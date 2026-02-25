@@ -1,72 +1,69 @@
-/*
- * DESIGN: "Control Surface" — Policy History
- * PRD Section 20: Audit trail of policy changes
- */
 import { motion } from "framer-motion";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import {
-  Plus, Edit3, Rocket, Pause, Trash2, FlaskConical,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Plus, Edit3, Rocket, Pause, Trash2, FlaskConical, ArrowRight } from "lucide-react";
 
 const EVENTS = [
-  { id: "1", type: "deployed", icon: Rocket, color: "bg-cordum", rule: "block-prod-writes", actor: "admin@cordum.io", summary: "Deployed to production", time: "2 hours ago" },
-  { id: "2", type: "modified", icon: Edit3, color: "bg-blue-400", rule: "require-approval-deploy", actor: "ops@cordum.io", summary: "Changed decision from ALLOW to REQUIRE_APPROVAL", time: "5 hours ago" },
-  { id: "3", type: "simulation", icon: FlaskConical, color: "bg-blue-400", rule: "block-prod-writes", actor: "admin@cordum.io", summary: "Ran simulation with 500 historical jobs", time: "6 hours ago" },
-  { id: "4", type: "created", icon: Plus, color: "bg-cordum", rule: "throttle-batch-jobs", actor: "admin@cordum.io", summary: "Created new rule", time: "1 day ago" },
-  { id: "5", type: "disabled", icon: Pause, color: "bg-amber-400", rule: "legacy-allow-all", actor: "ops@cordum.io", summary: "Disabled rule", time: "2 days ago" },
-  { id: "6", type: "deleted", icon: Trash2, color: "bg-red-400", rule: "temp-debug-rule", actor: "admin@cordum.io", summary: "Deleted rule", time: "3 days ago" },
+  { type: "deployed", icon: Rocket, color: "text-[var(--cordum)]", bg: "bg-[var(--cordum)]/10", rule: "production-restart-gate", actor: "Yaron Toren", time: "2h ago", summary: "Deployed v3 to production" },
+  { type: "modified", icon: Edit3, color: "text-blue-400", bg: "bg-blue-400/10", rule: "data-export-limit", actor: "Sarah Chen", time: "5h ago", summary: "Changed decision from ALLOW to ALLOW_WITH_CONSTRAINTS" },
+  { type: "simulation", icon: FlaskConical, color: "text-blue-400", bg: "bg-blue-400/10", rule: "pii-detection-v2", actor: "Alex Rivera", time: "8h ago", summary: "Simulation: 3/100 decisions changed" },
+  { type: "created", icon: Plus, color: "text-[var(--cordum)]", bg: "bg-[var(--cordum)]/10", rule: "api-rate-limit", actor: "Yaron Toren", time: "1d ago", summary: "New rule created: THROTTLE for api.* actions" },
+  { type: "disabled", icon: Pause, color: "text-amber-400", bg: "bg-amber-400/10", rule: "legacy-auth-check", actor: "Sarah Chen", time: "2d ago", summary: "Rule disabled pending review" },
+  { type: "deleted", icon: Trash2, color: "text-red-400", bg: "bg-red-400/10", rule: "deprecated-v1-gate", actor: "Yaron Toren", time: "3d ago", summary: "Rule permanently deleted" },
+  { type: "deployed", icon: Rocket, color: "text-[var(--cordum)]", bg: "bg-[var(--cordum)]/10", rule: "sandbox-allow-all", actor: "Alex Rivera", time: "4d ago", summary: "Deployed v1 to sandbox environment" },
+  { type: "modified", icon: Edit3, color: "text-blue-400", bg: "bg-blue-400/10", rule: "production-restart-gate", actor: "Yaron Toren", time: "5d ago", summary: "Updated conditions: added risk_score > 0.7" },
 ];
 
-export default function PolicyHistoryPage() {
+export default function PoliciesHistoryPage() {
   return (
     <div className="space-y-6">
-      <PageHeader label="Govern" title="Policy History" subtitle="Audit trail of all policy changes" />
+      <div>
+        <p className="text-xs font-mono uppercase tracking-wider text-[var(--cordum)] mb-1">GOVERN / Policies</p>
+        <h1 className="text-2xl font-display font-bold text-[var(--foreground)]">Policy History</h1>
+        <p className="text-sm text-[var(--muted-foreground)] mt-1">Audit trail of all policy changes.</p>
+      </div>
 
-      <div className="instrument-card p-5">
-        <div className="relative">
-          {/* Vertical line */}
-          <div className="absolute left-[19px] top-0 bottom-0 w-[2px] bg-border" />
+      {/* Timeline */}
+      <div className="relative">
+        {/* Vertical line */}
+        <div className="absolute left-5 top-0 bottom-0 w-px bg-[var(--border)]" />
 
-          <div className="space-y-6">
-            {EVENTS.map((event, i) => {
-              const Icon = event.icon;
-              return (
-                <motion.div
-                  key={event.id}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="relative flex gap-4 pl-12"
-                >
-                  {/* Dot */}
-                  <div className={cn("absolute left-2.5 top-1 w-5 h-5 rounded-full flex items-center justify-center", event.color)}>
-                    <Icon className="w-3 h-3 text-[#0f1518]" />
-                  </div>
+        <div className="space-y-4">
+          {EVENTS.map((evt, i) => {
+            const Icon = evt.icon;
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.06 }}
+                className="relative pl-12"
+              >
+                {/* Timeline dot */}
+                <div className={`absolute left-2.5 top-4 w-5 h-5 rounded-full ${evt.bg} flex items-center justify-center ring-4 ring-[var(--background)]`}>
+                  <Icon className={`w-3 h-3 ${evt.color}`} />
+                </div>
 
-                  <div className="flex-1 rounded-lg bg-surface-1 border border-border p-4">
-                    <div className="flex items-center justify-between mb-1">
+                <div className="instrument-card p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm text-cordum">{event.rule}</span>
-                        <StatusBadge variant={
-                          event.type === "deployed" ? "healthy" :
-                          event.type === "deleted" ? "danger" :
-                          event.type === "disabled" ? "warning" :
-                          "info"
-                        }>
-                          {event.type}
-                        </StatusBadge>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${evt.bg} ${evt.color}`}>{evt.type}</span>
+                        <span className="text-sm font-mono font-semibold text-[var(--cordum)] cursor-pointer hover:underline">{evt.rule}</span>
                       </div>
-                      <span className="text-xs text-muted-foreground">{event.time}</span>
+                      <p className="text-sm text-[var(--foreground)]">{evt.summary}</p>
+                      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                        <span>{evt.actor}</span>
+                        <span>·</span>
+                        <span className="font-mono">{evt.time}</span>
+                      </div>
                     </div>
-                    <p className="text-sm text-foreground">{event.summary}</p>
-                    <p className="text-xs text-muted-foreground mt-1">by {event.actor}</p>
+                    <button className="flex items-center gap-1 text-xs font-medium text-[var(--cordum)] hover:text-[var(--cordum-dim)] transition-colors">
+                      View Diff <ArrowRight className="w-3 h-3" />
+                    </button>
                   </div>
-                </motion.div>
-              );
-            })}
-          </div>
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
     </div>
