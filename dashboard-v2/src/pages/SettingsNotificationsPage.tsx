@@ -1,35 +1,49 @@
+/*
+ * DESIGN: "Control Surface" — Notifications
+ * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ */
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardBody } from "@/components/ui/InstrumentCard";
 import { Button } from "@/components/ui/Button";
-import { Bell, ArrowLeft } from "lucide-react";
+import { Bell, ArrowLeft, Construction } from "lucide-react";
 
 export default function SettingsNotificationsPage() {
   const navigate = useNavigate();
   return (
     <div className="space-y-6">
       <PageHeader
+        label="System"
         title="Notifications"
-        subtitle="Configure alert channels"
+        subtitle="Configure notification channels"
         actions={
-          <Button variant="ghost" size="sm" onClick={() => navigate(-1 as any)}>
-            <ArrowLeft className="w-3.5 h-3.5" /> Back
+          <Button variant="outline" size="sm" onClick={() => navigate(-1 as any)}>
+            <ArrowLeft className="w-3 h-3 mr-1" />
+            Back
           </Button>
         }
       />
-      <InstrumentCard>
-        <InstrumentCardBody className="py-16">
-          <div className="flex flex-col items-center text-center">
-            <div className="w-12 h-12 rounded-xl bg-cordum/10 flex items-center justify-center text-cordum mb-4">
-              <Bell className="w-5 h-5" />
-            </div>
-            <h3 className="text-sm font-semibold font-display text-foreground mb-1">Notifications</h3>
-            <p className="text-xs text-muted-foreground max-w-md">
-              Set up notification channels (Slack, email, webhook) and alert rules.
-            </p>
+
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="instrument-card p-8"
+      >
+        <div className="flex flex-col items-center text-center max-w-lg mx-auto">
+          <div className="w-14 h-14 rounded-xl bg-cordum/10 border border-cordum/20 flex items-center justify-center text-cordum mb-5">
+            <Bell className="w-6 h-6" />
           </div>
-        </InstrumentCardBody>
-      </InstrumentCard>
+          <h3 className="font-display font-bold text-lg text-foreground mb-2">Notifications</h3>
+          <p className="text-sm text-muted-foreground leading-relaxed mb-6">
+            Set up notification channels (Slack, email, webhooks) and configure alert rules for approvals, failures, and policy violations.
+          </p>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono">
+            <Construction className="w-3.5 h-3.5" />
+            Under Construction
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }

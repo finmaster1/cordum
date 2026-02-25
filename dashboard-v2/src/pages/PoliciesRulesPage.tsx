@@ -1,16 +1,19 @@
+/*
+ * DESIGN: "Control Surface" — Policy Rules
+ * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { get } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardBody } from "@/components/ui/InstrumentCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { DataTable } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
-import { Search, Plus, Shield, ArrowLeft, ToggleLeft, ToggleRight } from "lucide-react";
+import { Search, Plus, Shield, ArrowLeft, ToggleLeft, ToggleRight, Eye } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface PolicyRule {
   id: string;
@@ -46,92 +49,109 @@ export default function PoliciesRulesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        label="Safety"
         title="Policy Rules"
-        subtitle={`${all.length} rule${all.length !== 1 ? "s" : ""}`}
+        subtitle={`${all.length} rule${all.length !== 1 ? "s" : ""} defined`}
         actions={
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate("/policies")}>
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
+            <Button variant="outline" size="sm" onClick={() => navigate("/policies")}>
+              <ArrowLeft className="w-3 h-3 mr-1" />
+              Back
             </Button>
             <Button variant="primary" size="sm" onClick={() => navigate("/policies/rules/new")}>
-              <Plus className="w-3.5 h-3.5" /> New Rule
+              <Plus className="w-3 h-3 mr-1" />
+              New Rule
             </Button>
           </div>
         }
       />
 
-      <Input
-        icon={<Search className="w-3.5 h-3.5" />}
-        placeholder="Search rules…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="max-w-sm"
-      />
+      {/* Search — showcase style */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search rules..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-full pl-8 pr-3 text-xs bg-surface-1 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+        />
+      </div>
 
-      <InstrumentCard>
-        <InstrumentCardBody className="p-0">
-          {isLoading ? (
-            <div className="p-5"><SkeletonTable rows={6} /></div>
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              icon={<Shield className="w-5 h-5" />}
-              title="No rules found"
-              description="Create your first policy rule"
-              action={<Button variant="primary" size="sm" onClick={() => navigate("/policies/rules/new")}><Plus className="w-3.5 h-3.5" /> New Rule</Button>}
-            />
-          ) : (
-            <DataTable
-              columns={[
-                {
-                  key: "enabled",
-                  header: "",
-                  width: "40px",
-                  render: (r) => r.enabled !== false
-                    ? <ToggleRight className="w-4 h-4 text-cordum" />
-                    : <ToggleLeft className="w-4 h-4 text-muted-foreground" />,
-                },
-                {
-                  key: "priority",
-                  header: "Priority",
-                  width: "70px",
-                  align: "center",
-                  render: (r) => <span className="text-xs font-mono text-muted-foreground">{r.priority ?? "—"}</span>,
-                },
-                {
-                  key: "name",
-                  header: "Rule Name",
-                  render: (r) => (
+      {/* Rules Table — showcase style */}
+      {isLoading ? (
+        <div className="instrument-card p-5">
+          <SkeletonTable rows={6} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<Shield className="w-5 h-5" />}
+          title="No rules found"
+          description="Create your first policy rule"
+          action={
+            <Button variant="primary" size="sm" onClick={() => navigate("/policies/rules/new")}>
+              <Plus className="w-3 h-3 mr-1" />
+              New Rule
+            </Button>
+          }
+        />
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="instrument-card overflow-hidden"
+        >
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-surface-0">
+                <th className="px-5 py-3 w-10"></th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider w-20">Priority</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Rule Name</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider w-24">Decision</th>
+                <th className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider w-28">Updated</th>
+                <th className="px-5 py-3 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr
+                  key={r.id}
+                  onClick={() => navigate(`/policies/rules/${r.id}`)}
+                  className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer"
+                >
+                  <td className="px-5 py-3">
+                    {r.enabled !== false
+                      ? <ToggleRight className="w-4 h-4 text-cordum" />
+                      : <ToggleLeft className="w-4 h-4 text-muted-foreground" />
+                    }
+                  </td>
+                  <td className="px-5 py-3 text-center font-mono text-xs text-muted-foreground">{r.priority ?? "—"}</td>
+                  <td className="px-5 py-3">
                     <div>
                       <p className="text-sm font-medium text-foreground">{r.name}</p>
                       {r.description && <p className="text-xs text-muted-foreground truncate max-w-[300px]">{r.description}</p>}
                     </div>
-                  ),
-                },
-                {
-                  key: "decision",
-                  header: "Decision",
-                  width: "100px",
-                  render: (r) => (
+                  </td>
+                  <td className="px-5 py-3">
                     <StatusBadge variant={r.decision === "allow" ? "healthy" : r.decision === "deny" ? "danger" : "warning"}>
                       {r.decision}
                     </StatusBadge>
-                  ),
-                },
-                {
-                  key: "updated",
-                  header: "Updated",
-                  width: "120px",
-                  align: "right",
-                  render: (r) => <span className="text-xs text-muted-foreground font-mono">{r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}</span>,
-                },
-              ]}
-              data={filtered}
-              keyExtractor={(r) => r.id}
-              onRowClick={(r) => navigate(`/policies/rules/${r.id}`)}
-            />
-          )}
-        </InstrumentCardBody>
-      </InstrumentCard>
+                  </td>
+                  <td className="px-5 py-3 text-right text-xs text-muted-foreground font-mono">
+                    {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
+                  </td>
+                  <td className="px-5 py-3">
+                    <button className="p-1 rounded hover:bg-surface-2 transition-colors">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </motion.div>
+      )}
     </div>
   );
 }

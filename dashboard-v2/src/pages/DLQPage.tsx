@@ -1,17 +1,17 @@
+/*
+ * DESIGN: "Control Surface" — Dead Letter Queue
+ * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ */
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { get, post } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardHeader, InstrumentCardBody } from "@/components/ui/InstrumentCard";
-import { MetricValue } from "@/components/ui/MetricValue";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { DataTable } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
-import { Search, RefreshCw, AlertTriangle, Play, Trash2, CheckCircle2 } from "lucide-react";
-import { formatRelativeTime } from "@/lib/utils";
+import { Search, RefreshCw, AlertTriangle, Play, Trash2, CheckCircle2, ArrowUpRight } from "lucide-react";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface DLQItem {
@@ -55,109 +55,138 @@ export default function DLQPage() {
     return d.jobId.toLowerCase().includes(q) || (d.topic ?? "").toLowerCase().includes(q) || (d.error ?? "").toLowerCase().includes(q);
   });
 
+  const avgAttempts = items.length > 0 ? (items.reduce((s, i) => s + i.attempts, 0) / items.length).toFixed(1) : "0";
+
   return (
     <div className="space-y-6">
       <PageHeader
+        label="Platform"
         title="Dead Letter Queue"
         subtitle="Failed messages requiring attention"
         actions={
-          <Button variant="secondary" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="w-3 h-3 mr-1" />
+            Refresh
           </Button>
         }
       />
 
-      <div className="grid grid-cols-2 gap-4">
+      {/* KPI Row — showcase style */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="grid grid-cols-2 lg:grid-cols-3 gap-4"
+      >
         {isLoading ? (
-          Array.from({ length: 2 }).map((_, i) => <SkeletonCard key={i} />)
+          Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
           <>
-            <InstrumentCard accent={items.length > 0 ? "danger" : "healthy"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Dead Letters" value={data?.total ?? 0} />
-              </InstrumentCardBody>
-            </InstrumentCard>
-            <InstrumentCard accent="muted">
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Avg Attempts" value={items.length > 0 ? (items.reduce((s, i) => s + i.attempts, 0) / items.length).toFixed(1) : "0"} />
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className={cn("instrument-card p-5", items.length > 0 ? "status-danger" : "")}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Dead Letters</span>
+                <AlertTriangle className={cn("w-4 h-4", items.length > 0 ? "text-red-400" : "text-emerald-400")} />
+              </div>
+              <span className={cn("font-mono text-2xl font-bold", items.length > 0 ? "text-red-400" : "text-emerald-400")}>{data?.total ?? 0}</span>
+              <p className="text-xs text-muted-foreground mt-1">{items.length > 0 ? "Requires attention" : "Queue clear"}</p>
+            </div>
+
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Avg Attempts</span>
+              </div>
+              <span className="font-mono text-2xl font-bold text-foreground">{avgAttempts}</span>
+              <p className="text-xs text-muted-foreground mt-1">Before dead-lettering</p>
+            </div>
+
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Status</span>
+                <span className={cn("w-1.5 h-1.5 rounded-full status-pulse", items.length > 0 ? "bg-red-400" : "bg-emerald-400")} />
+              </div>
+              <span className={cn("font-mono text-sm font-bold", items.length > 0 ? "text-amber-400" : "text-emerald-400")}>
+                {items.length > 0 ? "Attention Required" : "All Clear"}
+              </span>
+            </div>
           </>
         )}
+      </motion.div>
+
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search by job ID, topic, or error..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-full pl-8 pr-3 text-xs bg-surface-1 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+        />
       </div>
 
-      <Input
-        icon={<Search className="w-3.5 h-3.5" />}
-        placeholder="Search by job ID, topic, or error…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="max-w-sm"
-      />
-
-      <InstrumentCard accent={items.length > 0 ? "danger" : "healthy"}>
-        <InstrumentCardBody className="p-0">
-          {isLoading ? (
-            <div className="p-5"><SkeletonTable rows={6} /></div>
-          ) : items.length === 0 ? (
-            <EmptyState
-              icon={<CheckCircle2 className="w-5 h-5" />}
-              title="DLQ is empty"
-              description="No failed messages — all systems healthy"
-            />
-          ) : (
-            <DataTable
-              columns={[
-                {
-                  key: "jobId",
-                  header: "Job ID",
-                  render: (d) => <span className="font-mono text-xs text-foreground">{d.jobId.slice(0, 16)}</span>,
-                },
-                {
-                  key: "topic",
-                  header: "Topic",
-                  render: (d) => <span className="text-sm text-foreground">{d.topic ?? "—"}</span>,
-                },
-                {
-                  key: "error",
-                  header: "Error",
-                  render: (d) => <span className="text-xs text-status-danger truncate max-w-[250px] block font-mono">{d.error ?? "—"}</span>,
-                },
-                {
-                  key: "attempts",
-                  header: "Attempts",
-                  width: "80px",
-                  align: "center",
-                  render: (d) => <span className="text-xs font-mono text-muted-foreground">{d.attempts}</span>,
-                },
-                {
-                  key: "failedAt",
-                  header: "Failed",
-                  width: "120px",
-                  render: (d) => <span className="text-xs text-muted-foreground font-mono">{formatRelativeTime(d.failedAt)}</span>,
-                },
-                {
-                  key: "actions",
-                  header: "",
-                  width: "100px",
-                  align: "right",
-                  render: (d) => (
+      {/* Table — showcase style */}
+      {isLoading ? (
+        <div className="instrument-card p-5">
+          <SkeletonTable rows={6} />
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<CheckCircle2 className="w-5 h-5" />}
+          title="DLQ is empty"
+          description="No failed messages — all systems healthy"
+        />
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+          className="instrument-card status-danger overflow-hidden"
+        >
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-surface-0">
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Job ID</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Topic</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Error</th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Attempts</th>
+                <th className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Failed</th>
+                <th className="px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((d) => (
+                <tr key={d.id} className="border-b border-border hover:bg-surface-1 transition-colors">
+                  <td className="px-5 py-3 font-mono text-sm text-foreground">{d.jobId.slice(0, 16)}</td>
+                  <td className="px-5 py-3 text-sm text-foreground">{d.topic ?? "—"}</td>
+                  <td className="px-5 py-3">
+                    <span className="text-xs text-red-400 truncate max-w-[250px] block font-mono">{d.error ?? "—"}</span>
+                  </td>
+                  <td className="px-5 py-3 text-center font-mono text-xs text-muted-foreground">{d.attempts}</td>
+                  <td className="px-5 py-3 text-right text-xs text-muted-foreground font-mono">{formatRelativeTime(d.failedAt)}</td>
+                  <td className="px-5 py-3">
                     <div className="flex gap-1 justify-end">
-                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); retryMutation.mutate(d.id); }}>
-                        <Play className="w-3 h-3" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); purgeMutation.mutate(d.id); }}>
-                        <Trash2 className="w-3 h-3 text-status-danger" />
-                      </Button>
+                      <button
+                        onClick={() => retryMutation.mutate(d.id)}
+                        className="p-1.5 rounded hover:bg-surface-2 transition-colors text-cordum"
+                        title="Retry"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => purgeMutation.mutate(d.id)}
+                        className="p-1.5 rounded hover:bg-surface-2 transition-colors text-red-400"
+                        title="Purge"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  ),
-                },
-              ]}
-              data={items}
-              keyExtractor={(d) => d.id}
-            />
-          )}
-        </InstrumentCardBody>
-      </InstrumentCard>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </motion.div>
+      )}
     </div>
   );
 }

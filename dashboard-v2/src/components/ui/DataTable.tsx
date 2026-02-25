@@ -32,13 +32,13 @@ export function DataTable<T>({
     <div className={cn("overflow-x-auto", className)}>
       <table className="w-full">
         <thead>
-          <tr className="border-b border-border">
+          <tr className="border-b border-border bg-surface-0">
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground font-mono",
-                  compact ? "px-3 py-2" : "px-4 py-3",
+                  "text-left text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider",
+                  compact ? "px-3 py-2" : "px-5 py-3",
                   col.align === "right" && "text-right",
                   col.align === "center" && "text-center",
                 )}
@@ -65,8 +65,8 @@ export function DataTable<T>({
                 key={keyExtractor(row, i)}
                 onClick={() => onRowClick?.(row)}
                 className={cn(
-                  "border-b border-border/50 transition-colors",
-                  onRowClick && "cursor-pointer hover:bg-cordum/5",
+                  "border-b border-border hover:bg-surface-1 transition-colors",
+                  onRowClick && "cursor-pointer",
                 )}
               >
                 {columns.map((col) => (
@@ -74,7 +74,7 @@ export function DataTable<T>({
                     key={col.key}
                     className={cn(
                       "text-sm",
-                      compact ? "px-3 py-2" : "px-4 py-3",
+                      compact ? "px-3 py-2" : "px-5 py-3",
                       col.align === "right" && "text-right",
                       col.align === "center" && "text-center",
                     )}

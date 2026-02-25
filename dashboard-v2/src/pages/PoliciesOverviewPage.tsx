@@ -1,14 +1,35 @@
+/*
+ * DESIGN: "Control Surface" — Policy Studio
+ * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ */
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { get } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardHeader, InstrumentCardBody } from "@/components/ui/InstrumentCard";
-import { MetricValue } from "@/components/ui/MetricValue";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { AreaChart, Area, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
-import { Shield, Plus, ArrowRight, FileText, Activity, History, FlaskConical } from "lucide-react";
+import { Shield, Plus, ArrowRight, Activity, History, FlaskConical, ArrowUpRight } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+
+/* Showcase-matched chart tooltip */
+function ChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-surface-2 border border-border rounded-lg p-3 shadow-xl">
+      <p className="font-mono text-xs text-muted-foreground mb-1">{label}</p>
+      {payload.map((entry: any, index: number) => (
+        <div key={index} className="flex items-center gap-2 text-xs">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span className="text-muted-foreground">{entry.name}:</span>
+          <span className="font-mono text-foreground font-medium">{entry.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function PoliciesOverviewPage() {
   const navigate = useNavigate();
@@ -25,8 +46,8 @@ export default function PoliciesOverviewPage() {
   const activeRules = allRules.filter((r) => r.enabled !== false);
 
   // Mock evaluation data
-  const evalData = Array.from({ length: 24 }, (_, i) => ({
-    hour: `${i}:00`,
+  const evalData = Array.from({ length: 7 }, (_, i) => ({
+    time: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "Now"][i],
     allow: Math.floor(Math.random() * 80 + 20),
     deny: Math.floor(Math.random() * 10),
     escalate: Math.floor(Math.random() * 8),
@@ -43,94 +64,127 @@ export default function PoliciesOverviewPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        label="Safety"
         title="Policy Studio"
-        subtitle="Manage safety policies for agent actions"
+        subtitle="Manage safety policies governing agent actions"
         actions={
           <Button variant="primary" size="sm" onClick={() => navigate("/policies/rules/new")}>
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-3 h-3 mr-1" />
             New Rule
           </Button>
         }
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Row — showcase style */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-4"
+      >
         {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
           <>
-            <InstrumentCard accent="cordum">
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Total Rules" value={allRules.length} />
-              </InstrumentCardBody>
-            </InstrumentCard>
-            <InstrumentCard accent="healthy">
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Active" value={activeRules.length} />
-              </InstrumentCardBody>
-            </InstrumentCard>
-            <InstrumentCard accent="info">
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Evaluations (24h)" value="2.4k" trend={{ value: 15, label: "vs yesterday" }} />
-              </InstrumentCardBody>
-            </InstrumentCard>
-            <InstrumentCard accent={false ? "danger" : "healthy"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Deny Rate" value="3.2%" trend={{ value: -0.5, label: "vs yesterday" }} />
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Total Rules</span>
+                <Shield className="w-4 h-4 text-cordum" />
+              </div>
+              <span className="font-mono text-2xl font-bold text-foreground">{allRules.length}</span>
+              <p className="text-xs text-muted-foreground mt-1">{activeRules.length} active</p>
+            </div>
+
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Active</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 status-pulse" />
+              </div>
+              <span className="font-mono text-2xl font-bold text-emerald-400">{activeRules.length}</span>
+              <Progress value={allRules.length > 0 ? (activeRules.length / allRules.length) * 100 : 100} className="mt-3 h-1.5" />
+            </div>
+
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Evaluations (24h)</span>
+                <Activity className="w-4 h-4 text-cordum" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-2xl font-bold text-foreground">2.4k</span>
+                <span className="text-xs font-mono text-emerald-400 flex items-center">
+                  <ArrowUpRight className="w-3 h-3" />15%
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">vs yesterday</p>
+            </div>
+
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Deny Rate</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-2xl font-bold text-foreground">3.2%</span>
+                <span className="text-xs font-mono text-emerald-400 flex items-center">
+                  <ArrowUpRight className="w-3 h-3" />-0.5%
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Trending down</p>
+            </div>
           </>
         )}
+      </motion.div>
+
+      {/* Evaluation Chart — showcase style */}
+      <div className="instrument-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-semibold text-sm text-foreground">Policy Evaluations</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Last 24 hours</p>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={240}>
+          <AreaChart data={evalData}>
+            <defs>
+              <linearGradient id="allowGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="denyGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#EF4444" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+            <XAxis dataKey="time" tick={{ fontSize: 11, fill: "#6B7A90" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: "#6B7A90" }} axisLine={false} tickLine={false} />
+            <Tooltip content={<ChartTooltip />} />
+            <Area type="monotone" dataKey="allow" stroke="#10B981" fill="url(#allowGrad)" strokeWidth={2} name="Allow" />
+            <Area type="monotone" dataKey="deny" stroke="#EF4444" fill="url(#denyGrad)" strokeWidth={2} name="Deny" />
+            <Area type="monotone" dataKey="escalate" stroke="#F59E0B" fill="none" strokeWidth={1.5} name="Escalate" strokeDasharray="4 2" />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
 
-      {/* Evaluation Chart */}
-      <InstrumentCard>
-        <InstrumentCardHeader title="Policy Evaluations" subtitle="Last 24 hours" icon={<Activity className="w-4 h-4" />} />
-        <InstrumentCardBody>
-          <div className="h-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={evalData}>
-                <defs>
-                  <linearGradient id="allowGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#27b3a8" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#27b3a8" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="denyGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#e05555" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#e05555" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(229,239,236,0.06)" strokeDasharray="3 3" />
-                <XAxis dataKey="hour" tick={{ fontSize: 10, fill: "#7a8f8c" }} axisLine={false} tickLine={false} interval={3} />
-                <YAxis tick={{ fontSize: 10, fill: "#7a8f8c" }} axisLine={false} tickLine={false} width={30} />
-                <Tooltip
-                  contentStyle={{ background: "var(--surface)", border: "1px solid var(--border-color)", borderRadius: "6px" }}
-                  labelStyle={{ color: "var(--text-muted)", fontSize: 11 }}
-                />
-                <Area type="monotone" dataKey="allow" stroke="#27b3a8" strokeWidth={2} fill="url(#allowGrad)" name="Allow" />
-                <Area type="monotone" dataKey="deny" stroke="#e05555" strokeWidth={2} fill="url(#denyGrad)" name="Deny" />
-                <Area type="monotone" dataKey="escalate" stroke="#d4a03a" strokeWidth={1.5} fill="none" name="Escalate" strokeDasharray="4 2" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </InstrumentCardBody>
-      </InstrumentCard>
-
-      {/* Quick Links */}
+      {/* Quick Links — showcase card style */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {quickLinks.map((link) => (
-          <InstrumentCard key={link.path} hoverable onClick={() => navigate(link.path)}>
-            <InstrumentCardBody className="py-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-cordum/10 flex items-center justify-center text-cordum shrink-0">
+          <motion.div
+            key={link.path}
+            whileHover={{ y: -2 }}
+            className="instrument-card p-5 cursor-pointer hover:border-cordum/30 transition-colors"
+            onClick={() => navigate(link.path)}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-cordum/10 border border-cordum/20 flex items-center justify-center text-cordum shrink-0">
                 <link.icon className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground">{link.label}</p>
+                <p className="text-sm font-display font-semibold text-foreground">{link.label}</p>
                 <p className="text-xs text-muted-foreground">{link.desc}</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
-            </InstrumentCardBody>
-          </InstrumentCard>
+            </div>
+          </motion.div>
         ))}
       </div>
     </div>

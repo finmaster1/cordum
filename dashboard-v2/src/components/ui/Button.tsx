@@ -5,21 +5,22 @@ import { Loader2 } from "lucide-react";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "outline";
 type ButtonSize = "sm" | "md" | "lg" | "icon";
 
+/* Exact match to showcase button styles */
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-cordum text-[#0f1518] hover:bg-cordum-light font-semibold shadow-sm",
+    "bg-cordum text-surface-0 hover:bg-cordum-dim font-semibold",
   secondary:
-    "bg-surface-2 text-foreground hover:bg-surface-3 border border-border",
+    "bg-secondary text-secondary-foreground hover:bg-surface-3",
   ghost:
-    "text-muted-foreground hover:text-foreground hover:bg-cordum/8",
+    "text-muted-foreground hover:text-foreground hover:bg-surface-2",
   danger:
-    "bg-status-danger/12 text-status-danger hover:bg-status-danger/20 border border-status-danger/20",
+    "bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/20",
   outline:
-    "border border-border text-foreground hover:bg-cordum/8 hover:border-cordum/30",
+    "border border-border text-foreground hover:bg-surface-2",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: "h-7 px-2.5 text-xs rounded-md gap-1.5",
+  sm: "h-8 px-3 text-xs rounded-md gap-1.5",
   md: "h-9 px-4 text-sm rounded-md gap-2",
   lg: "h-11 px-6 text-sm rounded-lg gap-2",
   icon: "h-9 w-9 rounded-md",

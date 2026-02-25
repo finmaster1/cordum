@@ -1,11 +1,12 @@
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
 
 interface MetricValueProps {
   value: string | number;
   label: string;
   trend?: { value: number; label?: string };
   unit?: string;
+  icon?: React.ReactNode;
   className?: string;
   size?: "sm" | "md" | "lg";
 }
@@ -15,6 +16,7 @@ export function MetricValue({
   label,
   trend,
   unit,
+  icon,
   className,
   size = "md",
 }: MetricValueProps) {
@@ -23,13 +25,16 @@ export function MetricValue({
 
   return (
     <div className={cn("flex flex-col", className)}>
-      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">
-        {label}
-      </p>
-      <div className="flex items-baseline gap-1.5">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+          {label}
+        </span>
+        {icon && <span className="text-cordum">{icon}</span>}
+      </div>
+      <div className="flex items-baseline gap-2">
         <span
           className={cn(
-            "font-display font-bold text-foreground tabular-nums",
+            "font-mono font-bold text-foreground",
             size === "sm" && "text-xl",
             size === "md" && "text-2xl",
             size === "lg" && "text-4xl",
@@ -38,29 +43,27 @@ export function MetricValue({
           {value}
         </span>
         {unit && (
-          <span className="text-xs text-muted-foreground font-mono">{unit}</span>
+          <span className="text-xs text-muted-foreground">{unit}</span>
         )}
-      </div>
-      {trend && (
-        <div
-          className={cn(
-            "flex items-center gap-1 mt-1 text-xs font-medium",
-            trendDirection === "up" && "text-status-healthy",
-            trendDirection === "down" && "text-status-danger",
-            trendDirection === "flat" && "text-muted-foreground",
-          )}
-        >
-          {trendDirection === "up" && <TrendingUp className="w-3 h-3" />}
-          {trendDirection === "down" && <TrendingDown className="w-3 h-3" />}
-          {trendDirection === "flat" && <Minus className="w-3 h-3" />}
-          <span>
+        {trend && (
+          <span
+            className={cn(
+              "text-xs font-mono flex items-center",
+              trendDirection === "up" && "text-emerald-400",
+              trendDirection === "down" && "text-red-400",
+              trendDirection === "flat" && "text-muted-foreground",
+            )}
+          >
+            {trendDirection === "up" && <ArrowUpRight className="w-3 h-3" />}
+            {trendDirection === "down" && <ArrowDownRight className="w-3 h-3" />}
+            {trendDirection === "flat" && <Minus className="w-3 h-3" />}
             {trend.value > 0 ? "+" : ""}
             {trend.value}%
           </span>
-          {trend.label && (
-            <span className="text-muted-foreground">{trend.label}</span>
-          )}
-        </div>
+        )}
+      </div>
+      {trend?.label && (
+        <p className="text-xs text-muted-foreground mt-1">{trend.label}</p>
       )}
     </div>
   );

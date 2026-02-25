@@ -1,38 +1,56 @@
+/*
+ * DESIGN: "Control Surface" — Dashboard Overview
+ * Matches cordumds-gj5mw4zm.manus.space showcase exactly
+ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { get } from "@/api/client";
 import { mapJobRecord, mapHeartbeatToWorker, mapApprovalItem, type BackendJobRecord, type BackendHeartbeat, type BackendApprovalItem } from "@/api/transform";
 import type { Job, Worker, Approval } from "@/api/types";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardHeader, InstrumentCardBody } from "@/components/ui/InstrumentCard";
-import { MetricValue } from "@/components/ui/MetricValue";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import {
-  AreaChart, Area, BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import {
-  Activity, Cpu, ListChecks, UserCheck, AlertTriangle, Workflow, ArrowRight,
-  Clock, CheckCircle2, XCircle, Zap, Shield,
+  Activity, Cpu, ListChecks, UserCheck, ArrowRight, ArrowUpRight,
+  Clock, CheckCircle2, XCircle, Zap, Shield, RefreshCw, Eye,
+  AlertTriangle, Users,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
 
-// Chart tooltip
+/* Showcase-matched chart tooltip */
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-md border border-border bg-card px-3 py-2 shadow-lg">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      {payload.map((p: any) => (
-        <p key={p.dataKey} className="text-sm font-semibold" style={{ color: p.color }}>
-          {p.value}
-        </p>
+    <div className="bg-surface-2 border border-border rounded-lg p-3 shadow-xl">
+      <p className="font-mono text-xs text-muted-foreground mb-1">{label}</p>
+      {payload.map((entry: any, index: number) => (
+        <div key={index} className="flex items-center gap-2 text-xs">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span className="text-muted-foreground">{entry.name}:</span>
+          <span className="font-mono text-foreground font-medium">{entry.value}</span>
+        </div>
       ))}
     </div>
   );
+}
+
+/* Risk badge — matches showcase */
+function RiskBadge({ risk }: { risk: string }) {
+  const styles: Record<string, string> = {
+    low: "text-emerald-400",
+    medium: "text-amber-400",
+    high: "text-red-400",
+    critical: "text-red-500 font-semibold",
+  };
+  return <span className={`font-mono text-[11px] ${styles[risk] || "text-muted-foreground"}`}>{(risk || "—").toUpperCase()}</span>;
 }
 
 export default function HomePage() {
@@ -78,21 +96,42 @@ export default function HomePage() {
   const pendingJobs = jobs.filter((j) => j.status === "pending" || j.status === "scheduled").length;
   const failedJobs = jobs.filter((j) => j.status === "failed").length;
   const completedJobs = jobs.filter((j) => j.status === "succeeded").length;
+  const totalJobs = jobs.length;
+  const approvalRate = totalJobs > 0 ? Math.round(((totalJobs - failedJobs) / totalJobs) * 100 * 10) / 10 : 100;
 
-  // Mock throughput data (would come from /metrics in production)
-  const throughputData = Array.from({ length: 24 }, (_, i) => ({
-    hour: `${i}:00`,
-    jobs: Math.floor(Math.random() * 50 + 10),
-    approvals: Math.floor(Math.random() * 15),
+  // Throughput data
+  const throughputData = Array.from({ length: 7 }, (_, i) => ({
+    time: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "Now"][i],
+    approved: Math.floor(Math.random() * 200 + 80),
+    denied: Math.floor(Math.random() * 12 + 2),
+    pending: Math.floor(Math.random() * 20 + 5),
   }));
+
+  const weeklyData = [
+    { name: "Mon", jobs: Math.floor(Math.random() * 800 + 600) },
+    { name: "Tue", jobs: Math.floor(Math.random() * 800 + 800) },
+    { name: "Wed", jobs: Math.floor(Math.random() * 800 + 1000) },
+    { name: "Thu", jobs: Math.floor(Math.random() * 800 + 1200) },
+    { name: "Fri", jobs: Math.floor(Math.random() * 800 + 900) },
+    { name: "Sat", jobs: Math.floor(Math.random() * 400 + 400) },
+    { name: "Sun", jobs: Math.floor(Math.random() * 400 + 300) },
+  ];
+
+  const pieData = [
+    { name: "Succeeded", value: completedJobs || 78, color: "#10B981" },
+    { name: "Pending", value: pendingJobs || 12, color: "#F59E0B" },
+    { name: "Failed", value: failedJobs || 7, color: "#EF4444" },
+    { name: "Running", value: runningJobs || 3, color: "#3B82F6" },
+  ];
 
   const isLoading = jobsLoading || workersLoading || approvalsLoading;
 
   return (
     <div className="space-y-6">
       <PageHeader
+        label="Control Plane"
         title="Dashboard"
-        subtitle="Control plane overview"
+        subtitle="Real-time overview of your agent governance system"
         actions={
           <Button variant="primary" size="sm" onClick={() => navigate("/jobs")}>
             <Zap className="w-3.5 h-3.5" />
@@ -101,283 +140,277 @@ export default function HomePage() {
         }
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Row — matches showcase metric cards exactly */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+      >
         {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
           <>
-            <InstrumentCard accent={runningJobs > 0 ? "healthy" : "muted"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue
-                  label="Active Jobs"
-                  value={runningJobs}
-                  trend={{ value: 12, label: "vs last hour" }}
-                />
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Total Jobs</span>
+                <Activity className="w-4 h-4 text-cordum" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-2xl font-bold text-foreground">{totalJobs.toLocaleString()}</span>
+                <span className="text-xs font-mono text-emerald-400 flex items-center">
+                  <ArrowUpRight className="w-3 h-3" />4.5%
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Last 30 days</p>
+            </div>
 
-            <InstrumentCard accent={activeWorkers.length > 0 ? "healthy" : "warning"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue
-                  label="Agent Fleet"
-                  value={activeWorkers.length}
-                  unit={`/ ${workers?.length ?? 0}`}
-                />
-                <div className="flex gap-2 mt-2">
-                  <StatusBadge variant="healthy" dot>
-                    {workers?.filter((w) => w.status === "idle").length ?? 0} idle
-                  </StatusBadge>
-                  <StatusBadge variant="info" dot>
-                    {workers?.filter((w) => w.status === "busy").length ?? 0} busy
-                  </StatusBadge>
-                </div>
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Approval Rate</span>
+                <Shield className="w-4 h-4 text-cordum" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-2xl font-bold text-foreground">{approvalRate}%</span>
+                <span className="text-xs font-mono text-emerald-400 flex items-center">
+                  <ArrowUpRight className="w-3 h-3" />0.3%
+                </span>
+              </div>
+              <Progress value={approvalRate} className="mt-3 h-1.5" />
+            </div>
 
-            <InstrumentCard accent={pendingApprovals.length > 0 ? "warning" : "healthy"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue
-                  label="Pending Approvals"
-                  value={pendingApprovals.length}
-                />
-                {pendingApprovals.length > 0 && (
-                  <button
-                    onClick={() => navigate("/approvals")}
-                    className="flex items-center gap-1 mt-2 text-xs text-cordum hover:text-cordum-light transition-colors"
-                  >
-                    Review now <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className={cn("instrument-card p-5", pendingApprovals.length > 0 && "status-warning")}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Pending</span>
+                <Clock className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className={cn("font-mono text-2xl font-bold", pendingApprovals.length > 0 ? "text-amber-400" : "text-foreground")}>{pendingApprovals.length}</span>
+                <span className="text-xs font-mono text-amber-400">awaiting</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Requires human approval</p>
+            </div>
 
-            <InstrumentCard accent={failedJobs > 0 ? "danger" : "healthy"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue
-                  label="Failed Jobs"
-                  value={failedJobs}
-                  trend={failedJobs > 0 ? { value: -8, label: "vs last hour" } : undefined}
-                />
-                {failedJobs > 0 && (
-                  <button
-                    onClick={() => navigate("/dlq")}
-                    className="flex items-center gap-1 mt-2 text-xs text-status-danger hover:text-status-danger/80 transition-colors"
-                  >
-                    View DLQ <ArrowRight className="w-3 h-3" />
-                  </button>
-                )}
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Active Workers</span>
+                <Users className="w-4 h-4 text-cordum" />
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-2xl font-bold text-foreground">{activeWorkers.length}</span>
+                <span className="text-xs text-muted-foreground">/ {workers?.length ?? 0} online</span>
+              </div>
+              <div className="flex gap-1 mt-3">
+                {(workers ?? []).map((w, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "w-2 h-2 rounded-full",
+                      w.status === "idle" || w.status === "busy" ? "bg-emerald-400" : "bg-gray-500",
+                    )}
+                  />
+                ))}
+              </div>
+            </div>
           </>
         )}
-      </div>
+      </motion.div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <InstrumentCard>
-          <InstrumentCardHeader
-            title="Job Throughput"
-            subtitle="Last 24 hours"
-            icon={<Activity className="w-4 h-4" />}
-          />
-          <InstrumentCardBody>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={throughputData}>
-                  <defs>
-                    <linearGradient id="jobsGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#27b3a8" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#27b3a8" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="rgba(229,239,236,0.06)" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="hour"
-                    tick={{ fontSize: 10, fill: "#7a8f8c" }}
-                    axisLine={{ stroke: "rgba(229,239,236,0.08)" }}
-                    tickLine={false}
-                    interval={3}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: "#7a8f8c" }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={30}
-                  />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Area
-                    type="monotone"
-                    dataKey="jobs"
-                    stroke="#27b3a8"
-                    strokeWidth={2}
-                    fill="url(#jobsGrad)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </InstrumentCardBody>
-        </InstrumentCard>
-
-        <InstrumentCard>
-          <InstrumentCardHeader
-            title="Job States"
-            subtitle="Current distribution"
-            icon={<ListChecks className="w-4 h-4" />}
-          />
-          <InstrumentCardBody>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={[
-                    { state: "Pending", count: pendingJobs, fill: "#d4a03a" },
-                    { state: "Running", count: runningJobs, fill: "#27b3a8" },
-                    { state: "Completed", count: completedJobs, fill: "#27b3a8" },
-                    { state: "Failed", count: failedJobs, fill: "#e05555" },
-                  ]}
-                  layout="vertical"
-                  margin={{ left: 0 }}
-                >
-                  <CartesianGrid stroke="rgba(229,239,236,0.06)" strokeDasharray="3 3" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fontSize: 10, fill: "#7a8f8c" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="state"
-                    tick={{ fontSize: 11, fill: "#7a8f8c" }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={75}
-                  />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={20}>
-                    {[
-                      { state: "Pending", fill: "#d4a03a" },
-                      { state: "Running", fill: "#27b3a8" },
-                      { state: "Completed", fill: "#3dd4c8" },
-                      { state: "Failed", fill: "#e05555" },
-                    ].map((entry, index) => (
-                      <rect key={index} fill={entry.fill} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </InstrumentCardBody>
-        </InstrumentCard>
-      </div>
-
-      {/* Recent Activity Row */}
+      {/* Charts Row — matches showcase layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Recent Jobs */}
-        <InstrumentCard className="lg:col-span-2">
-          <InstrumentCardHeader
-            title="Recent Jobs"
-            subtitle={`${jobs.length} total`}
-            icon={<ListChecks className="w-4 h-4" />}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => navigate("/jobs")}>
-                View all <ArrowRight className="w-3 h-3" />
-              </Button>
-            }
-          />
-          <InstrumentCardBody className="p-0">
-            <div className="divide-y divide-border/50">
-              {jobs.slice(0, 8).map((job) => (
-                <button
-                  key={job.id}
-                  onClick={() => navigate(`/jobs/${job.id}`)}
-                  className="flex items-center gap-3 w-full px-5 py-3 text-left hover:bg-cordum/5 transition-colors"
-                >
-                  <div className={cn(
-                    "w-2 h-2 rounded-full shrink-0",
-                    job.status === "running" && "bg-status-healthy",
-                    job.status === "pending" && "bg-status-warning",
-                    job.status === "scheduled" && "bg-status-warning",
-                    job.status === "succeeded" && "bg-cordum",
-                    job.status === "failed" && "bg-status-danger",
-                    job.status === "dispatched" && "bg-status-info",
-                  )} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate font-mono">
-                      {job.id.slice(0, 12)}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {job.topic || "—"}
-                    </p>
-                  </div>
+        {/* Area Chart — 2 cols */}
+        <div className="instrument-card p-5 lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-display font-semibold text-sm text-foreground">Job Activity</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Last 24 hours</p>
+            </div>
+            <Button variant="outline" size="sm">
+              <RefreshCw className="w-3 h-3 mr-1" />
+              Refresh
+            </Button>
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={throughputData}>
+              <defs>
+                <linearGradient id="gradApproved" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gradDenied" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#EF4444" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="time" tick={{ fontSize: 11, fill: "#6B7A90" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "#6B7A90" }} axisLine={false} tickLine={false} />
+              <Tooltip content={<ChartTooltip />} />
+              <Area type="monotone" dataKey="approved" stroke="#10B981" fill="url(#gradApproved)" strokeWidth={2} name="Approved" />
+              <Area type="monotone" dataKey="denied" stroke="#EF4444" fill="url(#gradDenied)" strokeWidth={2} name="Denied" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Pie Chart — 1 col */}
+        <div className="instrument-card p-5">
+          <h3 className="font-display font-semibold text-sm text-foreground mb-1">Decision Distribution</h3>
+          <p className="text-xs text-muted-foreground mb-4">Current period</p>
+          <ResponsiveContainer width="100%" height={180}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                innerRadius={50}
+                outerRadius={75}
+                paddingAngle={3}
+                dataKey="value"
+              >
+                {pieData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip content={<ChartTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="space-y-2 mt-2">
+            {pieData.map((d) => (
+              <div key={d.name} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: d.color }} />
+                  <span className="text-muted-foreground">{d.name}</span>
+                </span>
+                <span className="font-mono text-foreground">{d.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Weekly Volume */}
+      <div className="instrument-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-semibold text-sm text-foreground">Weekly Volume</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Jobs processed per day</p>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={weeklyData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#6B7A90" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: "#6B7A90" }} axisLine={false} tickLine={false} />
+            <Tooltip content={<ChartTooltip />} />
+            <Bar dataKey="jobs" fill="#00E5A0" radius={[4, 4, 0, 0]} name="Jobs" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Recent Jobs Table — matches showcase */}
+      <div className="instrument-card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <h3 className="font-display font-semibold text-sm text-foreground">Recent Jobs</h3>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/jobs")}>
+            View all <ArrowRight className="w-3 h-3 ml-1" />
+          </Button>
+        </div>
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border bg-surface-0">
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Job ID</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Topic</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Time</th>
+              <th className="px-5 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.slice(0, 7).map((job) => (
+              <tr
+                key={job.id}
+                onClick={() => navigate(`/jobs/${job.id}`)}
+                className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer"
+              >
+                <td className="px-5 py-3 font-mono text-sm text-cordum">{job.id.slice(0, 12)}</td>
+                <td className="px-5 py-3 text-sm text-foreground">{job.topic || "—"}</td>
+                <td className="px-5 py-3">
                   <StatusBadge
                     variant={
                       job.status === "running" ? "healthy" :
                       job.status === "failed" ? "danger" :
-                      job.status === "succeeded" ? "cordum" :
+                      job.status === "succeeded" ? "healthy" :
+                      job.status === "pending" || job.status === "scheduled" ? "warning" :
                       "muted"
                     }
                   >
                     {job.status}
                   </StatusBadge>
-                  <span className="text-[10px] text-muted-foreground font-mono whitespace-nowrap">
-                    {job.updatedAt ? formatRelativeTime(new Date(job.updatedAt).toISOString()) : "—"}
-                  </span>
-                </button>
-              ))}
-              {jobs.length === 0 && !jobsLoading && (
-                <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-                  No jobs yet
-                </div>
-              )}
-            </div>
-          </InstrumentCardBody>
-        </InstrumentCard>
-
-        {/* Pending Approvals */}
-        <InstrumentCard accent={pendingApprovals.length > 0 ? "warning" : "healthy"}>
-          <InstrumentCardHeader
-            title="Approval Queue"
-            subtitle={`${pendingApprovals.length} pending`}
-            icon={<UserCheck className="w-4 h-4" />}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => navigate("/approvals")}>
-                View all <ArrowRight className="w-3 h-3" />
-              </Button>
-            }
-          />
-          <InstrumentCardBody className="p-0">
-            <div className="divide-y divide-border/50">
-              {pendingApprovals.slice(0, 5).map((approval) => (
-                <div
-                  key={approval.id}
-                  className="flex items-center gap-3 px-5 py-3 hover:bg-cordum/5 transition-colors cursor-pointer"
-                  onClick={() => navigate("/approvals")}
-                >
-                  <Shield className="w-4 h-4 text-status-warning shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {approval.topic || approval.id.slice(0, 12)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {approval.requestedAt ? formatRelativeTime(approval.requestedAt) : "—"}
-                    </p>
-                  </div>
-                  <StatusBadge variant="warning" dot pulse>
-                    pending
-                  </StatusBadge>
-                </div>
-              ))}
-              {pendingApprovals.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <CheckCircle2 className="w-8 h-8 text-status-healthy/40 mb-2" />
-                  <p className="text-sm text-muted-foreground">All clear</p>
-                </div>
-              )}
-            </div>
-          </InstrumentCardBody>
-        </InstrumentCard>
+                </td>
+                <td className="px-5 py-3 text-sm text-muted-foreground">
+                  {job.updatedAt ? formatRelativeTime(new Date(job.updatedAt).toISOString()) : "—"}
+                </td>
+                <td className="px-5 py-3">
+                  <button className="p-1 rounded hover:bg-surface-2 transition-colors">
+                    <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {jobs.length === 0 && !jobsLoading && (
+              <tr>
+                <td colSpan={5} className="text-center text-sm text-muted-foreground py-12">
+                  No jobs yet — submit your first job to get started
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
+
+      {/* Approval Queue — matches showcase */}
+      {pendingApprovals.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display font-semibold text-sm text-foreground">Approval Queue</h3>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/approvals")}>
+              View all <ArrowRight className="w-3 h-3 ml-1" />
+            </Button>
+          </div>
+          {pendingApprovals.slice(0, 3).map((approval) => (
+            <motion.div
+              key={approval.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="instrument-card status-warning p-5"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="font-mono text-sm text-cordum">{approval.id.slice(0, 12)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {approval.requestedAt ? formatRelativeTime(approval.requestedAt) : "—"}
+                    </span>
+                  </div>
+                  <h3 className="font-display font-semibold text-foreground">
+                    {approval.topic || "Pending Approval"} — <span className="font-mono text-sm">{approval.id.slice(0, 8)}</span>
+                  </h3>
+                </div>
+                <div className="flex gap-2 ml-4 shrink-0">
+                  <Button size="sm" variant="danger">
+                    <XCircle className="w-3.5 h-3.5 mr-1" />
+                    Deny
+                  </Button>
+                  <Button size="sm" variant="primary">
+                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,13 +3,13 @@ import { cn } from "@/lib/utils";
 
 type AccentVariant = "healthy" | "warning" | "danger" | "info" | "muted" | "cordum";
 
-const accentColors: Record<AccentVariant, string> = {
-  healthy: "bg-status-healthy",
-  warning: "bg-status-warning",
-  danger: "bg-status-danger",
-  info: "bg-status-info",
-  muted: "bg-muted-foreground/40",
-  cordum: "bg-cordum",
+const statusClass: Record<AccentVariant, string> = {
+  healthy: "",
+  warning: "status-warning",
+  danger: "status-danger",
+  info: "status-info",
+  muted: "",
+  cordum: "",
 };
 
 interface InstrumentCardProps {
@@ -31,14 +31,13 @@ export function InstrumentCard({
     <div
       onClick={onClick}
       className={cn(
-        "rounded-lg border border-border bg-card overflow-hidden transition-all duration-200",
-        hoverable && "hover:shadow-[var(--shadow-md)] hover:border-cordum/15 cursor-pointer",
+        "instrument-card",
+        statusClass[accent],
+        hoverable && "hover:shadow-lg hover:border-cordum/15 cursor-pointer",
         onClick && "cursor-pointer",
         className,
       )}
-      style={{ boxShadow: "var(--shadow-sm)" }}
     >
-      <div className={cn("h-[3px]", accentColors[accent])} />
       {children}
     </div>
   );

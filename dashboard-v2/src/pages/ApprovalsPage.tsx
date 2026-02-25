@@ -1,18 +1,19 @@
+/*
+ * DESIGN: "Control Surface" — Approvals
+ * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ */
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { get, post } from "@/api/client";
 import { mapApprovalItem, type BackendApprovalItem } from "@/api/transform";
 import type { Approval } from "@/api/types";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardHeader, InstrumentCardBody } from "@/components/ui/InstrumentCard";
-import { MetricValue } from "@/components/ui/MetricValue";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Tabs } from "@/components/ui/Tabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
-import { Search, RefreshCw, UserCheck, CheckCircle2, XCircle, Shield, Clock, AlertTriangle } from "lucide-react";
+import { Search, RefreshCw, UserCheck, CheckCircle2, XCircle, Shield, Clock, X } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -58,13 +59,6 @@ export default function ApprovalsPage() {
   const approved = all.filter((a) => a.status === "approved");
   const denied = all.filter((a) => a.status === "denied");
 
-  const tabs = [
-    { id: "pending", label: "Pending", count: pending.length },
-    { id: "approved", label: "Approved", count: approved.length },
-    { id: "denied", label: "Denied", count: denied.length },
-    { id: "all", label: "All", count: all.length },
-  ];
-
   const filtered = all
     .filter((a) => {
       if (activeTab !== "all" && a.status !== activeTab) return false;
@@ -83,54 +77,97 @@ export default function ApprovalsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        label="Safety"
         title="Approvals"
-        subtitle="Human-in-the-loop review queue"
+        subtitle="Human-in-the-loop review queue for agent actions"
         actions={
-          <Button variant="secondary" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="w-3.5 h-3.5" />
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="w-3 h-3 mr-1" />
             Refresh
           </Button>
         }
       />
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* KPI Row — showcase style */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="grid grid-cols-3 gap-4"
+      >
         {isLoading ? (
           Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
           <>
-            <InstrumentCard accent={pending.length > 0 ? "warning" : "healthy"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Pending" value={pending.length} />
-              </InstrumentCardBody>
-            </InstrumentCard>
-            <InstrumentCard accent="healthy">
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Approved" value={approved.length} />
-              </InstrumentCardBody>
-            </InstrumentCard>
-            <InstrumentCard accent={denied.length > 0 ? "danger" : "muted"}>
-              <InstrumentCardBody className="pt-4">
-                <MetricValue label="Denied" value={denied.length} />
-              </InstrumentCardBody>
-            </InstrumentCard>
+            <div className={cn("instrument-card p-5", pending.length > 0 && "status-warning")}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Pending</span>
+                <Clock className="w-4 h-4 text-amber-400" />
+              </div>
+              <span className={cn("font-mono text-2xl font-bold", pending.length > 0 ? "text-amber-400" : "text-foreground")}>{pending.length}</span>
+              <p className="text-xs text-muted-foreground mt-1">Awaiting human review</p>
+            </div>
+
+            <div className="instrument-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Approved</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </div>
+              <span className="font-mono text-2xl font-bold text-emerald-400">{approved.length}</span>
+              <p className="text-xs text-muted-foreground mt-1">Actions permitted</p>
+            </div>
+
+            <div className={cn("instrument-card p-5", denied.length > 0 && "status-danger")}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Denied</span>
+                <XCircle className="w-4 h-4 text-red-400" />
+              </div>
+              <span className={cn("font-mono text-2xl font-bold", denied.length > 0 ? "text-red-400" : "text-foreground")}>{denied.length}</span>
+              <p className="text-xs text-muted-foreground mt-1">Actions blocked</p>
+            </div>
           </>
         )}
-      </div>
+      </motion.div>
 
-      {/* Filters */}
+      {/* Filters — showcase style */}
       <div className="flex items-center gap-3">
-        <Input
-          icon={<Search className="w-3.5 h-3.5" />}
-          placeholder="Search by ID, topic, or job…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-        <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} className="ml-auto border-none" />
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search approvals..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-full pl-8 pr-3 text-xs bg-surface-1 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+          />
+        </div>
+        <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-md p-0.5">
+          {[
+            { id: "pending", label: "Pending", count: pending.length },
+            { id: "approved", label: "Approved", count: approved.length },
+            { id: "denied", label: "Denied", count: denied.length },
+            { id: "all", label: "All", count: all.length },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded transition-colors",
+                activeTab === tab.id
+                  ? "bg-cordum/10 text-cordum"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {tab.label}
+              {tab.count > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-surface-2">{tab.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Approval Cards */}
+      {/* Approval Cards — showcase style */}
       {isLoading ? (
         <SkeletonTable rows={5} />
       ) : filtered.length === 0 ? (
@@ -142,127 +179,139 @@ export default function ApprovalsPage() {
       ) : (
         <div className="space-y-3">
           {filtered.map((approval) => (
-            <InstrumentCard
+            <motion.div
               key={approval.id}
-              accent={approvalStatusVariant(approval.status)}
-              hoverable
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                "instrument-card p-5 cursor-pointer",
+                approval.status === "pending" && "status-warning",
+                approval.status === "denied" && "status-danger",
+              )}
               onClick={() => setSelectedApproval(approval)}
             >
-              <InstrumentCardBody className="py-4">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <StatusBadge variant={approvalStatusVariant(approval.status)} dot pulse={approval.status === "pending"}>
-                        {approval.status}
-                      </StatusBadge>
-                      <span className="text-xs font-mono text-muted-foreground">{approval.id.slice(0, 16)}</span>
-                    </div>
-                    <p className="text-sm font-medium text-foreground">{approval.topic || "Approval Request"}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                      {approval.jobId && <span className="font-mono">Job: {approval.jobId.slice(0, 12)}</span>}
-                      {approval.requestedAt && (
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {formatRelativeTime(approval.requestedAt)}
-                        </span>
-                      )}
-                    </div>
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="font-mono text-sm text-cordum">{approval.id.slice(0, 16)}</span>
+                    <StatusBadge variant={approvalStatusVariant(approval.status)} dot pulse={approval.status === "pending"}>
+                      {approval.status}
+                    </StatusBadge>
+                    <span className="text-xs text-muted-foreground">
+                      {approval.requestedAt ? formatRelativeTime(approval.requestedAt) : "—"}
+                    </span>
                   </div>
-                  {approval.status === "pending" && (
-                    <div className="flex gap-2 shrink-0">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        loading={approveMutation.isPending}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          approveMutation.mutate({ id: approval.id, decision: "approve" });
-                        }}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Approve
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        loading={approveMutation.isPending}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          approveMutation.mutate({ id: approval.id, decision: "deny" });
-                        }}
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        Deny
-                      </Button>
-                    </div>
-                  )}
+                  <h3 className="font-display font-semibold text-foreground">
+                    {approval.topic || "Approval Request"} — <span className="font-mono text-sm">{approval.jobId?.slice(0, 8) || approval.id.slice(0, 8)}</span>
+                  </h3>
                 </div>
-              </InstrumentCardBody>
-            </InstrumentCard>
+                {approval.status === "pending" && (
+                  <div className="flex gap-2 ml-4 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      loading={approveMutation.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        approveMutation.mutate({ id: approval.id, decision: "deny" });
+                      }}
+                    >
+                      <XCircle className="w-3.5 h-3.5 mr-1" />
+                      Deny
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={approveMutation.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        approveMutation.mutate({ id: approval.id, decision: "approve" });
+                      }}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                      Approve
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
           ))}
         </div>
       )}
 
       {/* Detail Drawer */}
       {selectedApproval && (
-        <div className="fixed inset-y-0 right-0 w-[440px] bg-card border-l border-border shadow-2xl z-50 overflow-y-auto">
-          <div className="p-5 border-b border-border flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold font-display">Approval Detail</h2>
-              <p className="text-xs text-muted-foreground font-mono mt-0.5">{selectedApproval.id}</p>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => setSelectedApproval(null)}>✕</Button>
-          </div>
-          <div className="p-5 space-y-4">
-            <StatusBadge variant={approvalStatusVariant(selectedApproval.status)} dot>
-              {selectedApproval.status}
-            </StatusBadge>
-            <dl className="space-y-3">
-              {[
-                ["Topic", selectedApproval.topic],
-                ["Job ID", selectedApproval.jobId],
-                ["Requested", selectedApproval.requestedAt ? formatRelativeTime(selectedApproval.requestedAt) : "—"],
-                ["Decided By", selectedApproval.actor],
-                ["Reason", selectedApproval.reason],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <dt className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">{label}</dt>
-                  <dd className="text-sm text-foreground font-mono">{value || "—"}</dd>
-                </div>
-              ))}
-            </dl>
-            {selectedApproval.jobContext && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setSelectedApproval(null)} />
+          <motion.div
+            initial={{ x: 440 }}
+            animate={{ x: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="fixed inset-y-0 right-0 w-[440px] bg-surface-1 border-l border-border shadow-2xl z-50 overflow-y-auto"
+          >
+            <div className="p-5 border-b border-border flex items-center justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Context</p>
-                <div className="rounded-md bg-surface-2/50 border border-border p-3 font-mono text-xs text-foreground overflow-auto max-h-[200px]">
-                  <pre>{JSON.stringify(selectedApproval.jobContext, null, 2)}</pre>
+                <h2 className="font-display font-semibold text-sm text-foreground">Approval Detail</h2>
+                <p className="text-xs text-muted-foreground font-mono mt-0.5">{selectedApproval.id}</p>
+              </div>
+              <button
+                onClick={() => setSelectedApproval(null)}
+                className="p-1.5 rounded-md hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-5">
+              <StatusBadge variant={approvalStatusVariant(selectedApproval.status)} dot pulse={selectedApproval.status === "pending"}>
+                {selectedApproval.status}
+              </StatusBadge>
+              <dl className="space-y-3">
+                {[
+                  ["Topic", selectedApproval.topic],
+                  ["Job ID", selectedApproval.jobId],
+                  ["Requested", selectedApproval.requestedAt ? formatRelativeTime(selectedApproval.requestedAt) : "—"],
+                  ["Decided By", selectedApproval.actor],
+                  ["Reason", selectedApproval.reason],
+                ].map(([label, value]) => (
+                  <div key={label as string}>
+                    <dt className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-0.5">{label}</dt>
+                    <dd className="text-sm text-foreground">{(value as string) || "—"}</dd>
+                  </div>
+                ))}
+              </dl>
+              {selectedApproval.jobContext && (
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Context</p>
+                  <div className="rounded-md bg-surface-2/50 border border-border p-3 font-mono text-xs text-foreground overflow-auto max-h-[200px]">
+                    <pre>{JSON.stringify(selectedApproval.jobContext, null, 2)}</pre>
+                  </div>
                 </div>
-              </div>
-            )}
-            {selectedApproval.status === "pending" && (
-              <div className="flex gap-2 pt-2">
-                <Button
-                  variant="primary"
-                  className="flex-1"
-                  loading={approveMutation.isPending}
-                  onClick={() => approveMutation.mutate({ id: selectedApproval.id, decision: "approve" })}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Approve
-                </Button>
-                <Button
-                  variant="danger"
-                  className="flex-1"
-                  loading={approveMutation.isPending}
-                  onClick={() => approveMutation.mutate({ id: selectedApproval.id, decision: "deny" })}
-                >
-                  <XCircle className="w-3.5 h-3.5" />
-                  Deny
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
+              )}
+              {selectedApproval.status === "pending" && (
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    loading={approveMutation.isPending}
+                    onClick={() => approveMutation.mutate({ id: selectedApproval.id, decision: "approve" })}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                    Approve
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="flex-1"
+                    loading={approveMutation.isPending}
+                    onClick={() => approveMutation.mutate({ id: selectedApproval.id, decision: "deny" })}
+                  >
+                    <XCircle className="w-3.5 h-3.5 mr-1" />
+                    Deny
+                  </Button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </>
       )}
     </div>
   );

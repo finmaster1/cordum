@@ -1,17 +1,19 @@
+/*
+ * DESIGN: "Control Surface" — Workflows
+ * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { get } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { InstrumentCard, InstrumentCardBody } from "@/components/ui/InstrumentCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
-import { DataTable } from "@/components/ui/DataTable";
-import { Search, Plus, Workflow, RefreshCw, Play, GitBranch } from "lucide-react";
-import { formatRelativeTime } from "@/lib/utils";
+import { Search, Plus, Workflow, RefreshCw, Eye, GitBranch } from "lucide-react";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 interface WorkflowSummary {
   id: string;
@@ -48,106 +50,109 @@ export default function WorkflowsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        label="Core"
         title="Workflows"
-        subtitle={`${all.length} workflow${all.length !== 1 ? "s" : ""}`}
+        subtitle={`${all.length} workflow${all.length !== 1 ? "s" : ""} defined`}
         actions={
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="w-3.5 h-3.5" />
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="w-3 h-3 mr-1" />
               Refresh
             </Button>
             <Button variant="primary" size="sm" onClick={() => navigate("/workflows/new")}>
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3 mr-1" />
               New Workflow
             </Button>
           </div>
         }
       />
 
-      <Input
-        icon={<Search className="w-3.5 h-3.5" />}
-        placeholder="Search workflows…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="max-w-sm"
-      />
+      {/* Search — showcase style */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search workflows..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-full pl-8 pr-3 text-xs bg-surface-1 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+        />
+      </div>
 
-      <InstrumentCard>
-        <InstrumentCardBody className="p-0">
-          {isLoading ? (
-            <div className="p-5"><SkeletonTable rows={6} /></div>
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              icon={<Workflow className="w-5 h-5" />}
-              title="No workflows found"
-              description={search ? "Try adjusting your search" : "Create your first workflow to orchestrate agent tasks"}
-              action={
-                <Button variant="primary" size="sm" onClick={() => navigate("/workflows/new")}>
-                  <Plus className="w-3.5 h-3.5" />
-                  New Workflow
-                </Button>
-              }
-            />
-          ) : (
-            <DataTable
-              columns={[
-                {
-                  key: "name",
-                  header: "Name",
-                  render: (w) => (
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{w.name}</p>
-                      {w.description && <p className="text-xs text-muted-foreground truncate max-w-[300px]">{w.description}</p>}
+      {/* Workflows Table — showcase style */}
+      {isLoading ? (
+        <div className="instrument-card p-5">
+          <SkeletonTable rows={6} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<Workflow className="w-5 h-5" />}
+          title="No workflows found"
+          description={search ? "Try adjusting your search" : "Create your first workflow to orchestrate agent tasks"}
+          action={
+            <Button variant="primary" size="sm" onClick={() => navigate("/workflows/new")}>
+              <Plus className="w-3 h-3 mr-1" />
+              New Workflow
+            </Button>
+          }
+        />
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="instrument-card overflow-hidden"
+        >
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-surface-0">
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Name</th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Version</th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Steps</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+                <th className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Last Run</th>
+                <th className="px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((w) => (
+                <tr
+                  key={w.id}
+                  onClick={() => navigate(`/workflows/${w.id}`)}
+                  className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer"
+                >
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-cordum/10 border border-cordum/20 flex items-center justify-center shrink-0">
+                        <GitBranch className="w-4 h-4 text-cordum" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{w.name}</p>
+                        {w.description && <p className="text-xs text-muted-foreground truncate max-w-[300px]">{w.description}</p>}
+                      </div>
                     </div>
-                  ),
-                },
-                {
-                  key: "version",
-                  header: "Version",
-                  width: "80px",
-                  align: "center",
-                  render: (w) => (
-                    <span className="text-xs font-mono text-muted-foreground">v{w.version ?? 1}</span>
-                  ),
-                },
-                {
-                  key: "steps",
-                  header: "Steps",
-                  width: "80px",
-                  align: "center",
-                  render: (w) => (
-                    <span className="text-xs font-mono text-muted-foreground">{w.stepCount ?? "—"}</span>
-                  ),
-                },
-                {
-                  key: "status",
-                  header: "Status",
-                  width: "100px",
-                  render: (w) => (
+                  </td>
+                  <td className="px-5 py-3 text-center font-mono text-xs text-muted-foreground">v{w.version ?? 1}</td>
+                  <td className="px-5 py-3 text-center font-mono text-xs text-muted-foreground">{w.stepCount ?? "—"}</td>
+                  <td className="px-5 py-3">
                     <StatusBadge variant={w.status === "active" ? "healthy" : w.status === "draft" ? "muted" : "warning"}>
                       {w.status ?? "active"}
                     </StatusBadge>
-                  ),
-                },
-                {
-                  key: "lastRun",
-                  header: "Last Run",
-                  width: "120px",
-                  align: "right",
-                  render: (w) => (
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {w.lastRunAt ? formatRelativeTime(w.lastRunAt) : "Never"}
-                    </span>
-                  ),
-                },
-              ]}
-              data={filtered}
-              keyExtractor={(w) => w.id}
-              onRowClick={(w) => navigate(`/workflows/${w.id}`)}
-            />
-          )}
-        </InstrumentCardBody>
-      </InstrumentCard>
+                  </td>
+                  <td className="px-5 py-3 text-right text-xs text-muted-foreground font-mono">
+                    {w.lastRunAt ? formatRelativeTime(w.lastRunAt) : "Never"}
+                  </td>
+                  <td className="px-5 py-3">
+                    <button className="p-1 rounded hover:bg-surface-2 transition-colors">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </motion.div>
+      )}
     </div>
   );
 }

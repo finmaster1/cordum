@@ -5,7 +5,7 @@
 
 /* ============================================================
    CORDUM DESIGN SYSTEM — "Control Surface" Tokens
-   Aerospace-grade dashboard design language
+   Matched exactly to cordumds-gj5mw4zm.manus.space
    ============================================================ */
 
 @theme inline {
@@ -13,138 +13,92 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Semantic color mapping */
-  --color-background: var(--bg);
-  --color-foreground: var(--text);
-  --color-card: var(--surface);
-  --color-card-foreground: var(--text);
-  --color-popover: var(--surface);
-  --color-popover-foreground: var(--text);
-  --color-primary: var(--cordum);
-  --color-primary-foreground: var(--cordum-fg);
-  --color-secondary: var(--surface-2);
-  --color-secondary-foreground: var(--text);
-  --color-muted: var(--surface-2);
-  --color-muted-foreground: var(--text-muted);
-  --color-accent: var(--surface-2);
-  --color-accent-foreground: var(--text);
-  --color-destructive: var(--status-danger);
-  --color-destructive-foreground: #ffffff;
-  --color-border: var(--border-color);
-  --color-input: var(--border-color);
-  --color-ring: var(--cordum);
-
-  /* Chart palette */
-  --color-chart-1: var(--cordum);
-  --color-chart-2: var(--cordum-light);
-  --color-chart-3: var(--status-info);
-  --color-chart-4: var(--status-warning);
-  --color-chart-5: var(--accent-copper);
-
-  /* Sidebar */
-  --color-sidebar: var(--surface);
-  --color-sidebar-foreground: var(--text);
-  --color-sidebar-primary: var(--cordum);
-  --color-sidebar-primary-foreground: var(--cordum-fg);
-  --color-sidebar-accent: var(--surface-2);
-  --color-sidebar-accent-foreground: var(--text);
-  --color-sidebar-border: var(--border-color);
-  --color-sidebar-ring: var(--cordum);
-
-  /* Custom Cordum colors */
-  --color-cordum: var(--cordum);
-  --color-cordum-light: var(--cordum-light);
-  --color-cordum-dim: var(--cordum-dim);
-  --color-surface-1: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
-  --color-status-healthy: var(--status-healthy);
-  --color-status-warning: var(--status-warning);
-  --color-status-danger: var(--status-danger);
-  --color-status-info: var(--status-info);
-  --color-accent-copper: var(--accent-copper);
+  /* Cordum custom colors — exact match to showcase */
+  --color-cordum: oklch(0.82 0.18 165);
+  --color-cordum-dim: oklch(0.65 0.14 165);
+  --color-cordum-bright: oklch(0.90 0.20 165);
+  --color-surface-0: oklch(0.15 0.01 260);
+  --color-surface-1: oklch(0.18 0.01 260);
+  --color-surface-2: oklch(0.21 0.01 260);
+  --color-surface-3: oklch(0.25 0.01 260);
+  --color-warning: oklch(0.80 0.16 75);
+  --color-danger: oklch(0.65 0.22 25);
+  --color-info: oklch(0.70 0.15 250);
+  --color-success: oklch(0.75 0.17 155);
 
   /* Font families */
   --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
-  --font-sans: "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "IBM Plex Mono", monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* ============================================================
-   DARK THEME (default for Cordum dashboard)
-   ============================================================ */
 :root {
-  color-scheme: dark;
   --radius: 0.5rem;
-
-  /* Cordum Teal Palette */
-  --cordum: #27b3a8;
-  --cordum-light: #3dd4c8;
-  --cordum-dim: rgba(39, 179, 168, 0.15);
-  --cordum-fg: #0f1518;
-
-  /* Surface Layers */
-  --bg: #0c1114;
-  --surface: #111a1e;
-  --surface-2: #1a2428;
-  --surface-3: #222e33;
-
-  /* Text */
-  --text: #e5efec;
-  --text-muted: #7a8f8c;
-
-  /* Status */
-  --status-healthy: #27b3a8;
-  --status-warning: #d4a03a;
-  --status-danger: #e05555;
-  --status-info: #5b9bd5;
-
-  /* Accent */
-  --accent-copper: #d4833a;
-
-  /* Border */
-  --border-color: rgba(229, 239, 236, 0.08);
-
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 0 1px rgba(39, 179, 168, 0.2), 0 8px 24px rgba(39, 179, 168, 0.1);
-}
-
-/* ============================================================
-   LIGHT THEME
-   ============================================================ */
-.light {
-  color-scheme: light;
-
-  --cordum: #0f7f7a;
-  --cordum-light: #27b3a8;
-  --cordum-dim: rgba(15, 127, 122, 0.1);
-  --cordum-fg: #ffffff;
-
-  --bg: #f7f9fb;
-  --surface: #ffffff;
-  --surface-2: #f0f4f3;
-  --surface-3: #e5ebe9;
-
-  --text: #1a2428;
-  --text-muted: #5a6a70;
-
-  --status-healthy: #0f7f7a;
-  --status-warning: #c58a1c;
-  --status-danger: #b83a3a;
-  --status-info: #3b7dd8;
-
-  --accent-copper: #d4833a;
-
-  --border-color: rgba(25, 36, 40, 0.1);
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-glow: 0 0 0 1px rgba(15, 127, 122, 0.2), 0 8px 24px rgba(15, 127, 122, 0.08);
+  --primary: oklch(0.82 0.18 165);
+  --primary-foreground: oklch(0.15 0.02 165);
+  --background: oklch(0.13 0.01 260);
+  --foreground: oklch(0.90 0.005 260);
+  --card: oklch(0.18 0.01 260);
+  --card-foreground: oklch(0.90 0.005 260);
+  --popover: oklch(0.20 0.01 260);
+  --popover-foreground: oklch(0.90 0.005 260);
+  --secondary: oklch(0.22 0.01 260);
+  --secondary-foreground: oklch(0.80 0.005 260);
+  --muted: oklch(0.25 0.01 260);
+  --muted-foreground: oklch(0.60 0.01 260);
+  --accent: oklch(0.22 0.01 260);
+  --accent-foreground: oklch(0.90 0.005 260);
+  --destructive: oklch(0.65 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.28 0.01 260);
+  --input: oklch(0.25 0.01 260);
+  --ring: oklch(0.82 0.18 165);
+  --chart-1: oklch(0.82 0.18 165);
+  --chart-2: oklch(0.70 0.15 250);
+  --chart-3: oklch(0.80 0.16 75);
+  --chart-4: oklch(0.65 0.22 25);
+  --chart-5: oklch(0.75 0.17 155);
+  --sidebar: oklch(0.15 0.01 260);
+  --sidebar-foreground: oklch(0.85 0.005 260);
+  --sidebar-primary: oklch(0.82 0.18 165);
+  --sidebar-primary-foreground: oklch(0.15 0.02 165);
+  --sidebar-accent: oklch(0.22 0.01 260);
+  --sidebar-accent-foreground: oklch(0.90 0.005 260);
+  --sidebar-border: oklch(0.28 0.01 260);
+  --sidebar-ring: oklch(0.82 0.18 165);
 }
 
 /* ============================================================
@@ -153,26 +107,22 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    box-sizing: border-box;
   }
-
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
-
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
   }
-
   code, pre, kbd, .font-mono {
     font-family: var(--font-mono);
   }
-
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
   a[href],
   select:not(:disabled),
   input[type="checkbox"]:not(:disabled),
@@ -182,64 +132,78 @@
 }
 
 /* ============================================================
-   COMPONENT UTILITIES
+   COMPONENT UTILITIES — matched to showcase
    ============================================================ */
 @layer components {
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
   .flex {
     min-height: 0;
     min-width: 0;
   }
 
-  /* Instrument Card — signature Cordum component */
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem;
+      padding-right: 2rem;
+      max-width: 1400px;
+    }
+  }
+
+  /* Cordum instrument panel card — exact showcase match */
   .instrument-card {
-    @apply rounded-lg border border-border bg-card overflow-hidden;
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    @apply bg-card rounded-lg border border-border relative overflow-hidden;
+  }
+  .instrument-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--color-cordum);
+  }
+  .instrument-card.status-warning::before {
+    background: var(--color-warning);
+  }
+  .instrument-card.status-danger::before {
+    background: var(--color-danger);
+  }
+  .instrument-card.status-info::before {
+    background: var(--color-info);
   }
 
-  .instrument-card:hover {
-    box-shadow: var(--shadow-md);
-    border-color: rgba(39, 179, 168, 0.15);
+  /* Dot grid background */
+  .dot-grid {
+    background-image: radial-gradient(circle, oklch(0.35 0.01 260) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
 
-  .instrument-card-accent {
-    height: 3px;
-    background: var(--cordum);
+  /* Glow effect */
+  .glow-cordum {
+    box-shadow: 0 0 20px oklch(0.82 0.18 165 / 0.15), 0 0 40px oklch(0.82 0.18 165 / 0.05);
   }
 
-  .instrument-card-accent--warning {
-    background: var(--status-warning);
+  /* Status pulse */
+  @keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
-
-  .instrument-card-accent--danger {
-    background: var(--status-danger);
-  }
-
-  .instrument-card-accent--info {
-    background: var(--status-info);
-  }
-
-  .instrument-card-accent--muted {
-    background: var(--text-muted);
-  }
-
-  /* Scrollbar styling */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: rgba(122, 143, 140, 0.3);
-    border-radius: 3px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(122, 143, 140, 0.5);
+  .status-pulse {
+    animation: status-pulse 2s ease-in-out infinite;
   }
 
   /* Skeleton shimmer */
@@ -247,11 +211,26 @@
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
   }
-
   .skeleton {
-    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+    background: linear-gradient(90deg, oklch(0.21 0.01 260) 25%, oklch(0.25 0.01 260) 50%, oklch(0.21 0.01 260) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s ease-in-out infinite;
     border-radius: 0.375rem;
   }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.30 0.01 260);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.40 0.01 260);
 }
