@@ -7,6 +7,8 @@ import { useUiStore } from "./state/ui";
 import { AppShell } from "./components/layout/AppShell";
 import { LoadingScreen } from "./components/layout/LoadingScreen";
 import { useRequireAuth } from "./hooks/useAuth";
+import { useEventStream } from "./hooks/useEventStream";
+import { usePresenceCleanup } from "./state/events";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient({
@@ -82,6 +84,8 @@ function ErrorBoundaryWrapper({ children }: { children: ReactNode }) {
 
 function ProtectedRoutes() {
   const isAuthenticated = useRequireAuth();
+  useEventStream();
+  usePresenceCleanup();
   if (!isAuthenticated) return null;
 
   return (
