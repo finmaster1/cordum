@@ -18,22 +18,7 @@ import {
 } from "lucide-react";
 import { usePolicyRules, usePolicyBundles, usePolicyAudit } from "@/hooks/usePolicies";
 import { useOutputRules } from "@/hooks/useOutputRules";
-
-function ChartTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-surface-2 border border-border rounded-lg p-3 shadow-xl">
-      <p className="font-mono text-xs text-muted-foreground mb-1">{label}</p>
-      {payload.map((entry: any, index: number) => (
-        <div key={index} className="flex items-center gap-2 text-xs">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-          <span className="text-muted-foreground">{entry.name}:</span>
-          <span className="font-mono text-foreground font-medium">{entry.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+import { ChartTooltip } from "@/components/ui/ChartTooltip";
 
 export default function PoliciesOverviewPage() {
   const navigate = useNavigate();
@@ -69,10 +54,10 @@ export default function PoliciesOverviewPage() {
   }, [auditEntries]);
 
   const evalData = useMemo(() => {
-    const labels = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "Now"];
+    const labels = ["00:00 UTC", "04:00 UTC", "08:00 UTC", "12:00 UTC", "16:00 UTC", "20:00 UTC", "Now"];
     const buckets = labels.map((time) => ({ time, allow: 0, deny: 0, approval: 0 }));
     for (const entry of auditEntries) {
-      const hour = new Date(entry.timestamp).getHours();
+      const hour = new Date(entry.timestamp).getUTCHours();
       const idx = Math.min(Math.floor(hour / 4), 5);
       const a = entry.action.toLowerCase();
       if (a.includes("deny") || a.includes("block") || a.includes("reject")) {
@@ -112,47 +97,47 @@ export default function PoliciesOverviewPage() {
           <>
             <div className="instrument-card p-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Input Rules</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Input Rules</span>
                 <ShieldCheck className="w-4 h-4 text-cordum" />
               </div>
-              <span className="font-mono text-2xl font-bold text-foreground">{inputRules.length}</span>
+              <span className="font-mono text-3xl font-bold text-foreground">{inputRules.length}</span>
               <p className="text-xs text-muted-foreground mt-1">{activeInputRules.length} active</p>
             </div>
 
             <div className="instrument-card p-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Output Rules</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Output Rules</span>
                 <ShieldAlert className="w-4 h-4 text-cordum" />
               </div>
-              <span className="font-mono text-2xl font-bold text-foreground">{outputRules.length}</span>
+              <span className="font-mono text-3xl font-bold text-foreground">{outputRules.length}</span>
               <p className="text-xs text-muted-foreground mt-1">scanners + rules</p>
             </div>
 
             <div className="instrument-card p-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Bundles</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Bundles</span>
                 <Package className="w-4 h-4 text-cordum" />
               </div>
-              <span className="font-mono text-2xl font-bold text-foreground">{bundles.length}</span>
+              <span className="font-mono text-3xl font-bold text-foreground">{bundles.length}</span>
               <p className="text-xs text-muted-foreground mt-1">{publishedBundles.length} published</p>
             </div>
 
             <div className="instrument-card p-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Deny Rate</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Deny Rate</span>
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-2xl font-bold text-foreground">{blockRate}%</span>
+                <span className="font-mono text-3xl font-bold text-foreground">{blockRate}%</span>
               </div>
               <p className="text-xs text-muted-foreground mt-1">of {total} evaluations</p>
             </div>
 
             <div className="instrument-card p-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Approval Rate</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Approval Rate</span>
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-2xl font-bold text-foreground">{approvalRate}%</span>
+                <span className="font-mono text-3xl font-bold text-foreground">{approvalRate}%</span>
               </div>
               <p className="text-xs text-muted-foreground mt-1">require human review</p>
             </div>
