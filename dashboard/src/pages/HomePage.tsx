@@ -3,7 +3,7 @@
  * Revision v2: Balanced KPIs (2 ops + 2 governance)
  * "Orchestration sells. Governance seals. Both are Cordum."
  */
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -19,49 +19,22 @@ import {
   ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from "recharts";
 import {
-  Activity, Cpu, ListChecks, UserCheck, ArrowRight, ArrowUpRight, ArrowDownRight,
+  Activity, Cpu, ListChecks, UserCheck, ArrowRight,
   Clock, CheckCircle2, XCircle, Zap, Shield, RefreshCw, Eye,
   AlertTriangle, Users, ShieldCheck, Gauge, TrendingUp,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
-
-/* Chart tooltip */
-function ChartTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-surface-2 border border-border rounded-lg p-3 shadow-xl">
-      <p className="font-mono text-xs text-muted-foreground mb-1">{label}</p>
-      {payload.map((entry: any, index: number) => (
-        <div key={index} className="flex items-center gap-2 text-xs">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-          <span className="text-muted-foreground">{entry.name}:</span>
-          <span className="font-mono text-foreground font-medium">{entry.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* Safety decision badge for table rows */
-function SafetyDecisionBadge({ decision }: { decision?: string }) {
-  const config: Record<string, { color: string; bg: string; label: string }> = {
-    allow: { color: "text-emerald-400", bg: "bg-emerald-400/10", label: "ALLOW" },
-    deny: { color: "text-red-400", bg: "bg-red-400/10", label: "DENY" },
-    require_approval: { color: "text-amber-400", bg: "bg-amber-400/10", label: "APPROVAL" },
-    allow_with_constraints: { color: "text-blue-400", bg: "bg-blue-400/10", label: "CONSTRAINED" },
-    throttle: { color: "text-orange-400", bg: "bg-orange-400/10", label: "THROTTLE" },
-  };
-  const c = config[decision ?? ""] ?? { color: "text-muted-foreground", bg: "bg-surface-2", label: decision?.toUpperCase() || "—" };
-  return (
-    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[10px] font-semibold tracking-wider", c.color, c.bg)}>
-      {c.label}
-    </span>
-  );
-}
+import { useApproveJob, useRejectJob } from "@/hooks/useApprovals";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ChartTooltip } from "@/components/ui/ChartTooltip";
+import { SafetyDecisionBadge } from "@/components/ui/SafetyDecisionBadge";
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const [denyTarget, setDenyTarget] = useState<string | null>(null);
+  const approveMut = useApproveJob();
+  const rejectMut = useRejectJob();
 
   const { data: jobsData, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", "home"],
@@ -76,8 +49,8 @@ export default function HomePage() {
   const { data: workers, isLoading: workersLoading } = useQuery({
     queryKey: ["workers", "home"],
     queryFn: async () => {
-      const res = await get<BackendHeartbeat[]>("/workers");
-      return (res ?? []).map(mapHeartbeatToWorker).filter((w): w is Worker => !!w);
+      const res = await get<{ items: BackendHeartbeat[] }>("/workers");
+      return (res.items ?? []).map(mapHeartbeatToWorker).filter((w): w is Worker => !!w);
     },
     refetchInterval: 15_000,
   });
@@ -89,6 +62,15 @@ export default function HomePage() {
       return (res.items ?? []).map(mapApprovalItem).filter((a): a is Approval => !!a);
     },
     refetchInterval: 5_000,
+  });
+
+  const { data: healthData, isLoading: healthLoading } = useQuery({
+    queryKey: ["health", "home"],
+    queryFn: async () => {
+      const res = await get<{ data?: { services: { name: string; status: string; latency: string }[] } }>("/health");
+      return res.data;
+    },
+    refetchInterval: 15_000,
   });
 
   const jobs = jobsData?.items ?? [];
@@ -179,12 +161,7 @@ export default function HomePage() {
                 <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Total Jobs (24h)</span>
                 <Activity className="w-4 h-4 text-cordum" />
               </div>
-              <div className="flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-bold text-foreground">{totalJobs.toLocaleString()}</span>
-                <span className="text-xs font-mono text-emerald-400 flex items-center gap-0.5">
-                  <ArrowUpRight className="w-3 h-3" />12.3%
-                </span>
-              </div>
+              <span className="font-mono text-3xl font-bold text-foreground">{totalJobs.toLocaleString()}</span>
               <div className="flex gap-3 mt-2 text-[10px] font-mono text-muted-foreground">
                 <span>{runningJobs} running</span>
                 <span className="text-emerald-400">{completedJobs} done</span>
@@ -489,24 +466,34 @@ export default function HomePage() {
       >
         <h3 className="font-display font-semibold text-sm text-foreground mb-4">Service Health</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {[
-            { name: "API Gateway", status: "healthy", latency: "12ms", icon: Gauge },
-            { name: "Scheduler", status: "healthy", latency: "3ms", icon: Clock },
-            { name: "Safety Kernel", status: "healthy", latency: "8ms", icon: ShieldCheck },
-            { name: "Message Bus", status: "healthy", latency: "1ms", icon: Activity },
-            { name: "Workers", status: "healthy", latency: `${activeWorkers.length}/${workers?.length ?? 0}`, icon: Cpu },
-          ].map((svc) => (
-            <div key={svc.name} className="flex items-center gap-3 rounded-lg border border-border bg-surface-0 p-3">
-              <div className={cn(
-                "w-2 h-2 rounded-full shrink-0",
-                svc.status === "healthy" ? "bg-emerald-400" : svc.status === "degraded" ? "bg-amber-400" : "bg-red-400"
-              )} />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground font-medium truncate">{svc.name}</p>
-                <p className="text-[10px] text-muted-foreground font-mono">{svc.latency}</p>
+          {healthLoading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-surface-0 p-3 animate-pulse">
+                <div className="w-2 h-2 rounded-full shrink-0 bg-surface-2" />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="h-3 bg-surface-2 rounded w-20" />
+                  <div className="h-2.5 bg-surface-2 rounded w-10" />
+                </div>
               </div>
+            ))
+          ) : (healthData?.services ?? []).length > 0 ? (
+            (healthData?.services ?? []).map((svc) => (
+              <div key={svc.name} className="flex items-center gap-3 rounded-lg border border-border bg-surface-0 p-3">
+                <div className={cn(
+                  "w-2 h-2 rounded-full shrink-0",
+                  svc.status === "healthy" ? "bg-emerald-400" : svc.status === "degraded" ? "bg-amber-400" : "bg-red-400"
+                )} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-foreground font-medium truncate">{svc.name}</p>
+                  <p className="text-[10px] text-muted-foreground font-mono">{svc.latency || "—"}</p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="col-span-full text-center py-4 text-sm text-muted-foreground">
+              Health data unavailable
             </div>
-          ))}
+          )}
         </div>
       </motion.div>
 
@@ -542,11 +529,16 @@ export default function HomePage() {
                   </p>
                 </div>
                 <div className="flex gap-2 ml-4 shrink-0">
-                  <Button size="sm" variant="danger">
+                  <Button size="sm" variant="danger" onClick={() => setDenyTarget(approval.id)}>
                     <XCircle className="w-3.5 h-3.5 mr-1" />
                     Deny
                   </Button>
-                  <Button size="sm" variant="primary">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    loading={approveMut.isPending}
+                    onClick={() => approveMut.mutate({ id: approval.id })}
+                  >
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
                     Approve
                   </Button>
@@ -556,6 +548,22 @@ export default function HomePage() {
           ))}
         </motion.div>
       )}
+
+      <ConfirmDialog
+        open={!!denyTarget}
+        onClose={() => setDenyTarget(null)}
+        onConfirm={() => {
+          if (denyTarget) {
+            rejectMut.mutate({ id: denyTarget, reason: "Denied from dashboard" });
+          }
+          setDenyTarget(null);
+        }}
+        title="Deny Approval"
+        description="Are you sure you want to deny this approval request? This action cannot be undone."
+        confirmLabel="Deny"
+        variant="destructive"
+        loading={rejectMut.isPending}
+      />
     </div>
   );
 }

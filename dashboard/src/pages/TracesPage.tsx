@@ -21,14 +21,15 @@ import { toast } from "sonner";
 import { get } from "@/api/client";
 import { useJobs } from "@/hooks/useJobs";
 import type { Trace, TraceSpan } from "@/api/types";
+import { SafetyDecisionBadge } from "@/components/ui/SafetyDecisionBadge";
 
 interface TraceEntry {
   trace_id: string;
   job_id: string;
   agent_id?: string;
   total_duration_ms: number;
-  service_count: number;
-  span_count: number;
+  service_count?: number;
+  span_count?: number;
   status: "ok" | "error" | "timeout";
   started_at: string;
   safety_decision?: string;
@@ -43,22 +44,6 @@ const serviceColors: Record<string, string> = {
   "Worker Pool": "bg-cyan-400",
   "Worker": "bg-emerald-400",
 };
-
-function SafetyBadge({ decision }: { decision?: string }) {
-  const config: Record<string, { color: string; bg: string }> = {
-    allow: { color: "text-emerald-400", bg: "bg-emerald-400/10" },
-    deny: { color: "text-red-400", bg: "bg-red-400/10" },
-    require_approval: { color: "text-amber-400", bg: "bg-amber-400/10" },
-    allow_with_constraints: { color: "text-blue-400", bg: "bg-blue-400/10" },
-    throttle: { color: "text-orange-400", bg: "bg-orange-400/10" },
-  };
-  const c = config[decision ?? ""] ?? { color: "text-muted-foreground", bg: "bg-surface-2" };
-  return (
-    <span className={cn("px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold", c.color, c.bg)}>
-      {(decision ?? "\u2014").toUpperCase().replace(/_/g, " ")}
-    </span>
-  );
-}
 
 function jobStatusToTraceStatus(status: string): "ok" | "error" | "timeout" {
   if (status === "failed") return "error";
@@ -86,8 +71,6 @@ export default function TracesPage() {
         trace_id: job.traceId,
         job_id: job.id,
         total_duration_ms: job.duration ?? 0,
-        service_count: 0,
-        span_count: 0,
         status: jobStatusToTraceStatus(job.status),
         started_at: job.createdAt,
         safety_decision: job.safetyDecision?.type,
@@ -200,7 +183,7 @@ export default function TracesPage() {
                 </div>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs text-foreground">{trace.topic || "\u2014"}</span>
-                  <SafetyBadge decision={trace.safety_decision} />
+                  <SafetyDecisionBadge decision={trace.safety_decision} />
                 </div>
                 <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
                   <span>{trace.total_duration_ms}ms</span>
@@ -236,8 +219,8 @@ export default function TracesPage() {
               ) : traceError ? (
                 <div className="p-8 text-center">
                   <AlertTriangle className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-foreground font-medium mb-1">Trace data not available</p>
-                  <p className="text-xs text-muted-foreground">Span-level tracing data is not available for this job</p>
+                  <p className="text-sm text-foreground font-medium mb-1">Failed to load trace</p>
+                  <p className="text-xs text-muted-foreground">Could not fetch trace data from the server</p>
                 </div>
               ) : spans.length === 0 ? (
                 <div className="p-8 text-center">
@@ -340,7 +323,7 @@ export default function TracesPage() {
                                   {span.safety_decision && (
                                     <div>
                                       <p className="text-muted-foreground mb-0.5">Safety Decision</p>
-                                      <SafetyBadge decision={span.safety_decision} />
+                                      <SafetyDecisionBadge decision={span.safety_decision} />
                                     </div>
                                   )}
                                   {span.attributes && Object.entries(span.attributes).map(([k, v]) => (
