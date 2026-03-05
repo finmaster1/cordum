@@ -67,8 +67,8 @@ function StateMachine({ currentState }: { currentState: string }) {
       })}
       {isFailed && (
         <>
-          <div className="w-6 h-[2px] rounded bg-red-400/40" />
-          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-red-500 text-white text-[9px] ring-2 ring-red-500/30">
+          <div className="w-6 h-[2px] rounded bg-destructive/40" />
+          <div className="flex items-center justify-center w-7 h-7 rounded-full bg-destructive text-destructive-foreground text-[9px] ring-2 ring-destructive/30">
             ✕
           </div>
         </>
@@ -275,8 +275,8 @@ function JobTimeline({ job }: { job: Job }) {
             className={cn(
               "absolute left-[-15px] top-1.5 w-[10px] h-[10px] rounded-full border-2",
               entry.variant === "cordum" && "border-cordum bg-cordum/20",
-              entry.variant === "warning" && "border-amber-400 bg-amber-400/20",
-              entry.variant === "danger" && "border-red-400 bg-red-400/20",
+              entry.variant === "warning" && "border-[var(--color-warning)] bg-[var(--color-warning)]/20",
+              entry.variant === "danger" && "border-destructive bg-destructive/20",
               entry.variant === "muted" && "border-border bg-surface-2",
             )}
           />
@@ -345,7 +345,7 @@ export default function JobDetailPage() {
   if (!job) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <AlertTriangle className="w-10 h-10 text-amber-400 mb-3" />
+        <AlertTriangle className="w-10 h-10 text-[var(--color-warning)] mb-3" />
         <h2 className="text-lg font-semibold font-display text-foreground">Job not found</h2>
         <p className="text-sm text-muted-foreground mt-1">The job may have been purged or the ID is invalid.</p>
         <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate("/jobs")}>
@@ -376,7 +376,7 @@ export default function JobDetailPage() {
             <StatusBadge variant={jobStatusVariant(job.status)} dot pulse={job.status === "running"}>
               {job.status}
             </StatusBadge>
-            <button onClick={copyId} className="p-2 rounded-md hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors" title="Copy Job ID">
+            <button onClick={copyId} className="p-2 rounded-full hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors" title="Copy Job ID">
               <Copy className="w-3.5 h-3.5" />
             </button>
             {job.status === "failed" && (
@@ -425,7 +425,7 @@ export default function JobDetailPage() {
       </motion.div>
 
       {/* Tabs — showcase style */}
-      <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-md p-0.5 w-fit">
+      <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-2xl p-0.5 w-fit">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -456,7 +456,7 @@ export default function JobDetailPage() {
               <FileText className="w-4 h-4 text-cordum" />
               <h3 className="font-display font-semibold text-sm text-foreground">Job Info</h3>
             </div>
-            <dl className="space-y-3">
+            <dl className="grid grid-cols-[110px_1fr] gap-x-6 gap-y-3 items-baseline">
               {[
                 ["Topic", job.topic],
                 ["Tenant", job.tenant],
@@ -466,9 +466,9 @@ export default function JobDetailPage() {
                 ["Attempts", String(job.attempts ?? 0)],
                 ["Trace ID", job.traceId],
               ].map(([label, value]) => (
-                <div key={label} className="flex items-start justify-between">
+                <div key={label} className="contents">
                   <dt className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">{label}</dt>
-                  <dd className="text-sm text-foreground font-mono text-right max-w-[60%] truncate">
+                  <dd className="text-sm text-foreground font-mono truncate">
                     {value || "—"}
                   </dd>
                 </div>
@@ -485,16 +485,16 @@ export default function JobDetailPage() {
               <Shield className="w-4 h-4 text-cordum" />
               <h3 className="font-display font-semibold text-sm text-foreground">Safety Decision</h3>
             </div>
-            <dl className="space-y-3">
+            <dl className="grid grid-cols-[110px_1fr] gap-x-6 gap-y-3 items-baseline">
               {[
                 ["Decision", job.safetyDecision?.type],
                 ["Reason", job.safetyDecision?.reason],
                 ["Rule ID", job.safetyDecision?.matchedRule],
                 ["Risk Tags", (job.riskTags ?? []).join(", ")],
               ].map(([label, value]) => (
-                <div key={label} className="flex items-start justify-between">
+                <div key={label} className="contents">
                   <dt className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">{label}</dt>
-                  <dd className="text-sm text-foreground text-right max-w-[60%]">
+                  <dd className="text-sm text-foreground">
                     {label === "Decision" && value ? (
                       <StatusBadge
                         variant={
@@ -548,11 +548,11 @@ export default function JobDetailPage() {
           {job.errorMessage && (
             <div className="instrument-card status-danger p-5 lg:col-span-2">
               <div className="flex items-center gap-2 mb-4">
-                <AlertTriangle className="w-4 h-4 text-red-400" />
+                <AlertTriangle className="w-4 h-4 text-destructive" />
                 <h3 className="font-display font-semibold text-sm text-foreground">Error</h3>
               </div>
-              <div className="rounded-md bg-red-500/5 border border-red-500/15 p-4">
-                <p className="text-sm font-mono text-red-400 whitespace-pre-wrap">{job.errorMessage}</p>
+              <div className="rounded-2xl bg-destructive/5 border border-destructive/15 p-4">
+                <p className="text-sm font-mono text-destructive whitespace-pre-wrap">{job.errorMessage}</p>
                 {job.errorCode && (
                   <p className="text-xs text-muted-foreground mt-2 font-mono">
                     Code: {job.errorCode} {job.errorCodeEnum ? `(${job.errorCodeEnum})` : ""}
@@ -632,14 +632,14 @@ export default function JobDetailPage() {
               </StatusBadge>
             </div>
             <div className="p-5 space-y-3">
-              <dl className="space-y-3">
+              <dl className="grid grid-cols-[120px_1fr] gap-x-6 gap-y-3 items-baseline">
                 {[
                   ["Decision", job.safetyDecision?.type ?? "\u2014"],
                   ["Reason", job.safetyDecision?.reason ?? "\u2014"],
                   ["Matched Rule", job.safetyDecision?.matchedRule ?? "\u2014"],
                   ["Eval Time", job.safetyDecision?.evalTimeMs ? `${job.safetyDecision.evalTimeMs}ms` : "\u2014"],
                 ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between">
+                  <div key={label} className="contents">
                     <dt className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">{label}</dt>
                     <dd className="text-sm font-mono text-foreground">{value}</dd>
                   </div>
@@ -666,7 +666,7 @@ export default function JobDetailPage() {
           {job.safetyDecision?.type === "allow_with_constraints" && (
             <div className="instrument-card p-0 overflow-hidden">
               <div className="px-5 py-3 border-b border-border bg-surface-0 flex items-center gap-2">
-                <div className="w-5 h-5 rounded-full bg-amber-400/15 flex items-center justify-center text-[10px] font-mono font-bold text-amber-400">2</div>
+                <div className="w-5 h-5 rounded-full bg-[var(--color-warning)]/15 flex items-center justify-center text-[10px] font-mono font-bold text-[var(--color-warning)]">2</div>
                 <span className="text-xs font-mono font-medium text-foreground">Constraints Applied</span>
                 <StatusBadge variant="warning">constrained</StatusBadge>
               </div>
@@ -679,7 +679,7 @@ export default function JobDetailPage() {
           {/* Step 3: Output Evaluation */}
           <div className={cn("instrument-card p-0 overflow-hidden", job.output_safety?.decision === "QUARANTINE" ? "status-danger" : "")}>
             <div className="px-5 py-3 border-b border-border bg-surface-0 flex items-center gap-2">
-              <div className="w-5 h-5 rounded-full bg-blue-400/15 flex items-center justify-center text-[10px] font-mono font-bold text-blue-400">{job.safetyDecision?.type === "allow_with_constraints" ? "3" : "2"}</div>
+              <div className="w-5 h-5 rounded-full bg-[var(--color-info)]/15 flex items-center justify-center text-[10px] font-mono font-bold text-[var(--color-info)]">{job.safetyDecision?.type === "allow_with_constraints" ? "3" : "2"}</div>
               <span className="text-xs font-mono font-medium text-foreground">Output Policy Evaluation</span>
               {job.output_safety ? (
                 <StatusBadge variant={job.output_safety.decision === "ALLOW" ? "healthy" : job.output_safety.decision === "REDACT" ? "warning" : "danger"}>
@@ -692,19 +692,19 @@ export default function JobDetailPage() {
             <div className="p-5 space-y-3">
               {job.output_safety ? (
                 <>
-                  <dl className="space-y-3">
-                    <div className="flex justify-between">
+                  <dl className="grid grid-cols-[120px_1fr] gap-x-6 gap-y-3 items-baseline">
+                    <div className="contents">
                       <dt className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Decision</dt>
                       <dd><StatusBadge variant={job.output_safety.decision === "ALLOW" ? "healthy" : "danger"}>{job.output_safety.decision}</StatusBadge></dd>
                     </div>
                     {job.output_safety.reason && (
-                      <div className="flex justify-between">
+                      <div className="contents">
                         <dt className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Reason</dt>
                         <dd className="text-sm font-mono text-foreground">{job.output_safety.reason}</dd>
                       </div>
                     )}
                     {job.output_safety.rule_id && (
-                      <div className="flex justify-between">
+                      <div className="contents">
                         <dt className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Rule</dt>
                         <dd className="text-sm font-mono text-foreground">{job.output_safety.rule_id}</dd>
                       </div>
@@ -721,7 +721,7 @@ export default function JobDetailPage() {
                             {f.scanner && <span className="text-[10px] text-muted-foreground">via {f.scanner}</span>}
                           </div>
                           <p className="text-xs text-muted-foreground">{f.detail}</p>
-                          {f.matched_pattern && <p className="text-[10px] font-mono text-red-400 mt-1">Pattern: {f.matched_pattern}</p>}
+                          {f.matched_pattern && <p className="text-[10px] font-mono text-destructive mt-1">Pattern: {f.matched_pattern}</p>}
                         </div>
                       ))}
                     </div>
