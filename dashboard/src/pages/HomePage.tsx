@@ -15,16 +15,14 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  AreaChart, Area, PieChart, Pie, Cell,
+  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import {
-  Activity, Cpu, ListChecks, UserCheck, ArrowRight,
-  Clock, CheckCircle2, XCircle, Zap, Shield, RefreshCw, Eye,
-  AlertTriangle, Users, ShieldCheck, Gauge, TrendingUp,
+  Activity, Cpu, UserCheck, ArrowRight,
+  CheckCircle2, XCircle, Zap, ShieldCheck,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { Progress } from "@/components/ui/progress";
 import { useApproveJob, useRejectJob } from "@/hooks/useApprovals";
 import { useStatus } from "@/hooks/useStatus";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -123,7 +121,7 @@ export default function HomePage() {
   const completedJobs = jobs.filter((j) => j.status === "succeeded").length;
   const totalJobs = jobs.length;
 
-  const { safetyAllowed, safetyDenied, safetyApproval, safetyConstrained, safetyThrottled, safetyTotal, safetyAllowRate } = useMemo(() => {
+  const { safetyAllowed, safetyDenied, safetyApproval, safetyConstrained, safetyThrottled, safetyAllowRate } = useMemo(() => {
     const allowed = jobs.filter(j => j.safetyDecision?.type === "allow").length;
     const denied = jobs.filter(j => j.safetyDecision?.type === "deny").length;
     const approval = jobs.filter(j => j.safetyDecision?.type === "require_approval").length;

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
 import {
-  Cpu, Search, RefreshCw, Zap, Filter, X, Shield, Layers,
+  Cpu, Search, RefreshCw, Zap, Shield,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn, formatRelativeTime, clickableRowProps } from "@/lib/utils";

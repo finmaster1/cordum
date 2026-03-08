@@ -13,9 +13,9 @@ import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import {
   ArrowLeft, Copy, Play, XCircle, Clock, Shield,
-  FileText, AlertTriangle, CheckCircle2, Workflow, Layers, Eye,
+  FileText, AlertTriangle, CheckCircle2, Workflow, Eye,
 } from "lucide-react";
-import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";

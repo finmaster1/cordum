@@ -158,19 +158,6 @@ function normalizeOutputFailMode(raw: unknown): GlobalPolicyOutputFailMode {
     : "closed";
 }
 
-function emptyMcpMatch(): GlobalPolicyMcpMatch {
-  return {
-    allowServers: [],
-    denyServers: [],
-    allowTools: [],
-    denyTools: [],
-    allowResources: [],
-    denyResources: [],
-    allowActions: [],
-    denyActions: [],
-  };
-}
-
 function parseInputMatch(raw: unknown): GlobalPolicyInputMatch {
   const source = isRecord(raw) ? raw : {};
   const mcpRaw = isRecord(source.mcp) ? source.mcp : {};

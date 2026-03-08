@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
-import { Search, RefreshCw, UserCheck, CheckCircle2, XCircle, Clock, X, LayoutGrid, ArrowRight } from "lucide-react";
+import { Search, RefreshCw, UserCheck, CheckCircle2, XCircle, Clock, X, ArrowRight } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { InstrumentCard } from "@/components/ui/InstrumentCard";
