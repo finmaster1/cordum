@@ -326,7 +326,7 @@ func (p *OIDCProvider) refreshJWKS(ctx context.Context) error {
 
 	// If no cache hit, fetch from IdP.
 	if body == nil {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.jwksURI, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.jwksURI, nil) // #nosec G704 -- jwksURI from OIDC discovery of admin-configured issuer, not user input
 		if err != nil {
 			return err
 		}

@@ -117,12 +117,6 @@ describe("RuleCard", () => {
 
     // Edit button has Pencil icon — find buttons, the one before delete
     const buttons = Array.from(container.querySelectorAll("button"));
-    const editBtn = buttons.find((b) => {
-      const svg = b.querySelector("svg");
-      return svg && !b.textContent?.includes("Confirm") && !b.textContent?.includes("Cancel");
-    });
-    // The edit button is the one with pencil (second-to-last action button)
-    // Simpler: find button by position — the second icon-only button in actions
     act(() => {
       // There should be an edit (pencil) button
       for (const btn of buttons) {

@@ -264,7 +264,7 @@ func (v *jwtValidator) authFromClaims(claims map[string]any) *AuthContext {
 	if role == "" {
 		role = v.defaultRole
 	}
-	tenant := claimString(claims, "tenant")
+	tenant := claimString(claims, "tenant") // #nosec G706 -- structured slog logging, no format string injection
 	if tenant == "" {
 		tenant = claimString(claims, "tenant_id")
 	}

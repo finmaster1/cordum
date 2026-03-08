@@ -523,7 +523,7 @@ func loadBasicAPIKeys() (map[string]apiKeyMeta, bool, string, time.Time, bool, e
 // so Go's map lookup timing correlates with hash values (opaque) rather
 // than the original secret.
 func hashAPIKey(key string) string {
-	h := sha256.Sum256([]byte(key))
+	h := sha256.Sum256([]byte(key)) // #nosec G703 -- SHA-256 hash for lookup index, no path traversal
 	return hex.EncodeToString(h[:])
 }
 

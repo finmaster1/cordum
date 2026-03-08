@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { X, Mail, Hash, Bell, Globe, Loader, Plus, Trash2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
-import { Badge } from "../ui/Badge";
 import { cn } from "../../lib/utils";
 import { notificationChannelSchema } from "../../lib/settingsSchemas";
 import { useSaveNotificationChannel } from "../../hooks/useSettings";

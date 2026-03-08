@@ -116,7 +116,7 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 			// Start renewal goroutine if the locker supports it.
 			if renewer, ok := lm.locker.(RunLockRenewer); ok {
 				var renewCtx context.Context
-				renewCtx, renewCancel = context.WithCancel(context.Background())
+				renewCtx, renewCancel = context.WithCancel(context.Background()) // #nosec G118 -- renewCancel called in deferred cleanup
 				renewDone = make(chan struct{})
 				go func() {
 					defer close(renewDone)

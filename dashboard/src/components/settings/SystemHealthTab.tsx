@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { get } from "../../api/client";
 import { Card, CardHeader, CardTitle } from "../ui/Card";
@@ -6,13 +6,10 @@ import { Badge } from "../ui/Badge";
 import { ProgressBar } from "../ProgressBar";
 import { cn } from "../../lib/utils";
 import {
-  Loader,
   CheckCircle,
   AlertTriangle,
   XCircle,
   RefreshCw,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { useStatus } from "../../hooks/useStatus";
 import { ReplicaTable } from "./ReplicaTable";
@@ -415,40 +412,6 @@ function HealthSkeleton() {
           </Card>
         ))}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Collapsible section (default collapsed)
-// ---------------------------------------------------------------------------
-
-function CollapsibleSection({
-  title,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <div>
-      <button
-        type="button"
-        className="flex w-full items-center justify-between rounded-xl border border-border bg-surface px-4 py-2.5 text-left transition-colors hover:bg-surface2/50"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="text-xs font-semibold text-ink">{title}</span>
-        {open ? (
-          <ChevronUp className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        )}
-      </button>
-      {open && <div className="mt-3">{children}</div>}
     </div>
   );
 }

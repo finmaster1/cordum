@@ -126,7 +126,7 @@ func (e *Engine) withJobLock(jobID string, ttl time.Duration, fn func(context.Co
 
 	// fenceCtx is cancelled when lock ownership can no longer be guaranteed.
 	// All store operations inside fn must derive timeouts from fenceCtx.
-	fenceCtx, fenceCancel := context.WithCancelCause(e.ctx)
+	fenceCtx, fenceCancel := context.WithCancelCause(e.ctx) // #nosec G118 -- fenceCancel called in deferred cleanup below
 	abandoned := false
 
 	// Start lock renewal goroutine at ttl/3 interval to prevent expiry

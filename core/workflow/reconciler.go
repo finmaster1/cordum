@@ -205,7 +205,7 @@ func (r *reconciler) reconcileOrphanedJobs(ctx context.Context, runID string) {
 	if runID == "" || r.workflowStore == nil || r.engine == nil || r.jobStore == nil {
 		return
 	}
-	run, err := r.workflowStore.GetRun(ctx, runID)
+	run, err := r.workflowStore.GetRun(ctx, runID) // #nosec G706 -- runID is internal run identifier, structured slog logging
 	if err != nil || run == nil {
 		return
 	}
@@ -213,7 +213,7 @@ func (r *reconciler) reconcileOrphanedJobs(ctx context.Context, runID string) {
 		return
 	}
 
-	var orphaned []string
+	var orphaned []string // #nosec G706 -- runID used in structured slog key-value pairs below
 	for _, sr := range run.Steps {
 		orphaned = append(orphaned, collectOrphanedJobIDs(ctx, sr, r.jobStore)...)
 	}

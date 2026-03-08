@@ -104,11 +104,6 @@ describe("useApprovals internals", () => {
       const afterRemoveA = __approvalsInternal.removeApprovalFromList(list, "a-1");
       expect(afterRemoveA?.items.map((i) => i.id)).toEqual(["a-2", "a-3"]);
 
-      // Snapshot for A captured the ORIGINAL state (before remove)
-      const snapshotA = {
-        previous: [[["approvals"], list]] as [unknown, ApiResponse<Approval[]> | undefined][],
-      };
-
       // Step 2: Approve B → remove B from the already-modified list
       const afterRemoveB = __approvalsInternal.removeApprovalFromList(afterRemoveA!, "a-2");
       expect(afterRemoveB?.items.map((i) => i.id)).toEqual(["a-3"]);

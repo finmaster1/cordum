@@ -595,7 +595,7 @@ func (b *NatsBus) initJetStreamFromEnv() {
 			Duplicates: 2 * time.Minute,
 		})
 		if err == nil {
-			slog.Info("bus: jetstream stream ensured", "stream", name, "subjects", subjects, "max_age", maxAge)
+			slog.Info("bus: jetstream stream ensured", "stream", name, "subjects", subjects, "max_age", maxAge) // #nosec G706 -- structured slog, name is from internal config
 			return
 		}
 		// Stream may already exist; treat that as success.

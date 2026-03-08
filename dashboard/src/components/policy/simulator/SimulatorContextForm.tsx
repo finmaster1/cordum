@@ -11,15 +11,6 @@ export interface SimulatorContext {
   labels: Record<string, string>;
 }
 
-const EMPTY_CONTEXT: SimulatorContext = {
-  topic: "",
-  tenant: "",
-  workflowId: "",
-  capabilities: [],
-  riskTags: [],
-  labels: {},
-};
-
 interface SimulatorContextFormProps {
   prefill?: Partial<SimulatorContext>;
   isSubmitting: boolean;
