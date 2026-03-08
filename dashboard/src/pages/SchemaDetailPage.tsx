@@ -10,7 +10,7 @@ import { get } from "@/api/client";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
-import { ArrowLeft, FileJson, Copy, Clock, Hash, Code, Edit } from "lucide-react";
+import { ArrowLeft, FileJson, Copy, Clock, Hash, Edit } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 

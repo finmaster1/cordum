@@ -3,13 +3,13 @@
  * PRD Section 27: Grouped settings with unsaved changes banner
  */
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { get, post } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { SkeletonCard } from "@/components/ui/Skeleton";
-import { Save, RotateCcw, AlertTriangle, Settings, Shield, Clock, Database, Zap } from "lucide-react";
+import { Save, RotateCcw, AlertTriangle, Settings, Shield, Database, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -63,7 +63,6 @@ const GROUPS: ConfigGroup[] = [
 ];
 
 export default function SettingsConfigPage() {
-  const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, ConfigValue>>({});
   const [originalValues, setOriginalValues] = useState<Record<string, ConfigValue>>({});
   const [activeGroup, setActiveGroup] = useState("general");

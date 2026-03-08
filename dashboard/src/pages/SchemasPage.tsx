@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { Search, Plus, FileJson } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useSchemas } from "@/hooks/useSchemas";
 
 export default function SchemasPage() {

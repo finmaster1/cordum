@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DialogOverlay } from "@/components/ui/DialogOverlay";
-import { Key, Plus, Copy, Trash2, Eye, EyeOff, X, Shield } from "lucide-react";
+import { Key, Plus, Copy, Trash2, X } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 

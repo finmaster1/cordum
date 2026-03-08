@@ -3,7 +3,7 @@
  * Revision v2: Safety Decision column, Safety Decision filter, Pool filter
  * "Every job row tells the full story: who, what, governance decided, execution result, duration."
  */
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,7 +19,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import {
   Search, RefreshCw, ListChecks, Plus, Eye, Download,
-  ArrowUpDown, ArrowUp, ArrowDown, Shield, Filter, X,
+  ArrowUpDown, ArrowUp, ArrowDown, Shield, X,
 } from "lucide-react";
 import { cn, formatRelativeTime, clickableRowProps } from "@/lib/utils";
 import { toast } from "sonner";

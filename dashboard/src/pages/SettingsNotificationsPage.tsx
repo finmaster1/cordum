@@ -9,7 +9,7 @@ import { get, post } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
+import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Bell, Mail, MessageSquare, Webhook, Save, Plus, TestTube } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
