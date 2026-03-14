@@ -9,12 +9,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/google/uuid"
 )
 
@@ -714,5 +716,91 @@ func TestApproveJobConcurrentRace(t *testing.T) {
 	}
 	if total := okCount.Load() + conflictCount.Load(); total != N {
 		t.Errorf("expected %d total responses (200+409), got %d", N, total)
+	}
+}
+
+func TestApproveJob_RejectsTimedOutRun(t *testing.T) {
+	s, _, safety := newTestGateway(t)
+	safety.setSnapshots([]string{"snap-1"})
+
+	ctx := context.Background()
+
+	// Create a timed-out workflow run.
+	now := time.Now().UTC()
+	wfDef := &wf.Workflow{
+		ID:         "wf-timeout-test",
+		OrgID:      "default",
+		TimeoutSec: 10,
+		Steps:      map[string]*wf.Step{"s1": {ID: "s1", Type: wf.StepTypeWorker, Topic: "job.test"}},
+	}
+	if err := s.workflowStore.SaveWorkflow(ctx, wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+	run := &wf.WorkflowRun{
+		ID:         "run-timedout-1",
+		WorkflowID: wfDef.ID,
+		OrgID:      "default",
+		Status:     wf.RunStatusTimedOut,
+		Steps:      map[string]*wf.StepRun{},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		CompletedAt: &now,
+	}
+	if err := s.workflowStore.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Create a job in APPROVAL_REQUIRED state that references the timed-out run.
+	jobID := uuid.NewString()
+	req := &pb.JobRequest{
+		JobId:    jobID,
+		Topic:    "job.test",
+		TenantId: "default",
+		Labels: map[string]string{
+			"workflow_id": wfDef.ID,
+			"run_id":      run.ID,
+			"step_id":     "s1",
+		},
+	}
+	if err := s.jobStore.SetJobMeta(ctx, req); err != nil {
+		t.Fatalf("set job meta: %v", err)
+	}
+	if err := s.jobStore.SetJobRequest(ctx, req); err != nil {
+		t.Fatalf("set job req: %v", err)
+	}
+	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	hash, err := scheduler.HashJobRequest(req)
+	if err != nil {
+		t.Fatalf("hash job: %v", err)
+	}
+	if err := s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		PolicySnapshot:   "snap-1",
+		JobHash:          hash,
+	}); err != nil {
+		t.Fatalf("set safety decision: %v", err)
+	}
+
+	// Attempt to approve — should get 409 with a clear timeout message.
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approvals/"+jobID+"/approve", strings.NewReader(`{}`))
+	httpReq.SetPathValue("job_id", jobID)
+	httpReq = withAuth(httpReq, &AuthContext{Tenant: "default", PrincipalID: "alice", Role: "admin"})
+	rr := httptest.NewRecorder()
+
+	s.handleApproveJob(rr, httpReq)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var errResp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "timed_out") {
+		t.Fatalf("expected error to mention 'timed_out', got %q", errMsg)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -251,6 +253,19 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErrorJSON(w, http.StatusNotFound, "job request not found")
 		return
+	}
+	// Check if this job belongs to a workflow run that has already terminated
+	// (timed out, cancelled, failed). Return a clear error instead of letting
+	// the caller hit a confusing "policy snapshot changed" later.
+	if req.Labels != nil {
+		if runID := strings.TrimSpace(req.Labels["run_id"]); runID != "" && s.workflowStore != nil {
+			if run, runErr := s.workflowStore.GetRun(r.Context(), runID); runErr == nil && run != nil {
+				if wf.IsTerminalRunStatus(run.Status) {
+					writeErrorJSON(w, http.StatusConflict, fmt.Sprintf("workflow run %s — approval no longer valid", run.Status))
+					return
+				}
+			}
+		}
 	}
 	safetyRecord, err := s.jobStore.GetSafetyDecision(r.Context(), jobID)
 	if err != nil {
