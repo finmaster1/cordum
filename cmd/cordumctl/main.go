@@ -92,7 +92,7 @@ func runRunCmd(args []string) {
 	switch args[0] {
 	case "start":
 		fs := newFlagSet("run start")
-		input := fs.String("input", "", "input json file")
+		input := fs.String("input", "", "input json (inline or file path)")
 		dryRun := fs.Bool("dry-run", false, "start in dry-run mode")
 		idempotencyKey := fs.String("idempotency-key", "", "idempotency key")
 		fs.ParseArgs(args[1:])
@@ -101,7 +101,13 @@ func runRunCmd(args []string) {
 		}
 		payload := map[string]any{}
 		if *input != "" {
-			loadJSON(*input, &payload)
+			parsed, err := parseJSONArg(*input)
+			check(err)
+			if m, ok := parsed.(map[string]any); ok {
+				payload = m
+			} else if parsed != nil {
+				fail("input must be a JSON object")
+			}
 		}
 		client := newClientFromFlags(fs)
 		runID, err := client.StartRunWithOptions(context.Background(), fs.Arg(0), payload, sdk.RunOptions{
