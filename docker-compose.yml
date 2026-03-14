@@ -74,7 +74,7 @@ services:
     volumes:
       - ./certs:/etc/cordum/tls:ro
     ports:
-      - "50070:50070"
+      - "50400:50070"
     deploy:
       resources:
         limits:
