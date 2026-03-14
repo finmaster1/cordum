@@ -2034,6 +2034,11 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.Status = StepStatusFailed
 				parentSR.Error = map[string]any{"message": err.Error()}
 				run.Steps[stepID] = parentSR
+				logging.Error("workflow-engine", "step input build failed", "run_id", run.ID, "step_id", stepID, "error", err)
+				e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
+				if e.OnStepFinished != nil {
+					e.OnStepFinished(run.ID, stepID, parentSR.Status)
+				}
 				continue
 			}
 			if ptr, err := e.putJobContext(ctx, jobID, payload); err != nil {
@@ -2041,6 +2046,11 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.Error = map[string]any{"message": err.Error()}
 				parentSR.Input = payload
 				run.Steps[stepID] = parentSR
+				logging.Error("workflow-engine", "step context store failed", "run_id", run.ID, "step_id", stepID, "job_id", jobID, "error", err)
+				e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
+				if e.OnStepFinished != nil {
+					e.OnStepFinished(run.ID, stepID, parentSR.Status)
+				}
 				continue
 			} else if ptr != "" {
 				req.ContextPtr = ptr

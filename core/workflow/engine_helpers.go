@@ -406,3 +406,8 @@ func isTerminalRunStatus(status RunStatus) bool {
 		return false
 	}
 }
+
+// IsTerminalRunStatus reports whether a run status is terminal (exported for gateway use).
+func IsTerminalRunStatus(status RunStatus) bool {
+	return isTerminalRunStatus(status)
+}

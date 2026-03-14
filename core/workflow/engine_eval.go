@@ -62,6 +62,14 @@ func evalTemplates(value any, scope map[string]any) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			// Skip keys where a template expression resolved to nil (i.e.
+			// the field was absent from the input). This makes "not provided"
+			// equivalent to "key absent" so JSON Schema validation doesn't
+			// reject null against a typed property. Hardcoded YAML nulls
+			// (child was already nil) are preserved as-is.
+			if evaled == nil && child != nil {
+				continue
+			}
 			out[k] = evaled
 		}
 		return out, nil

@@ -388,7 +388,7 @@ func collectCancelableJobs(sr *StepRun) []string {
 		return nil
 	}
 	var out []string
-	if sr.Status == StepStatusRunning && sr.JobID != "" {
+	if (sr.Status == StepStatusRunning || sr.Status == StepStatusWaiting) && sr.JobID != "" {
 		out = append(out, sr.JobID)
 	}
 	for _, child := range sr.Children {
