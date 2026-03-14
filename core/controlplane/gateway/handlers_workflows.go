@@ -395,6 +395,29 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		}()
 		if startErr != nil {
 			logging.Error("api-gateway", "start workflow run failed", "workflow_id", wfID, "run_id", runID, "error", startErr)
+			if s.workflowStore != nil {
+				if failedRun, err := s.workflowStore.GetRun(r.Context(), runID); err == nil && failedRun != nil {
+					failedRun.Status = wf.RunStatusFailed
+					now := time.Now().UTC()
+					failedRun.CompletedAt = &now
+					if failedRun.Error == nil {
+						failedRun.Error = map[string]any{"message": startErr.Error()}
+					} else {
+						failedRun.Error["message"] = startErr.Error()
+					}
+					_ = s.workflowStore.UpdateRun(r.Context(), failedRun)
+					_ = s.workflowStore.AppendTimelineEvent(r.Context(), failedRun.ID, &wf.TimelineEvent{
+						Type:    "run_status",
+						Status:  string(wf.RunStatusFailed),
+						Message: startErr.Error(),
+					})
+				}
+			}
+		}
+		if startErr == nil && s.workflowStore != nil {
+			if updated, err := s.workflowStore.GetRun(r.Context(), runID); err == nil && updated != nil && updated.Status == wf.RunStatusFailed {
+				logging.Warn("api-gateway", "run failed during initialization", "run_id", runID, "workflow_id", wfID)
+			}
 		}
 	}
 	startWfName := ""
@@ -481,6 +504,24 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 	}()
 	if startErr != nil {
 		logging.Error("api-gateway", "start rerun failed", "workflow_id", wfID, "run_id", newID, "error", startErr)
+		if s.workflowStore != nil {
+			if failedRun, err := s.workflowStore.GetRun(r.Context(), newID); err == nil && failedRun != nil {
+				failedRun.Status = wf.RunStatusFailed
+				now := time.Now().UTC()
+				failedRun.CompletedAt = &now
+				if failedRun.Error == nil {
+					failedRun.Error = map[string]any{"message": startErr.Error()}
+				} else {
+					failedRun.Error["message"] = startErr.Error()
+				}
+				_ = s.workflowStore.UpdateRun(r.Context(), failedRun)
+				_ = s.workflowStore.AppendTimelineEvent(r.Context(), failedRun.ID, &wf.TimelineEvent{
+					Type:    "run_status",
+					Status:  string(wf.RunStatusFailed),
+					Message: startErr.Error(),
+				})
+			}
+		}
 	}
 	rerunWfName := ""
 	if s.workflowStore != nil {
