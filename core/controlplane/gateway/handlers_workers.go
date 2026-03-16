@@ -106,9 +106,11 @@ func (s *server) handleGetWorkerJobs(w http.ResponseWriter, r *http.Request) {
 	// predate per-worker tracking.
 	if len(jobs) == 0 {
 		pool := s.resolveWorkerPool(id)
-		if pool != "" {
-			jobs = s.recentJobsByPool(r.Context(), pool, limit)
+		if pool == "" {
+			writeErrorJSON(w, http.StatusNotFound, "worker not found")
+			return
 		}
+		jobs = s.recentJobsByPool(r.Context(), pool, limit)
 	}
 
 	writeJSON(w, map[string]any{"items": jobs})
