@@ -240,6 +240,10 @@ func (s *fakeReconcileStore) GetOutputDecision(_ context.Context, jobID string) 
 	return s.output[jobID], nil
 }
 
+func (s *fakeReconcileStore) SetWorkerID(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (s *fakeReconcileStore) CancelJob(_ context.Context, jobID string) (JobState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

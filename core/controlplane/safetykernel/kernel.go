@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,6 +79,10 @@ type cacheEntry struct {
 
 // policyLookupIP allows tests to override DNS resolution for policy URL validation.
 var policyLookupIP = net.LookupIP
+
+// policyEvalTestHook is called inside the evaluate recover closure before policy.Evaluate.
+// It is nil in production; tests may set it to inject panics for fail-closed verification.
+var policyEvalTestHook func()
 
 var defaultDecisionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "cordum_safety_default_decision_total",
@@ -242,7 +247,7 @@ func (s *server) ListSnapshots(ctx context.Context, _ *pb.ListSnapshotsRequest) 
 }
 
 func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ string) (*pb.PolicyCheckResponse, error) {
-	decision := pb.DecisionType_DECISION_TYPE_ALLOW
+	decision := pb.DecisionType_DECISION_TYPE_DENY
 	reason := ""
 
 	topic := strings.TrimSpace(req.GetTopic())
@@ -309,13 +314,28 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 	}
 	input.SecretsPresent = secretsPresent(input.Meta, req.GetLabels())
 
-	policyDecision := policy.Evaluate(input)
-	if tp, ok := policy.Tenants[tenant]; ok {
-		if ok, mcpReason := config.MCPAllowed(tp.MCP, input.MCP); !ok {
-			policyDecision.Decision = "deny"
-			policyDecision.Reason = mcpReason
+	var policyDecision config.PolicyDecision
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("safety-kernel: CRITICAL policy evaluation panic: %v\n%s", r, debug.Stack())
+				policyDecision = config.PolicyDecision{
+					Decision: "deny",
+					Reason:   fmt.Sprintf("policy evaluation panic: %v", r),
+				}
+			}
+		}()
+		if policyEvalTestHook != nil {
+			policyEvalTestHook()
 		}
-	}
+		policyDecision = policy.Evaluate(input)
+		if tp, ok := policy.Tenants[tenant]; ok {
+			if ok, mcpReason := config.MCPAllowed(tp.MCP, input.MCP); !ok {
+				policyDecision.Decision = "deny"
+				policyDecision.Reason = mcpReason
+			}
+		}
+	}()
 	if strings.HasPrefix(policyDecision.Reason, "no matching rule") {
 		defaultDecisionTotal.WithLabelValues(policyDecision.Decision).Inc()
 	}
@@ -334,6 +354,7 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 	case "allow_with_constraints":
 		decision = pb.DecisionType_DECISION_TYPE_ALLOW_WITH_CONSTRAINTS
 	case "allow":
+		decision = pb.DecisionType_DECISION_TYPE_ALLOW
 		if constraints != nil {
 			decision = pb.DecisionType_DECISION_TYPE_ALLOW_WITH_CONSTRAINTS
 		}

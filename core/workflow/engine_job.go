@@ -205,3 +205,46 @@ func buildStepMetadata(run *WorkflowRun, step *Step) *pb.JobMetadata {
 	}
 	return meta
 }
+
+// buildApprovalGateRequest creates a lightweight job request for workflow
+// approval steps. The job is dispatched to the approval gate topic so the
+// scheduler places it in APPROVAL_REQUIRED state. Once approved via the
+// unified /approvals/{job_id}/approve endpoint, the scheduler auto-completes
+// the job and the result flows back through HandleJobResult.
+func (e *Engine) buildApprovalGateRequest(wfDef *Workflow, run *WorkflowRun, step *Step, stepID, jobID string) *pb.JobRequest {
+	if run == nil {
+		run = &WorkflowRun{}
+	}
+	labels := map[string]string{
+		"workflow_id": wfDef.ID,
+		"run_id":      run.ID,
+		"step_id":     stepID,
+		"gate_type":   "workflow_approval",
+	}
+	if step.WorkerID != "" {
+		labels["worker_id"] = step.WorkerID
+	}
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		Priority:   pb.JobPriority_JOB_PRIORITY_INTERACTIVE,
+		WorkflowId: wfDef.ID,
+		Env: map[string]string{
+			"workflow_id": wfDef.ID,
+			"run_id":      run.ID,
+			"step_id":     stepID,
+			"tenant_id":   run.OrgID,
+			"team_id":     run.TeamID,
+		},
+		Labels:   labels,
+		TenantId: run.OrgID,
+		Meta: &pb.JobMetadata{
+			IdempotencyKey: fmt.Sprintf("wf:%s:%s:%d:approval", run.ID, stepID, 1),
+		},
+	}
+	if run.DryRun || run.Metadata["dry_run"] == "true" {
+		req.Labels["dry_run"] = "true"
+		req.Env["dry_run"] = "true"
+	}
+	return req
+}

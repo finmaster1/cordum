@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -252,6 +254,19 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusNotFound, "job request not found")
 		return
 	}
+	// Check if this job belongs to a workflow run that has already terminated
+	// (timed out, cancelled, failed). Return a clear error instead of letting
+	// the caller hit a confusing "policy snapshot changed" later.
+	if req.Labels != nil {
+		if runID := strings.TrimSpace(req.Labels["run_id"]); runID != "" && s.workflowStore != nil {
+			if run, runErr := s.workflowStore.GetRun(r.Context(), runID); runErr == nil && run != nil {
+				if wf.IsTerminalRunStatus(run.Status) {
+					writeErrorJSON(w, http.StatusConflict, fmt.Sprintf("workflow run %s — approval no longer valid", run.Status))
+					return
+				}
+			}
+		}
+	}
 	safetyRecord, err := s.jobStore.GetSafetyDecision(r.Context(), jobID)
 	if err != nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "safety decision unavailable")
@@ -457,7 +472,15 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 	if err := s.bus.Publish(capsdk.SubjectDLQ, packet); err != nil {
 		logging.Error("api-gateway", "publish dlq on approval reject failed", "job_id", jobID, "error", err)
 	}
+	// For workflow approval gates, also publish to SubjectResult so the
+	// workflow engine's HandleJobResult picks up the denial and transitions
+	// the workflow step (including on_error handler activation).
 	rejectTopic, _ := s.jobStore.GetTopic(r.Context(), jobID)
+	if rejectTopic == capsdk.SubjectWorkflowApprovalGate {
+		if err := s.bus.Publish(capsdk.SubjectResult, packet); err != nil {
+			logging.Error("api-gateway", "publish result on workflow gate reject failed", "job_id", jobID, "error", err)
+		}
+	}
 	s.appendAuditEntryNamed(r.Context(), "reject", "job", jobID, rejectTopic, policyActorID(r), policyRole(r), "reject job "+jobID)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{"job_id": jobID})
@@ -472,3 +495,4 @@ func snapshotBase(snap string) string {
 	}
 	return snap
 }
+

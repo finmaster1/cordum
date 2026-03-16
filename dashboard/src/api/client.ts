@@ -76,10 +76,19 @@ async function handleResponse<T>(res: Response, meta: { method: string; path: st
 
   // 401 — clear auth and redirect
   if (res.status === 401) {
-    logger.warn("api-client", "Unauthorized", { path: meta.path, requestId: meta.requestId, durationMs });
-    useConfigStore.getState().logout();
-    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      window.location.href = "/login";
+    const { isLoggingOut, logout } = useConfigStore.getState();
+    if (!isLoggingOut) {
+      logger.warn("api-client", "Unauthorized", { path: meta.path, requestId: meta.requestId, durationMs });
+      logout();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
+    } else {
+      logger.debug("api-client", "Skipping duplicate logout during unauthorized response", {
+        path: meta.path,
+        requestId: meta.requestId,
+        durationMs,
+      });
     }
     throw new ApiError(401, "Unauthorized — session expired");
   }

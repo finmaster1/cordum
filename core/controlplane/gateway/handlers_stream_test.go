@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/gorilla/websocket"
@@ -453,6 +457,82 @@ func TestFilterQuarantinedPacketPassesHeartbeat(t *testing.T) {
 	filtered := filterQuarantinedPacket(pkt)
 	if filtered != pkt {
 		t.Fatal("expected heartbeat packet returned unchanged")
+	}
+}
+
+func TestEnqueueBusPacketFallsBackToSanitizedProtoJSON(t *testing.T) {
+	var buf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(origOutput)
+
+	s := &server{
+		eventsCh: make(chan wsEvent, 1),
+	}
+
+	invalidErrorMessage := "bad" + string([]byte{0xff})
+	pkt := &pb.BusPacket{
+		TraceId: "trace-1",
+		Payload: &pb.BusPacket_JobResult{
+			JobResult: &pb.JobResult{
+				JobId:        "job-1",
+				Status:       pb.JobStatus_JOB_STATUS_SUCCEEDED,
+				ErrorMessage: invalidErrorMessage,
+			},
+		},
+	}
+
+	s.enqueueBusPacket(pkt)
+
+	select {
+	case evt := <-s.eventsCh:
+		if strings.Contains(string(evt.data), "\"Payload\"") {
+			t.Fatalf("expected protojson-compatible fallback payload, got %s", string(evt.data))
+		}
+
+		var packet struct {
+			TraceID   string `json:"traceId"`
+			JobResult struct {
+				JobID        string `json:"jobId"`
+				Status       string `json:"status"`
+				ErrorMessage string `json:"errorMessage"`
+			} `json:"jobResult"`
+		}
+		if err := json.Unmarshal(evt.data, &packet); err != nil {
+			t.Fatalf("decode websocket fallback payload: %v", err)
+		}
+		if packet.TraceID != "trace-1" {
+			t.Fatalf("expected traceId preserved, got %q", packet.TraceID)
+		}
+		if packet.JobResult.JobID != "job-1" {
+			t.Fatalf("expected jobId preserved, got %q", packet.JobResult.JobID)
+		}
+		if packet.JobResult.Status != pb.JobStatus_JOB_STATUS_SUCCEEDED.String() {
+			t.Fatalf("expected protojson enum string, got %q", packet.JobResult.Status)
+		}
+		if packet.JobResult.ErrorMessage == "" {
+			t.Fatal("expected fallback to preserve errorMessage content")
+		}
+		if !utf8.ValidString(packet.JobResult.ErrorMessage) {
+			t.Fatalf("expected fallback errorMessage to be valid UTF-8, got %q", packet.JobResult.ErrorMessage)
+		}
+	default:
+		t.Fatal("expected websocket event to be enqueued")
+	}
+
+	if pkt.GetJobResult().GetErrorMessage() != invalidErrorMessage {
+		t.Fatal("expected fallback marshalling to avoid mutating the original packet")
+	}
+
+	logOutput := buf.String()
+	for _, want := range []string{
+		"protojson marshal failed for websocket bus packet",
+		"packet_type=job_result",
+		"trace_id=trace-1",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("expected log output to contain %q, got %q", want, logOutput)
+		}
 	}
 }
 

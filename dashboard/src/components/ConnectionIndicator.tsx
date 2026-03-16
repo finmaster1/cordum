@@ -1,5 +1,4 @@
 import { Wifi, WifiOff } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useEventStore } from "../state/events";
 import { useSyncExternalStore } from "react";
 
@@ -55,17 +54,11 @@ export function ConnectionIndicator() {
   const c = config[status];
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.span
-        key={status}
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-medium border ${c.badgeClass}`}
-      >
-        <span className={`w-1.5 h-1.5 rounded-full ${c.dotClass}`} />
-        {c.label}
-      </motion.span>
-    </AnimatePresence>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-medium border transition-all duration-300 ${c.badgeClass}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dotClass}`} />
+      {c.label}
+    </span>
   );
 }

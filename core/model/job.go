@@ -20,6 +20,7 @@ const (
 // JobRecord captures a lightweight view of job state for reconciliation.
 type JobRecord struct {
 	ID             string   `json:"id"`
+	WorkerID       string   `json:"worker_id,omitempty"`
 	TraceID        string   `json:"trace_id,omitempty"`
 	UpdatedAt      int64    `json:"updated_at"`
 	State          JobState `json:"state"`

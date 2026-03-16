@@ -47,7 +47,7 @@ type workerDef struct {
 var bankWorkers = []workerDef{
 	{
 		ID:           "megacorp-transfer-agent-01",
-		Pool:         "megacorp-banking",
+		Pool:         "demo-mock-bank",
 		Topics:       []string{"job.demo-mock-bank.transfer"},
 		Capacity:     8,
 		Region:       "us-east-1",
@@ -57,7 +57,7 @@ var bankWorkers = []workerDef{
 	},
 	{
 		ID:           "megacorp-transfer-agent-02",
-		Pool:         "megacorp-banking",
+		Pool:         "demo-mock-bank",
 		Topics:       []string{"job.demo-mock-bank.transfer"},
 		Capacity:     8,
 		Region:       "us-east-1",
@@ -67,7 +67,7 @@ var bankWorkers = []workerDef{
 	},
 	{
 		ID:           "megacorp-compliance-scanner",
-		Pool:         "megacorp-compliance",
+		Pool:         "demo-mock-bank",
 		Topics:       []string{"job.demo-mock-bank.transfer"},
 		Capacity:     4,
 		Region:       "us-west-2",
@@ -77,13 +77,45 @@ var bankWorkers = []workerDef{
 	},
 	{
 		ID:           "megacorp-audit-recorder",
-		Pool:         "megacorp-audit",
+		Pool:         "demo-mock-bank",
 		Topics:       []string{"job.demo-mock-bank.transfer"},
 		Capacity:     2,
 		Region:       "eu-west-1",
 		Type:         "cpu",
 		Capabilities: []string{"audit", "reporting", "regulatory"},
 		Labels:       map[string]string{"name": "Audit Recorder", "env": "production", "tier": "standard"},
+	},
+	// bank-validators pool — used by production gate tests (gates 5, 6, 7, 8, 11, 12, etc.)
+	{
+		ID:           "megacorp-validator-01",
+		Pool:         "bank-validators",
+		Topics:       []string{"job.bank-validators.process"},
+		Capacity:     8,
+		Region:       "us-east-1",
+		Type:         "cpu",
+		Capabilities: []string{"validate", "compliance", "aml-check"},
+		Labels:       map[string]string{"name": "Validator 01", "env": "production", "tier": "critical"},
+	},
+	{
+		ID:           "megacorp-validator-02",
+		Pool:         "bank-validators",
+		Topics:       []string{"job.bank-validators.process"},
+		Capacity:     4,
+		Region:       "us-west-2",
+		Type:         "cpu",
+		Capabilities: []string{"validate", "compliance"},
+		Labels:       map[string]string{"name": "Validator 02", "env": "production", "tier": "standard"},
+	},
+	// bank-executors pool — used by production gate 16 (degradation)
+	{
+		ID:           "megacorp-executor-01",
+		Pool:         "bank-executors",
+		Topics:       []string{"job.bank-executors.process"},
+		Capacity:     4,
+		Region:       "us-east-1",
+		Type:         "cpu",
+		Capabilities: []string{"execute", "wire", "transfer"},
+		Labels:       map[string]string{"name": "Executor 01", "env": "production", "tier": "critical"},
 	},
 }
 

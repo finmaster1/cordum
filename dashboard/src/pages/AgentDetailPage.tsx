@@ -347,7 +347,7 @@ export default function AgentDetailPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
               <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "#5a6a70" }} axisLine={false} tickLine={false} interval={3} />
               <YAxis tick={{ fontSize: 9, fill: "#5a6a70" }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip />} />
+              <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--surface-2)" }} />
               <Bar dataKey="jobs" fill="#0f7f7a" radius={[2, 2, 0, 0]} name="Jobs" />
               <Bar dataKey="denied" fill="#b83a3a" radius={[2, 2, 0, 0]} name="Denied" />
             </BarChart>

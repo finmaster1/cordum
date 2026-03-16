@@ -128,6 +128,7 @@ export interface SafetyResult {
 
 export interface Job {
   id: string;
+  workerId?: string;
   type: string;
   topic: string;
   status: JobStatus;

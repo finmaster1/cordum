@@ -25,6 +25,7 @@ const (
 	jobRequestKeyPrefix         = "job:req:"
 	jobEventsKeyPrefix          = "job:events:"
 	jobOutputDecisionKeySuffix  = ":output_decision"
+	metaFieldWorkerID           = "worker_id"
 	metaFieldTopic              = "topic"
 	metaFieldTenant             = "tenant"
 	metaFieldPrincipal          = "principal"
@@ -520,6 +521,7 @@ func (s *RedisJobStore) buildJobRecords(ctx context.Context, members []redis.Z) 
 
 		out = append(out, model.JobRecord{
 			ID:             jobID,
+			WorkerID:       meta[metaFieldWorkerID],
 			TraceID:        meta[metaFieldTraceID],
 			UpdatedAt:      int64(m.Score),
 			State:          state,
@@ -914,6 +916,10 @@ func stateIndexKey(state model.JobState) string {
 	return "job:index:" + strings.ToLower(string(state))
 }
 
+func workerJobsKey(workerID string) string {
+	return "worker:jobs:" + workerID
+}
+
 func (s *RedisJobStore) AddJobToTrace(ctx context.Context, traceID, jobID string) error {
 	if traceID == "" || jobID == "" {
 		return fmt.Errorf("traceID and jobID are required")
@@ -1050,6 +1056,43 @@ func (s *RedisJobStore) IncrAttempts(ctx context.Context, jobID string) error {
 		return fmt.Errorf("jobID required")
 	}
 	return s.client.HIncrBy(ctx, jobMetaKey(jobID), metaFieldAttempts, 1).Err()
+}
+
+// SetWorkerID persists the worker that processed a job and maintains a
+// per-worker index for efficient lookups.
+func (s *RedisJobStore) SetWorkerID(ctx context.Context, jobID, workerID string) error {
+	if jobID == "" || workerID == "" {
+		return fmt.Errorf("jobID and workerID required")
+	}
+	now := nowUnixMicros()
+	pipe := s.client.TxPipeline()
+	pipe.HSet(ctx, jobMetaKey(jobID), metaFieldWorkerID, workerID)
+	wKey := workerJobsKey(workerID)
+	pipe.ZAdd(ctx, wKey, redis.Z{Score: float64(now), Member: jobID})
+	pipe.ZRemRangeByRank(ctx, wKey, 0, -1001) // keep last 1000
+	if s.metaTTL > 0 {
+		pipe.Expire(ctx, wKey, s.metaTTL)
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("job store set worker_id %s/%s: %w", jobID, workerID, err)
+	}
+	return nil
+}
+
+// ListWorkerJobs returns the most recent jobs processed by a specific worker.
+func (s *RedisJobStore) ListWorkerJobs(ctx context.Context, workerID string, limit int64) ([]model.JobRecord, error) {
+	if workerID == "" {
+		return nil, fmt.Errorf("workerID required")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	members, err := s.client.ZRevRangeWithScores(ctx, workerJobsKey(workerID), 0, limit-1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("job store list worker jobs %s: %w", workerID, err)
+	}
+	return s.buildJobRecords(ctx, members)
 }
 
 func (s *RedisJobStore) CountActiveByTenant(ctx context.Context, tenant string) (int, error) {
@@ -1509,6 +1552,7 @@ func (s *RedisJobStore) GetTraceJobs(ctx context.Context, traceID string) ([]mod
 		attempts := parseInt(meta[metaFieldAttempts])
 		out = append(out, model.JobRecord{
 			ID:             jobID,
+			WorkerID:       meta[metaFieldWorkerID],
 			TraceID:        traceID,
 			State:          state,
 			Topic:          meta[metaFieldTopic],

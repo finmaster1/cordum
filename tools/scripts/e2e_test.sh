@@ -16,13 +16,31 @@ require() {
 require curl
 require jq
 
-BASE="${CORDUM_E2E_BASE:-http://localhost:8082/api/v1}"
-GW="${CORDUM_E2E_GW_BASE:-http://localhost:8081/api/v1}"
 API_KEY="${CORDUM_API_KEY:-${API_KEY:-}}"
 TENANT_ID="${CORDUM_TENANT_ID:-default}"
 ADMIN_USERNAME="${CORDUM_ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD="${CORDUM_ADMIN_PASSWORD:-}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-cordum-dev}"
+
+# TLS auto-detection (same logic as platform_smoke.sh)
+CURL_TLS_OPTS=()
+TLS_CA="${CORDUM_TLS_CA:-}"
+if [[ -z "${TLS_CA}" && -f "./certs/ca/ca.crt" ]]; then
+  TLS_CA="./certs/ca/ca.crt"
+fi
+if [[ -n "${TLS_CA}" ]]; then
+  CURL_TLS_OPTS=(--cacert "${TLS_CA}")
+  if curl --version 2>/dev/null | grep -qi schannel; then
+    CURL_TLS_OPTS+=(--ssl-no-revoke)
+  fi
+  GW_SCHEME="https"
+else
+  GW_SCHEME="http"
+fi
+
+BASE="${CORDUM_E2E_BASE:-http://localhost:8082/api/v1}"
+GW="${CORDUM_E2E_GW_BASE:-${GW_SCHEME}://localhost:8081/api/v1}"
+GW_ROOT="${GW%/api/v1}"
 
 if [[ -z "${API_KEY}" ]]; then
   echo "CORDUM_API_KEY is required; export it before running the e2e test." >&2
@@ -111,7 +129,7 @@ else
 fi
 
 bold "1.3 Gateway health"
-code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/health)
+code=$(curl -s -o /dev/null -w "%{http_code}" "${CURL_TLS_OPTS[@]}" "${GW_ROOT}/health")
 check "GET /health (gateway)" "200" "$code"
 
 bold "1.4 NATS reachable"
@@ -285,7 +303,7 @@ check "GET /config" "200" "$code"
 bold "[setup] Waiting for hello-worker heartbeat"
 WORKER_READY=false
 for _ in $(seq 1 60); do
-  if curl -s "$GW/workers" -H "X-API-Key: $API_KEY" -H "X-Tenant-ID: ${TENANT_ID}" 2>/dev/null \
+  if curl -s "${CURL_TLS_OPTS[@]}" "$GW/workers" -H "X-API-Key: $API_KEY" -H "X-Tenant-ID: ${TENANT_ID}" 2>/dev/null \
     | jq -e '[.[] | select(.pool == "hello-pack")] | length > 0' >/dev/null 2>&1; then
     WORKER_READY=true
     break

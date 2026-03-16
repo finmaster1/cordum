@@ -4,8 +4,10 @@ import { get } from "../api/client";
 import type { Job, Worker, Pool } from "../api/types";
 import {
   mapHeartbeatToWorker,
+  mapJobRecord,
   mapPoolResponse,
   type BackendHeartbeat,
+  type BackendJobRecord,
   type BackendPoolSummary,
 } from "../api/transform";
 
@@ -57,8 +59,10 @@ export function useWorkerJobs(workerId: string | null | undefined) {
     queryKey: ["worker-jobs", workerId],
     queryFn: async () => {
       if (!workerId) return [];
-      const res = await get<{ items?: any[] }>(`/workers/${encodeURIComponent(workerId)}/jobs?limit=20`);
-      return res.items ?? [];
+      const res = await get<{ items?: BackendJobRecord[] }>(
+        `/workers/${encodeURIComponent(workerId)}/jobs?limit=20`,
+      );
+      return (res.items ?? []).map(mapJobRecord);
     },
     enabled: !!workerId,
     staleTime: 15_000,

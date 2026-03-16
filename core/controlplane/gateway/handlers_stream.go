@@ -12,13 +12,24 @@ import (
 
 	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/store"
+	"github.com/prometheus/client_golang/prometheus"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+var wsPacketsDroppedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+	Name: "cordum_gateway_ws_packets_dropped_total",
+	Help: "Total WebSocket bus packets dropped due to marshal failure",
+})
+
+func init() {
+	prometheus.MustRegister(wsPacketsDroppedTotal)
+}
 
 // stopBusTaps shuts down the broadcast goroutine by closing eventsCh.
 // It is safe to call multiple times.
@@ -283,9 +294,17 @@ func (s *server) enqueueBusPacket(p *pb.BusPacket) {
 	// Filter quarantined/denied job results: strip sensitive content before broadcast.
 	p = filterQuarantinedPacket(p)
 
-	data, err := protojson.Marshal(p)
+	data, err := marshalBusPacketForWS(p)
 	if err != nil {
-		logging.Error("api-gateway", "protojson marshal failed", "error", err)
+		wsPacketsDroppedTotal.Inc()
+		logging.Error(
+			"api-gateway",
+			"websocket bus packet dropped after all marshal attempts failed",
+			"packet_type", busPacketType(p),
+			"trace_id", sanitizeUTF8ForLog(strings.TrimSpace(p.GetTraceId())),
+			"sender_id", sanitizeUTF8ForLog(strings.TrimSpace(p.GetSenderId())),
+			"error", err,
+		)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -293,6 +312,175 @@ func (s *server) enqueueBusPacket(p *pb.BusPacket) {
 	cancel()
 	jobID := jobIDForBusPacket(p)
 	s.enqueueWSEvent(data, tenant, jobID)
+}
+
+func marshalBusPacketForWS(p *pb.BusPacket) ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("bus packet required")
+	}
+
+	data, err := protojson.Marshal(p)
+	if err == nil {
+		return data, nil
+	}
+
+	packetType := busPacketType(p)
+	traceID := sanitizeUTF8ForLog(strings.TrimSpace(p.GetTraceId()))
+	logging.Error(
+		"api-gateway",
+		"protojson marshal failed for websocket bus packet",
+		"packet_type", packetType,
+		"trace_id", traceID,
+		"error", err,
+	)
+
+	data, sanitizedErr := marshalSanitizedBusPacketForWS(p)
+	if sanitizedErr == nil {
+		return data, nil
+	}
+
+	data, fallbackErr := json.Marshal(p)
+	if fallbackErr == nil {
+		logging.Error(
+			"api-gateway",
+			"sanitized protojson fallback failed; using stdlib JSON fallback for websocket bus packet",
+			"packet_type", packetType,
+			"trace_id", traceID,
+			"error", sanitizedErr,
+		)
+		return data, nil
+	}
+
+	logging.Error(
+		"api-gateway",
+		"failed to marshal websocket bus packet fallback; dropping packet",
+		"packet_type", packetType,
+		"trace_id", traceID,
+		"sanitize_error", sanitizedErr,
+		"error", fallbackErr,
+	)
+	return nil, fallbackErr
+}
+
+func marshalSanitizedBusPacketForWS(p *pb.BusPacket) ([]byte, error) {
+	cloned, ok := proto.Clone(p).(*pb.BusPacket)
+	if !ok || cloned == nil {
+		return nil, errors.New("failed to clone bus packet for websocket fallback")
+	}
+	sanitizeProtoStrings(cloned.ProtoReflect())
+	return protojson.Marshal(cloned)
+}
+
+func sanitizeProtoStrings(msg protoreflect.Message) {
+	if !msg.IsValid() {
+		return
+	}
+
+	msg.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		switch {
+		case fd.IsMap():
+			sanitizeProtoMapField(msg, fd, v.Map())
+		case fd.IsList():
+			sanitizeProtoListField(fd, v.List())
+		case fd.Kind() == protoreflect.MessageKind:
+			sanitizeProtoStrings(v.Message())
+		case fd.Kind() == protoreflect.StringKind:
+			sanitized := sanitizeUTF8ForLog(v.String())
+			if sanitized != v.String() {
+				msg.Set(fd, protoreflect.ValueOfString(sanitized))
+			}
+		}
+		return true
+	})
+}
+
+func sanitizeProtoListField(fd protoreflect.FieldDescriptor, list protoreflect.List) {
+	switch fd.Kind() {
+	case protoreflect.StringKind:
+		for i := 0; i < list.Len(); i++ {
+			current := list.Get(i).String()
+			sanitized := sanitizeUTF8ForLog(current)
+			if sanitized != current {
+				list.Set(i, protoreflect.ValueOfString(sanitized))
+			}
+		}
+	case protoreflect.MessageKind:
+		for i := 0; i < list.Len(); i++ {
+			sanitizeProtoStrings(list.Get(i).Message())
+		}
+	}
+}
+
+func sanitizeProtoMapField(msg protoreflect.Message, fd protoreflect.FieldDescriptor, m protoreflect.Map) {
+	type mapEntry struct {
+		key   protoreflect.MapKey
+		value protoreflect.Value
+	}
+
+	entries := make([]mapEntry, 0)
+	changed := false
+
+	m.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+		entry := mapEntry{key: k, value: v}
+
+		if fd.MapKey().Kind() == protoreflect.StringKind {
+			sanitizedKey := sanitizeUTF8ForLog(k.String())
+			if sanitizedKey != k.String() {
+				entry.key = protoreflect.ValueOfString(sanitizedKey).MapKey()
+				changed = true
+			}
+		}
+
+		switch fd.MapValue().Kind() {
+		case protoreflect.StringKind:
+			sanitizedValue := sanitizeUTF8ForLog(v.String())
+			if sanitizedValue != v.String() {
+				entry.value = protoreflect.ValueOfString(sanitizedValue)
+				changed = true
+			}
+		case protoreflect.MessageKind:
+			sanitizeProtoStrings(v.Message())
+		}
+
+		entries = append(entries, entry)
+		return true
+	})
+
+	if !changed {
+		return
+	}
+
+	msg.Clear(fd)
+	dst := msg.Mutable(fd).Map()
+	for _, entry := range entries {
+		dst.Set(entry.key, entry.value)
+	}
+}
+
+func sanitizeUTF8ForLog(value string) string {
+	return strings.ToValidUTF8(value, "\uFFFD")
+}
+
+func busPacketType(p *pb.BusPacket) string {
+	if p == nil {
+		return "unknown"
+	}
+	switch p.GetPayload().(type) {
+	case *pb.BusPacket_JobRequest:
+		return "job_request"
+	case *pb.BusPacket_JobResult:
+		return "job_result"
+	case *pb.BusPacket_Heartbeat:
+		return "heartbeat"
+	case *pb.BusPacket_Alert:
+		return "alert"
+	case *pb.BusPacket_JobProgress:
+		return "job_progress"
+	case *pb.BusPacket_JobCancel:
+		return "job_cancel"
+	default:
+		return "unknown"
+	}
 }
 
 // filterQuarantinedPacket strips result payloads from quarantined/denied job results

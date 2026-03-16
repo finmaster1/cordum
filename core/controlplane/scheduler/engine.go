@@ -642,7 +642,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 		// Approval gate auto-complete: when an approval gate job is granted,
 		// publish a synthetic success result instead of dispatching to workers.
 		// Publish before state transition so a failed publish can be retried.
-		if topic == capsdk.SubjectApprovalGate && record.Reason == "approval granted" {
+		isApprovalGate := topic == capsdk.SubjectApprovalGate || topic == capsdk.SubjectWorkflowApprovalGate
+		if isApprovalGate && record.Reason == "approval granted" {
 			pkt := &pb.BusPacket{
 				TraceId:         traceID,
 				SenderId:        defaultSenderID,
@@ -1145,6 +1146,7 @@ func (e *Engine) handleJobResult(res *pb.JobResult) error {
 				return RetryAfter(err, retryDelayStore)
 			}
 		}
+		e.setWorkerID(jobID, strings.TrimSpace(res.GetWorkerId()))
 		if err := e.setJobState(jobID, state); err != nil {
 			return RetryAfter(err, retryDelayStore)
 		}
@@ -1436,6 +1438,17 @@ func (e *Engine) setResultPtr(jobID, ptr string) error {
 		return fmt.Errorf("set result ptr: %w", err)
 	}
 	return nil
+}
+
+func (e *Engine) setWorkerID(jobID, workerID string) {
+	if e.jobStore == nil || jobID == "" || workerID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, storeOpTimeout)
+	defer cancel()
+	if err := e.jobStore.SetWorkerID(ctx, jobID, workerID); err != nil {
+		logging.Warn("scheduler", "worker_id write failed", "job_id", jobID, "worker_id", workerID, "error", err)
+	}
 }
 
 // attachEffectiveConfig resolves and injects the effective config into the job request env.

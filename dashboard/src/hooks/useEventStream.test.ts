@@ -15,7 +15,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null;
   onmessage: WsListener | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev: { code: number; reason: string; wasClean: boolean }) => void) | null = null;
   closed = false;
 
   constructor(url: string, protocols?: string[]) {
@@ -39,9 +39,9 @@ class MockWebSocket {
     this.onmessage?.({ data: JSON.stringify(data) });
   }
 
-  simulateClose() {
+  simulateClose(code = 1006, reason = "") {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code, reason, wasClean: false });
   }
 }
 
@@ -202,5 +202,18 @@ describe("useEventStream", () => {
     cleanupFn?.();
     expect(ws.closed).toBe(true);
     expect(useEventStore.getState().status).toBe("disconnected");
+  });
+
+  it("does not schedule a reconnect when close fires after unmount", () => {
+    useEventStream();
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    cleanupFn?.();
+    ws.simulateClose();
+
+    expect(useEventStore.getState().status).toBe("disconnected");
+    vi.advanceTimersByTime(5000);
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 });

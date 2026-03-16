@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/registry"
+	"github.com/cordum/cordum/core/model"
 )
 
 // handleGetWorker returns a single worker by ID from the Redis snapshot.
@@ -60,8 +63,9 @@ func (s *server) handleGetWorker(w http.ResponseWriter, r *http.Request) {
 	writeErrorJSON(w, http.StatusNotFound, "worker not found")
 }
 
-// handleGetWorkerJobs returns jobs assigned to a specific worker.
-// Currently returns an empty list since we don't track worker→job assignments yet.
+// handleGetWorkerJobs returns recent jobs processed by a specific worker.
+// When the per-worker index is empty (pre-existing jobs), falls back to
+// recent jobs filtered by the worker's pool topics.
 func (s *server) handleGetWorkerJobs(w http.ResponseWriter, r *http.Request) {
 	if err := s.requireRole(r, "admin"); err != nil {
 		writeForbidden(w, r, err)
@@ -74,28 +78,102 @@ func (s *server) handleGetWorkerJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate worker exists in snapshot or in-memory.
-	found := false
+	limit := int64(20)
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	if s.jobStore == nil {
+		writeJSON(w, map[string]any{"items": []any{}})
+		return
+	}
+
+	// Try per-worker index first (populated for jobs processed after tracking was added).
+	jobs, err := s.jobStore.ListWorkerJobs(r.Context(), id, limit)
+	if err != nil {
+		logging.Error("api-gateway", "list worker jobs failed", "worker_id", id, "error", err)
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to list worker jobs")
+		return
+	}
+
+	// Fallback: if per-worker index is empty, return recent jobs filtered by
+	// topics routed to this worker's pool. This covers historical jobs that
+	// predate per-worker tracking.
+	if len(jobs) == 0 {
+		pool := s.resolveWorkerPool(id)
+		if pool == "" {
+			writeErrorJSON(w, http.StatusNotFound, "worker not found")
+			return
+		}
+		jobs = s.recentJobsByPool(r.Context(), pool, limit)
+	}
+
+	writeJSON(w, map[string]any{"items": jobs})
+}
+
+// resolveWorkerPool returns the pool for a worker from snapshot or in-memory state.
+func (s *server) resolveWorkerPool(workerID string) string {
 	snap, _ := s.snapshotFromRedis()
 	if snap != nil {
 		for _, ws := range snap.Workers {
-			if ws.WorkerID == id {
-				found = true
+			if ws.WorkerID == workerID {
+				return ws.Pool
+			}
+		}
+	}
+	s.workerMu.RLock()
+	hb, ok := s.workers[workerID]
+	s.workerMu.RUnlock()
+	if ok && hb != nil {
+		return hb.Pool
+	}
+	return ""
+}
+
+// recentJobsByPool returns recent jobs whose topic routes to the given pool.
+func (s *server) recentJobsByPool(ctx context.Context, pool string, limit int64) []model.JobRecord {
+	// Collect topics routed to this pool.
+	poolTopics := map[string]bool{}
+	snap, _ := s.snapshotFromRedis()
+	if snap != nil {
+		for topic, ts := range snap.Topics {
+			if ts.Pool == pool {
+				poolTopics[topic] = true
+			}
+		}
+	}
+	if len(poolTopics) == 0 {
+		return nil
+	}
+
+	// Fetch a larger batch and filter by topic to fill the requested limit.
+	fetchLimit := limit * 5
+	if fetchLimit > 200 {
+		fetchLimit = 200
+	}
+	all, err := s.jobStore.ListRecentJobs(ctx, fetchLimit)
+	if err != nil {
+		logging.Warn("api-gateway", "recent jobs fallback failed", "pool", pool, "error", err)
+		return nil
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	filtered := make([]model.JobRecord, 0, limit)
+	for _, j := range all {
+		if poolTopics[j.Topic] {
+			filtered = append(filtered, j)
+			if int64(len(filtered)) >= limit {
 				break
 			}
 		}
 	}
-	if !found {
-		s.workerMu.RLock()
-		_, found = s.workers[id]
-		s.workerMu.RUnlock()
-	}
-	if !found {
-		writeErrorJSON(w, http.StatusNotFound, "worker not found")
-		return
-	}
-
-	writeJSON(w, map[string]any{"items": []any{}})
+	return filtered
 }
 
 // handleListPools returns all pools with utilization metrics.

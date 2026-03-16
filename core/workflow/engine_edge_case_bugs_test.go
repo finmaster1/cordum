@@ -1375,3 +1375,102 @@ func TestRunStatusMatrix(t *testing.T) {
 		})
 	}
 }
+
+// TestBug_ForEachTimedOutChildActivatesOnError verifies that when a forEach
+// child times out (JOB_STATUS_TIMEOUT), the parent's on_error handler is
+// activated and running siblings are cancelled.
+func TestBug_ForEachTimedOutChildActivatesOnError(t *testing.T) {
+	store := newWorkflowStore(t)
+	defer store.Close()
+	bus := &recordingBus{}
+	engine := NewEngine(store, bus)
+
+	wf := &Workflow{
+		ID:    "wf-foreach-timeout",
+		OrgID: "org",
+		Steps: map[string]*Step{
+			"fan": {
+				ID:      "fan",
+				Type:    StepTypeWorker,
+				Topic:   "job.default",
+				ForEach: "input.items",
+				OnError: "recover",
+			},
+			"recover": {
+				ID:        "recover",
+				Type:      StepTypeWorker,
+				Topic:     "job.recover",
+				DependsOn: []string{"fan"},
+			},
+		},
+	}
+	if err := store.SaveWorkflow(context.Background(), wf); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	now := time.Now().UTC()
+	run := &WorkflowRun{
+		ID:         "run-foreach-timeout",
+		WorkflowID: wf.ID,
+		OrgID:      "org",
+		TeamID:     "team",
+		Input:      map[string]any{"items": []any{"a", "b", "c"}},
+		Status:     RunStatusPending,
+		Steps:      map[string]*StepRun{},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := store.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Start: dispatches fan[0], fan[1], fan[2]
+	if err := engine.StartRun(context.Background(), wf.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	// Timeout child fan[0] — aggregateChildren marks parent as Failed
+	engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:        "run-foreach-timeout:fan[0]@1",
+		Status:       pb.JobStatus_JOB_STATUS_TIMEOUT,
+		ErrorMessage: "child 0 timed out",
+	})
+
+	final, err := store.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+
+	// (1) Child fan[0] should be TimedOut
+	child0 := final.Steps["fan[0]"]
+	if child0 == nil || child0.Status != StepStatusTimedOut {
+		t.Fatalf("expected fan[0] to be TimedOut, got %v", child0)
+	}
+
+	// (2) Parent should be Failed (aggregateChildren collapses TimedOut to Failed)
+	parentStep := final.Steps["fan"]
+	if parentStep == nil || parentStep.Status != StepStatusFailed {
+		t.Fatalf("expected parent fan to be Failed, got %v", parentStep)
+	}
+
+	// (3) Running siblings should be cancelled
+	cancelCount := 0
+	msgs := bus.Snapshot()
+	for _, m := range msgs {
+		if m.packet.GetJobCancel() != nil {
+			cancelCount++
+		}
+	}
+	if cancelCount < 2 {
+		t.Fatalf("expected at least 2 cancel messages for sibling children, got %d", cancelCount)
+	}
+
+	// (4) on_error handler "recover" should be activated (Pending status)
+	recoverStep := final.Steps["recover"]
+	if recoverStep == nil {
+		t.Fatalf("expected on_error handler 'recover' to be created")
+	}
+	if recoverStep.Status != StepStatusPending && recoverStep.Status != StepStatusRunning {
+		t.Fatalf("expected on_error handler status Pending or Running, got %s", recoverStep.Status)
+	}
+}

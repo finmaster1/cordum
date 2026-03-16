@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -556,5 +557,66 @@ func TestApproveJobEmptyID(t *testing.T) {
 	err := client.ApproveJob(context.Background(), "", true)
 	if err == nil {
 		t.Fatal("expected error for empty job ID")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: StartRunWithOptions sends input correctly
+// ---------------------------------------------------------------------------
+
+func TestStartRunWithOptionsEncodesInput(t *testing.T) {
+	input := map[string]any{
+		"date_range": map[string]any{
+			"start": "2026-03-08",
+			"end":   "2026-03-15",
+		},
+	}
+	client := newTestClient(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("unmarshal body: %v", err)
+		}
+		dr, ok := decoded["date_range"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected date_range object in body, got: %s", string(body))
+		}
+		if dr["start"] != "2026-03-08" || dr["end"] != "2026-03-15" {
+			t.Fatalf("unexpected date_range values: %v", dr)
+		}
+		return jsonResponse(http.StatusOK, `{"run_id":"run-42"}`), nil
+	}))
+
+	runID, err := client.StartRunWithOptions(context.Background(), "test-wf", input, RunOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runID != "run-42" {
+		t.Fatalf("expected run-42, got %s", runID)
+	}
+}
+
+func TestStartRunWithOptionsNilInputSendsEmptyObject(t *testing.T) {
+	client := newTestClient(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		trimmed := strings.TrimSpace(string(body))
+		if trimmed != "{}" {
+			t.Fatalf("expected empty object {}, got: %s", trimmed)
+		}
+		return jsonResponse(http.StatusOK, `{"run_id":"run-nil"}`), nil
+	}))
+
+	runID, err := client.StartRunWithOptions(context.Background(), "test-wf", nil, RunOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runID != "run-nil" {
+		t.Fatalf("expected run-nil, got %s", runID)
 	}
 }

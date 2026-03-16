@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildSimulatorUrl } from "@/lib/policy-studio/simulatorQuery";
+import { InputRuleEditorDrawer } from "@/components/policy/input-rules/InputRuleEditorDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -24,6 +25,7 @@ import { usePolicyRules, usePolicyBundles } from "@/hooks/usePolicies";
 import { usePolicyAccess } from "@/hooks/usePolicyAccess";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import type { PolicyRule } from "@/api/types";
+import type { GlobalPolicyInputDecision, GlobalPolicyInputRule } from "@/types/policy";
 
 // ---------------------------------------------------------------------------
 // Types & constants
@@ -90,6 +92,93 @@ export function getInputRulesAffordances(canEdit: boolean) {
   };
 }
 
+function normalizeInputRuleDecision(
+  decision: PolicyRule["decision"],
+): GlobalPolicyInputDecision {
+  switch ((decision ?? "").toLowerCase()) {
+    case "allow":
+    case "deny":
+    case "require_approval":
+    case "allow_with_constraints":
+    case "throttle":
+      return decision.toLowerCase() as GlobalPolicyInputDecision;
+    default:
+      return "deny";
+  }
+}
+
+export function getInputRuleEditTarget(
+  rule: Pick<PolicyRule, "bundle_id">,
+): "bundle" | "drawer" {
+  return rule.bundle_id ? "bundle" : "drawer";
+}
+
+export function mapPolicyRuleToInputEditorRule(
+  rule: PolicyRule,
+): GlobalPolicyInputRule {
+  const match = rule.match ?? {};
+  const constraints = rule.constraints ?? {};
+  const budgets = constraints.budgets ?? {};
+  const sandbox = constraints.sandbox ?? {};
+  const toolchain = constraints.toolchain ?? {};
+  const diff = constraints.diff ?? {};
+  const mcp = match.mcp ?? {};
+
+  return {
+    id: rule.rule_id ?? rule.id,
+    decision: normalizeInputRuleDecision(rule.decision),
+    reason: rule.reason ?? "",
+    match: {
+      tenants: match.tenants ?? [],
+      topics: match.topics ?? [],
+      capabilities: match.capabilities ?? [],
+      riskTags: match.risk_tags ?? [],
+      requires: match.requires ?? [],
+      packIds: match.pack_ids ?? [],
+      actorIds: match.actor_ids ?? [],
+      actorTypes: match.actor_types ?? [],
+      labels: match.labels ?? {},
+      secretsPresent: match.secrets_present ?? null,
+      mcp: {
+        allowServers: mcp.allow_servers ?? [],
+        denyServers: mcp.deny_servers ?? [],
+        allowTools: mcp.allow_tools ?? [],
+        denyTools: mcp.deny_tools ?? [],
+        allowResources: mcp.allow_resources ?? [],
+        denyResources: mcp.deny_resources ?? [],
+        allowActions: mcp.allow_actions ?? [],
+        denyActions: mcp.deny_actions ?? [],
+      },
+    },
+    constraints: {
+      budgets: {
+        maxRuntimeMs: budgets.max_runtime_ms,
+        maxRetries: budgets.max_retries,
+        maxArtifactBytes: budgets.max_artifact_bytes,
+        maxConcurrentJobs: budgets.max_concurrent_jobs,
+      },
+      sandbox: {
+        isolated: sandbox.isolated,
+        networkAllowlist: sandbox.network_allowlist ?? [],
+        fsReadOnly: sandbox.fs_read_only ?? [],
+        fsReadWrite: sandbox.fs_read_write ?? [],
+      },
+      toolchain: {
+        allowedTools: toolchain.allowed_tools ?? [],
+        allowedCommands: toolchain.allowed_commands ?? [],
+      },
+      diff: {
+        maxFiles: diff.max_files,
+        maxLines: diff.max_lines,
+        denyPathGlobs: diff.deny_path_globs ?? [],
+      },
+      redactionLevel: constraints.redaction_level,
+    },
+    remediations: [],
+    source: rule.source ?? {},
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Scope detection
 // ---------------------------------------------------------------------------
@@ -148,6 +237,7 @@ export default function InputRulesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const policyAccess = usePolicyAccess();
+  const affordances = getInputRulesAffordances(policyAccess.canEdit);
 
   // --- unified data ---
   const { data: rulesData, isLoading: rulesLoading } = usePolicyRules();
@@ -193,6 +283,8 @@ export default function InputRulesPage() {
     topic: "",
     capability: "",
   });
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   // --- derived data ---
   const allRules = rulesData?.items ?? [];
@@ -284,6 +376,22 @@ export default function InputRulesPage() {
   const contextMatchCount = contextActive
     ? enrichedRules.filter((e) => e.contextMatch).length
     : 0;
+  const editingRule = useMemo(
+    () =>
+      editingIndex === null
+        ? null
+        : allRules[editingIndex]
+          ? mapPolicyRuleToInputEditorRule(allRules[editingIndex])
+          : null,
+    [allRules, editingIndex],
+  );
+  const existingRuleIds = useMemo(
+    () =>
+      allRules
+        .map((rule) => rule.rule_id ?? rule.id)
+        .filter((_, index) => index !== editingIndex),
+    [allRules, editingIndex],
+  );
 
   // --- loading ---
   if (rulesLoading && allRules.length === 0) {
@@ -305,8 +413,8 @@ export default function InputRulesPage() {
         title="Input Rules"
         subtitle="All input policy rules across every bundle. See what rules affect any tenant, topic, or workflow."
         actions={
-          <StatusBadge variant={policyAccess.canEdit ? "healthy" : "muted"}>
-            {policyAccess.canEdit ? "editor access" : "read-only role"}
+          <StatusBadge variant={affordances.canEditRule ? "healthy" : "muted"}>
+            {affordances.canEditRule ? "editor access" : "read-only role"}
           </StatusBadge>
         }
       />
@@ -527,11 +635,19 @@ export default function InputRulesPage() {
           <RuleCard
             key={e.rule.id}
             enriched={e}
-            canEdit={policyAccess.canEdit}
+            canEdit={affordances.canEditRule}
             onEdit={() => {
-              if (e.rule.bundle_id) {
-                navigate(`/govern/bundles/${encodeURIComponent(e.rule.bundle_id)}`);
+              const bundleId = e.rule.bundle_id;
+              if (bundleId && getInputRuleEditTarget(e.rule) === "bundle") {
+                navigate(`/govern/bundles/${encodeURIComponent(bundleId)}`);
+                return;
               }
+              const nextEditingIndex = allRules.findIndex(
+                (rule) => rule.id === e.rule.id,
+              );
+              if (nextEditingIndex < 0) return;
+              setEditingIndex(nextEditingIndex);
+              setEditorOpen(true);
             }}
             onSimulate={() =>
               navigate(
@@ -544,6 +660,21 @@ export default function InputRulesPage() {
         ))}
       </div>
 
+      <InputRuleEditorDrawer
+        open={editorOpen}
+        readOnly={affordances.drawerReadOnly}
+        rule={editingRule}
+        nextRuleIndex={allRules.length + 1}
+        existingRuleIds={existingRuleIds}
+        onClose={() => {
+          setEditorOpen(false);
+          setEditingIndex(null);
+        }}
+        onSave={() => {
+          setEditorOpen(false);
+          setEditingIndex(null);
+        }}
+      />
     </div>
   );
 }
@@ -701,7 +832,7 @@ function RuleCard({
                 <button
                   onClick={onEdit}
                   className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
-                  title="Edit in bundle"
+                  title={rule.bundle_id ? "Edit in bundle" : "Edit rule"}
                 >
                   <Pencil className="w-3.5 h-3.5" />
                 </button>

@@ -291,7 +291,7 @@ has_mock_bank_worker() {
   if [[ -z "${workers}" ]]; then
     return 1
   fi
-  echo "${workers}" | jq -e '[.[] | select(.pool == "demo-mock-bank")] | length > 0' >/dev/null 2>&1
+  echo "${workers}" | jq -e '[(.items // [])[] | select(.pool == "demo-mock-bank")] | length > 0' >/dev/null 2>&1
 }
 
 MOCK_BANK_PID_FILE="/tmp/production-gate-mock-bank.pid"
@@ -493,7 +493,7 @@ gate_3_workflows() {
 
   ensure_mock_bank_pack
   ensure_mock_bank_worker
-  policy_probe="$(jq -cn --arg tenant "${TENANT_ID}" '{tenant: $tenant, topic: "job.demo-mock-bank.transfer.auto"}')"
+  policy_probe="$(jq -cn --arg tenant "${TENANT_ID}" '{tenant: $tenant, topic: "job.demo-mock-bank.transfer", meta: {risk_tags: ["low"]}}')"
   for _ in {1..30}; do
     policy_decision="$(api_call POST /policy/evaluate "${policy_probe}" | jq -r '.decision // empty' 2>/dev/null || true)"
     case "${policy_decision}" in
@@ -529,7 +529,7 @@ gate_3_workflows() {
   }
 
   review_input="$(jq -cn --arg bucket "review" --arg customer "gate-review" --arg currency "USD" \
-    '{amount: 80, currency: $currency, customer: $customer, reason: "gate review", note: "prod gate", requested_by: "prod-gate", policy_bucket: $bucket}')"
+    '{amount: 150, currency: $currency, customer: $customer, reason: "gate review", note: "prod gate", requested_by: "prod-gate", policy_bucket: $bucket}')"
   run_body="$(api_call POST /workflows/demo-mock-bank.transfer/runs "${review_input}")"
   review_run="$(echo "${run_body}" | jq -r '.run_id // empty' 2>/dev/null || true)"
   [[ -n "${review_run}" ]] || {
@@ -539,7 +539,7 @@ gate_3_workflows() {
 
   review_job=""
   for _ in {1..40}; do
-    review_job="$(api_body GET "/workflow-runs/${review_run}" | jq -r '.steps.review.job_id // empty' 2>/dev/null || true)"
+    review_job="$(api_body GET "/workflow-runs/${review_run}" | jq -r '.steps.execute_review.job_id // empty' 2>/dev/null || true)"
     if [[ -n "${review_job}" ]]; then
       break
     fi
@@ -578,7 +578,7 @@ gate_3_workflows() {
 
   blocked_job=""
   for _ in {1..40}; do
-    blocked_job="$(api_body GET "/workflow-runs/${blocked_run}" | jq -r '.steps.blocked.job_id // empty' 2>/dev/null || true)"
+    blocked_job="$(api_body GET "/workflow-runs/${blocked_run}" | jq -r '.steps.execute_high.job_id // empty' 2>/dev/null || true)"
     if [[ -n "${blocked_job}" ]]; then
       break
     fi
@@ -630,7 +630,7 @@ gate_3_workflows() {
     return 1
   }
 
-  run_body="$(api_call POST "/workflow-runs/${auto_run}/rerun" '{"from_step":"auto"}')"
+  run_body="$(api_call POST "/workflow-runs/${auto_run}/rerun" '{"from_step":"execute_low"}')"
   rerun_run="$(echo "${run_body}" | jq -r '.run_id // empty' 2>/dev/null || true)"
   [[ -n "${rerun_run}" ]] || {
     echo "rerun endpoint did not return run_id" >&2
@@ -863,7 +863,7 @@ gate_6_performance() {
   start_all="$(now_ms)"
 
   for i in $(seq 1 "${total}"); do
-    body="$(jq -cn --arg idx "${i}" '{prompt: ("gate6 perf job " + $idx), topic: "job.demo-mock-bank.transfer.auto"}')"
+    body="$(jq -cn --arg idx "${i}" '{prompt: ("gate6 perf job " + $idx), topic: "job.demo-mock-bank.transfer", risk_tags: ["low"]}')"
     resp="$(api_call POST /jobs "${body}")"
     id="$(echo "${resp}" | jq -r '.job_id // empty' 2>/dev/null || true)"
     [[ -n "${id}" ]] || {
@@ -1925,9 +1925,10 @@ gate_12_adv_workflows() {
     }
   fi
 
-  # --- Workflow step-level approval ---
-  # Create a workflow with an approval step
-  local approval_wf_id approval_run_id approval_step_code
+  # --- Workflow step-level approval (unified via /approvals endpoint) ---
+  # Create a workflow with an approval step; the engine dispatches a gate job
+  # that appears in the unified /approvals list.
+  local approval_wf_id approval_run_id approval_job approval_step_code
   resp="$(api_call POST /workflows "$(jq -cn '{
     name: "pg12-approval-flow",
     steps: {
@@ -1940,10 +1941,23 @@ gate_12_adv_workflows() {
     resp="$(api_call POST "/workflows/${approval_wf_id}/runs" '{"input":{}}')"
     approval_run_id="$(echo "${resp}" | jq -r '.run_id // .id // empty' 2>/dev/null || true)"
     if [[ -n "${approval_run_id}" ]]; then
-      sleep 1
+      # Wait for the approval step to dispatch its gate job
+      approval_job=""
+      for _ in {1..40}; do
+        approval_job="$(api_body GET "/workflow-runs/${approval_run_id}" | jq -r '.steps.approve.job_id // empty' 2>/dev/null || true)"
+        if [[ -n "${approval_job}" ]]; then
+          break
+        fi
+        sleep 0.5
+      done
+      [[ -n "${approval_job}" ]] || {
+        echo "approval step did not produce a gate job" >&2
+        return 1
+      }
+      # Approve via the unified /approvals endpoint
       approval_step_code="$(api_code POST \
-        "/workflows/${approval_wf_id}/runs/${approval_run_id}/steps/approve/approve" \
-        "${JSON_HEADERS[@]}" -d '{}')"
+        "/approvals/${approval_job}/approve" \
+        "${JSON_HEADERS[@]}" -d '{"reason":"production gate approval"}')"
       [[ "${approval_step_code}" == "200" || "${approval_step_code}" == "204" || "${approval_step_code}" == "409" ]] || {
         echo "step approval expected 200/204/409, got ${approval_step_code}" >&2
         return 1

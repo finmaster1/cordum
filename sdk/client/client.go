@@ -348,6 +348,12 @@ func (c *Client) StartRunWithOptions(ctx context.Context, workflowID string, inp
 	if workflowID == "" {
 		return "", fmt.Errorf("workflow id required")
 	}
+	// Guard against nil map: a nil map[string]any assigned to the body
+	// parameter (type any) becomes a non-nil interface that encodes to
+	// JSON null instead of {}. Normalize to an empty map.
+	if input == nil {
+		input = map[string]any{}
+	}
 	path := "/api/v1/workflows/" + escapePathSegment(workflowID) + "/runs"
 	if opts.DryRun {
 		path += "?dry_run=true"

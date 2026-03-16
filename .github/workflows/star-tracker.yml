@@ -1,0 +1,169 @@
+name: Star Tracker
+
+on:
+  watch:
+    types: [started]
+  # GitHub Actions doesn't have a native "unstarred" event trigger.
+  # The `watch` event only fires on `started` (star added).
+  # To catch unstars, we use a scheduled job that compares current
+  # stargazers against the last known list stored as an artifact.
+
+  schedule:
+    # Run every 15 minutes to detect unstars
+    - cron: "*/15 * * * *"
+
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  NOTIFY_EMAIL: yaron@cordum.io
+  REPO_FULL_NAME: cordum-io/cordum
+
+jobs:
+  # ─────────────────────────────────────────────────────
+  # Job 1: Instant notification when someone STARS
+  # ─────────────────────────────────────────────────────
+  star-added:
+    if: github.event_name == 'watch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send star notification
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          USER="${{ github.actor }}"
+          REPO="${{ github.repository }}"
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [ -z "$RESEND_API_KEY" ]; then
+            echo "::warning::RESEND_API_KEY secret not set — skipping email"
+            exit 0
+          fi
+
+          curl -s -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer $RESEND_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(cat <<PAYLOAD
+          {
+            "from": "Cordum Stars <stars@cordum.io>",
+            "to": ["$NOTIFY_EMAIL"],
+            "subject": "⭐ New star: ${USER} starred ${REPO}",
+            "html": "<h2>New Star</h2><p><strong><a href='https://github.com/${USER}'>${USER}</a></strong> starred <a href='https://github.com/${REPO}'>${REPO}</a></p><p>Time: ${TIMESTAMP}</p><p><a href='https://github.com/${REPO}/stargazers'>View all stargazers</a></p>"
+          }
+          PAYLOAD
+          )"
+
+          echo "✅ Star notification sent for ${USER}"
+
+  # ─────────────────────────────────────────────────────
+  # Job 2: Detect unstars by comparing stargazer snapshots
+  # ─────────────────────────────────────────────────────
+  detect-unstars:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch current stargazers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fetch all stargazers (paginated, up to 10 pages = 1000 stars)
+          echo "[]" > /tmp/current_stars.json
+          PAGE=1
+          while [ $PAGE -le 10 ]; do
+            RESULT=$(gh api "repos/${REPO_FULL_NAME}/stargazers?per_page=100&page=${PAGE}" \
+              -H "Accept: application/vnd.github.v3.star+json" 2>/dev/null || echo "[]")
+
+            COUNT=$(echo "$RESULT" | jq length)
+            if [ "$COUNT" = "0" ] || [ -z "$COUNT" ]; then
+              break
+            fi
+
+            # Merge into current list
+            jq -s '.[0] + .[1]' /tmp/current_stars.json <(echo "$RESULT") > /tmp/current_stars_merged.json
+            mv /tmp/current_stars_merged.json /tmp/current_stars.json
+
+            if [ "$COUNT" -lt 100 ]; then
+              break
+            fi
+            PAGE=$((PAGE + 1))
+          done
+
+          # Extract just usernames, sorted
+          jq -r '.[].user.login' /tmp/current_stars.json | sort -u > /tmp/current_usernames.txt
+          TOTAL=$(wc -l < /tmp/current_usernames.txt | tr -d ' ')
+          echo "📊 Current stargazers: ${TOTAL}"
+
+      - name: Download previous snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: stargazer-snapshot
+          path: /tmp/previous
+        continue-on-error: true
+
+      - name: Compare and detect unstars
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          if [ ! -f /tmp/previous/stargazers.txt ]; then
+            echo "📝 No previous snapshot — this is the first run. Saving baseline."
+            exit 0
+          fi
+
+          # Find users in previous but NOT in current = unstars
+          comm -23 /tmp/previous/stargazers.txt /tmp/current_usernames.txt > /tmp/unstars.txt
+          # Find users in current but NOT in previous = new stars (caught by watch event too)
+          comm -13 /tmp/previous/stargazers.txt /tmp/current_usernames.txt > /tmp/new_stars.txt
+
+          UNSTAR_COUNT=$(wc -l < /tmp/unstars.txt | tr -d ' ')
+          NEW_COUNT=$(wc -l < /tmp/new_stars.txt | tr -d ' ')
+          PREV_TOTAL=$(wc -l < /tmp/previous/stargazers.txt | tr -d ' ')
+          CURR_TOTAL=$(wc -l < /tmp/current_usernames.txt | tr -d ' ')
+
+          echo "📊 Previous: ${PREV_TOTAL} → Current: ${CURR_TOTAL} (${NEW_COUNT} new, ${UNSTAR_COUNT} removed)"
+
+          if [ "$UNSTAR_COUNT" = "0" ]; then
+            echo "✅ No unstars detected"
+            exit 0
+          fi
+
+          echo "⚠️ Unstars detected:"
+          cat /tmp/unstars.txt
+
+          # Build email body
+          UNSTAR_LIST=""
+          while IFS= read -r user; do
+            UNSTAR_LIST="${UNSTAR_LIST}<li><a href='https://github.com/${user}'>${user}</a></li>"
+          done < /tmp/unstars.txt
+
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [ -z "$RESEND_API_KEY" ]; then
+            echo "::warning::RESEND_API_KEY secret not set — skipping email"
+            exit 0
+          fi
+
+          curl -s -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer $RESEND_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(cat <<PAYLOAD
+          {
+            "from": "Cordum Stars <stars@cordum.io>",
+            "to": ["$NOTIFY_EMAIL"],
+            "subject": "⚠️ ${UNSTAR_COUNT} user(s) unstarred ${REPO_FULL_NAME}",
+            "html": "<h2>Star Removal Alert</h2><p><strong>${UNSTAR_COUNT}</strong> user(s) removed their star from <a href='https://github.com/${REPO_FULL_NAME}'>${REPO_FULL_NAME}</a></p><h3>Who left:</h3><ul>${UNSTAR_LIST}</ul><p>Star count: ${PREV_TOTAL} → ${CURR_TOTAL}</p><p>Detected at: ${TIMESTAMP}</p><p><a href='https://github.com/${REPO_FULL_NAME}/stargazers'>View current stargazers</a></p>"
+          }
+          PAYLOAD
+          )"
+
+          echo "📧 Unstar alert sent to ${NOTIFY_EMAIL}"
+
+      - name: Save current snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: stargazer-snapshot
+          path: /tmp/current_usernames.txt
+          overwrite: true
+          retention-days: 90

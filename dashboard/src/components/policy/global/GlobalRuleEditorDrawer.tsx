@@ -309,8 +309,6 @@ export function GlobalRuleEditorDrawer({
     }
   }, [draft.decision, draft.remediations, showRemediationMismatchConfirm]);
 
-  if (!open) return null;
-
   const firstInvalidFieldId = validationErrors.ruleId
     ? "global-rule-id"
     : validationErrors.decision
@@ -379,7 +377,7 @@ export function GlobalRuleEditorDrawer({
   };
 
   useEffect(() => {
-    if (!advancedOpen || viewedSections.advanced) return;
+    if (!open || !advancedOpen || viewedSections.advanced) return;
     setViewedSections((previous) => ({ ...previous, advanced: true }));
     emitTelemetry("policy_editor_section_viewed", {
       scope: "input_global",
@@ -390,7 +388,7 @@ export function GlobalRuleEditorDrawer({
   }, [advancedConfigured.count, advancedOpen, draft.decision, emitTelemetry, viewedSections.advanced]);
 
   useEffect(() => {
-    if (!showConstraintsSection || viewedSections.constraints) return;
+    if (!open || !showConstraintsSection || viewedSections.constraints) return;
     setViewedSections((previous) => ({ ...previous, constraints: true }));
     emitTelemetry("policy_editor_section_viewed", {
       scope: "input_global",
@@ -401,7 +399,7 @@ export function GlobalRuleEditorDrawer({
   }, [advancedConfigured.count, draft.decision, emitTelemetry, showConstraintsSection, viewedSections.constraints]);
 
   useEffect(() => {
-    if (!showRemediationsSection || viewedSections.remediations) return;
+    if (!open || !showRemediationsSection || viewedSections.remediations) return;
     setViewedSections((previous) => ({ ...previous, remediations: true }));
     emitTelemetry("policy_editor_section_viewed", {
       scope: "input_global",
@@ -410,6 +408,8 @@ export function GlobalRuleEditorDrawer({
       configuredAdvancedCount: advancedConfigured.count,
     });
   }, [advancedConfigured.count, draft.decision, emitTelemetry, showRemediationsSection, viewedSections.remediations]);
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[120] flex justify-end">

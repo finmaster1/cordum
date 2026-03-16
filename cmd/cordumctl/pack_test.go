@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -248,6 +249,173 @@ func TestBuildDeletePatch(t *testing.T) {
 	topics, ok := out["topics"].(map[string]any)
 	if !ok || topics["job.pack1.ok"] == nil {
 		t.Fatalf("expected delete patch for topics")
+	}
+}
+
+func TestAcquirePackLocks_RetriesGlobalReleaseOnPackLockFailure(t *testing.T) {
+	var globalReleaseCalls int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Resource string `json:"resource"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/locks/acquire" && req.Resource == "packs:global":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/locks/acquire" && req.Resource == "pack:demo-pack":
+			http.Error(w, "pack lock unavailable", http.StatusConflict)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/locks/release" && req.Resource == "packs:global":
+			globalReleaseCalls++
+			if globalReleaseCalls == 1 {
+				http.Error(w, "transient global release failure", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s resource=%q", r.Method, r.URL.Path, req.Resource)
+		}
+	}))
+	defer srv.Close()
+
+	client := &restClient{baseURL: srv.URL, httpClient: srv.Client()}
+	release, err := acquirePackLocks(context.Background(), client, "demo-pack", "owner-1")
+	if err == nil {
+		t.Fatal("expected pack lock acquisition error")
+	}
+	if globalReleaseCalls != 1 {
+		t.Fatalf("expected one immediate global release attempt, got %d", globalReleaseCalls)
+	}
+
+	release()
+	if globalReleaseCalls != 2 {
+		t.Fatalf("expected cleanup to retry global release, got %d calls", globalReleaseCalls)
+	}
+
+	release()
+	if globalReleaseCalls != 2 {
+		t.Fatalf("expected cleanup to become a no-op after successful release, got %d calls", globalReleaseCalls)
+	}
+}
+
+func TestRollbackPackInstallWithHooks_ReversesInstallOrderPerStage(t *testing.T) {
+	tests := []struct {
+		name      string
+		policies  []appliedPolicyChange
+		configs   []appliedConfigChange
+		workflows []workflowPlan
+		schemas   []schemaPlan
+		want      []string
+	}{
+		{
+			name: "schema stage failure rolls back schemas only",
+			schemas: []schemaPlan{
+				{ID: "schema.one"},
+				{ID: "schema.two"},
+			},
+			want: []string{
+				"schema:schema.two",
+				"schema:schema.one",
+			},
+		},
+		{
+			name: "workflow stage failure rolls back workflows before schemas",
+			workflows: []workflowPlan{
+				{ID: "workflow.one"},
+				{ID: "workflow.two"},
+			},
+			schemas: []schemaPlan{
+				{ID: "schema.one"},
+			},
+			want: []string{
+				"workflow:workflow.two",
+				"workflow:workflow.one",
+				"schema:schema.one",
+			},
+		},
+		{
+			name: "config stage failure rolls back config overlays before workflows and schemas",
+			configs: []appliedConfigChange{
+				{Overlay: packAppliedConfigOverlay{Name: "config.one"}},
+				{Overlay: packAppliedConfigOverlay{Name: "config.two"}},
+			},
+			workflows: []workflowPlan{
+				{ID: "workflow.one"},
+			},
+			schemas: []schemaPlan{
+				{ID: "schema.one"},
+			},
+			want: []string{
+				"config:config.two",
+				"config:config.one",
+				"workflow:workflow.one",
+				"schema:schema.one",
+			},
+		},
+		{
+			name: "policy stage failure rolls back policies before configs workflows and schemas",
+			policies: []appliedPolicyChange{
+				{Overlay: packAppliedPolicyOverlay{Name: "policy.one", FragmentID: "pack/policy.one"}},
+				{Overlay: packAppliedPolicyOverlay{Name: "policy.two", FragmentID: "pack/policy.two"}},
+			},
+			configs: []appliedConfigChange{
+				{Overlay: packAppliedConfigOverlay{Name: "config.one"}},
+			},
+			workflows: []workflowPlan{
+				{ID: "workflow.one"},
+			},
+			schemas: []schemaPlan{
+				{ID: "schema.one"},
+			},
+			want: []string{
+				"policy:policy.two",
+				"policy:policy.one",
+				"config:config.one",
+				"workflow:workflow.one",
+				"schema:schema.one",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			hooks := packInstallRollbackHooks{
+				restorePolicyOverlay: func(_ context.Context, _ *restClient, change appliedPolicyChange) error {
+					got = append(got, "policy:"+change.Overlay.Name)
+					return nil
+				},
+				restoreConfigOverlay: func(_ context.Context, _ *restClient, change appliedConfigChange) error {
+					got = append(got, "config:"+change.Overlay.Name)
+					return nil
+				},
+				rollbackWorkflow: func(_ context.Context, _ *restClient, plan workflowPlan) error {
+					got = append(got, "workflow:"+plan.ID)
+					return nil
+				},
+				rollbackSchema: func(_ context.Context, _ *restClient, plan schemaPlan) error {
+					got = append(got, "schema:"+plan.ID)
+					return nil
+				},
+			}
+
+			rollbackPackInstallWithHooks(
+				context.Background(),
+				nil,
+				tt.policies,
+				tt.configs,
+				tt.workflows,
+				tt.schemas,
+				hooks,
+			)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("rollback order mismatch\n got: %v\nwant: %v", got, tt.want)
+			}
+		})
 	}
 }
 

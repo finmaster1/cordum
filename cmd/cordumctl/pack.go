@@ -236,6 +236,9 @@ func runPackInstall(args []string) {
 	}
 	owner := lockOwner()
 	release, err := acquirePackLocks(ctx, client, manifest.Metadata.ID, owner)
+	if err != nil {
+		release()
+	}
 	check(err)
 	defer release()
 
@@ -265,26 +268,7 @@ func runPackInstall(args []string) {
 	}
 
 	rollback := func() {
-		for i := len(appliedConfigChanges) - 1; i >= 0; i-- {
-			if err := restoreConfigOverlay(ctx, client, appliedConfigChanges[i]); err != nil {
-				slog.Warn("pack install rollback: restore config overlay failed", "error", err, "index", i)
-			}
-		}
-		for i := len(appliedPolicyChanges) - 1; i >= 0; i-- {
-			if err := restorePolicyOverlay(ctx, client, appliedPolicyChanges[i]); err != nil {
-				slog.Warn("pack install rollback: restore policy overlay failed", "error", err, "index", i)
-			}
-		}
-		for i := len(appliedWorkflows) - 1; i >= 0; i-- {
-			if err := rollbackWorkflow(ctx, client, appliedWorkflows[i]); err != nil {
-				slog.Warn("pack install rollback: rollback workflow failed", "error", err, "index", i)
-			}
-		}
-		for i := len(appliedSchemas) - 1; i >= 0; i-- {
-			if err := rollbackSchema(ctx, client, appliedSchemas[i]); err != nil {
-				slog.Warn("pack install rollback: rollback schema failed", "error", err, "index", i)
-			}
-		}
+		rollbackPackInstall(ctx, client, appliedPolicyChanges, appliedConfigChanges, appliedWorkflows, appliedSchemas)
 	}
 
 	installFail := func(err error) {
@@ -381,6 +365,9 @@ func runPackUninstall(args []string) {
 	ctx := context.Background()
 	owner := lockOwner()
 	release, err := acquirePackLocks(ctx, client, packID, owner)
+	if err != nil {
+		release()
+	}
 	check(err)
 	defer release()
 
@@ -513,6 +500,68 @@ type appliedPolicyChange struct {
 	Overlay     packAppliedPolicyOverlay
 	Previous    any
 	HadPrevious bool
+}
+
+type packInstallRollbackHooks struct {
+	restorePolicyOverlay func(context.Context, *restClient, appliedPolicyChange) error
+	restoreConfigOverlay func(context.Context, *restClient, appliedConfigChange) error
+	rollbackWorkflow     func(context.Context, *restClient, workflowPlan) error
+	rollbackSchema       func(context.Context, *restClient, schemaPlan) error
+}
+
+func rollbackPackInstall(
+	ctx context.Context,
+	client *restClient,
+	appliedPolicyChanges []appliedPolicyChange,
+	appliedConfigChanges []appliedConfigChange,
+	appliedWorkflows []workflowPlan,
+	appliedSchemas []schemaPlan,
+) {
+	rollbackPackInstallWithHooks(
+		ctx,
+		client,
+		appliedPolicyChanges,
+		appliedConfigChanges,
+		appliedWorkflows,
+		appliedSchemas,
+		packInstallRollbackHooks{
+			restorePolicyOverlay: restorePolicyOverlay,
+			restoreConfigOverlay: restoreConfigOverlay,
+			rollbackWorkflow:     rollbackWorkflow,
+			rollbackSchema:       rollbackSchema,
+		},
+	)
+}
+
+func rollbackPackInstallWithHooks(
+	ctx context.Context,
+	client *restClient,
+	appliedPolicyChanges []appliedPolicyChange,
+	appliedConfigChanges []appliedConfigChange,
+	appliedWorkflows []workflowPlan,
+	appliedSchemas []schemaPlan,
+	hooks packInstallRollbackHooks,
+) {
+	for i := len(appliedPolicyChanges) - 1; i >= 0; i-- {
+		if err := hooks.restorePolicyOverlay(ctx, client, appliedPolicyChanges[i]); err != nil {
+			slog.Warn("pack install rollback: restore policy overlay failed", "error", err, "index", i)
+		}
+	}
+	for i := len(appliedConfigChanges) - 1; i >= 0; i-- {
+		if err := hooks.restoreConfigOverlay(ctx, client, appliedConfigChanges[i]); err != nil {
+			slog.Warn("pack install rollback: restore config overlay failed", "error", err, "index", i)
+		}
+	}
+	for i := len(appliedWorkflows) - 1; i >= 0; i-- {
+		if err := hooks.rollbackWorkflow(ctx, client, appliedWorkflows[i]); err != nil {
+			slog.Warn("pack install rollback: rollback workflow failed", "error", err, "index", i)
+		}
+	}
+	for i := len(appliedSchemas) - 1; i >= 0; i-- {
+		if err := hooks.rollbackSchema(ctx, client, appliedSchemas[i]); err != nil {
+			slog.Warn("pack install rollback: rollback schema failed", "error", err, "index", i)
+		}
+	}
 }
 
 func planSchemas(ctx context.Context, client *restClient, dir string, manifest *packManifest, upgrade bool) ([]schemaPlan, error) {
@@ -1239,20 +1288,36 @@ func acquirePackLocks(ctx context.Context, client *restClient, packID, owner str
 	if err := client.acquireLock(ctx, global, owner, 60*time.Second); err != nil {
 		return func() {}, fmt.Errorf("acquire pack locks: %w", err)
 	}
-	packLock := "pack:" + packID
-	if err := client.acquireLock(ctx, packLock, owner, 60*time.Second); err != nil {
-		if relErr := client.releaseLock(ctx, global, owner); relErr != nil {
-			slog.Warn("pack: failed to release lock", "lock", global, "owner", owner, "error", relErr)
-		}
-		return func() {}, fmt.Errorf("acquire pack locks: %w", err)
-	}
-	return func() {
-		if err := client.releaseLock(ctx, packLock, owner); err != nil {
-			slog.Warn("pack: failed to release lock", "lock", packLock, "owner", owner, "error", err)
+	globalReleased := false
+	releaseGlobal := func() {
+		if globalReleased {
+			return
 		}
 		if err := client.releaseLock(ctx, global, owner); err != nil {
 			slog.Warn("pack: failed to release lock", "lock", global, "owner", owner, "error", err)
+			return
 		}
+		globalReleased = true
+	}
+	packLock := "pack:" + packID
+	if err := client.acquireLock(ctx, packLock, owner, 60*time.Second); err != nil {
+		releaseGlobal()
+		return releaseGlobal, fmt.Errorf("acquire pack locks: %w", err)
+	}
+	packReleased := false
+	releasePack := func() {
+		if packReleased {
+			return
+		}
+		if err := client.releaseLock(ctx, packLock, owner); err != nil {
+			slog.Warn("pack: failed to release lock", "lock", packLock, "owner", owner, "error", err)
+			return
+		}
+		packReleased = true
+	}
+	return func() {
+		releasePack()
+		releaseGlobal()
 	}, nil
 }
 

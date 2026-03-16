@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -294,5 +296,120 @@ func TestSplitCommaEdgeCases(t *testing.T) {
 		if len(got) != tc.want {
 			t.Errorf("splitComma(%q) = %v (len %d), want len %d", tc.input, got, len(got), tc.want)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: reorderArgs fixes flag parsing after positional args
+// ---------------------------------------------------------------------------
+
+func TestReorderArgsFlagsAfterPositional(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.String("input", "", "input json")
+	fs.Bool("dry-run", false, "dry run")
+
+	args := []string{"my-workflow", "--input", `{"key":"val"}`, "--dry-run"}
+	got := reorderArgs(fs, args)
+	want := []string{"--input", `{"key":"val"}`, "--dry-run", "my-workflow"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestReorderArgsFlagsBeforePositional(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.String("input", "", "input json")
+	fs.Bool("dry-run", false, "dry run")
+
+	// Already correct order — should be unchanged.
+	args := []string{"--input", `{"key":"val"}`, "--dry-run", "my-workflow"}
+	got := reorderArgs(fs, args)
+	want := []string{"--input", `{"key":"val"}`, "--dry-run", "my-workflow"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestReorderArgsDoubleDashStopsProcessing(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.String("input", "", "input json")
+
+	args := []string{"--", "--input", "value"}
+	got := reorderArgs(fs, args)
+	// Everything after -- should remain positional.
+	want := []string{"--", "--input", "value"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestReorderArgsInlineEquals(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.String("input", "", "input json")
+
+	args := []string{"my-workflow", "--input=data.json"}
+	got := reorderArgs(fs, args)
+	want := []string{"--input=data.json", "my-workflow"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestReorderArgsMixedOrder(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.Bool("approve", false, "approve")
+	fs.Bool("reject", false, "reject")
+
+	// Simulates: cordumctl approval job <job_id> --approve
+	args := []string{"job-123", "--approve"}
+	got := reorderArgs(fs, args)
+	want := []string{"--approve", "job-123"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestReorderArgsNoFlags(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	args := []string{"pos1", "pos2"}
+	got := reorderArgs(fs, args)
+	want := []string{"pos1", "pos2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs = %v, want %v", got, want)
+	}
+}
+
+func TestReorderArgsEmpty(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	got := reorderArgs(fs, []string{})
+	if len(got) != 0 {
+		t.Fatalf("expected empty, got %v", got)
+	}
+}
+
+func TestParseArgsFlagAfterPositional(t *testing.T) {
+	// End-to-end test: verify that ParseArgs correctly parses flags
+	// placed after positional arguments.
+	t.Setenv("CORDUM_GATEWAY", "http://localhost:8081")
+	t.Setenv("CORDUM_API_KEY", "")
+	t.Setenv("CORDUM_TENANT_ID", "default")
+	t.Setenv("CORDUM_TLS_CA", "")
+	t.Setenv("CORDUM_TLS_INSECURE", "")
+
+	fs := newFlagSet("run start")
+	input := fs.String("input", "", "input json")
+	dryRun := fs.Bool("dry-run", false, "dry run mode")
+
+	// Simulate: cordumctl run start my-workflow --input '{"k":"v"}' --dry-run
+	fs.ParseArgs([]string{"my-workflow", "--input", `{"k":"v"}`, "--dry-run"})
+
+	if *input != `{"k":"v"}` {
+		t.Fatalf("expected input flag parsed, got %q", *input)
+	}
+	if !*dryRun {
+		t.Fatal("expected dry-run=true")
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "my-workflow" {
+		t.Fatalf("expected positional arg 'my-workflow', got %v", fs.Args())
 	}
 }

@@ -39,4 +39,6 @@ type JobStore interface {
 	GetFailureReason(ctx context.Context, jobID string) (string, error)
 	SetOutputDecision(ctx context.Context, jobID string, record OutputSafetyRecord) error
 	GetOutputDecision(ctx context.Context, jobID string) (OutputSafetyRecord, error)
+	// Worker tracking
+	SetWorkerID(ctx context.Context, jobID, workerID string) error
 }

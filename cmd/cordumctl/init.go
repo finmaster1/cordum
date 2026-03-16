@@ -234,7 +234,7 @@ tenants:
 func runInitCmd(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	force := fs.Bool("force", false, "overwrite existing files")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
 		fail(err.Error())
 	}
 	if fs.NArg() < 1 {

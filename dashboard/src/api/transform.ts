@@ -34,6 +34,7 @@ import type {
 
 export interface BackendJobRecord {
   id: string;
+  worker_id?: string;
   trace_id?: string;
   updated_at?: number;
   state?: string;
@@ -533,6 +534,7 @@ export function mapJobRecord(record: BackendJobRecord): Job {
   );
   return {
     id,
+    workerId: record.worker_id,
     type: record.topic || "",
     topic: record.topic || "",
     status: normalizeJobStatus(record.state),

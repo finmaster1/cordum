@@ -920,6 +920,110 @@ func TestCachedDecisionNotServedAfterPolicyNil(t *testing.T) {
 	}
 }
 
+func TestEvaluatePanicRecoveryReturnsDeny(t *testing.T) {
+	// SECURITY: If policy.Evaluate() panics (e.g., malformed topic causes regex panic),
+	// the safety kernel must return DENY (fail-closed), not ALLOW (fail-open).
+	srv := &server{}
+	policy := &config.SafetyPolicy{
+		DefaultTenant: "default",
+		Tenants: map[string]config.TenantPolicy{
+			"default": {AllowTopics: []string{"job.*"}},
+		},
+	}
+	srv.setPolicy(policy, "snap-panic")
+
+	// Inject a panic via the test hook.
+	origHook := policyEvalTestHook
+	policyEvalTestHook = func() { panic("simulated policy evaluation panic") }
+	t.Cleanup(func() { policyEvalTestHook = origHook })
+
+	req := &pb.PolicyCheckRequest{
+		JobId:  "job-panic",
+		Topic:  "job.test",
+		Tenant: "default",
+	}
+
+	resp, err := srv.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("evaluate should not return error on panic recovery: %v", err)
+	}
+	if resp.GetDecision() != pb.DecisionType_DECISION_TYPE_DENY {
+		t.Fatalf("FAIL-OPEN BUG: panic during evaluation should deny, got %v", resp.GetDecision())
+	}
+	if !strings.Contains(resp.GetReason(), "policy evaluation panic") {
+		t.Fatalf("expected panic reason, got %q", resp.GetReason())
+	}
+	if !strings.Contains(resp.GetReason(), "simulated") {
+		t.Fatalf("expected panic value in reason, got %q", resp.GetReason())
+	}
+}
+
+func TestEvaluatePanicRecoveryWithNilMapAccess(t *testing.T) {
+	// Simulate a nil map access panic (a realistic panic scenario).
+	srv := &server{}
+	policy := &config.SafetyPolicy{
+		DefaultTenant: "default",
+		Tenants: map[string]config.TenantPolicy{
+			"default": {AllowTopics: []string{"job.*"}},
+		},
+	}
+	srv.setPolicy(policy, "snap-nilmap")
+
+	origHook := policyEvalTestHook
+	policyEvalTestHook = func() {
+		var m map[string]string
+		_ = m["trigger"] // safe — won't panic
+		// Force a nil pointer dereference to simulate realistic panic.
+		var p *config.SafetyPolicy
+		_ = p.DefaultTenant
+	}
+	t.Cleanup(func() { policyEvalTestHook = origHook })
+
+	req := &pb.PolicyCheckRequest{
+		JobId:  "job-nilmap",
+		Topic:  "job.test",
+		Tenant: "default",
+	}
+
+	resp, err := srv.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("evaluate should not return error on panic recovery: %v", err)
+	}
+	if resp.GetDecision() != pb.DecisionType_DECISION_TYPE_DENY {
+		t.Fatalf("FAIL-OPEN BUG: nil map panic should deny, got %v", resp.GetDecision())
+	}
+	if !strings.Contains(resp.GetReason(), "policy evaluation panic") {
+		t.Fatalf("expected panic reason, got %q", resp.GetReason())
+	}
+}
+
+func TestEvaluateDefaultDecisionIsDeny(t *testing.T) {
+	// Verify the default decision variable is DENY, not ALLOW.
+	// An unrecognized policy decision string should result in DENY.
+	srv := &server{}
+	policy := &config.SafetyPolicy{
+		DefaultDecision: "unknown_decision_value",
+		DefaultTenant:   "default",
+	}
+	srv.setPolicy(policy, "snap-default")
+
+	req := &pb.PolicyCheckRequest{
+		JobId:  "job-default",
+		Topic:  "job.test",
+		Tenant: "default",
+	}
+
+	resp, err := srv.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("evaluate error: %v", err)
+	}
+	// The policy returns an unrecognized decision string ("unknown_decision_value"),
+	// which doesn't match any case in the switch. Default decision must be DENY.
+	if resp.GetDecision() == pb.DecisionType_DECISION_TYPE_ALLOW {
+		t.Fatalf("FAIL-OPEN BUG: unrecognized policy decision should not result in ALLOW")
+	}
+}
+
 func TestWatchPolicyReloadFailureKeepsOldPolicy(t *testing.T) {
 	t.Setenv("SAFETY_POLICY_RELOAD_INTERVAL", "50ms")
 

@@ -347,16 +347,16 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			parent.CompletedAt = nil
 		} else {
 			parent.Status = aggregateChildren(parent)
-			if parent.Status == StepStatusSucceeded || parent.Status == StepStatusFailed {
+			if parent.Status == StepStatusSucceeded || parent.Status == StepStatusFailed || parent.Status == StepStatusTimedOut {
 				parent.CompletedAt = &now
 			}
 		}
-		// Cancel running/pending forEach siblings when parent fails.
-		if parent.Status == StepStatusFailed && stepDef != nil && stepDef.ForEach != "" {
+		// Cancel running/pending forEach siblings when parent fails or times out.
+		if (parent.Status == StepStatusFailed || parent.Status == StepStatusTimedOut) && stepDef != nil && stepDef.ForEach != "" {
 			e.cancelForEachSiblings(ctx, run, parent, now)
 		}
 		run.Steps[baseStepID] = parent
-		if parent.Status == StepStatusFailed {
+		if parent.Status == StepStatusFailed || parent.Status == StepStatusTimedOut {
 			e.activateOnErrorHandler(ctx, run, wfDef, baseStepID, parent, now)
 		}
 		if retry && delay > 0 {
@@ -654,13 +654,47 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				continue
 			}
 
-			// Approval steps pause until explicitly approved/denied.
+			// Approval steps dispatch a gate job so they appear in the unified
+			// /approvals list. The scheduler places the job in APPROVAL_REQUIRED
+			// state; once approved, it auto-completes and the result flows back
+			// through HandleJobResult to advance the workflow.
 			if step.Type == StepTypeApproval {
 				if parentSR.Status == "" || parentSR.Status == StepStatusPending {
+					jobID := fmt.Sprintf("%s:%s@1", run.ID, stepID)
+					req := e.buildApprovalGateRequest(wfDef, run, step, stepID, jobID)
+
 					parentSR.Status = StepStatusWaiting
 					parentSR.StartedAt = &now
+					parentSR.JobID = jobID
+					parentSR.Attempts = 1
 					run.Status = RunStatusWaiting
-					e.appendTimeline(ctx, run, "step_waiting", stepID, "", string(parentSR.Status), "", "approval requested", nil)
+					run.Steps[stepID] = parentSR
+
+					if err := e.store.UpdateRun(ctx, run); err != nil {
+						logging.Error("workflow-engine", "approval gate pre-dispatch persist failed", "run_id", run.ID, "step_id", stepID, "error", err)
+						parentSR.Status = StepStatusPending
+						parentSR.JobID = ""
+						parentSR.Attempts = 0
+						parentSR.StartedAt = nil
+						run.Steps[stepID] = parentSR
+						continue
+					}
+
+					packet := makeJobPacket(run.ID, req)
+					if err := e.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
+						logging.Error("workflow-engine", "approval gate dispatch failed", "run_id", run.ID, "step_id", stepID, "error", err)
+						parentSR.Status = StepStatusPending
+						parentSR.JobID = ""
+						parentSR.Attempts = 0
+						parentSR.StartedAt = nil
+						run.Steps[stepID] = parentSR
+						_ = e.store.UpdateRun(ctx, run)
+					} else {
+						e.appendTimeline(ctx, run, "step_waiting", stepID, jobID, string(parentSR.Status), "", "approval requested", nil)
+						if e.OnStepDispatched != nil {
+							e.OnStepDispatched(run.ID, stepID, jobID)
+						}
+					}
 				}
 				run.Steps[stepID] = parentSR
 				continue
@@ -2034,6 +2068,11 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.Status = StepStatusFailed
 				parentSR.Error = map[string]any{"message": err.Error()}
 				run.Steps[stepID] = parentSR
+				logging.Error("workflow-engine", "step input build failed", "run_id", run.ID, "step_id", stepID, "error", err)
+				e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
+				if e.OnStepFinished != nil {
+					e.OnStepFinished(run.ID, stepID, parentSR.Status)
+				}
 				continue
 			}
 			if ptr, err := e.putJobContext(ctx, jobID, payload); err != nil {
@@ -2041,6 +2080,11 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.Error = map[string]any{"message": err.Error()}
 				parentSR.Input = payload
 				run.Steps[stepID] = parentSR
+				logging.Error("workflow-engine", "step context store failed", "run_id", run.ID, "step_id", stepID, "job_id", jobID, "error", err)
+				e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
+				if e.OnStepFinished != nil {
+					e.OnStepFinished(run.ID, stepID, parentSR.Status)
+				}
 				continue
 			} else if ptr != "" {
 				req.ContextPtr = ptr

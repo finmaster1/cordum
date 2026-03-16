@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,90 @@ import (
 )
 
 // ---- Workflow REST Handlers ----
+
+const (
+	workflowAdmissionLockTTL        = 10 * time.Second
+	workflowAdmissionLockRetryDelay = 10 * time.Millisecond
+	workflowAdmissionLockMaxWait    = 2 * time.Second
+)
+
+func workflowAdmissionLockKey(orgID string) string {
+	return "cordum:wf:run:admission:" + strings.TrimSpace(orgID)
+}
+
+func cleanupRunIdempotencyReservation(ctx context.Context, idempotencyKey, runID, failureContext string, deleteFn func(context.Context, string) error) {
+	if deleteFn == nil || strings.TrimSpace(idempotencyKey) == "" {
+		return
+	}
+	if err := deleteFn(ctx, idempotencyKey); err != nil {
+		logging.Error("api-gateway", failureContext, "key", idempotencyKey, "run_id", runID, "error", err)
+	}
+}
+
+type runFailurePersistenceStore interface {
+	GetRun(context.Context, string) (*wf.WorkflowRun, error)
+	UpdateRun(context.Context, *wf.WorkflowRun) error
+	AppendTimelineEvent(context.Context, string, *wf.TimelineEvent) error
+}
+
+func markRunFailedAfterStartError(ctx context.Context, workflowStore runFailurePersistenceStore, runID string, startErr error, updateLogMessage, timelineLogMessage string) {
+	if workflowStore == nil || startErr == nil {
+		return
+	}
+	failedRun, err := workflowStore.GetRun(ctx, runID)
+	if err != nil || failedRun == nil {
+		return
+	}
+	failedRun.Status = wf.RunStatusFailed
+	now := time.Now().UTC()
+	failedRun.CompletedAt = &now
+	if failedRun.Error == nil {
+		failedRun.Error = map[string]any{"message": startErr.Error()}
+	} else {
+		failedRun.Error["message"] = startErr.Error()
+	}
+	if updateErr := workflowStore.UpdateRun(ctx, failedRun); updateErr != nil {
+		logging.Error("api-gateway", updateLogMessage, "run_id", runID, "error", updateErr)
+	}
+	if timelineErr := workflowStore.AppendTimelineEvent(ctx, failedRun.ID, &wf.TimelineEvent{
+		Type:    "run_status",
+		Status:  string(wf.RunStatusFailed),
+		Message: startErr.Error(),
+	}); timelineErr != nil {
+		logging.Error("api-gateway", timelineLogMessage, "run_id", runID, "error", timelineErr)
+	}
+}
+
+func (s *server) acquireWorkflowAdmissionLock(ctx context.Context, orgID string) (func(), error) {
+	if s == nil || s.jobStore == nil || strings.TrimSpace(orgID) == "" {
+		return func() {}, nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, workflowAdmissionLockMaxWait)
+	defer cancel()
+	lockKey := workflowAdmissionLockKey(orgID)
+	for {
+		token, err := s.jobStore.TryAcquireLock(waitCtx, lockKey, workflowAdmissionLockTTL)
+		if err != nil {
+			return nil, err
+		}
+		if token != "" {
+			return func() {
+				releaseCtx, releaseCancel := context.WithTimeout(context.Background(), time.Second)
+				defer releaseCancel()
+				if err := s.jobStore.ReleaseLock(releaseCtx, lockKey, token); err != nil {
+					logging.Error("api-gateway", "release workflow admission lock failed", "org_id", orgID, "error", err)
+				}
+			}, nil
+		}
+		timer := time.NewTimer(workflowAdmissionLockRetryDelay)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return nil, waitCtx.Err()
+		case <-timer.C:
+		}
+	}
+}
 
 type createWorkflowRequest struct {
 	ID          string             `json:"id"`
@@ -313,16 +398,22 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dryRun := parseBool(r.URL.Query().Get("dry_run"))
-	idempotencyKey := idempotencyKeyFromRequest(r)
-	if idempotencyKey != "" {
-		if existingID, err := s.workflowStore.GetRunByIdempotencyKey(r.Context(), idempotencyKey); err == nil && existingID != "" {
-			w.Header().Set("Content-Type", "application/json")
-			writeJSON(w, map[string]string{"run_id": existingID})
+	limit := s.maxConcurrentRuns(r.Context(), orgID, teamID)
+	var releaseAdmissionLock func()
+	if limit > 0 {
+		releaseAdmissionLock, err = s.acquireWorkflowAdmissionLock(r.Context(), orgID)
+		if err != nil {
+			logging.Error("api-gateway", "workflow admission lock failed", "org_id", orgID, "error", err)
+			writeErrorJSON(w, http.StatusServiceUnavailable, "workflow concurrency gate unavailable")
 			return
-		} else if err != nil && !errors.Is(err, redis.Nil) {
-			logging.Error("api-gateway", "run idempotency lookup failed", "error", err)
 		}
+		defer func() {
+			if releaseAdmissionLock != nil {
+				releaseAdmissionLock()
+			}
+		}()
 	}
+	idempotencyKey := idempotencyKeyFromRequest(r)
 	runID := uuid.NewString()
 	reservedKey := false
 	if idempotencyKey != "" {
@@ -336,14 +427,40 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				writeJSON(w, map[string]string{"run_id": existingID})
 				return
+			} else if err != nil && !errors.Is(err, redis.Nil) {
+				logging.Error("api-gateway", "run idempotency lookup failed", "error", err)
 			}
 			writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
 			return
 		}
 		reservedKey = true
 	}
-	if limit := s.maxConcurrentRuns(r.Context(), orgID, teamID); limit > 0 {
-		if count, err := s.workflowStore.CountActiveRuns(r.Context(), orgID); err == nil && count >= limit {
+	if limit > 0 {
+		count, err := s.workflowStore.CountActiveRuns(r.Context(), orgID)
+		if err != nil {
+			if reservedKey && idempotencyKey != "" {
+				cleanupRunIdempotencyReservation(
+					r.Context(),
+					idempotencyKey,
+					runID,
+					"failed to cleanup idempotency key after active run count failure",
+					s.workflowStore.DeleteRunIdempotencyKey,
+				)
+			}
+			logging.Error("api-gateway", "count active runs failed", "org_id", orgID, "error", err)
+			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to enforce max concurrent runs")
+			return
+		}
+		if count >= limit {
+			if reservedKey && idempotencyKey != "" {
+				cleanupRunIdempotencyReservation(
+					r.Context(),
+					idempotencyKey,
+					runID,
+					"failed to cleanup idempotency key after concurrency limit rejection",
+					s.workflowStore.DeleteRunIdempotencyKey,
+				)
+			}
 			writeErrorJSON(w, http.StatusTooManyRequests, "max concurrent runs reached")
 			return
 		}
@@ -367,11 +484,21 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.workflowStore.CreateRun(r.Context(), run); err != nil {
 		if reservedKey && idempotencyKey != "" {
-			_ = s.workflowStore.DeleteRunIdempotencyKey(r.Context(), idempotencyKey)
+			cleanupRunIdempotencyReservation(
+				r.Context(),
+				idempotencyKey,
+				runID,
+				"failed to cleanup idempotency key after run creation failure",
+				s.workflowStore.DeleteRunIdempotencyKey,
+			)
 		}
 		logging.Error("api-gateway", "run create failed", "error", err, "run_id", runID)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to create run")
 		return
+	}
+	if releaseAdmissionLock != nil {
+		releaseAdmissionLock()
+		releaseAdmissionLock = nil
 	}
 	// Kick off execution
 	if s.workflowEng != nil {
@@ -395,6 +522,12 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		}()
 		if startErr != nil {
 			logging.Error("api-gateway", "start workflow run failed", "workflow_id", wfID, "run_id", runID, "error", startErr)
+			markRunFailedAfterStartError(r.Context(), s.workflowStore, runID, startErr, "failed to persist run failure status", "failed to append run failure timeline event")
+		}
+		if startErr == nil && s.workflowStore != nil {
+			if updated, err := s.workflowStore.GetRun(r.Context(), runID); err == nil && updated != nil && updated.Status == wf.RunStatusFailed {
+				logging.Warn("api-gateway", "run failed during initialization", "run_id", runID, "workflow_id", wfID)
+			}
 		}
 	}
 	startWfName := ""
@@ -438,8 +571,27 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
 		return
 	}
-	if limit := s.maxConcurrentRuns(r.Context(), origRun.OrgID, origRun.TeamID); limit > 0 {
-		if count, err := s.workflowStore.CountActiveRuns(r.Context(), origRun.OrgID); err == nil && count >= limit {
+	limit := s.maxConcurrentRuns(r.Context(), origRun.OrgID, origRun.TeamID)
+	var releaseAdmissionLock func()
+	if limit > 0 {
+		releaseAdmissionLock, err = s.acquireWorkflowAdmissionLock(r.Context(), origRun.OrgID)
+		if err != nil {
+			logging.Error("api-gateway", "workflow admission lock failed", "org_id", origRun.OrgID, "error", err)
+			writeErrorJSON(w, http.StatusServiceUnavailable, "workflow concurrency gate unavailable")
+			return
+		}
+		defer func() {
+			if releaseAdmissionLock != nil {
+				releaseAdmissionLock()
+			}
+		}()
+		count, err := s.workflowStore.CountActiveRuns(r.Context(), origRun.OrgID)
+		if err != nil {
+			logging.Error("api-gateway", "count active reruns failed", "org_id", origRun.OrgID, "error", err)
+			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to enforce max concurrent runs")
+			return
+		}
+		if count >= limit {
 			writeErrorJSON(w, http.StatusTooManyRequests, "max concurrent runs reached")
 			return
 		}
@@ -454,6 +606,10 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 		logging.Error("api-gateway", "run rerun failed", "error", err, "run_id", runID)
 		writeErrorJSON(w, http.StatusBadRequest, "rerun failed")
 		return
+	}
+	if releaseAdmissionLock != nil {
+		releaseAdmissionLock()
+		releaseAdmissionLock = nil
 	}
 	newRun, err := s.workflowStore.GetRun(r.Context(), newID)
 	if err != nil || newRun == nil {
@@ -481,6 +637,7 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 	}()
 	if startErr != nil {
 		logging.Error("api-gateway", "start rerun failed", "workflow_id", wfID, "run_id", newID, "error", startErr)
+		markRunFailedAfterStartError(r.Context(), s.workflowStore, newID, startErr, "failed to persist rerun failure status", "failed to append rerun failure timeline event")
 	}
 	rerunWfName := ""
 	if s.workflowStore != nil {

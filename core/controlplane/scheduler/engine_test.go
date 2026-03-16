@@ -299,6 +299,10 @@ func (s *fakeJobStore) GetOutputDecision(_ context.Context, jobID string) (Outpu
 	return s.output[jobID], nil
 }
 
+func (s *fakeJobStore) SetWorkerID(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (s *fakeJobStore) IncrAttempts(_ context.Context, jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

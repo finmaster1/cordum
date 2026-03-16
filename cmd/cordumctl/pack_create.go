@@ -14,7 +14,7 @@ func runPackCreate(args []string) {
 	fs := flag.NewFlagSet("pack create", flag.ExitOnError)
 	dir := fs.String("dir", "", "output directory (defaults to pack id)")
 	force := fs.Bool("force", false, "overwrite existing files")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
 		fail(err.Error())
 	}
 	if fs.NArg() < 1 {

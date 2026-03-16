@@ -14,6 +14,7 @@ topics:
   job.notification-service.process: notification-service
   job.valuation-agents.process: valuation-agents
   job.underwriting-agents.process: underwriting-agents
+  job.cordum.approval-gate: approval-gates
 pools:
   default:
     requires: []
@@ -44,4 +45,6 @@ pools:
   valuation-agents:
     requires: []
   underwriting-agents:
+    requires: []
+  approval-gates:
     requires: []

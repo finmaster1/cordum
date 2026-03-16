@@ -114,6 +114,7 @@ interface ConfigState {
   // Auth
   user: User | null;
   isAuthenticated: boolean;
+  isLoggingOut: boolean;
   loginTimestamp: number | null;
   /** @internal Prevents tenant impersonation via store mutation after login. */
   tenantLocked: boolean;
@@ -128,7 +129,7 @@ interface ConfigState {
   refreshLoginTimestamp: () => void;
 }
 
-export const useConfigStore = create<ConfigState>((set) => {
+export const useConfigStore = create<ConfigState>((set, get) => {
   const savedUser = loadUser();
   return {
     apiBaseUrl: "",
@@ -140,6 +141,7 @@ export const useConfigStore = create<ConfigState>((set) => {
     approvalSlaMs: 900_000, // 15 minutes default
     user: savedUser,
     isAuthenticated: !!loadToken(),
+    isLoggingOut: false,
     loginTimestamp: loadLoginTimestamp(),
     tenantLocked: !!(savedUser?.tenant),
     loaded: true,
@@ -179,6 +181,7 @@ export const useConfigStore = create<ConfigState>((set) => {
         apiKey: token,
         user,
         isAuthenticated: true,
+        isLoggingOut: false,
         loginTimestamp: now,
         tenantId: user.tenant ?? "",
         principalId: user.id ?? "",
@@ -189,7 +192,12 @@ export const useConfigStore = create<ConfigState>((set) => {
     },
 
     logout: () => {
-      logger.info("config-store", "Logout");
+      const alreadyLoggingOut = get().isLoggingOut;
+      if (alreadyLoggingOut) {
+        logger.debug("config-store", "Logout skipped; already in progress");
+      } else {
+        logger.info("config-store", "Logout");
+      }
       persistToken("");
       persistUser(null);
       persistLoginTimestamp(null);
@@ -200,13 +208,16 @@ export const useConfigStore = create<ConfigState>((set) => {
         apiKey: "",
         user: null,
         isAuthenticated: false,
+        isLoggingOut: true,
         loginTimestamp: null,
         tenantId: "",
         principalId: "",
         principalRole: "",
         tenantLocked: false,
       });
-      broadcastSync({ type: "auth-logout" });
+      if (!alreadyLoggingOut) {
+        broadcastSync({ type: "auth-logout" });
+      }
     },
 
     refreshLoginTimestamp: () => {

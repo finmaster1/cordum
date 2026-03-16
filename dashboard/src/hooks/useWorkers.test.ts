@@ -149,7 +149,7 @@ describe("useWorkers hooks", () => {
       expect(hook.result.current?.isSuccess).toBe(true);
     });
 
-    expect(hook.result.current?.data?.[0]).toMatchObject({ id: "j1", state: "RUNNING" });
+    expect(hook.result.current?.data?.[0]).toMatchObject({ id: "j1", status: "running", topic: "sys.job.submit" });
     hook.unmount();
   });
 

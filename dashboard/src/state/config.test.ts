@@ -63,6 +63,7 @@ describe("useConfigStore", () => {
     expect(state.traceUrlTemplate).toBe("");
     expect(state.approvalSlaMs).toBe(900_000);
     expect(state.isAuthenticated).toBe(true);
+    expect(state.isLoggingOut).toBe(false);
     expect(state.loginTimestamp).toBe(1700000000000);
   });
 
@@ -106,6 +107,7 @@ describe("useConfigStore", () => {
     expect(state.apiKey).toBe("login-token");
     expect(state.user?.id).toBe("user-2");
     expect(state.isAuthenticated).toBe(true);
+    expect(state.isLoggingOut).toBe(false);
     expect(state.tenantId).toBe("tenant-b");
     expect(state.principalId).toBe("user-2");
     expect(state.principalRole).toBe("operator");
@@ -154,6 +156,7 @@ describe("useConfigStore", () => {
     expect(state.apiKey).toBe("");
     expect(state.user).toBeNull();
     expect(state.isAuthenticated).toBe(false);
+    expect(state.isLoggingOut).toBe(true);
     expect(state.loginTimestamp).toBeNull();
     expect(state.tenantId).toBe("");
     expect(state.principalId).toBe("");
@@ -163,6 +166,41 @@ describe("useConfigStore", () => {
     expect(window.localStorage.getItem(USER_KEY)).toBeNull();
     expect(window.localStorage.getItem(LOGIN_TS_KEY)).toBeNull();
     expect(broadcastSyncMock).toHaveBeenCalledWith({ type: "auth-logout" });
+  });
+
+  it("ignores duplicate logout calls until the next login", async () => {
+    const { useConfigStore } = await loadConfigModule();
+    useConfigStore.getState().login("token-1", {
+      id: "user-1",
+      username: "alice",
+      email: "alice@example.com",
+      display_name: "Alice",
+      roles: ["admin"],
+      tenant: "tenant-a",
+    });
+
+    useConfigStore.getState().logout();
+    useConfigStore.getState().logout();
+
+    expect(useConfigStore.getState().isLoggingOut).toBe(true);
+    expect(broadcastSyncMock).toHaveBeenCalledTimes(2);
+    expect(broadcastSyncMock).toHaveBeenNthCalledWith(1, {
+      type: "auth-login",
+      token: "token-1",
+      user: expect.objectContaining({ id: "user-1", tenant: "tenant-a" }),
+    });
+    expect(broadcastSyncMock).toHaveBeenNthCalledWith(2, { type: "auth-logout" });
+
+    useConfigStore.getState().login("token-2", {
+      id: "user-2",
+      username: "bob",
+      email: "bob@example.com",
+      display_name: "Bob",
+      roles: ["operator"],
+      tenant: "tenant-b",
+    });
+
+    expect(useConfigStore.getState().isLoggingOut).toBe(false);
   });
 
   it("refreshLoginTimestamp updates and persists timestamp", async () => {

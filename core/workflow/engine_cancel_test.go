@@ -451,3 +451,105 @@ func (b *countingCancelBus) Publish(subject string, packet *pb.BusPacket) error 
 }
 
 func (b *countingCancelBus) Subscribe(string, string, func(*pb.BusPacket) error) error { return nil }
+
+// ---------------------------------------------------------------------------
+// Bug regression: timed-out runs must cancel approval-waiting step jobs
+// ---------------------------------------------------------------------------
+
+func TestTimeoutRun_CancelsWaitingStepJobs(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis unavailable: %v", err)
+	}
+	defer srv.Close()
+
+	ws, err := NewRedisWorkflowStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("workflow store: %v", err)
+	}
+	defer ws.Close()
+
+	cancelCount := &atomic.Int32{}
+	bus := &countingCancelBus{cancelCount: cancelCount}
+	engine := NewEngine(ws, bus)
+
+	ctx := context.Background()
+	wfDef := &Workflow{
+		ID:         "wf-timeout-waiting",
+		OrgID:      "org",
+		TimeoutSec: 10,
+		Steps: map[string]*Step{
+			"s1": {ID: "s1", Type: StepTypeWorker, Topic: "job.test"},
+			"s2": {ID: "s2", Type: StepTypeWorker, Topic: "job.test"},
+		},
+	}
+	if err := ws.SaveWorkflow(ctx, wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	now := time.Now().UTC()
+	run := &WorkflowRun{
+		ID:         "run-timeout-waiting-1",
+		WorkflowID: wfDef.ID,
+		OrgID:      "org",
+		Status:     RunStatusWaiting,
+		Steps: map[string]*StepRun{
+			// s1: running step with a job (should be cancelled)
+			"s1": {StepID: "s1", Status: StepStatusRunning, JobID: "job-running-1"},
+			// s2: waiting step with a job in APPROVAL_REQUIRED (should also be cancelled)
+			"s2": {StepID: "s2", Status: StepStatusWaiting, JobID: "job-approval-1"},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := ws.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.timeoutRun(ctx, wfDef, run, now); err != nil {
+		t.Fatalf("timeoutRun: %v", err)
+	}
+
+	// Both jobs should have received cancel publishes.
+	if got := cancelCount.Load(); got != 2 {
+		t.Fatalf("expected 2 cancel publishes (running + waiting), got %d", got)
+	}
+
+	// Verify both steps are timed out.
+	updated, err := ws.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	for _, stepID := range []string{"s1", "s2"} {
+		sr := updated.Steps[stepID]
+		if sr == nil {
+			t.Fatalf("step %s not found", stepID)
+		}
+		if sr.Status != StepStatusTimedOut {
+			t.Fatalf("step %s: expected TimedOut, got %s", stepID, sr.Status)
+		}
+	}
+}
+
+func TestCollectCancelableJobs_IncludesWaitingSteps(t *testing.T) {
+	// Verify collectCancelableJobs collects jobs from both Running and Waiting steps.
+	sr := &StepRun{
+		StepID: "s1",
+		Status: StepStatusWaiting,
+		JobID:  "job-waiting-1",
+	}
+	jobs := collectCancelableJobs(sr)
+	if len(jobs) != 1 || jobs[0] != "job-waiting-1" {
+		t.Fatalf("expected [job-waiting-1], got %v", jobs)
+	}
+
+	// Waiting step without JobID should return nothing.
+	srNoJob := &StepRun{
+		StepID: "approval-gate",
+		Status: StepStatusWaiting,
+	}
+	jobs = collectCancelableJobs(srNoJob)
+	if len(jobs) != 0 {
+		t.Fatalf("expected no jobs for waiting step without JobID, got %v", jobs)
+	}
+}

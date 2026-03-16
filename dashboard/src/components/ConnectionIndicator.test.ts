@@ -52,4 +52,15 @@ describe("ConnectionIndicator (store integration)", () => {
     useEventStore.getState().setStatus("reconnecting");
     expect(deriveStatus(useEventStore.getState().status, false)).toBe("disconnected");
   });
+
+  it("settles on connected after rapid connecting-to-connected transitions", () => {
+    useEventStore.getState().setStatus("disconnected");
+    expect(deriveStatus(useEventStore.getState().status, true)).toBe("disconnected");
+
+    useEventStore.getState().setStatus("connecting");
+    expect(deriveStatus(useEventStore.getState().status, true)).toBe("reconnecting");
+
+    useEventStore.getState().setStatus("connected");
+    expect(deriveStatus(useEventStore.getState().status, true)).toBe("connected");
+  });
 });

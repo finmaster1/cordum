@@ -71,6 +71,43 @@ func TestBuildJobPayloadAndValidation(t *testing.T) {
 	}
 }
 
+// TestBuildJobPayloadStripsNilValues verifies that nil-valued keys produced
+// by unresolved optional template expressions are stripped before schema
+// validation. Without this, a workflow input like `sources: ${input.missing}`
+// would inject "sources": null into the payload, causing JSON Schema to reject
+// null against "type": "array" even though the field is not required.
+func TestBuildJobPayloadStripsNilValues(t *testing.T) {
+	engine := &Engine{}
+	run := &WorkflowRun{Input: map[string]any{
+		"date_range": map[string]any{"start": "2026-03-01", "end": "2026-03-14"},
+	}}
+	// Step references ${input.optional_field} which doesn't exist in run input.
+	step := &Step{
+		Input: map[string]any{
+			"required_field": "${input.date_range}",
+			"optional_field": "${input.missing_field}",
+		},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"required_field": map[string]any{"type": "object"},
+				"optional_field": map[string]any{"type": "array"},
+			},
+			"required": []any{"required_field"},
+		},
+	}
+	payload, err := engine.buildJobPayload(run, step, nil)
+	if err != nil {
+		t.Fatalf("buildJobPayload should succeed when optional field resolves to nil: %v", err)
+	}
+	if payload["required_field"] == nil {
+		t.Fatal("required_field should be present")
+	}
+	if _, exists := payload["optional_field"]; exists {
+		t.Fatal("nil-valued optional_field should have been stripped from payload")
+	}
+}
+
 func TestValidateStepOutputInlineSchema(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()

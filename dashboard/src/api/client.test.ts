@@ -9,6 +9,7 @@ interface MockConfigState {
   principalId: string;
   principalRole: string;
   user: MockUser;
+  isLoggingOut: boolean;
   logout: ReturnType<typeof vi.fn>;
 }
 
@@ -71,6 +72,7 @@ describe("api client - get", () => {
       principalId: "principal-1",
       principalRole: "admin",
       user: { id: "user-1" },
+      isLoggingOut: false,
       logout: vi.fn(),
     };
     getStateMock.mockImplementation(() => mockConfigState);
@@ -129,6 +131,7 @@ describe("api client - write methods", () => {
       principalId: "principal-1",
       principalRole: "admin",
       user: { id: "user-1" },
+      isLoggingOut: false,
       logout: vi.fn(),
     };
     getStateMock.mockImplementation(() => mockConfigState);
@@ -203,6 +206,7 @@ describe("api client - error handling", () => {
       principalId: "principal-1",
       principalRole: "admin",
       user: { id: "user-1" },
+      isLoggingOut: false,
       logout: vi.fn(),
     };
     getStateMock.mockImplementation(() => mockConfigState);
@@ -237,6 +241,34 @@ describe("api client - error handling", () => {
     expect(err.name).toBe("ApiError");
     expect(err.status).toBe(401);
     expect(err.message).toBe("Unauthorized — session expired");
+    expect(mockConfigState.logout).toHaveBeenCalledTimes(1);
+    expect(mockedWindow.location.href).toBe("/login");
+  });
+
+  it("coalesces simultaneous 401 responses into a single logout", async () => {
+    const mockedWindow = {
+      location: {
+        pathname: "/dashboard",
+        href: "/dashboard",
+      },
+    } as unknown as Window & typeof globalThis;
+    vi.stubGlobal("window", mockedWindow);
+
+    mockConfigState.logout.mockImplementation(() => {
+      mockConfigState.isLoggingOut = true;
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: "unauthorized" }, "Unauthorized"))
+      .mockResolvedValueOnce(jsonResponse(401, { error: "unauthorized" }, "Unauthorized"));
+
+    const [firstError, secondError] = await Promise.all([
+      captureApiError(get("/protected-a")),
+      captureApiError(get("/protected-b")),
+    ]);
+
+    expect(firstError.status).toBe(401);
+    expect(secondError.status).toBe(401);
     expect(mockConfigState.logout).toHaveBeenCalledTimes(1);
     expect(mockedWindow.location.href).toBe("/login");
   });
@@ -330,6 +362,7 @@ describe("api client - baseUrl and auth header edge cases", () => {
       principalId: "",
       principalRole: "",
       user: { id: "user-fallback" },
+      isLoggingOut: false,
       logout: vi.fn(),
     };
     getStateMock.mockImplementation(() => mockConfigState);
