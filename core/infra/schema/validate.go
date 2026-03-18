@@ -4,17 +4,30 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
+// SchemaResolver loads a schema document by URL for $ref resolution.
+type SchemaResolver func(url string) (io.ReadCloser, error)
+
 // ValidateSchema validates a value against a JSON schema payload.
 func ValidateSchema(id string, schema []byte, value any) error {
+	return ValidateSchemaWithResolver(id, schema, value, nil)
+}
+
+// ValidateSchemaWithResolver validates a value against a JSON schema payload,
+// using the provided resolver to load external $ref URLs.
+func ValidateSchemaWithResolver(id string, schema []byte, value any, resolve SchemaResolver) error {
 	if len(schema) == 0 {
 		return fmt.Errorf("schema is empty")
 	}
 	resourceID := schemaID(id)
 	compiler := jsonschema.NewCompiler()
+	if resolve != nil {
+		compiler.LoadURL = resolve
+	}
 	if err := compiler.AddResource(resourceID, bytes.NewReader(schema)); err != nil {
 		return fmt.Errorf("add schema resource: %w", err)
 	}

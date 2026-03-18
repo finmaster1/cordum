@@ -103,11 +103,13 @@ output_rules:
     reason: "Potential secret material detected in output."
 
   - id: output-pii-leak
-    description: "PII detection rule (disabled by default to avoid false positives)."
+    description: "PII detection rule — excludes mkt-signal (internal scanning produces names/orgs from public sources)."
     enabled: true
     match:
       topics:
-        - "job.*"
+        - "job.mkt-authority.*"
+        - "job.mkt-pipeline.*"
+        - "job.demo-*"
       scanners:
         - "pii"
     decision: quarantine

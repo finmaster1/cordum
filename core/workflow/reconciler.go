@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -96,7 +97,14 @@ func (r *reconciler) HandleJobResult(ctx context.Context, jr *pb.JobResult) erro
 		defer func() { _ = r.jobStore.ReleaseLock(context.Background(), lockKey, token) }()
 	}
 	if r.engine != nil {
-		r.engine.HandleJobResult(ctx, jr)
+		if err := r.engine.HandleJobResult(ctx, jr); err != nil {
+			if errors.Is(err, ErrRunNotFound) {
+				slog.Info("reconciler: discarding result for deleted run",
+					"run_id", runID, "job_id", jr.JobId)
+				return nil
+			}
+			return bus.RetryAfter(err, 1*time.Second)
+		}
 	}
 	return nil
 }
@@ -196,7 +204,8 @@ func (r *reconciler) reconcileRun(ctx context.Context, runID string) {
 		if status != pb.JobStatus_JOB_STATUS_SUCCEEDED && jr.ErrorMessage == "" {
 			jr.ErrorMessage = fmt.Sprintf("job %s terminated with state %s (no error details available)", sr.JobID, state)
 		}
-		r.engine.HandleJobResult(ctx, jr)
+		// Ignore ErrRunNotFound — run may have been deleted between scan and processing.
+		_ = r.engine.HandleJobResult(ctx, jr)
 	}
 
 	if err := r.engine.StartRun(ctx, run.WorkflowID, run.ID); err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/store"
+	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/prometheus/client_golang/prometheus"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -545,7 +546,14 @@ func (s *server) handleWorkflowJobResult(ctx context.Context, jr *pb.JobResult) 
 		defer func() { _ = s.jobStore.ReleaseLock(context.Background(), lockKey, token) }()
 	}
 
-	s.workflowEng.HandleJobResult(ctx, jr)
+	if err := s.workflowEng.HandleJobResult(ctx, jr); err != nil {
+		if errors.Is(err, wf.ErrRunNotFound) {
+			slog.Info("discarding job result for deleted/missing run",
+				"run_id", runID, "job_id", jr.JobId)
+			return nil // ACK — run is gone, retrying won't help
+		}
+		return bus.RetryAfter(err, 1*time.Second)
+	}
 	return nil
 }
 

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -252,45 +254,49 @@ func (e *Engine) lockRun(runID string) (func(), bool) {
 }
 
 // HandleJobResult updates step/run state and dispatches next steps if ready.
-func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
+func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) error {
 	if res == nil || res.JobId == "" {
-		return
+		return nil
 	}
 	runID, stepID := splitJobID(res.JobId)
 	if runID == "" || stepID == "" {
-		return
+		return nil
 	}
 
 	slog.Debug("step result received", "component", "workflow", "runId", runID, "traceId", runID, "stepId", stepID, "jobId", res.JobId)
 
 	unlock, ok := e.lockRun(runID)
 	if !ok {
-		return // Another replica owns this run.
+		return nil // Another replica owns this run.
 	}
 	defer unlock()
 
 	run, err := e.store.GetRun(ctx, runID)
 	if err != nil {
-		slog.Error("get run failed", "run_id", runID, "error", err)
-		return
+		if errors.Is(err, redis.Nil) {
+			slog.Info("run not found (deleted or never existed)", "run_id", runID)
+			return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
+		}
+		slog.Error("get run failed (transient)", "run_id", runID, "error", err)
+		return fmt.Errorf("get run %s: %w", runID, err)
 	}
 	switch run.Status {
 	case RunStatusSucceeded, RunStatusFailed, RunStatusCancelled, RunStatusTimedOut:
 		e.markRunTerminal(run.ID)
-		return
+		return nil
 	}
 	wfDef, err := e.store.GetWorkflow(ctx, run.WorkflowID)
 	if err != nil {
 		slog.Error("get workflow failed", "workflow_id", run.WorkflowID, "error", err)
-		return
+		return fmt.Errorf("get workflow %s: %w", run.WorkflowID, err)
 	}
 
 	now := time.Now().UTC()
 	if timedOut, err := e.enforceWorkflowTimeout(ctx, wfDef, run, now); err != nil {
 		slog.Error("enforce workflow timeout", "run_id", run.ID, "error", err)
-		return
+		return nil
 	} else if timedOut {
-		return
+		return nil
 	}
 
 	prevStatus := run.Status
@@ -314,7 +320,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			}
 		}
 		if child.JobID != "" && child.JobID != res.JobId {
-			return
+			return nil
 		}
 		if child.JobID == "" {
 			child.JobID = res.JobId
@@ -323,7 +329,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			child.Attempts = attempt
 		}
 		if child.JobID == res.JobId && shouldIgnoreProcessedResult(child) {
-			return
+			return nil
 		}
 		retry, delay := applyResult(child, res, stepDef)
 		if !retry && child.Status == StepStatusSucceeded && res.ResultPtr != "" {
@@ -371,7 +377,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 	} else {
 		stepRun := run.Steps[stepID]
 		if stepRun != nil && stepRun.JobID != "" && stepRun.JobID != res.JobId {
-			return
+			return nil
 		}
 		if stepRun == nil {
 			stepRun = &StepRun{StepID: stepID}
@@ -383,7 +389,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			stepRun.Attempts = attempt
 		}
 		if stepRun.JobID == res.JobId && shouldIgnoreProcessedResult(stepRun) {
-			return
+			return nil
 		}
 		retry, delay := applyResult(stepRun, res, stepDef)
 		if !retry && stepRun.Status == StepStatusSucceeded && res.ResultPtr != "" {
@@ -423,7 +429,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 
 	if err := e.store.UpdateRun(ctx, run); err != nil {
 		slog.Error("update run", "run_id", run.ID, "error", err)
-		return
+		return nil
 	}
 	if isTerminalRunStatus(run.Status) {
 		e.markRunTerminal(run.ID)
@@ -434,6 +440,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			slog.Error("schedule ready", "run_id", run.ID, "error", err)
 		}
 	}
+	return nil
 }
 
 // cancelForEachSiblings cancels running/pending forEach children when a sibling

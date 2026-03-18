@@ -889,6 +889,16 @@ func (s *server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		if wfDef, err := s.workflowStore.GetWorkflow(r.Context(), run.WorkflowID); err == nil && wfDef != nil {
 			delRunWfName = wfDef.Name
 		}
+		// Cancel in-flight jobs before deleting the run data. This prevents
+		// orphaned NATS messages from completed jobs arriving after deletion.
+		// Best-effort: if cancel fails, proceed with deletion anyway — the
+		// gateway-side ErrRunNotFound discard handles any stragglers.
+		if s.workflowEng != nil && run.Status != wf.RunStatusSucceeded && run.Status != wf.RunStatusFailed && run.Status != wf.RunStatusCancelled && run.Status != wf.RunStatusTimedOut {
+			if err := s.workflowEng.CancelRun(r.Context(), id); err != nil {
+				slog.Warn("pre-delete cancel failed, proceeding with deletion",
+					"run_id", id, "error", err)
+			}
+		}
 	}
 	if err := s.workflowStore.DeleteRun(r.Context(), id); err != nil {
 		if errors.Is(err, redis.Nil) {

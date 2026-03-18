@@ -356,6 +356,14 @@ func (s *server) handleUninstallPack(w http.ResponseWriter, r *http.Request) {
 			_ = s.workflowStore.DeleteWorkflow(r.Context(), wfID)
 		}
 		for schemaID := range rec.Resources.Schemas {
+			if raw, err := s.schemaRegistry.Get(r.Context(), schemaID); err == nil {
+				var sm map[string]any
+				if json.Unmarshal(raw, &sm) == nil {
+					if dollarID, ok := sm["$id"].(string); ok && dollarID != "" {
+						_ = s.schemaRegistry.DeleteURL(r.Context(), dollarID)
+					}
+				}
+			}
 			_ = s.schemaRegistry.Delete(r.Context(), schemaID)
 		}
 	}
@@ -491,6 +499,11 @@ func (s *server) registerSchema(ctx context.Context, id string, schemaMap map[st
 	if err := s.schemaRegistry.Register(ctx, id, payload); err != nil {
 		return fmt.Errorf("register schema %s: %w", id, err)
 	}
+	if dollarID, ok := schemaMap["$id"].(string); ok && dollarID != "" {
+		if err := s.schemaRegistry.RegisterURL(ctx, dollarID, payload); err != nil {
+			return fmt.Errorf("register schema %s url alias %s: %w", id, dollarID, err)
+		}
+	}
 	return nil
 }
 
@@ -579,6 +592,9 @@ func (s *server) saveWorkflowRequest(ctx context.Context, req *createWorkflowReq
 func (s *server) rollbackSchema(ctx context.Context, plan schemaPlan) error {
 	if plan.HadExisting && plan.Existing != nil {
 		return s.registerSchema(ctx, plan.ID, plan.Existing)
+	}
+	if dollarID, ok := plan.Schema["$id"].(string); ok && dollarID != "" {
+		_ = s.schemaRegistry.DeleteURL(ctx, dollarID)
 	}
 	return s.schemaRegistry.Delete(ctx, plan.ID)
 }
