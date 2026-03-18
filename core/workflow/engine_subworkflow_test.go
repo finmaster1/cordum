@@ -48,11 +48,13 @@ func TestSubWorkflowSucceeds(t *testing.T) {
 		t.Fatalf("expected child run id on invoke step")
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:child_step@1", childRunID),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:child-success",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	if err := engine.StartRun(context.Background(), "wf-parent-success", "run-parent-success"); err != nil {
 		t.Fatalf("poll parent run: %v", err)
 	}
@@ -102,11 +104,13 @@ func TestSubWorkflowFailsWhenChildFails(t *testing.T) {
 	parent := mustGetRun(t, store, "run-parent-fail")
 	childRunID := parent.Steps["invoke"].JobID
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        fmt.Sprintf("%s:child_step@1", childRunID),
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "child exploded",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	if err := engine.StartRun(context.Background(), "wf-parent-fail", "run-parent-fail"); err != nil {
 		t.Fatalf("poll parent run: %v", err)
 	}
@@ -207,11 +211,13 @@ func TestSubWorkflowOutputMapping(t *testing.T) {
 	parent := mustGetRun(t, store, "run-parent-output-map")
 	childRunID := parent.Steps["invoke"].JobID
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:child_step@1", childRunID),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:child-output-map",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	if err := engine.StartRun(context.Background(), "wf-parent-output-map", "run-parent-output-map"); err != nil {
 		t.Fatalf("poll parent run: %v", err)
 	}

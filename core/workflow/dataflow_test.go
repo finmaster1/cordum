@@ -111,18 +111,22 @@ func TestForEachMaxParallelLimitsDispatch(t *testing.T) {
 		t.Fatalf("expected 1 publish due to max_parallel, got %d", len(bus.published))
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-par:fan[0]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result fan[0]: %v", err)
+	}
 	if len(bus.published) != 2 {
 		t.Fatalf("expected 2 publishes after first completion, got %d", len(bus.published))
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-par:fan[1]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result fan[1]: %v", err)
+	}
 	if len(bus.published) != 3 {
 		t.Fatalf("expected 3 publishes after second completion, got %d", len(bus.published))
 	}

@@ -107,14 +107,18 @@ func TestEngineForEachFanoutAndAggregateSuccess(t *testing.T) {
 		t.Fatalf("expected 2 fan-out publishes, got %d", bus.Count())
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-foreach:fan[0]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-foreach:fan[1]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
@@ -234,10 +238,12 @@ func TestEngineRetriesAndBackoff(t *testing.T) {
 		t.Fatalf("expected 1 publish, got %d", bus.Count())
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-retry:step@1",
 		Status: pb.JobStatus_JOB_STATUS_FAILED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Poll until the backoff retry triggers a second publish.
 	deadline := time.Now().Add(5 * time.Second)
@@ -251,10 +257,12 @@ func TestEngineRetriesAndBackoff(t *testing.T) {
 		t.Fatalf("expected retry publish, got %d", bus.Count())
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-retry:step@2",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
 		t.Fatalf("expected run succeeded after retry, got %s", final.Status)
@@ -869,11 +877,13 @@ func TestOnError_RedirectsToHandlerOnFailure(t *testing.T) {
 	}
 
 	// Fail the main step.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerr:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "something broke",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Run should NOT be failed yet — on_error handler should be dispatched.
 	mid, _ := store.GetRun(context.Background(), run.ID)
@@ -899,10 +909,12 @@ func TestOnError_RedirectsToHandlerOnFailure(t *testing.T) {
 	}
 
 	// Let the handler succeed.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-onerr:handler@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
@@ -956,10 +968,12 @@ func TestOnError_NotTriggeredOnSuccess(t *testing.T) {
 	}
 
 	// Main step succeeds — handler should NOT be activated.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-onerr-ok:main@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	// Handler should not have been activated — run should still resolve.
@@ -1018,18 +1032,22 @@ func TestOnError_HandlerFailsCausesRunFailure(t *testing.T) {
 	}
 
 	// Fail the main step.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerr-fail:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "main broke",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Now fail the handler too.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerr-fail:handler@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "handler also broke",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusFailed {
@@ -1302,10 +1320,12 @@ func TestForEach_ExpressionEvaluatedOnce(t *testing.T) {
 	}
 
 	// Complete first child → triggers second dispatch via HandleJobResult.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-foreach-once:fan[0]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// The second scheduleReady should use stored items, not re-evaluate.
 	afterSecond, _ := store.GetRun(context.Background(), run.ID)
