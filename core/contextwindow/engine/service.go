@@ -59,6 +59,7 @@ func NewService(redisURL string) (*Service, error) {
 			maxChunkScan = int64(n)
 		}
 	}
+	slog.Debug("context engine connected", "component", "context", "maxEntryBytes", maxEntryBytes, "maxChunkScan", maxChunkScan)
 	return &Service{
 		redis:         client,
 		maxHistory:    defaultMaxHistory,
@@ -87,8 +88,12 @@ func (s *Service) BuildWindow(ctx context.Context, req *pb.BuildWindowRequest) (
 	// Pull recent history for CHAT/RAG.
 	if memoryID != "" && (mode == pb.ContextMode_CONTEXT_MODE_CHAT || mode == pb.ContextMode_CONTEXT_MODE_RAG) {
 		redisCtx, cancel := redisOpContext(ctx)
-		events, _ := s.redis.LRange(redisCtx, s.historyKey(memoryID), -s.maxHistory, -1).Result()
+		events, err := s.redis.LRange(redisCtx, s.historyKey(memoryID), -s.maxHistory, -1).Result()
 		cancel()
+		if err != nil {
+			slog.Error("context fetch failed", "component", "context", "memoryId", memoryID, "error", err)
+		}
+		slog.Debug("context fetch", "component", "context", "memoryId", memoryID, "mode", mode.String(), "historyEvents", len(events))
 		for _, raw := range events {
 			var ev historyEvent
 			if err := json.Unmarshal([]byte(raw), &ev); err != nil {
@@ -210,6 +215,7 @@ func (s *Service) UpdateMemory(ctx context.Context, req *pb.UpdateMemoryRequest)
 	if _, err := pipe.Exec(redisCtx); err != nil {
 		return nil, fmt.Errorf("update memory pipeline: %w", err)
 	}
+	slog.Debug("context store", "component", "context", "memoryId", memoryID, "pushed", pushed)
 	return &pb.UpdateMemoryResponse{}, nil
 }
 
@@ -253,6 +259,7 @@ func (s *Service) loadChunks(ctx context.Context, memoryID string) []chunkRecord
 		}
 		keys, next, err := s.redis.SScan(redisCtx, s.chunkIndexKey(memoryID), cursor, "", scanCount).Result()
 		if err != nil {
+			slog.Error("context chunk scan failed", "component", "context", "memoryId", memoryID, "error", err)
 			return nil
 		}
 		cursor = next

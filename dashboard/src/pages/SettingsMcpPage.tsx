@@ -241,7 +241,7 @@ export default function SettingsMcpPage() {
 
                         {/* Actions */}
                         <div className="flex gap-2 pt-2 border-t border-border">
-                          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); toast.info("Refreshing tools..."); }}>
+                          <Button variant="outline" size="sm" disabled title="Tool refresh not yet available">
                             <RefreshCw className="w-3 h-3 mr-1" />Refresh
                           </Button>
                           <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(serverUrl); toast.success("URL copied"); }}>

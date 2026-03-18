@@ -2,11 +2,11 @@ package gateway
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/registry"
 	"github.com/cordum/cordum/core/model"
 )
@@ -27,7 +27,7 @@ func (s *server) handleGetWorker(w http.ResponseWriter, r *http.Request) {
 	// Prefer Redis snapshot (consistent across replicas).
 	snap, err := s.snapshotFromRedis()
 	if err != nil {
-		logging.Warn("api-gateway", "worker snapshot read failed, falling back to in-memory", "error", err)
+		slog.Warn("worker snapshot read failed, falling back to in-memory", "error", err)
 	}
 	if snap != nil {
 		for _, ws := range snap.Workers {
@@ -96,7 +96,7 @@ func (s *server) handleGetWorkerJobs(w http.ResponseWriter, r *http.Request) {
 	// Try per-worker index first (populated for jobs processed after tracking was added).
 	jobs, err := s.jobStore.ListWorkerJobs(r.Context(), id, limit)
 	if err != nil {
-		logging.Error("api-gateway", "list worker jobs failed", "worker_id", id, "error", err)
+		slog.Error("list worker jobs failed", "worker_id", id, "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to list worker jobs")
 		return
 	}
@@ -158,7 +158,7 @@ func (s *server) recentJobsByPool(ctx context.Context, pool string, limit int64)
 	}
 	all, err := s.jobStore.ListRecentJobs(ctx, fetchLimit)
 	if err != nil {
-		logging.Warn("api-gateway", "recent jobs fallback failed", "pool", pool, "error", err)
+		slog.Warn("recent jobs fallback failed", "pool", pool, "error", err)
 		return nil
 	}
 	if limit > 100 {
@@ -185,7 +185,7 @@ func (s *server) handleListPools(w http.ResponseWriter, r *http.Request) {
 
 	snap, err := s.snapshotFromRedis()
 	if err != nil {
-		logging.Warn("api-gateway", "worker snapshot read failed", "error", err)
+		slog.Warn("worker snapshot read failed", "error", err)
 	}
 
 	items := []map[string]any{}
@@ -219,7 +219,7 @@ func (s *server) handleGetPool(w http.ResponseWriter, r *http.Request) {
 
 	snap, err := s.snapshotFromRedis()
 	if err != nil {
-		logging.Warn("api-gateway", "worker snapshot read failed", "error", err)
+		slog.Warn("worker snapshot read failed", "error", err)
 	}
 	if snap == nil {
 		writeErrorJSON(w, http.StatusNotFound, "pool not found")

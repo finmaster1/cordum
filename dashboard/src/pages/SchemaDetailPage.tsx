@@ -5,14 +5,35 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useForm, useFieldArray } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { motion } from "framer-motion";
 import { get } from "@/api/client";
+import { useRegisterSchema } from "@/hooks/useSchemas";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
-import { ArrowLeft, FileJson, Copy, Clock, Hash, Edit } from "lucide-react";
+import { ArrowLeft, FileJson, Copy, Clock, Hash, Edit, Plus, Trash2 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
+
+const FIELD_TYPES = ["string", "number", "boolean", "array", "object", "integer"] as const;
+const SCHEMA_TYPES = ["input", "output", "config"] as const;
+
+const createSchemaFormSchema = z.object({
+  id: z.string().min(1, "Schema name is required").regex(/^[a-z0-9][a-z0-9._-]*$/, "Lowercase alphanumeric, dots, hyphens, underscores only"),
+  type: z.enum(SCHEMA_TYPES),
+  description: z.string().optional(),
+  fields: z.array(z.object({
+    name: z.string().min(1, "Field name is required"),
+    type: z.enum(FIELD_TYPES),
+    required: z.boolean(),
+    description: z.string().optional(),
+  })).min(1, "At least one field is required"),
+});
+
+type CreateSchemaForm = z.infer<typeof createSchemaFormSchema>;
 
 interface SchemaField {
   name: string;
@@ -26,6 +47,119 @@ interface SchemaVersion {
   createdAt: string;
   fields: SchemaField[];
   changelog?: string;
+}
+
+function SchemaCreateForm() {
+  const navigate = useNavigate();
+  const registerSchema = useRegisterSchema();
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = useForm<CreateSchemaForm>({
+    resolver: zodResolver(createSchemaFormSchema),
+    defaultValues: {
+      id: "",
+      type: "input",
+      description: "",
+      fields: [{ name: "", type: "string", required: false, description: "" }],
+    },
+  });
+  const { fields, append, remove } = useFieldArray({ control, name: "fields" });
+
+  function onSubmit(data: CreateSchemaForm) {
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const f of data.fields) {
+      properties[f.name] = {
+        type: f.type,
+        ...(f.description ? { description: f.description } : {}),
+      };
+      if (f.required) required.push(f.name);
+    }
+    const schema: Record<string, unknown> = {
+      type: "object",
+      properties,
+      ...(required.length > 0 ? { required } : {}),
+      ...(data.description ? { description: data.description } : {}),
+    };
+
+    registerSchema.mutate({ id: data.id, schema }, {
+      onSuccess: () => navigate(`/schemas/${data.id}`),
+    });
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <div className="flex items-center gap-3">
+        <button onClick={() => navigate("/schemas")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
+          <ArrowLeft className="w-4 h-4 text-muted-foreground" />
+        </button>
+        <FileJson className="w-5 h-5 text-cordum" />
+        <div>
+          <h1 className="text-lg font-display font-bold text-foreground">New Schema</h1>
+          <p className="text-xs text-muted-foreground">Define a new schema for your platform</p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <div className="instrument-card p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Schema ID</label>
+              <input {...register("id")} placeholder="e.g. job-input-schema" className="w-full rounded-xl border border-border bg-surface-0 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30" />
+              {errors.id && <p className="mt-1 text-xs text-destructive">{errors.id.message}</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Type</label>
+              <select {...register("type")} className="w-full rounded-xl border border-border bg-surface-0 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30">
+                {SCHEMA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
+            <input {...register("description")} placeholder="Optional description" className="w-full rounded-xl border border-border bg-surface-0 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30" />
+          </div>
+        </div>
+
+        <div className="instrument-card p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Fields</h2>
+            <button type="button" onClick={() => append({ name: "", type: "string", required: false, description: "" })} className="flex items-center gap-1 text-xs text-cordum hover:text-cordum/80 transition-colors">
+              <Plus className="w-3.5 h-3.5" />Add Field
+            </button>
+          </div>
+          {errors.fields?.root && <p className="text-xs text-destructive">{errors.fields.root.message}</p>}
+
+          <div className="space-y-3">
+            {fields.map((field, index) => (
+              <div key={field.id} className="grid grid-cols-[1fr_auto_auto_1fr_auto] items-start gap-2 p-3 rounded-xl bg-surface-1">
+                <div>
+                  <input {...register(`fields.${index}.name`)} placeholder="Field name" className="w-full rounded-lg border border-border bg-surface-0 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30" />
+                  {errors.fields?.[index]?.name && <p className="mt-0.5 text-[10px] text-destructive">{errors.fields[index].name?.message}</p>}
+                </div>
+                <select {...register(`fields.${index}.type`)} className="rounded-lg border border-border bg-surface-0 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30">
+                  {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap py-1.5">
+                  <input type="checkbox" {...register(`fields.${index}.required`)} className="rounded border-border" />
+                  Required
+                </label>
+                <input {...register(`fields.${index}.description`)} placeholder="Description" className="w-full rounded-lg border border-border bg-surface-0 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30" />
+                <button type="button" onClick={() => fields.length > 1 && remove(index)} disabled={fields.length <= 1} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button type="submit" disabled={isSubmitting || registerSchema.isPending}>
+            {registerSchema.isPending ? "Creating…" : "Create Schema"}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => navigate("/schemas")}>Cancel</Button>
+        </div>
+      </form>
+    </motion.div>
+  );
 }
 
 export default function SchemaDetailPage() {
@@ -48,28 +182,7 @@ export default function SchemaDetailPage() {
   const currentVersion = schema?.versions?.find(v => v.version === schema.currentVersion) || schema?.versions?.[0];
 
   if (isCreateMode) {
-    return (
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate("/schemas")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
-              <ArrowLeft className="w-4 h-4 text-muted-foreground" />
-            </button>
-            <FileJson className="w-5 h-5 text-cordum" />
-            <div>
-              <h1 className="text-lg font-display font-bold text-foreground">New Schema</h1>
-              <p className="text-xs text-muted-foreground">Define a new schema for your platform</p>
-            </div>
-          </div>
-        </div>
-        <div className="instrument-card p-6">
-          <p className="text-sm text-muted-foreground">Select a schema from the list to view its details.</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate("/schemas")}>
-            Back to Schemas
-          </Button>
-        </div>
-      </motion.div>
-    );
+    return <SchemaCreateForm />;
   }
 
   if (isLoading) {
@@ -101,7 +214,7 @@ export default function SchemaDetailPage() {
             </div>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => toast.info("Feature coming soon")}>
+        <Button variant="outline" size="sm" disabled title="Schema editing not yet available">
           <Edit className="w-3 h-3 mr-1" />Edit Schema
         </Button>
       </div>

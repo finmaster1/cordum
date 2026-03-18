@@ -8,12 +8,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/cordum/cordum/core/infra/logging"
 	sdk "github.com/cordum/cordum/sdk/client"
 )
 
 const defaultGateway = "http://localhost:8081"
 
 func main() {
+	logging.Init("cordumctl")
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(1)
@@ -92,10 +94,17 @@ func runRunCmd(args []string) {
 	switch args[0] {
 	case "start":
 		fs := newFlagSet("run start")
-		input := fs.String("input", "", "input json (inline or file path)")
+		input := fs.String("input", "", "input json (inline, file path, or - for stdin)")
 		dryRun := fs.Bool("dry-run", false, "start in dry-run mode")
 		idempotencyKey := fs.String("idempotency-key", "", "idempotency key")
+		debug := fs.Bool("debug", false, "print debug info to stderr")
 		fs.ParseArgs(args[1:])
+		if *debug {
+			fmt.Fprintf(os.Stderr, "[debug] os.Args: %q\n", os.Args)
+			fmt.Fprintf(os.Stderr, "[debug] sub-args (after 'run start'): %q\n", args[1:])
+			fmt.Fprintf(os.Stderr, "[debug] reordered+parsed positional: %q\n", fs.Args())
+			fmt.Fprintf(os.Stderr, "[debug] input flag value: %q\n", *input)
+		}
 		if fs.NArg() < 1 {
 			fail("workflow id required")
 		}
@@ -109,6 +118,10 @@ func runRunCmd(args []string) {
 				fail("input must be a JSON object")
 			}
 		}
+		if *debug {
+			debugJSON, _ := json.Marshal(payload)
+			fmt.Fprintf(os.Stderr, "[debug] payload to send: %s\n", debugJSON)
+		}
 		client := newClientFromFlags(fs)
 		runID, err := client.StartRunWithOptions(context.Background(), fs.Arg(0), payload, sdk.RunOptions{
 			DryRun:         *dryRun,
@@ -116,6 +129,16 @@ func runRunCmd(args []string) {
 		})
 		check(err)
 		fmt.Println(runID)
+	case "get":
+		fs := newFlagSet("run get")
+		fs.ParseArgs(args[1:])
+		if fs.NArg() < 1 {
+			fail("run id required")
+		}
+		client := newClientFromFlags(fs)
+		run, err := client.GetRun(context.Background(), fs.Arg(0))
+		check(err)
+		printJSON(run)
 	case "delete":
 		fs := newFlagSet("run delete")
 		fs.ParseArgs(args[1:])
@@ -317,7 +340,8 @@ Usage:
   cordumctl status
   cordumctl workflow create --file workflow.json
   cordumctl workflow delete <workflow_id>
-  cordumctl run start <workflow_id> [--input input.json] [--dry-run]
+  cordumctl run start <workflow_id> [--input input.json|'{...}'|-] [--dry-run] [--debug]
+  cordumctl run get <run_id>
   cordumctl run delete <run_id>
   cordumctl run timeline <run_id>
   cordumctl approval job <job_id> (--approve|--reject)

@@ -16,7 +16,8 @@ import (
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/config"
-	"github.com/cordum/cordum/core/infra/logging"
+	"log/slog"
+
 	"github.com/cordum/cordum/core/infra/registry"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/infra/schema"
@@ -100,7 +101,7 @@ func Run(cfg *config.Config) error {
 	if err := bus.PublishHandshake(natsBus, "workflow-engine", pb.ComponentRole_COMPONENT_ROLE_ORCHESTRATOR, map[string]bool{
 		"workflows": true, "approvals": true,
 	}); err != nil {
-		logging.Warn("workflow-engine", "handshake publish failed", "error", err)
+		slog.Warn("handshake publish failed", "error", err)
 	}
 
 	engine := NewEngine(workflowStore, natsBus).WithMemory(memStore).WithConfig(configSvc).WithSchemaRegistry(schemaRegistry).WithRunLocker(jobStore)
@@ -140,16 +141,16 @@ func Run(cfg *config.Config) error {
 	}
 
 	srv := startHealthServer(httpAddr)
-	logging.Info("workflow-engine", "started", "http", httpAddr, "scan_interval", scanInterval.String(), "run_scan_limit", runScanLimit)
+	slog.Info("started", "http", httpAddr, "scan_interval", scanInterval.String(), "run_scan_limit", runScanLimit)
 
 	<-ctx.Done()
 
-	logging.Info("workflow-engine", "shutting down gracefully", "timeout", defaultShutdownTimeout.String())
+	slog.Info("shutting down gracefully", "timeout", defaultShutdownTimeout.String())
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 
-	logging.Info("workflow-engine", "stopped")
+	slog.Info("stopped")
 	return nil
 }
 
@@ -170,7 +171,7 @@ func startHealthServer(addr string) *http.Server {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logging.Error("workflow-engine", "http server error", "error", err)
+			slog.Error("http server error", "error", err)
 		}
 	}()
 	return srv

@@ -1,8 +1,10 @@
 package schema
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -123,16 +125,79 @@ func (r *Registry) List(ctx context.Context, limit int64) ([]string, error) {
 }
 
 // ValidateID validates payload against a stored schema.
+// It uses a resolver that looks up $ref URLs via the registry's URL aliases,
+// enabling cross-schema references between schemas registered in the same system.
 func (r *Registry) ValidateID(ctx context.Context, id string, value any) error {
 	schema, err := r.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("load schema %s: %w", id, err)
 	}
-	return ValidateSchema(schemaID(id), schema, value)
+	resolve := func(url string) (io.ReadCloser, error) {
+		data, err := r.GetByURL(ctx, url)
+		if err != nil {
+			return nil, fmt.Errorf("resolve $ref %s: %w", url, err)
+		}
+		return io.NopCloser(bytes.NewReader(data)), nil
+	}
+	return ValidateSchemaWithResolver(schemaID(id), schema, value, resolve)
+}
+
+// RegisterURL stores schema bytes keyed by a $id URL (e.g., https://cordum.io/schemas/...).
+// This allows $ref resolution to find schemas by their JSON Schema $id URL.
+func (r *Registry) RegisterURL(ctx context.Context, url string, schema []byte) error {
+	if r == nil || r.client == nil {
+		return fmt.Errorf("registry unavailable")
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("schema url required")
+	}
+	if len(schema) == 0 {
+		return fmt.Errorf("schema body required")
+	}
+	if err := r.client.Set(ctx, schemaURLKey(url), schema, 0).Err(); err != nil {
+		return fmt.Errorf("register schema url %s: %w", url, err)
+	}
+	return nil
+}
+
+// GetByURL retrieves schema bytes by their $id URL.
+func (r *Registry) GetByURL(ctx context.Context, url string) ([]byte, error) {
+	if r == nil || r.client == nil {
+		return nil, fmt.Errorf("registry unavailable")
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return nil, fmt.Errorf("schema url required")
+	}
+	data, err := r.client.Get(ctx, schemaURLKey(url)).Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("get schema by url %s: %w", url, err)
+	}
+	return data, nil
+}
+
+// DeleteURL removes the URL alias for a schema.
+func (r *Registry) DeleteURL(ctx context.Context, url string) error {
+	if r == nil || r.client == nil {
+		return fmt.Errorf("registry unavailable")
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("schema url required")
+	}
+	if err := r.client.Del(ctx, schemaURLKey(url)).Err(); err != nil {
+		return fmt.Errorf("delete schema url %s: %w", url, err)
+	}
+	return nil
 }
 
 func schemaKey(id string) string {
 	return "schema:" + id
+}
+
+func schemaURLKey(url string) string {
+	return "schema:url:" + url
 }
 
 func schemaIndexKey() string {

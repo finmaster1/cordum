@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 
 	capvalidate "github.com/cordum-io/cap/v2/sdk/go"
 	"github.com/cordum/cordum/core/infra/config"
-	"github.com/cordum/cordum/core/infra/logging"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/redis/go-redis/v9"
@@ -103,7 +103,7 @@ func (e *Engine) withJobLock(jobID string, ttl time.Duration, fn func(context.Co
 		token, err = e.jobStore.TryAcquireLock(ctx, key, ttl)
 		cancel()
 		if err != nil {
-			logging.Error("scheduler", "job lock acquisition failed", "job_id", jobID, "error", err)
+			slog.Error("job lock acquisition failed", "job_id", jobID, "error", err)
 			return RetryAfter(err, retryDelayStore)
 		}
 		if token != "" {
@@ -147,7 +147,7 @@ func (e *Engine) withJobLock(jobID string, ttl time.Duration, fn func(context.Co
 				if err := e.jobStore.RenewLock(rCtx, key, token, ttl); err != nil {
 					consecutiveFailures++
 					if consecutiveFailures >= maxRenewalFailures {
-						logging.Error("scheduler", "lock renewal abandoned, fencing critical section",
+						slog.Error("lock renewal abandoned, fencing critical section",
 							"job_id", jobID, "failures", consecutiveFailures, "error", err)
 						abandoned = true
 						fenceCancel(errLockAbandoned)
@@ -157,7 +157,7 @@ func (e *Engine) withJobLock(jobID string, ttl time.Duration, fn func(context.Co
 						rCancel()
 						return
 					}
-					logging.Warn("scheduler", "job lock renewal failed",
+					slog.Warn("job lock renewal failed",
 						"job_id", jobID, "attempt", consecutiveFailures, "error", err)
 				} else {
 					consecutiveFailures = 0
@@ -177,19 +177,19 @@ func (e *Engine) withJobLock(jobID string, ttl time.Duration, fn func(context.Co
 		// Skip lock release after abandonment — another handler may
 		// already hold the lock and releasing would drop their lock.
 		if abandoned {
-			logging.Warn("scheduler", "skipping lock release after abandonment",
+			slog.Warn("skipping lock release after abandonment",
 				"job_id", jobID)
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), storeOpTimeout)
 		defer cancel()
 		if err := e.jobStore.ReleaseLock(ctx, key, token); err != nil {
-			logging.Warn("scheduler", "job lock release failed, retrying",
+			slog.Warn("job lock release failed, retrying",
 				"job_id", jobID, "error", err)
 			ctx2, cancel2 := context.WithTimeout(context.Background(), storeOpTimeout)
 			defer cancel2()
 			if err2 := e.jobStore.ReleaseLock(ctx2, key, token); err2 != nil {
-				logging.Error("scheduler", "job lock release retry failed, lock will expire via TTL",
+				slog.Error("job lock release retry failed, lock will expire via TTL",
 					"job_id", jobID, "ttl", ttl, "error", err2)
 			}
 		}
@@ -326,7 +326,7 @@ func (e *Engine) Start() error {
 					return
 				case <-ticker.C:
 					total, byPool := statter.Stats()
-					logging.Info("scheduler", "registry stats",
+					slog.Info("registry stats",
 						"total_workers", total,
 						"pools", fmt.Sprintf("%v", byPool),
 					)
@@ -365,7 +365,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 		if hb == nil {
 			return nil
 		}
-		logging.Info("scheduler", "heartbeat received",
+		slog.Info("heartbeat received",
 			"worker_id", hb.WorkerId,
 			"type", hb.Type,
 			"cpu", hb.CpuLoad,
@@ -381,7 +381,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 			return nil
 		}
 		if err := capvalidate.ValidateJobRequest(req); err != nil {
-			logging.Warn("scheduler", "invalid job request rejected",
+			slog.Warn("invalid job request rejected",
 				"job_id", req.GetJobId(),
 				"validation_error", err.Error(),
 				"trace_id", p.TraceId,
@@ -392,7 +392,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 			return nil
 		}
 		tenant := ExtractTenant(req)
-		logging.Info("scheduler", "job request received",
+		slog.Info("job request received",
 			"job_id", req.JobId,
 			"topic", req.Topic,
 			"trace_id", p.TraceId,
@@ -406,7 +406,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 			return nil
 		}
 		if err := capvalidate.ValidateJobResult(res); err != nil {
-			logging.Warn("scheduler", "invalid job result rejected",
+			slog.Warn("invalid job result rejected",
 				"job_id", res.GetJobId(),
 				"validation_error", err.Error(),
 				"trace_id", p.TraceId,
@@ -416,7 +416,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 			}
 			return nil
 		}
-		logging.Info("scheduler", "job result received",
+		slog.Info("job result received",
 			"job_id", res.JobId,
 			"status", res.Status.String(),
 			"worker_id", res.WorkerId,
@@ -428,7 +428,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 		if cancelReq == nil {
 			return nil
 		}
-		logging.Info("scheduler", "job cancel received",
+		slog.Info("job cancel received",
 			"job_id", cancelReq.JobId,
 			"reason", cancelReq.Reason,
 		)
@@ -437,7 +437,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 			defer cancel()
 			_, err := e.jobStore.CancelJob(ctx, cancelReq.JobId)
 			if err != nil {
-				logging.Error("scheduler", "cancel job failed",
+				slog.Error("cancel job failed",
 					"job_id", cancelReq.JobId,
 					"error", err,
 				)
@@ -447,7 +447,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 				return err // return error so NATS redelivers the message
 			}
 		}
-		logging.Info("scheduler", "job cancelled",
+		slog.Info("job cancelled",
 			"job_id", cancelReq.JobId,
 		)
 		return nil
@@ -456,7 +456,7 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 		if hs == nil {
 			return nil
 		}
-		logging.Info("scheduler", "handshake received",
+		slog.Info("handshake received",
 			"component_id", hs.ComponentId,
 			"role", hs.Role.String(),
 			"sdk_version", hs.SdkVersion,
@@ -494,7 +494,7 @@ func (e *Engine) Stop() {
 	select {
 	case <-done:
 	case <-timer.C:
-		logging.Warn("scheduler", "graceful shutdown deadline exceeded, some handlers still in-flight")
+		slog.Warn("graceful shutdown deadline exceeded, some handlers still in-flight")
 	}
 }
 
@@ -506,13 +506,13 @@ func (e *Engine) handleJobRequest(req *pb.JobRequest, traceID string) error {
 	jobID := strings.TrimSpace(req.JobId)
 	topic := strings.TrimSpace(req.Topic)
 	if jobID == "" || topic == "" {
-		logging.Error("scheduler", "invalid job request",
+		slog.Error("invalid job request",
 			"trace_id", traceID,
 			"job_id", safeJobID(req),
 			"topic", safeTopic(req),
 		)
 		if err := e.setJobState(jobID, JobStateFailed); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
 		return nil
@@ -536,7 +536,7 @@ func (e *Engine) handleJobRequest(req *pb.JobRequest, traceID string) error {
 			} else if !errors.Is(err, redis.Nil) {
 				// Non-nil, non-"key not found" error — fail closed to prevent
 				// duplicate dispatch when we can't determine current state.
-				logging.Error("scheduler", "state read failed, failing closed",
+				slog.Error("state read failed, failing closed",
 					"job_id", jobID, "error", err)
 				return RetryAfter(err, retryDelayStore)
 			}
@@ -549,19 +549,19 @@ func (e *Engine) handleJobRequest(req *pb.JobRequest, traceID string) error {
 			defer cancel()
 			if traceID != "" {
 				if err := e.jobStore.AddJobToTrace(ctx, traceID, jobID); err != nil {
-					logging.Error("scheduler", "failed to add job to trace", "job_id", jobID, "trace_id", traceID, "error", err)
+					slog.Error("failed to add job to trace", "job_id", jobID, "trace_id", traceID, "error", err)
 					return RetryAfter(err, retryDelayStore)
 				}
 			}
 			if err := e.jobStore.SetJobMeta(ctx, req); err != nil {
-				logging.Error("scheduler", "failed to persist job metadata", "job_id", jobID, "error", err)
+				slog.Error("failed to persist job metadata", "job_id", jobID, "error", err)
 				return RetryAfter(err, retryDelayStore)
 			}
 			if store, ok := e.jobStore.(interface {
 				SetJobRequest(context.Context, *pb.JobRequest) error
 			}); ok {
 				if err := store.SetJobRequest(ctx, req); err != nil {
-					logging.Error("scheduler", "failed to persist job request", "job_id", jobID, "error", err)
+					slog.Error("failed to persist job request", "job_id", jobID, "error", err)
 					return RetryAfter(err, retryDelayStore)
 				}
 			}
@@ -585,13 +585,13 @@ func (e *Engine) handleJobRequest(req *pb.JobRequest, traceID string) error {
 
 func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID string) error {
 	if req == nil || strings.TrimSpace(req.JobId) == "" || strings.TrimSpace(req.Topic) == "" {
-		logging.Error("scheduler", "invalid job request",
+		slog.Error("invalid job request",
 			"trace_id", traceID,
 			"job_id", safeJobID(req),
 			"topic", safeTopic(req),
 		)
 		if err := e.setJobState(safeJobID(req), JobStateFailed); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", safeJobID(req), "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed", "job_id", safeJobID(req), "target_state", JobStateFailed, "error", err)
 		}
 		e.incJobsCompleted(safeTopic(req), pb.JobStatus_JOB_STATUS_FAILED.String())
 		return nil
@@ -616,12 +616,12 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 	// (e.g. job.default with no workers). Job goes to DLQ for investigation.
 	if attempts >= maxSchedulingRetries {
 		reason := fmt.Sprintf("max scheduling retries exceeded (attempts=%d)", attempts)
-		logging.Warn("scheduler", "giving up on job", "job_id", jobID, "topic", topic, "attempts", attempts)
+		slog.Warn("giving up on job", "job_id", jobID, "topic", topic, "attempts", attempts)
 		if err := e.setJobState(jobID, JobStateFailed); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
 		}
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, reason, "max_scheduling_retries"); err != nil {
-			logging.Error("scheduler", "dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
 		return nil
@@ -631,7 +631,7 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 
 	record, err := e.checkSafetyDecision(req)
 	if err != nil {
-		logging.Error("scheduler", "safety check failed", "job_id", jobID, "error", err)
+		slog.Error("safety check failed", "job_id", jobID, "error", err)
 		record.Decision = SafetyUnavailable
 	}
 	switch record.Decision {
@@ -667,7 +667,7 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			return nil
 		}
 	case SafetyThrottle:
-		logging.Info("safety", "job throttled",
+		slog.Info("job throttled",
 			"job_id", jobID,
 			"topic", topic,
 			"reason", record.Reason,
@@ -684,7 +684,7 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			e.metrics.IncSafetyUnavailable(topic)
 		}
 		if e.isInputFailOpen() {
-			logging.Warn("safety", "safety kernel unavailable — FAIL-OPEN: allowing job",
+			slog.Warn("safety kernel unavailable — FAIL-OPEN: allowing job",
 				"job_id", jobID, "topic", topic, "reason", record.Reason,
 				"trace_id", traceID, "input_fail_mode", "open")
 			if e.metrics != nil {
@@ -697,50 +697,50 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			record.Reason = "fail-open: safety unavailable — " + record.Reason
 			// Fall through to allow
 		} else {
-			logging.Warn("safety", "safety kernel unavailable, requeueing job",
+			slog.Warn("safety kernel unavailable, requeueing job",
 				"job_id", jobID, "topic", topic, "reason", record.Reason,
 				"trace_id", traceID, "input_fail_mode", "closed")
 			return RetryAfter(fmt.Errorf("safety unavailable: %s", record.Reason), safetyThrottleDelay)
 		}
 	case SafetyRequireApproval:
-		logging.Info("safety", "job requires human approval",
+		slog.Info("job requires human approval",
 			"job_id", jobID,
 			"topic", topic,
 			"reason", record.Reason,
 			"trace_id", traceID,
 		)
 		if err := e.setJobState(jobID, JobStateApproval); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateApproval, "error", err)
+			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateApproval, "error", err)
 		}
 		return nil
 	case SafetyDeny:
-		logging.Info("safety", "job denied",
+		slog.Info("job denied",
 			"job_id", jobID,
 			"topic", topic,
 			"reason", record.Reason,
 			"trace_id", traceID,
 		)
 		if err := e.setJobState(jobID, JobStateDenied); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateDenied, "error", err)
+			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateDenied, "error", err)
 		}
 		e.incSafetyDenied(topic)
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, record.Reason, "safety_denied"); err != nil {
-			logging.Error("scheduler", "dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
 		}
 		return nil
 	default:
-		logging.Info("safety", "job denied (unknown decision)",
+		slog.Info("job denied (unknown decision)",
 			"job_id", jobID,
 			"topic", topic,
 			"reason", record.Reason,
 			"trace_id", traceID,
 		)
 		if err := e.setJobState(jobID, JobStateDenied); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateDenied, "error", err)
+			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateDenied, "error", err)
 		}
 		e.incSafetyDenied(topic)
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, record.Reason, "safety_unknown"); err != nil {
-			logging.Error("scheduler", "dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
 		}
 		return nil
 	}
@@ -754,10 +754,10 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			if attempts >= allowedAttempts {
 				reason := fmt.Sprintf("max retries exceeded (attempts=%d, max_retries=%d)", attempts, maxRetries)
 				if err := e.setJobState(jobID, JobStateFailed); err != nil {
-					logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+					slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
 				}
 				if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, reason, "max_retries_exceeded"); err != nil {
-					logging.Error("scheduler", "dlq emit failed", "job_id", jobID, "error", err)
+					slog.Error("dlq emit failed", "job_id", jobID, "error", err)
 				}
 				return nil
 			}
@@ -773,7 +773,7 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			return RetryAfter(err, retryDelayStore)
 		}
 		if int64(active) >= maxConcurrent {
-			logging.Info("scheduler", "tenant concurrency limit reached",
+			slog.Info("tenant concurrency limit reached",
 				"job_id", jobID,
 				"tenant", tenant,
 				"active", active,
@@ -794,7 +794,7 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 
 	workers := e.registry.Snapshot()
 	if len(workers) == 0 {
-		logging.Warn("scheduler", "no workers in registry",
+		slog.Warn("no workers in registry",
 			"topic", topic,
 			"job_id", jobID,
 		)
@@ -802,13 +802,13 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 	subject, err := e.strategy.PickSubject(req, workers)
 	if err != nil {
 		if errors.Is(err, ErrNoPoolMapping) {
-			logging.Warn("scheduler", "no pool mapping for topic, will retry",
+			slog.Warn("no pool mapping for topic, will retry",
 				"job_id", jobID,
 				"topic", topic,
 				"error", err,
 			)
 		} else {
-			logging.Error("scheduler", "failed to pick subject",
+			slog.Error("failed to pick subject",
 				"job_id", jobID,
 				"topic", topic,
 				"error", err,
@@ -825,11 +825,11 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			return RetryAfter(err, backoffDelay(attempts, backoffBase, backoffMax))
 		}
 		if err := e.setJobState(jobID, JobStateFailed); err != nil {
-			logging.Error("scheduler", "state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, err.Error(), reasonCodeForSchedulingError(err)); err != nil {
-			logging.Error("scheduler", "dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
 		}
 		return nil
 	}
@@ -859,13 +859,13 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 	}
 
 	if err := e.bus.Publish(subject, packet); err != nil {
-		logging.Error("scheduler", "failed to publish job, rolling back to SCHEDULED",
+		slog.Error("failed to publish job, rolling back to SCHEDULED",
 			"job_id", jobID,
 			"subject", subject,
 			"error", err,
 		)
 		if rbErr := e.setJobState(jobID, JobStateScheduled); rbErr != nil {
-			logging.Error("scheduler", "dispatch rollback failed",
+			slog.Error("dispatch rollback failed",
 				"job_id", jobID, "error", rbErr)
 		}
 		if e.metrics != nil {
@@ -955,9 +955,9 @@ func (e *Engine) checkSafetyDecision(req *pb.JobRequest) (SafetyDecisionRecord, 
 					}
 					return record, nil
 				}
-				logging.Warn("scheduler", "approval label ignored (hash mismatch)", "job_id", jobID)
+				slog.Warn("approval label ignored (hash mismatch)", "job_id", jobID)
 			} else {
-				logging.Warn("scheduler", "approval label ignored (no approval record)", "job_id", jobID)
+				slog.Warn("approval label ignored (no approval record)", "job_id", jobID)
 			}
 		}
 	}
@@ -972,7 +972,7 @@ func (e *Engine) checkSafetyDecision(req *pb.JobRequest) (SafetyDecisionRecord, 
 	if safetyCtx.Err() != nil {
 		record.Decision = SafetyUnavailable
 		err = fmt.Errorf("safety check timeout (defense-in-depth, %s)", safetyCheckTimeout)
-		logging.Warn("scheduler", "safety check timed out", "job_id", jobID, "timeout", safetyCheckTimeout)
+		slog.Warn("safety check timed out", "job_id", jobID, "timeout", safetyCheckTimeout)
 	}
 	if record.CheckedAt == 0 {
 		record.CheckedAt = time.Now().UTC().UnixNano() / int64(time.Microsecond)
@@ -984,7 +984,7 @@ func (e *Engine) checkSafetyDecision(req *pb.JobRequest) (SafetyDecisionRecord, 
 		if hash, err := HashJobRequest(req); err == nil {
 			record.JobHash = hash
 		} else {
-			logging.Error("scheduler", "job hash failed", "job_id", jobID, "error", err)
+			slog.Error("job hash failed", "job_id", jobID, "error", err)
 		}
 	}
 	if e.jobStore != nil {
@@ -1046,7 +1046,7 @@ func (e *Engine) handleJobResult(res *pb.JobResult) error {
 		}
 		if status == pb.JobStatus_JOB_STATUS_SUCCEEDED && e.saga != nil && jobReq != nil {
 			if err := e.saga.RecordCompensation(lockCtx, jobReq); err != nil {
-				logging.Error("scheduler", "record compensation failed", "job_id", jobID, "error", err)
+				slog.Error("record compensation failed", "job_id", jobID, "error", err)
 			}
 		}
 		if status == pb.JobStatus_JOB_STATUS_FAILED_FATAL && e.saga != nil {
@@ -1065,9 +1065,9 @@ func (e *Engine) handleJobResult(res *pb.JobResult) error {
 					defer cancel()
 					start := time.Now()
 					if err := e.saga.Rollback(ctx, wfID); err != nil {
-						logging.Error("scheduler", "saga rollback failed", "workflow_id", wfID, "duration", time.Since(start), "error", err)
+						slog.Error("saga rollback failed", "workflow_id", wfID, "duration", time.Since(start), "error", err)
 					} else {
-						logging.Info("scheduler", "saga rollback completed", "workflow_id", wfID, "duration", time.Since(start))
+						slog.Info("saga rollback completed", "workflow_id", wfID, "duration", time.Since(start))
 					}
 				}(workflowID)
 			}
@@ -1091,7 +1091,7 @@ func (e *Engine) handleJobResult(res *pb.JobResult) error {
 		case pb.JobStatus_JOB_STATUS_CANCELLED:
 			state = JobStateCancelled
 		default:
-			logging.Error("scheduler", "unknown job status",
+			slog.Error("unknown job status",
 				"job_id", res.JobId,
 				"status", res.Status.String(),
 			)
@@ -1141,7 +1141,7 @@ func (e *Engine) handleJobResult(res *pb.JobResult) error {
 		if res.ResultPtr != "" {
 			if err := e.setResultPtr(jobID, res.ResultPtr); err != nil {
 				e.incResultPtrWriteFailure()
-				logging.Error("scheduler", "result ptr write failed, keeping job in current state for retry",
+				slog.Error("result ptr write failed, keeping job in current state for retry",
 					"job_id", jobID, "result_ptr", res.ResultPtr, "error", err)
 				return RetryAfter(err, retryDelayStore)
 			}
@@ -1188,7 +1188,7 @@ func (e *Engine) checkOutputSafety(jobID, topic string, res *pb.JobResult, req *
 		return record
 	}
 	if req == nil {
-		logging.Error("scheduler", "output policy skipped: missing job request", "job_id", jobID)
+		slog.Error("output policy skipped: missing job request", "job_id", jobID)
 		e.incOutputPolicySkipped(topic)
 		return record
 	}
@@ -1200,7 +1200,7 @@ func (e *Engine) checkOutputSafety(jobID, topic string, res *pb.JobResult, req *
 	e.observeOutputCheckLatency(topic, "sync", float64(record.CheckDurationMs)/1000.0)
 	e.observeOutputEvalDuration(topic, elapsed.Seconds())
 	if err != nil {
-		logging.Error("scheduler", "output policy check failed", "job_id", jobID, "error", err)
+		slog.Error("output policy check failed", "job_id", jobID, "error", err)
 		e.incOutputPolicySkipped(topic)
 		return record
 	}
@@ -1267,7 +1267,7 @@ func (e *Engine) startAsyncOutputCheck(jobID, topic string, res *pb.JobResult, r
 		if err != nil {
 			e.incAsyncOutputTimeout(topic)
 			if e.isAsyncFailClosed() {
-				logging.Error("scheduler", "async output check failed, fail-closed: quarantining", "job_id", jobID, "error", err)
+				slog.Error("async output check failed, fail-closed: quarantining", "job_id", jobID, "error", err)
 				record = OutputSafetyRecord{
 					Decision:        OutputQuarantine,
 					Reason:          "async output check error — fail-closed: " + err.Error(),
@@ -1278,7 +1278,7 @@ func (e *Engine) startAsyncOutputCheck(jobID, topic string, res *pb.JobResult, r
 				}
 				// Fall through to process the quarantine decision below.
 			} else {
-				logging.Warn("scheduler", "async output check failed, fail-open: allowing", "job_id", jobID, "error", err)
+				slog.Warn("async output check failed, fail-open: allowing", "job_id", jobID, "error", err)
 				e.incOutputPolicySkipped(topic)
 				return
 			}
@@ -1336,7 +1336,7 @@ func (e *Engine) startAsyncOutputCheck(jobID, topic string, res *pb.JobResult, r
 			e.emitOutputAuditEvent(jobID, topic, outputPolicyAsync, reason, record.Decision)
 			return e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, reason, outputPolicyAsync)
 		}); err != nil {
-			logging.Error("scheduler", "async quarantine transition failed", "job_id", jobID, "error", err)
+			slog.Error("async quarantine transition failed", "job_id", jobID, "error", err)
 		}
 	}()
 }
@@ -1361,7 +1361,7 @@ func (e *Engine) materializeRedaction(jobID, topic string, res *pb.JobResult, re
 	e.observeOutputCheckLatency(topic, "sync_redact", elapsed.Seconds())
 	e.observeOutputEvalDuration(topic, elapsed.Seconds())
 	if err != nil {
-		logging.Error("scheduler", "redaction materialization failed", "job_id", jobID, "error", err)
+		slog.Error("redaction materialization failed", "job_id", jobID, "error", err)
 		current.Decision = OutputQuarantine
 		if strings.TrimSpace(current.Reason) == "" {
 			current.Reason = "output redaction required but sanitized output unavailable"
@@ -1410,7 +1410,7 @@ func (e *Engine) persistOutputSafety(jobID string, record OutputSafetyRecord) {
 	ctx, cancel := context.WithTimeout(e.ctx, storeOpTimeout)
 	defer cancel()
 	if err := e.jobStore.SetOutputDecision(ctx, jobID, record); err != nil {
-		logging.Error("scheduler", "persist output safety failed", "job_id", jobID, "error", err)
+		slog.Error("persist output safety failed", "job_id", jobID, "error", err)
 	}
 }
 
@@ -1421,7 +1421,7 @@ func (e *Engine) setJobState(jobID string, state JobState) error {
 	ctx, cancel := context.WithTimeout(e.ctx, storeOpTimeout)
 	defer cancel()
 	if err := e.jobStore.SetState(ctx, jobID, state); err != nil {
-		logging.Error("scheduler", "failed to set job state", "job_id", jobID, "state", state, "error", err)
+		slog.Error("failed to set job state", "job_id", jobID, "state", state, "error", err)
 		return fmt.Errorf("set job state: %w", err)
 	}
 	return nil
@@ -1434,7 +1434,7 @@ func (e *Engine) setResultPtr(jobID, ptr string) error {
 	ctx, cancel := context.WithTimeout(e.ctx, storeOpTimeout)
 	defer cancel()
 	if err := e.jobStore.SetResultPtr(ctx, jobID, ptr); err != nil {
-		logging.Error("scheduler", "failed to persist result ptr", "job_id", jobID, "error", err)
+		slog.Error("failed to persist result ptr", "job_id", jobID, "error", err)
 		return fmt.Errorf("set result ptr: %w", err)
 	}
 	return nil
@@ -1447,7 +1447,7 @@ func (e *Engine) setWorkerID(jobID, workerID string) {
 	ctx, cancel := context.WithTimeout(e.ctx, storeOpTimeout)
 	defer cancel()
 	if err := e.jobStore.SetWorkerID(ctx, jobID, workerID); err != nil {
-		logging.Warn("scheduler", "worker_id write failed", "job_id", jobID, "worker_id", workerID, "error", err)
+		slog.Warn("worker_id write failed", "job_id", jobID, "worker_id", workerID, "error", err)
 	}
 }
 
@@ -1716,7 +1716,7 @@ func (e *Engine) emitDLQWithRetry(jobID, topic string, status pb.JobStatus, reas
 	if err == nil {
 		return nil
 	}
-	logging.Warn("scheduler", "dlq emit failed, retrying", "job_id", jobID, "error", err)
+	slog.Warn("dlq emit failed, retrying", "job_id", jobID, "error", err)
 	retryTimer := time.NewTimer(500 * time.Millisecond)
 	select {
 	case <-e.ctx.Done():
@@ -1726,7 +1726,7 @@ func (e *Engine) emitDLQWithRetry(jobID, topic string, status pb.JobStatus, reas
 	}
 	err = e.emitDLQ(jobID, topic, status, reason, reasonCode)
 	if err != nil {
-		logging.Error("scheduler", "dlq emit failed after retry", "job_id", jobID, "reason_code", reasonCode, "error", err)
+		slog.Error("dlq emit failed after retry", "job_id", jobID, "reason_code", reasonCode, "error", err)
 		if e.metrics != nil {
 			e.metrics.IncDLQEmitFailure(topic)
 		}
@@ -1784,6 +1784,6 @@ func (e *Engine) emitOutputAuditEvent(jobID, topic, code, reason string, decisio
 		},
 	}
 	if err := e.bus.Publish(outputPolicyAudit, packet); err != nil {
-		logging.Error("scheduler", "output audit event publish failed", "job_id", jobID, "code", code, "error", err)
+		slog.Error("output audit event publish failed", "job_id", jobID, "code", code, "error", err)
 	}
 }

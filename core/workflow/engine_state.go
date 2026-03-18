@@ -20,6 +20,7 @@ func (e *Engine) StartRun(ctx context.Context, workflowID, runID string) error {
 		return nil // Another replica owns this run.
 	}
 	defer unlock()
+	slog.Debug("run starting", "component", "workflow", "workflowId", workflowID, "runId", runID, "traceId", runID)
 	wfDef, err := e.store.GetWorkflow(ctx, workflowID)
 	if err != nil {
 		return fmt.Errorf("get workflow: %w", err)

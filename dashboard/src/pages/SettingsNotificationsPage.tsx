@@ -131,14 +131,14 @@ export default function SettingsNotificationsPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <StatusBadge variant={ch.enabled ? "healthy" : "muted"}>{ch.enabled ? "Active" : "Disabled"}</StatusBadge>
-                    <Button variant="ghost" size="sm" onClick={() => toast.info("Test notification sent")}>
+                    <Button variant="ghost" size="sm" disabled title="Test notifications not yet available">
                       <TestTube className="w-3 h-3 mr-1" />Test
                     </Button>
                   </div>
                 </motion.div>
               );
             })}
-            <Button variant="outline" size="sm" onClick={() => toast.info("Not configured")}>
+            <Button variant="outline" size="sm" disabled title="Channel management not yet available">
               <Plus className="w-3 h-3 mr-1" />Add Channel
             </Button>
           </div>

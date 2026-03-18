@@ -26,8 +26,19 @@ const LEVEL_FN: Record<LogLevel, "log" | "warn" | "error"> = {
   error: "error",
 };
 
+function resolveDebugCategories(): Set<string> | null {
+  const raw = import.meta.env.VITE_DEBUG_CATEGORIES as string | undefined;
+  if (!raw || !raw.trim()) return null; // null = all categories enabled
+  const cats = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return cats.length > 0 ? new Set(cats) : null;
+}
+
 function createLogger(minLevel: LogLevel) {
   const threshold = LEVEL_ORDER[minLevel];
+  const debugCategories = resolveDebugCategories();
 
   function emit(
     level: LogLevel,
@@ -36,6 +47,11 @@ function createLogger(minLevel: LogLevel) {
     fields?: Record<string, unknown>,
   ): void {
     if (LEVEL_ORDER[level] < threshold) return;
+    // Debug-level category filtering: when VITE_DEBUG_CATEGORIES is set,
+    // only emit debug messages whose component matches one of the listed categories.
+    if (level === "debug" && debugCategories !== null) {
+      if (!debugCategories.has(component.toLowerCase())) return;
+    }
 
     const entry: LogEntry = {
       ts: new Date().toISOString(),

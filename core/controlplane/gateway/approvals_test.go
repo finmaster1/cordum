@@ -804,3 +804,102 @@ func TestApproveJob_RejectsTimedOutRun(t *testing.T) {
 		t.Fatalf("expected error to mention 'timed_out', got %q", errMsg)
 	}
 }
+
+func TestListApprovalsExcludesTerminatedRunApprovals(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+
+	ctx := context.Background()
+	runID := uuid.NewString()
+
+	// Create a workflow run in terminal (succeeded) state.
+	run := &wf.WorkflowRun{
+		ID:         runID,
+		WorkflowID: "wf-stale",
+		Status:     wf.RunStatusSucceeded,
+		Steps:      map[string]*wf.StepRun{},
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := s.workflowStore.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Create a stale approval job (belongs to the terminated run).
+	staleJobID := uuid.NewString()
+	staleReq := &pb.JobRequest{
+		JobId:    staleJobID,
+		Topic:    "job.mkt-authority.approval",
+		TenantId: "default",
+		Labels:   map[string]string{"run_id": runID, "workflow_id": "wf-stale"},
+	}
+	if err := s.jobStore.SetJobMeta(ctx, staleReq); err != nil {
+		t.Fatalf("set stale job meta: %v", err)
+	}
+	if err := s.jobStore.SetJobRequest(ctx, staleReq); err != nil {
+		t.Fatalf("set stale job req: %v", err)
+	}
+	if err := s.jobStore.SetState(ctx, staleJobID, model.JobStateApproval); err != nil {
+		t.Fatalf("set stale state: %v", err)
+	}
+
+	// Create a standalone approval job (no run_id — should appear in list).
+	freshJobID := uuid.NewString()
+	freshReq := &pb.JobRequest{
+		JobId:    freshJobID,
+		Topic:    "job.test.approval",
+		TenantId: "default",
+		Labels:   map[string]string{},
+	}
+	if err := s.jobStore.SetJobMeta(ctx, freshReq); err != nil {
+		t.Fatalf("set fresh job meta: %v", err)
+	}
+	if err := s.jobStore.SetJobRequest(ctx, freshReq); err != nil {
+		t.Fatalf("set fresh job req: %v", err)
+	}
+	if err := s.jobStore.SetState(ctx, freshJobID, model.JobStateApproval); err != nil {
+		t.Fatalf("set fresh state: %v", err)
+	}
+
+	// List approvals.
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	httpReq.Header.Set("X-Tenant-ID", "default")
+	rr := httptest.NewRecorder()
+
+	s.handleListApprovals(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// The stale approval should be filtered out; only the fresh one remains.
+	for _, item := range resp.Items {
+		job, ok := item["job"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if job["id"] == staleJobID {
+			t.Fatalf("stale approval (terminated run) should have been filtered out")
+		}
+	}
+
+	found := false
+	for _, item := range resp.Items {
+		job, ok := item["job"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if job["id"] == freshJobID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("standalone approval should be in the list")
+	}
+}

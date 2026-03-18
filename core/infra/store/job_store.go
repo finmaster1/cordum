@@ -334,6 +334,7 @@ func NewRedisJobStore(url string) (*RedisJobStore, error) {
 		return nil, fmt.Errorf("connect redis: %w", err)
 	}
 
+	slog.Debug("job store connected", "component", "store", "metaTTL", ttl.String())
 	return &RedisJobStore{client: client, metaTTL: ttl}, nil
 }
 

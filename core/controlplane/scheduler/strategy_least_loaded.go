@@ -2,11 +2,11 @@ package scheduler
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 
 	"github.com/cordum/cordum/core/infra/bus"
-	"github.com/cordum/cordum/core/infra/logging"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
 
@@ -74,7 +74,7 @@ func (s *LeastLoadedStrategy) PickSubject(req *pb.JobRequest, workers map[string
 		if hb, exists := workers[preferredWorker]; exists {
 			if _, ok := poolSet[hb.GetPool()]; ok && matchesLabels(hb, requiredLabels) && !isOverloaded(hb) {
 				if subject := bus.DirectSubject(preferredWorker); subject != "" {
-					logging.Info("scheduler", "strategy pick preferred worker",
+					slog.Info("strategy pick preferred worker",
 						"topic", req.Topic,
 						"pool", hb.Pool,
 						"selected_worker", hb.WorkerId,
@@ -118,7 +118,7 @@ func (s *LeastLoadedStrategy) PickSubject(req *pb.JobRequest, workers map[string
 		return "", fmt.Errorf("%w: pool %q", ErrNoWorkers, strings.Join(eligiblePools, ","))
 	}
 
-	logging.Info("scheduler", "strategy pick",
+	slog.Info("strategy pick",
 		"topic", req.Topic,
 		"pool", selected.Pool,
 		"selected_worker", selected.WorkerId,

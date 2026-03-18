@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"sort"
@@ -69,7 +68,7 @@ func bootstrapConfig(ctx context.Context, svc *configsvc.Service, pools *config.
 				doc.Data["pools"] = encoded
 				doc.Data["_poolsFileHash"] = fileHash
 				changed = true
-				log.Printf("scheduler: pool config updated in Redis (hash changed)")
+				slog.Info("pool config updated in Redis (hash changed)")
 			}
 		}
 	}
@@ -92,7 +91,7 @@ func bootstrapConfig(ctx context.Context, svc *configsvc.Service, pools *config.
 				doc.Data["timeouts"] = encoded
 				doc.Data["_timeoutsFileHash"] = fileHash
 				changed = true
-				log.Printf("scheduler: timeouts config updated in Redis (hash changed)")
+				slog.Info("timeouts config updated in Redis (hash changed)")
 			}
 		}
 	}
@@ -124,7 +123,7 @@ func loadConfigSnapshot(ctx context.Context, svc *configsvc.Service, fallbackPoo
 	if raw, ok := doc.Data["pools"]; ok {
 		pools, hash, err := parsePools(raw)
 		if err != nil {
-			log.Printf("scheduler: pools overlay ignored: %v", err)
+			slog.Warn("pools overlay ignored", "error", err)
 		} else if pools != nil {
 			snap.Pools = pools
 			snap.PoolsHash = hash
@@ -133,7 +132,7 @@ func loadConfigSnapshot(ctx context.Context, svc *configsvc.Service, fallbackPoo
 	if raw, ok := doc.Data["timeouts"]; ok {
 		timeouts, hash, err := parseTimeouts(raw)
 		if err != nil {
-			log.Printf("scheduler: timeouts overlay ignored: %v", err)
+			slog.Warn("timeouts overlay ignored", "error", err)
 		} else if timeouts != nil {
 			snap.Timeouts = timeouts
 			snap.TimeoutsHash = hash
@@ -151,7 +150,7 @@ func watchConfigChanges(ctx context.Context, svc *configsvc.Service, fallbackPoo
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			interval = parsed
 		} else {
-			log.Printf("scheduler: invalid SCHEDULER_CONFIG_RELOAD_INTERVAL=%q, using default %s", raw, interval) // #nosec -- value is config input for diagnostics.
+			slog.Warn("invalid SCHEDULER_CONFIG_RELOAD_INTERVAL, using default", "value", raw, "default", interval) // #nosec -- value is config input for diagnostics.
 		}
 	}
 
@@ -181,20 +180,20 @@ func watchConfigChanges(ctx context.Context, svc *configsvc.Service, fallbackPoo
 	reload := func(trigger string) {
 		snap, err := loadConfigSnapshot(ctx, svc, fallbackPools, fallbackTimeouts)
 		if err != nil {
-			log.Printf("scheduler: config reload failed (%s): %v", trigger, err)
+			slog.Error("config reload failed", "trigger", trigger, "error", err)
 			return
 		}
 		if snap.Pools != nil && snap.PoolsHash != "" && snap.PoolsHash != lastPoolsHash {
 			routing := buildRouting(snap.Pools)
 			strategy.UpdateRouting(routing)
 			lastPoolsHash = snap.PoolsHash
-			log.Printf("scheduler: routing updated (%d topics, trigger=%s)", len(routing.Topics), trigger)
+			slog.Info("routing updated", "topics", len(routing.Topics), "trigger", trigger)
 		}
 		if snap.Timeouts != nil && snap.TimeoutsHash != "" && snap.TimeoutsHash != lastTimeoutsHash {
 			dispatch, running, _ := reconcilerTimeouts(snap.Timeouts)
 			reconciler.UpdateTimeouts(dispatch, running)
 			lastTimeoutsHash = snap.TimeoutsHash
-			log.Printf("scheduler: reconciler timeouts updated (dispatch=%s, running=%s, trigger=%s)", dispatch, running, trigger)
+			slog.Info("reconciler timeouts updated", "dispatch", dispatch, "running", running, "trigger", trigger)
 		}
 	}
 

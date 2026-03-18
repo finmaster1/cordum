@@ -2,7 +2,7 @@ package config
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 )
 
 // EffectiveConfigEnvVar carries the JSON-encoded effective config on job env.
@@ -15,7 +15,7 @@ func ParseEffectiveSafety(payload []byte) (SafetyConfig, bool) {
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &top); err != nil {
-		log.Printf("config: failed to parse effective safety: %v", err)
+		slog.Warn("config: failed to parse effective safety", "err", err)
 		return SafetyConfig{}, false
 	}
 	if raw, ok := top["safety"]; ok && len(raw) > 0 {

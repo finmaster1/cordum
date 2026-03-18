@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, ListChecks, Server } from "lucide-react";
+import { Users, ListChecks, Server, Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -121,9 +121,14 @@ export default function TenantsPage() {
         title="Tenants"
         subtitle="Canonical tenant access boundary surface for topic allow/deny, MCP governance, and tenant limits."
         actions={
-          <StatusBadge variant={canManageTenants ? "healthy" : "muted"}>
-            {canManageTenants ? "editor access" : "read-only role"}
-          </StatusBadge>
+          <div className="flex items-center gap-2">
+            <Button variant="primary" size="sm" disabled title="Tenants are managed through policy bundles — edit the bundle YAML to add tenants">
+              <Plus className="w-3 h-3 mr-1" />Create Tenant
+            </Button>
+            <StatusBadge variant={canManageTenants ? "healthy" : "muted"}>
+              {canManageTenants ? "editor access" : "read-only role"}
+            </StatusBadge>
+          </div>
         }
       />
 

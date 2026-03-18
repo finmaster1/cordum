@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
+	"log/slog"
+
 	schemas "github.com/cordum/cordum/core/infra/schema"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
@@ -37,10 +38,19 @@ func recordStepOutput(ctx context.Context, mem store.Store, run *WorkflowRun, st
 
 	entry := map[string]any{"result_ptr": resultPtr}
 	if inline, ok := inlineResult(ctx, mem, resultPtr); ok {
-		entry["output"] = inline
+		effective := inline
+		// If result_data_path is set, extract the sub-field as the effective output.
+		if stepDef != nil {
+			if rdp := strings.TrimSpace(stepDef.ResultDataPath); rdp != "" {
+				if extracted, found := extractDataPath(inline, rdp); found {
+					effective = extracted
+				}
+			}
+		}
+		entry["output"] = effective
 		if applyOutputPath && stepDef != nil {
 			if path := strings.TrimSpace(stepDef.OutputPath); path != "" {
-				_ = setContextPath(run.Context, path, inline)
+				_ = setContextPath(run.Context, path, effective)
 			}
 		}
 	} else if applyOutputPath && stepDef != nil {
@@ -130,6 +140,14 @@ func (e *Engine) validateStepOutput(step *Step, resultPtr string) error {
 		// be fetched, reject the step rather than silently skipping validation.
 		return fmt.Errorf("output schema validation failed: unable to fetch result payload %q", resultPtr)
 	}
+	// If result_data_path is set, extract the sub-field for validation.
+	if rdp := strings.TrimSpace(step.ResultDataPath); rdp != "" {
+		extracted, found := extractDataPath(payload, rdp)
+		if !found {
+			return fmt.Errorf("output schema validation failed: result_data_path %q not found in job result", rdp)
+		}
+		payload = extracted
+	}
 	if hasInline {
 		return schemas.ValidateMap(step.OutputSchema, payload)
 	}
@@ -161,6 +179,34 @@ func fetchResultPayload(ctx context.Context, mem store.Store, resultPtr string) 
 	return string(data), true
 }
 
+// extractDataPath navigates a dot-separated path into a value. Works on
+// map[string]any at each level. Returns (value, true) if the path is found,
+// or (nil, false) if any segment is missing or the value is not a map at
+// an intermediate level.
+func extractDataPath(value any, path string) (any, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return value, true
+	}
+	parts := strings.Split(path, ".")
+	cur := value
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, false
+		}
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = m[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
 // checkStepOutputPolicy runs a fast sync output policy check on step results.
 // Returns true if the step was quarantined/denied (caller should skip recording output).
 func (e *Engine) checkStepOutputPolicy(ctx context.Context, run *WorkflowRun, stepID string, stepRun *StepRun, res *pb.JobResult) bool {
@@ -169,7 +215,7 @@ func (e *Engine) checkStepOutputPolicy(ctx context.Context, run *WorkflowRun, st
 	}
 	record, err := e.outputSafety.CheckOutputMeta(res, nil)
 	if err != nil {
-		logging.Error("workflow-engine", "step output policy check failed", "run_id", run.ID, "step_id", stepID, "error", err)
+		slog.Error("step output policy check failed", "run_id", run.ID, "step_id", stepID, "error", err)
 		return false // fail-open on error to preserve backward compat
 	}
 	now := time.Now().UTC()

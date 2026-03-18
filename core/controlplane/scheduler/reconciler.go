@@ -3,10 +3,9 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/cordum/cordum/core/infra/logging"
 )
 
 // Reconciler periodically inspects job state to enforce timeouts and cleanup.
@@ -53,7 +52,7 @@ func (r *Reconciler) Start(ctx context.Context) {
 			if r.lockKey != "" && r.store != nil && r.lockTTL > 0 {
 				token, err := r.store.TryAcquireLock(ctx, r.lockKey, r.lockTTL)
 				if err != nil {
-					logging.Error("reconciler", "lock acquisition failed", "error", err)
+					slog.Error("lock acquisition failed", "error", err)
 					continue
 				}
 				if token == "" {
@@ -75,7 +74,7 @@ func (r *Reconciler) Start(ctx context.Context) {
 						case <-t.C:
 							rCtx, rc := context.WithTimeout(ctx, 2*time.Second)
 							if err := r.store.RenewLock(rCtx, r.lockKey, token, r.lockTTL); err != nil {
-								logging.Warn("reconciler", "lock renewal failed", "error", err)
+								slog.Warn("lock renewal failed", "error", err)
 							}
 							rc()
 						}
@@ -129,7 +128,7 @@ func (r *Reconciler) handleTimeouts(ctx context.Context, state JobState, cutoff 
 		cutoffMicros := cutoff.UnixNano() / int64(time.Microsecond)
 		records, err := r.store.ListJobsByState(ctx, state, cutoffMicros, 200)
 		if err != nil {
-			logging.Error("reconciler", "list jobs", "state", state, "error", err)
+			slog.Error("list jobs", "state", state, "error", err)
 			return
 		}
 		if r.metrics != nil {
@@ -146,7 +145,7 @@ func (r *Reconciler) handleTimeouts(ctx context.Context, state JobState, cutoff 
 			}
 			if err := r.store.SetState(ctx, rec.ID, JobStateTimeout); err != nil {
 				failed[rec.ID]++
-				logging.Error("reconciler", "mark timeout", "job_id", rec.ID, "error", err, "retry", failed[rec.ID])
+				slog.Error("mark timeout", "job_id", rec.ID, "error", err, "retry", failed[rec.ID])
 				continue
 			}
 			reason := fmt.Sprintf("timeout: %s exceeded", state)
@@ -154,7 +153,7 @@ func (r *Reconciler) handleTimeouts(ctx context.Context, state JobState, cutoff 
 				reason = fmt.Sprintf("timeout: %s >%s", state, timeout[0])
 			}
 			_ = r.store.SetFailureReason(ctx, rec.ID, reason)
-			logging.Info("reconciler", "job timed out", "job_id", rec.ID, "from_state", state)
+			slog.Info("job timed out", "job_id", rec.ID, "from_state", state)
 			progress++
 		}
 
@@ -167,21 +166,21 @@ func (r *Reconciler) handleTimeouts(ctx context.Context, state JobState, cutoff 
 			}
 		}
 	}
-	logging.Error("reconciler", "max iterations reached while processing timeouts", "state", state)
+	slog.Error("max iterations reached while processing timeouts", "state", state)
 }
 
 func (r *Reconciler) handleDeadlineExpirations(ctx context.Context, now time.Time) {
 	records, err := r.store.ListExpiredDeadlines(ctx, now.Unix(), 200)
 	if err != nil {
-		logging.Error("reconciler", "list expired deadlines", "error", err)
+		slog.Error("list expired deadlines", "error", err)
 		return
 	}
 	for _, rec := range records {
 		if err := r.store.SetState(ctx, rec.ID, JobStateTimeout); err != nil {
-			logging.Error("reconciler", "mark deadline timeout", "job_id", rec.ID, "error", err)
+			slog.Error("mark deadline timeout", "job_id", rec.ID, "error", err)
 		} else {
 			_ = r.store.SetFailureReason(ctx, rec.ID, "timeout: deadline expired")
-			logging.Info("reconciler", "job deadline expired", "job_id", rec.ID)
+			slog.Info("job deadline expired", "job_id", rec.ID)
 		}
 	}
 }

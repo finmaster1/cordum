@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -17,7 +18,6 @@ import (
 	"github.com/cordum/cordum/core/infra/artifacts"
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/bus"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/registry"
 	"github.com/cordum/cordum/core/infra/secrets"
 	"github.com/cordum/cordum/core/infra/store"
@@ -39,7 +39,7 @@ const statusPipelineSampleLimit = int64(500)
 // Returns true if unmarshal succeeded, false otherwise.
 func safeUnmarshal(data []byte, v any, field, jobID string) bool {
 	if err := json.Unmarshal(data, v); err != nil {
-		logging.Warn("api-gateway", "job meta: corrupt JSON field",
+		slog.Warn("job meta: corrupt JSON field",
 			"field", field,
 			"job_id", jobID,
 			"error", err,
@@ -64,7 +64,7 @@ func (s *server) handleGetWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		logging.Warn("api-gateway", "worker snapshot read failed, falling back to in-memory", "error", err)
+		slog.Warn("worker snapshot read failed, falling back to in-memory", "error", err)
 	}
 	// Fallback: in-memory heartbeat map (local replica only).
 	out := s.activeWorkersSnapshot(time.Now().UTC())
@@ -249,7 +249,7 @@ func (s *server) statusPipeline(ctx context.Context, tenantID string) map[string
 	defer cancel()
 	jobs, err := s.jobStore.ListRecentJobs(listCtx, statusPipelineSampleLimit)
 	if err != nil {
-		logging.Warn("api-gateway", "status pipeline list failed", "error", err)
+		slog.Warn("status pipeline list failed", "error", err)
 		return pipeline
 	}
 
@@ -337,7 +337,7 @@ func (s *server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		jobs, err = s.jobStore.ListRecentJobs(r.Context(), limit)
 	}
 	if err != nil {
-		logging.Error("api-gateway", "job list failed", "error", err)
+		slog.Error("job list failed", "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to list jobs")
 		return
 	}
@@ -411,7 +411,7 @@ func (s *server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		var parseErr error
 		attempts, parseErr = strconv.Atoi(raw)
 		if parseErr != nil {
-			logging.Warn("api-gateway", "job meta: non-numeric attempts field",
+			slog.Warn("job meta: non-numeric attempts field",
 				"job_id", id,
 				"raw", raw,
 				"error", parseErr,
@@ -629,7 +629,7 @@ func (s *server) handleListJobDecisions(w http.ResponseWriter, r *http.Request) 
 	limit = clampListLimit(limit)
 	decisions, err := s.jobStore.ListSafetyDecisions(r.Context(), id, limit)
 	if err != nil {
-		logging.Error("api-gateway", "job decisions list failed", "error", err, "job_id", id)
+		slog.Error("job decisions list failed", "error", err, "job_id", id)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to list decisions")
 		return
 	}
@@ -685,9 +685,9 @@ func (s *server) handleGetMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if auth := authFromRequest(r); auth != nil {
-		logging.Info("api-gateway", "memory read", "tenant", auth.Tenant, "principal", auth.PrincipalID, "key", key, "ptr", ptr)
+		slog.Info("memory read", "tenant", auth.Tenant, "principal", auth.PrincipalID, "key", key, "ptr", ptr)
 	} else {
-		logging.Info("api-gateway", "memory read", "tenant", "", "principal", "", "key", key, "ptr", ptr)
+		slog.Info("memory read", "tenant", "", "principal", "", "key", key, "ptr", ptr)
 	}
 
 	// Tenant isolation: for ctx:{id} and res:{id} keys, extract the job ID
@@ -863,7 +863,7 @@ func (s *server) handleGetMemory(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusNotFound, "not found")
 			return
 		}
-		logging.Error("api-gateway", "memory read failed", "error", err, "key", key)
+		slog.Error("memory read failed", "error", err, "key", key)
 		writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -964,7 +964,7 @@ func (s *server) handlePutArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	ptr, err := s.artifactStore.Put(r.Context(), content, meta)
 	if err != nil {
-		logging.Error("api-gateway", "artifact put failed", "error", err)
+		slog.Error("artifact put failed", "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to store artifact")
 		return
 	}
@@ -991,7 +991,7 @@ func (s *server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusNotFound, "artifact not found")
 			return
 		}
-		logging.Error("api-gateway", "artifact get failed", "error", err, "ptr", ptr)
+		slog.Error("artifact get failed", "error", err, "ptr", ptr)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to retrieve artifact")
 		return
 	}
@@ -1053,7 +1053,7 @@ func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusNotFound, "job not found")
 			return
 		}
-		logging.Error("api-gateway", "job cancel failed", "error", err, "job_id", id)
+		slog.Error("job cancel failed", "error", err, "job_id", id)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to cancel job")
 		return
 	}
@@ -1086,7 +1086,7 @@ func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	s.enqueueBusPacket(cancelPacket)
 	// Publish cancel result so scheduler/system listeners can observe the cancel.
 	if err := s.bus.Publish(capsdk.SubjectResult, cancelPacket); err != nil {
-		logging.Error("api-gateway", "publish cancel result failed", "job_id", id, "error", err)
+		slog.Error("publish cancel result failed", "job_id", id, "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to publish cancel")
 		return
 	}
@@ -1105,7 +1105,7 @@ func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 		Payload:         &pb.BusPacket_JobCancel{JobCancel: cancelReq},
 	}
 	if err := s.bus.Publish(capsdk.SubjectCancel, cancelBusPacket); err != nil {
-		logging.Error("api-gateway", "publish cancel broadcast failed", "job_id", id, "error", err)
+		slog.Error("publish cancel broadcast failed", "job_id", id, "error", err)
 	}
 
 	cancelTopic, _ := s.jobStore.GetTopic(r.Context(), id)
@@ -1346,7 +1346,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil && !errors.Is(err, redis.Nil) {
-			logging.Error("api-gateway", "idempotency lookup failed", "error", err)
+			slog.Error("idempotency lookup failed", "error", err)
 		}
 	}
 	if err := s.enforceJobBackpressure(r.Context(), orgID, teamID); err != nil {
@@ -1355,7 +1355,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusTooManyRequests, bp.Error())
 			return
 		}
-		logging.Error("api-gateway", "job backpressure check failed", "error", err)
+		slog.Error("job backpressure check failed", "error", err)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "job submission unavailable")
 		return
 	}
@@ -1382,7 +1382,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err != nil && !errors.Is(err, redis.Nil) {
-				logging.Error("api-gateway", "idempotency lookup failed", "error", err)
+				slog.Error("idempotency lookup failed", "error", err)
 			}
 			writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
 			return
@@ -1476,29 +1476,29 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.memStore.PutContext(r.Context(), ctxKey, payloadBytes); err != nil {
-		logging.Error("api-gateway", "failed to persist job context", "job_id", jobID, "error", err)
+		slog.Error("failed to persist job context", "job_id", jobID, "error", err)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "failed to persist job context")
 		return
 	}
 
 	// Set initial state
 	if err := s.jobStore.SetState(r.Context(), jobID, model.JobStatePending); err != nil {
-		logging.Error("api-gateway", "failed to initialize job state", "job_id", jobID, "error", err)
+		slog.Error("failed to initialize job state", "job_id", jobID, "error", err)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "failed to initialize job state")
 		return
 	}
 	if err := s.jobStore.SetTopic(r.Context(), jobID, req.Topic); err != nil {
-		logging.Error("api-gateway", "failed to set job topic", "job_id", jobID, "error", err)
+		slog.Error("failed to set job topic", "job_id", jobID, "error", err)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "failed to initialize job metadata")
 		return
 	}
 	if err := s.jobStore.SetTenant(r.Context(), jobID, orgID); err != nil {
-		logging.Error("api-gateway", "failed to set job tenant", "job_id", jobID, "error", err)
+		slog.Error("failed to set job tenant", "job_id", jobID, "error", err)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "failed to initialize job metadata")
 		return
 	} // Use OrgId here too
 	if err := s.jobStore.AddJobToTrace(r.Context(), traceID, jobID); err != nil {
-		logging.Error("api-gateway", "failed to add job to trace", "job_id", jobID, "trace_id", traceID, "error", err)
+		slog.Error("failed to add job to trace", "job_id", jobID, "trace_id", traceID, "error", err)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "failed to initialize job metadata")
 		return
 	}
@@ -1531,12 +1531,12 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if s.jobStore != nil {
 		if err := s.jobStore.SetJobMeta(r.Context(), jobReq); err != nil {
-			logging.Error("api-gateway", "failed to persist job metadata", "job_id", jobID, "error", err)
+			slog.Error("failed to persist job metadata", "job_id", jobID, "error", err)
 			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to persist job metadata")
 			return
 		}
 		if err := s.jobStore.SetJobRequest(r.Context(), jobReq); err != nil {
-			logging.Error("api-gateway", "failed to persist job request", "job_id", jobID, "error", err)
+			slog.Error("failed to persist job request", "job_id", jobID, "error", err)
 			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to persist job metadata")
 			return
 		}
@@ -1553,15 +1553,22 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
-		logging.Error("api-gateway", "job publish failed", "job_id", jobID, "error", err)
+		slog.Error("job publish failed", "job_id", jobID, "error", err)
 		_ = s.jobStore.SetState(r.Context(), jobID, model.JobStateFailed)
 		writeErrorJSON(w, http.StatusServiceUnavailable, "failed to enqueue job")
 		return
 	}
 
-	logging.Info("api-gateway", "job submitted http", "job_id", jobID)
+	reqID := requestIdFromContext(r.Context())
+	loggerFromContext(r.Context()).Info("job submitted",
+		"jobId", jobID,
+		"traceId", traceID,
+		"requestId", reqID,
+		"topic", req.Topic,
+	)
 
 	s.appendAuditEntryNamed(r.Context(), "submit", "job", jobID, req.Topic, policyActorID(r), policyRole(r), "submit job "+jobID)
+	w.Header().Set("X-Trace-Id", traceID)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{
 		"job_id":   jobID,
@@ -1578,7 +1585,7 @@ func (s *server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 
 	jobs, err := s.jobStore.GetTraceJobs(r.Context(), id)
 	if err != nil {
-		logging.Error("api-gateway", "trace jobs lookup failed", "error", err, "trace_id", id)
+		slog.Error("trace jobs lookup failed", "error", err, "trace_id", id)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to load trace")
 		return
 	}

@@ -29,11 +29,13 @@ func TestLoopFixedCountNoCondition(t *testing.T) {
 	}
 
 	for idx := 0; idx < 3; idx++ {
-		engine.HandleJobResult(context.Background(), &pb.JobResult{
+		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 			JobId:     fmt.Sprintf("%s:loop[%d]@1", runID, idx),
 			Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 			ResultPtr: fmt.Sprintf("redis://res:loop[%d]", idx),
-		})
+		}); err != nil {
+			t.Fatalf("handle job result: %v", err)
+		}
 	}
 
 	final := mustGetRun(t, store, runID)
@@ -76,11 +78,13 @@ func TestLoopUntilStopsAtFiveIterations(t *testing.T) {
 	defer store.Close()
 
 	for idx := 0; idx < 10; idx++ {
-		engine.HandleJobResult(context.Background(), &pb.JobResult{
+		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 			JobId:     fmt.Sprintf("%s:loop[%d]@1", runID, idx),
 			Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 			ResultPtr: fmt.Sprintf("redis://res:loop[%d]", idx),
-		})
+		}); err != nil {
+			t.Fatalf("handle job result: %v", err)
+		}
 		if run := mustGetRun(t, store, runID); run.Status == RunStatusSucceeded {
 			break
 		}
@@ -117,11 +121,13 @@ func TestLoopMaxExceededFails(t *testing.T) {
 	defer store.Close()
 
 	for idx := 0; idx < 3; idx++ {
-		engine.HandleJobResult(context.Background(), &pb.JobResult{
+		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 			JobId:     fmt.Sprintf("%s:loop[%d]@1", runID, idx),
 			Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 			ResultPtr: fmt.Sprintf("redis://res:loop[%d]", idx),
-		})
+		}); err != nil {
+			t.Fatalf("handle job result: %v", err)
+		}
 	}
 
 	final := mustGetRun(t, store, runID)
@@ -156,11 +162,13 @@ func TestLoopWhileConditionRunsFiveIterations(t *testing.T) {
 	defer store.Close()
 
 	for idx := 0; idx < 10; idx++ {
-		engine.HandleJobResult(context.Background(), &pb.JobResult{
+		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 			JobId:     fmt.Sprintf("%s:loop[%d]@1", runID, idx),
 			Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 			ResultPtr: fmt.Sprintf("redis://res:loop[%d]", idx),
-		})
+		}); err != nil {
+			t.Fatalf("handle job result: %v", err)
+		}
 		if run := mustGetRun(t, store, runID); run.Status == RunStatusSucceeded {
 			break
 		}
@@ -245,11 +253,13 @@ func TestLoopScopeVariablesInChildPayload(t *testing.T) {
 		t.Fatalf("expected first payload loop.previous_output=nil, got %#v", firstPayload["prev"])
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     runID + ":loop[0]@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:loop[0]",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	second := mustGetRun(t, store, runID)
 	secondPayload := childPayload(t, second, "loop[1]")
@@ -277,11 +287,13 @@ func TestLoopScopeVariablesInChildPayload(t *testing.T) {
 		t.Fatalf("expected loop_previous_output env to include previous ptr, got %q", req.Env["loop_previous_output"])
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     runID + ":loop[1]@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:loop[1]",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	final := mustGetRun(t, store, runID)
 	if final.Status != RunStatusSucceeded {
 		t.Fatalf("expected run succeeded, got %s", final.Status)

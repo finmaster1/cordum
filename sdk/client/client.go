@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -156,6 +157,7 @@ type WorkflowRun struct {
 	ID         string             `json:"id"`
 	WorkflowID string             `json:"workflow_id"`
 	Status     string             `json:"status"`
+	Input      map[string]any     `json:"input,omitempty"`
 	Steps      map[string]StepRun `json:"steps,omitempty"`
 	UpdatedAt  string             `json:"updated_at,omitempty"`
 	Metadata   map[string]string  `json:"metadata,omitempty"`
@@ -261,6 +263,7 @@ func (c *Client) doJSONWithHeaders(ctx context.Context, method, path string, bod
 		if err := json.NewEncoder(buf).Encode(body); err != nil {
 			return fmt.Errorf("encode json: %w", err)
 		}
+		slog.Debug("sdk request body", "method", method, "path", path, "body_bytes", buf.Len(), "body", buf.String())
 		payload = buf
 	}
 

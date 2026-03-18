@@ -20,11 +20,13 @@ func TestParallelAllSucceed(t *testing.T) {
 	}
 
 	for _, childID := range childIDs {
-		engine.HandleJobResult(context.Background(), &pb.JobResult{
+		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 			JobId:     fmt.Sprintf("%s:%s@1", runID, childID),
 			Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 			ResultPtr: "redis://res:" + childID,
-		})
+		}); err != nil {
+			t.Fatalf("handle job result: %v", err)
+		}
 	}
 
 	final, err := store.GetRun(context.Background(), runID)
@@ -51,15 +53,19 @@ func TestParallelOneFailsStrategyAll(t *testing.T) {
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-fail", "run-parallel-fail", childIDs, "all", 0, 0)
 	defer store.Close()
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_a"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:check_a",
-	})
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  fmt.Sprintf("%s:%s@1", runID, "check_b"),
 		Status: pb.JobStatus_JOB_STATUS_FAILED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), runID)
 	if err != nil {
@@ -82,11 +88,13 @@ func TestParallelAnyStrategy(t *testing.T) {
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-any", "run-parallel-any", childIDs, "any", 0, 0)
 	defer store.Close()
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_a"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:check_a",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), runID)
 	if err != nil {
@@ -113,11 +121,13 @@ func TestParallelNOfM(t *testing.T) {
 	defer store.Close()
 
 	for _, childID := range []string{"check_1", "check_2", "check_3"} {
-		engine.HandleJobResult(context.Background(), &pb.JobResult{
+		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 			JobId:     fmt.Sprintf("%s:%s@1", runID, childID),
 			Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 			ResultPtr: "redis://res:" + childID,
-		})
+		}); err != nil {
+			t.Fatalf("handle job result: %v", err)
+		}
 	}
 
 	final, err := store.GetRun(context.Background(), runID)
@@ -148,29 +158,35 @@ func TestParallelMaxParallel(t *testing.T) {
 		t.Fatalf("expected 1 initial dispatch with max_parallel=1, got %d", countPublishedSubject(bus, capsdk.SubjectSubmit))
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_a"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:check_a",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	if countPublishedSubject(bus, capsdk.SubjectSubmit) != 2 {
 		t.Fatalf("expected second child dispatch after first completion, got %d", countPublishedSubject(bus, capsdk.SubjectSubmit))
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_b"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:check_b",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	if countPublishedSubject(bus, capsdk.SubjectSubmit) != 3 {
 		t.Fatalf("expected third child dispatch after second completion, got %d", countPublishedSubject(bus, capsdk.SubjectSubmit))
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_c"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:check_c",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), runID)
 	if err != nil {
@@ -186,16 +202,20 @@ func TestParallelOutputAggregation(t *testing.T) {
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-output", "run-parallel-output", childIDs, "all", 0, 0)
 	defer store.Close()
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "alpha"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:alpha",
-	})
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "beta"),
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:beta",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), runID)
 	if err != nil {

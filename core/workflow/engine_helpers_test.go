@@ -388,3 +388,159 @@ func TestEvalForEachAndBuildJobRequestDefaults(t *testing.T) {
 		t.Fatalf("expected default context mode")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// extractDataPath unit tests
+// ---------------------------------------------------------------------------
+
+func TestExtractDataPath(t *testing.T) {
+	cases := []struct {
+		name   string
+		value  any
+		path   string
+		wantOK bool
+	}{
+		{"empty path returns original", map[string]any{"k": "v"}, "", true},
+		{"single level", map[string]any{"data": map[string]any{"x": 1}}, "data", true},
+		{"nested path", map[string]any{"data": map[string]any{"nested": "val"}}, "data.nested", true},
+		{"missing path", map[string]any{"data": "ok"}, "missing", false},
+		{"deep missing", map[string]any{"a": map[string]any{"b": "c"}}, "a.z", false},
+		{"non-map value", "string-value", "data", false},
+		{"nil value", nil, "data", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := extractDataPath(tc.value, tc.path)
+			if ok != tc.wantOK {
+				t.Fatalf("extractDataPath ok=%v, want %v", ok, tc.wantOK)
+			}
+		})
+	}
+
+	// Verify specific extracted values.
+	val, ok := extractDataPath(map[string]any{"data": map[string]any{"nested": "val"}}, "data.nested")
+	if !ok || val != "val" {
+		t.Fatalf("expected 'val', got %v (ok=%v)", val, ok)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// validateStepOutput with ResultDataPath
+// ---------------------------------------------------------------------------
+
+func TestValidateStepOutputWithResultDataPath(t *testing.T) {
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	engine := (&Engine{}).WithMemory(memStore)
+
+	// Worker returns a wrapper: {action: "draft", status: "ok", data: {drafts: [...]}}
+	// Schema validates the inner data field only.
+	wrapper := map[string]any{
+		"action": "draft",
+		"status": "ok",
+		"data":   map[string]any{"drafts": []any{"draft-1", "draft-2"}},
+	}
+	key := store.MakeResultKey("job-rdp-1")
+	data, _ := json.Marshal(wrapper)
+	if err := memStore.PutResult(context.Background(), key, data); err != nil {
+		t.Fatalf("put result: %v", err)
+	}
+	ptr := store.PointerForKey(key)
+
+	// Schema requires "drafts" field — only valid for the extracted data, not the wrapper.
+	step := &Step{
+		ResultDataPath: "data",
+		OutputSchema:   map[string]any{"type": "object", "required": []any{"drafts"}},
+	}
+	if err := engine.validateStepOutput(step, ptr); err != nil {
+		t.Fatalf("expected validation to pass with result_data_path, got: %v", err)
+	}
+
+	// Without ResultDataPath, the same schema should FAIL (wrapper doesn't have "drafts").
+	stepNoRDP := &Step{
+		OutputSchema: map[string]any{"type": "object", "required": []any{"drafts"}},
+	}
+	if err := engine.validateStepOutput(stepNoRDP, ptr); err == nil {
+		t.Fatal("expected validation to fail without result_data_path")
+	}
+}
+
+func TestValidateStepOutputResultDataPathMissing(t *testing.T) {
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	engine := (&Engine{}).WithMemory(memStore)
+
+	wrapper := map[string]any{"action": "draft", "status": "ok"}
+	key := store.MakeResultKey("job-rdp-missing")
+	data, _ := json.Marshal(wrapper)
+	if err := memStore.PutResult(context.Background(), key, data); err != nil {
+		t.Fatalf("put result: %v", err)
+	}
+	ptr := store.PointerForKey(key)
+
+	step := &Step{
+		ResultDataPath: "nonexistent",
+		OutputSchema:   map[string]any{"type": "object"},
+	}
+	err := engine.validateStepOutput(step, ptr)
+	if err == nil {
+		t.Fatal("expected error for missing result_data_path")
+	}
+	if !strings.Contains(err.Error(), "result_data_path") {
+		t.Fatalf("expected result_data_path error message, got: %v", err)
+	}
+}
+
+func TestRecordStepOutputWithResultDataPath(t *testing.T) {
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	wrapper := map[string]any{
+		"action": "draft",
+		"status": "ok",
+		"data":   map[string]any{"drafts": []any{"d1"}},
+	}
+	key := store.MakeResultKey("job-rdp-record")
+	data, _ := json.Marshal(wrapper)
+	if err := memStore.PutResult(context.Background(), key, data); err != nil {
+		t.Fatalf("put result: %v", err)
+	}
+	ptr := store.PointerForKey(key)
+
+	run := &WorkflowRun{ID: "run-rdp", Context: map[string]any{}}
+	step := &Step{ResultDataPath: "data", OutputPath: "ctx.outreach"}
+
+	recordStepOutput(context.Background(), memStore, run, "step-1", step, ptr, true)
+
+	// Verify the output stored is the extracted data, not the wrapper.
+	steps := run.Context["steps"].(map[string]any)
+	entry := steps["step-1"].(map[string]any)
+	output, ok := entry["output"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map output, got %T: %v", entry["output"], entry["output"])
+	}
+	if _, hasDrafts := output["drafts"]; !hasDrafts {
+		t.Fatalf("expected extracted data with drafts field, got: %v", output)
+	}
+	if _, hasAction := output["action"]; hasAction {
+		t.Fatal("extracted data should NOT contain wrapper field 'action'")
+	}
+
+	// Verify output_path stores extracted data.
+	ctxVal, found := getContextPath(run.Context, "ctx.outreach")
+	if !found {
+		t.Fatal("expected ctx.outreach to be set")
+	}
+	outreachMap, ok := ctxVal.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map at ctx.outreach, got %T", ctxVal)
+	}
+	if _, hasDrafts := outreachMap["drafts"]; !hasDrafts {
+		t.Fatal("expected ctx.outreach to contain extracted drafts")
+	}
+}

@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { logger } from "../lib/logger";
 
 export type PolicyStudioTelemetryEventName =
   | "policy_editor_advanced_toggled"
@@ -45,9 +46,7 @@ export function usePolicyStudioTelemetry() {
         new CustomEvent("cordum:policy-studio-telemetry", { detail }),
       );
 
-      if (import.meta.env.DEV) {
-        console.debug("[policy-telemetry]", detail);
-      }
+      logger.debug("policy-telemetry", event, detail as unknown as Record<string, unknown>);
     },
     [],
   );

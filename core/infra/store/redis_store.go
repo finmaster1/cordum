@@ -94,6 +94,7 @@ func NewRedisStore(url string) (*RedisStore, error) {
 		return nil, fmt.Errorf("connect redis: %w", err)
 	}
 
+	slog.Debug("redis store connected", "component", "store", "dataTTL", ttl.String())
 	return &RedisStore{client: client, dataTTL: ttl}, nil
 }
 

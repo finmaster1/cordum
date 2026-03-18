@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
+	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/store"
+	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/prometheus/client_golang/prometheus"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -182,7 +184,7 @@ func (s *server) startBusTaps() error {
 					Attempts:   attempts,
 					CreatedAt:  time.Now().UTC(),
 				}); err != nil {
-					logging.Error("api-gateway", "dlq add failed", "job_id", jobID, "error", err)
+					slog.Error("dlq add failed", "job_id", jobID, "error", err)
 				}
 
 				// Best effort: ensure a result exists for failed-to-dispatch jobs so clients can inspect `res:<job_id>`.
@@ -198,12 +200,12 @@ func (s *server) startBusTaps() error {
 					}
 					if data, err := json.Marshal(body); err == nil {
 						if err := s.memStore.PutResult(dlqCtx, resKey, data); err != nil {
-							logging.Error("api-gateway", "store result failed", "job_id", jobID, "error", err)
+							slog.Error("store result failed", "job_id", jobID, "error", err)
 						}
 					}
 					if existing, err := s.jobStore.GetResultPtr(dlqCtx, jobID); err != nil || strings.TrimSpace(existing) == "" {
 						if err := s.jobStore.SetResultPtr(dlqCtx, jobID, resPtr); err != nil {
-							logging.Error("api-gateway", "set result pointer failed", "job_id", jobID, "error", err)
+							slog.Error("set result pointer failed", "job_id", jobID, "error", err)
 						}
 					}
 				}
@@ -218,6 +220,9 @@ func (s *server) startBusTaps() error {
 	for _, subj := range []string{"sys.job.>", "sys.audit.>"} {
 		subject := subj
 		if err := s.bus.Subscribe(subject, "", func(p *pb.BusPacket) error {
+			// Always broadcast to WS clients first — duplicate broadcasts are
+			// harmless (dashboard re-renders) and ensures visibility even on retry.
+			s.enqueueBusPacket(p)
 			if subject == "sys.job.>" {
 				// Check if gateway is shutting down before starting
 				// potentially long-running workflow result processing.
@@ -228,12 +233,13 @@ func (s *server) startBusTaps() error {
 				}
 				handlerCtx, handlerCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer handlerCancel()
-				s.handleWorkflowJobResult(handlerCtx, p.GetJobResult())
+				if err := s.handleWorkflowJobResult(handlerCtx, p.GetJobResult()); err != nil {
+					return err
+				}
 			}
-			s.enqueueBusPacket(p)
 			return nil
 		}); err != nil {
-			logging.Error("api-gateway", "bus subscribe failed", "subject", subject, "error", err)
+			slog.Error("bus subscribe failed", "subject", subject, "error", err)
 		}
 	}
 
@@ -297,8 +303,7 @@ func (s *server) enqueueBusPacket(p *pb.BusPacket) {
 	data, err := marshalBusPacketForWS(p)
 	if err != nil {
 		wsPacketsDroppedTotal.Inc()
-		logging.Error(
-			"api-gateway",
+		slog.Error(
 			"websocket bus packet dropped after all marshal attempts failed",
 			"packet_type", busPacketType(p),
 			"trace_id", sanitizeUTF8ForLog(strings.TrimSpace(p.GetTraceId())),
@@ -326,8 +331,7 @@ func marshalBusPacketForWS(p *pb.BusPacket) ([]byte, error) {
 
 	packetType := busPacketType(p)
 	traceID := sanitizeUTF8ForLog(strings.TrimSpace(p.GetTraceId()))
-	logging.Error(
-		"api-gateway",
+	slog.Error(
 		"protojson marshal failed for websocket bus packet",
 		"packet_type", packetType,
 		"trace_id", traceID,
@@ -341,8 +345,7 @@ func marshalBusPacketForWS(p *pb.BusPacket) ([]byte, error) {
 
 	data, fallbackErr := json.Marshal(p)
 	if fallbackErr == nil {
-		logging.Error(
-			"api-gateway",
+		slog.Error(
 			"sanitized protojson fallback failed; using stdlib JSON fallback for websocket bus packet",
 			"packet_type", packetType,
 			"trace_id", traceID,
@@ -351,8 +354,7 @@ func marshalBusPacketForWS(p *pb.BusPacket) ([]byte, error) {
 		return data, nil
 	}
 
-	logging.Error(
-		"api-gateway",
+	slog.Error(
 		"failed to marshal websocket bus packet fallback; dropping packet",
 		"packet_type", packetType,
 		"trace_id", traceID,
@@ -523,25 +525,36 @@ func (s *server) enqueueWSEvent(data []byte, tenant string, jobID string) {
 	}
 }
 
-func (s *server) handleWorkflowJobResult(ctx context.Context, jr *pb.JobResult) {
+func (s *server) handleWorkflowJobResult(ctx context.Context, jr *pb.JobResult) error {
 	if s == nil || s.workflowEng == nil || jr == nil || jr.JobId == "" {
-		return
+		return nil
 	}
 	runID, _ := splitWorkflowJobID(jr.JobId)
 	if runID == "" {
-		return
+		return nil
 	}
 
 	if s.jobStore != nil {
 		lockKey := "cordum:wf:run:lock:" + runID
 		token, err := s.jobStore.TryAcquireLock(ctx, lockKey, 30*time.Second)
-		if err != nil || token == "" {
-			return
+		if err != nil {
+			return bus.RetryAfter(err, 1*time.Second)
+		}
+		if token == "" {
+			return bus.RetryAfter(fmt.Errorf("run lock busy: %s", runID), 500*time.Millisecond)
 		}
 		defer func() { _ = s.jobStore.ReleaseLock(context.Background(), lockKey, token) }()
 	}
 
-	s.workflowEng.HandleJobResult(ctx, jr)
+	if err := s.workflowEng.HandleJobResult(ctx, jr); err != nil {
+		if errors.Is(err, wf.ErrRunNotFound) {
+			slog.Info("discarding job result for deleted/missing run",
+				"run_id", runID, "job_id", jr.JobId)
+			return nil // ACK — run is gone, retrying won't help
+		}
+		return bus.RetryAfter(err, 1*time.Second)
+	}
+	return nil
 }
 
 func splitWorkflowJobID(jobID string) (runID, stepID string) {
@@ -565,14 +578,14 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logging.Info("gateway", "ws connection attempt", "remote", r.RemoteAddr)
+	slog.Info("ws connection attempt", "remote", r.RemoteAddr)
 	ws, err := upgrader.Upgrade(w, r, negotiateSubprotocol(r))
 	if err != nil {
-		logging.Error("gateway", "ws upgrade failed", "error", err)
+		slog.Error("ws upgrade failed", "error", err)
 		return
 	}
 	defer ws.Close()
-	logging.Info("gateway", "ws connected", "remote", r.RemoteAddr)
+	slog.Info("ws connected", "remote", r.RemoteAddr)
 
 	authCtx := authFromRequest(r)
 	client := &wsClient{ch: make(chan wsEvent, 100)}
@@ -607,7 +620,7 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-revalidate.C:
 			if s.auth != nil && client.apiKey != "" {
 				if err := s.revalidateWSAuth(client.apiKey); err != nil {
-					logging.Info("gateway", "ws credential revoked, closing",
+					slog.Info("ws credential revoked, closing",
 						"tenant", client.tenant, "remote", r.RemoteAddr)
 					_ = ws.WriteControl(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "credential revoked"),
@@ -647,14 +660,14 @@ func (s *server) handleJobStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logging.Info("gateway", "job ws connection attempt", "job_id", jobID, "remote", r.RemoteAddr)
+	slog.Info("job ws connection attempt", "job_id", jobID, "remote", r.RemoteAddr)
 	ws, err := upgrader.Upgrade(w, r, negotiateSubprotocol(r))
 	if err != nil {
-		logging.Error("gateway", "job ws upgrade failed", "job_id", jobID, "error", err)
+		slog.Error("job ws upgrade failed", "job_id", jobID, "error", err)
 		return
 	}
 	defer ws.Close()
-	logging.Info("gateway", "job ws connected", "job_id", jobID, "remote", r.RemoteAddr)
+	slog.Info("job ws connected", "job_id", jobID, "remote", r.RemoteAddr)
 
 	authCtx := authFromRequest(r)
 	client := &wsClient{ch: make(chan wsEvent, 100), tenant: strings.TrimSpace(tenant), jobID: jobID}
@@ -687,7 +700,7 @@ func (s *server) handleJobStream(w http.ResponseWriter, r *http.Request) {
 		case <-revalidate.C:
 			if s.auth != nil && client.apiKey != "" {
 				if err := s.revalidateWSAuth(client.apiKey); err != nil {
-					logging.Info("gateway", "job ws credential revoked, closing",
+					slog.Info("job ws credential revoked, closing",
 						"job_id", jobID, "tenant", client.tenant, "remote", r.RemoteAddr)
 					_ = ws.WriteControl(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "credential revoked"),

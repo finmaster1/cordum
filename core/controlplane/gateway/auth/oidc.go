@@ -24,8 +24,9 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/cordum/cordum/core/infra/env"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/metadata"
 )
@@ -320,7 +321,7 @@ func (p *OIDCProvider) refreshJWKS(ctx context.Context) error {
 		cacheCancel()
 		if err == nil && len(cached) > 0 {
 			body = cached
-			logging.Info("oidc", "jwks cache hit", "key", cacheKey)
+			slog.Debug("jwks cache hit", "key", cacheKey)
 		}
 	}
 
@@ -351,7 +352,7 @@ func (p *OIDCProvider) refreshJWKS(ctx context.Context) error {
 			cacheKey := p.issuerCacheKey()
 			setCtx, setCancel := context.WithTimeout(ctx, 2*time.Second)
 			if err := rdb.Set(setCtx, cacheKey, body, time.Hour).Err(); err != nil {
-				logging.Error("oidc", "jwks cache write failed", "error", err)
+				slog.Error("jwks cache write failed", "error", err)
 			}
 			setCancel()
 		}
@@ -392,14 +393,14 @@ func (p *OIDCProvider) refreshJWKS(ctx context.Context) error {
 		case "RSA":
 			pub, err := parseJWKRSA(key.N, key.E)
 			if err != nil {
-				logging.Error("oidc", "skip bad RSA key", "kid", key.Kid, "error", err)
+				slog.Error("skip bad RSA key", "kid", key.Kid, "error", err)
 				continue
 			}
 			rsaKeys[key.Kid] = pub
 		case "EC":
 			pub, err := parseJWKEC(key.Crv, key.X, key.Y)
 			if err != nil {
-				logging.Error("oidc", "skip bad EC key", "kid", key.Kid, "error", err)
+				slog.Error("skip bad EC key", "kid", key.Kid, "error", err)
 				continue
 			}
 			ecKeys[key.Kid] = pub
@@ -412,7 +413,7 @@ func (p *OIDCProvider) refreshJWKS(ctx context.Context) error {
 	p.lastRefresh = time.Now()
 	p.mu.Unlock()
 
-	logging.Info("oidc", "jwks refreshed", "rsa_keys", len(rsaKeys), "ec_keys", len(ecKeys))
+	slog.Info("jwks refreshed", "rsa_keys", len(rsaKeys), "ec_keys", len(ecKeys))
 	return nil
 }
 
@@ -448,7 +449,7 @@ func (p *OIDCProvider) backgroundRefresh() {
 			}
 			refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := p.refreshJWKS(refreshCtx); err != nil {
-				logging.Error("oidc", "background jwks refresh failed", "error", err)
+				slog.Error("background jwks refresh failed", "error", err)
 			}
 			refreshCancel()
 		}
@@ -475,7 +476,7 @@ func (p *OIDCProvider) refreshIfUnknownKid(kid string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := p.refreshJWKS(ctx); err != nil {
-		logging.Error("oidc", "on-demand jwks refresh failed", "kid", kid, "error", err)
+		slog.Error("on-demand jwks refresh failed", "kid", kid, "error", err)
 		return false
 	}
 

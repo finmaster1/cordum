@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/secrets"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
@@ -61,7 +61,7 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 			return &pb.SubmitJobResponse{JobId: existingID, TraceId: traceID}, nil
 		}
 		if err != nil && !errors.Is(err, redis.Nil) {
-			logging.Error("api-gateway", "idempotency lookup failed", "error", err)
+			slog.Error("idempotency lookup failed", "error", err)
 		}
 	}
 	if err := s.enforceJobBackpressure(ctx, orgID, req.GetTeamId()); err != nil {
@@ -69,7 +69,7 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 		if errors.As(err, &bp) {
 			return nil, status.Error(codes.ResourceExhausted, bp.Error())
 		}
-		logging.Error("api-gateway", "job backpressure check failed", "error", err)
+		slog.Error("job backpressure check failed", "error", err)
 		return nil, status.Error(codes.Unavailable, "job submission unavailable")
 	}
 
@@ -89,7 +89,7 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 				return &pb.SubmitJobResponse{JobId: existingID, TraceId: traceID}, nil
 			}
 			if err != nil && !errors.Is(err, redis.Nil) {
-				logging.Error("api-gateway", "idempotency lookup failed", "error", err)
+				slog.Error("idempotency lookup failed", "error", err)
 			}
 			return nil, status.Error(codes.AlreadyExists, "idempotency key already used")
 		}
@@ -162,21 +162,21 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 		return nil, status.Error(codes.Unavailable, "memory store unavailable")
 	}
 	if err := s.memStore.PutContext(ctx, ctxKey, payloadBytes); err != nil {
-		logging.Error("api-gateway", "failed to persist job context", "job_id", jobID, "error", err)
+		slog.Error("failed to persist job context", "job_id", jobID, "error", err)
 		return nil, status.Error(codes.Unavailable, "failed to persist job context")
 	}
 
 	// Set initial state
 	if err := s.jobStore.SetState(ctx, jobID, model.JobStatePending); err != nil {
-		logging.Error("api-gateway", "failed to initialize job state", "job_id", jobID, "error", err)
+		slog.Error("failed to initialize job state", "job_id", jobID, "error", err)
 		return nil, status.Error(codes.Unavailable, "failed to initialize job state")
 	}
 	if err := s.jobStore.SetTopic(ctx, jobID, payloadReq.Topic); err != nil {
-		logging.Error("api-gateway", "failed to set job topic", "job_id", jobID, "error", err)
+		slog.Error("failed to set job topic", "job_id", jobID, "error", err)
 		return nil, status.Error(codes.Unavailable, "failed to initialize job metadata")
 	}
 	if err := s.jobStore.SetTenant(ctx, jobID, orgID); err != nil {
-		logging.Error("api-gateway", "failed to set job tenant", "job_id", jobID, "error", err)
+		slog.Error("failed to set job tenant", "job_id", jobID, "error", err)
 		return nil, status.Error(codes.Unavailable, "failed to initialize job metadata")
 	} // Use OrgId here
 
@@ -258,15 +258,15 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 
 	if s.jobStore != nil {
 		if err := s.jobStore.SetJobMeta(ctx, jobReq); err != nil {
-			logging.Error("api-gateway", "failed to persist job metadata", "job_id", jobID, "error", err)
+			slog.Error("failed to persist job metadata", "job_id", jobID, "error", err)
 			return nil, status.Error(codes.Unavailable, "failed to persist job metadata")
 		}
 		if err := s.jobStore.SetJobRequest(ctx, jobReq); err != nil {
-			logging.Error("api-gateway", "failed to persist job request", "job_id", jobID, "error", err)
+			slog.Error("failed to persist job request", "job_id", jobID, "error", err)
 			return nil, status.Error(codes.Unavailable, "failed to persist job metadata")
 		}
 		if err := s.jobStore.AddJobToTrace(ctx, traceID, jobID); err != nil {
-			logging.Error("api-gateway", "failed to add job to trace", "job_id", jobID, "trace_id", traceID, "error", err)
+			slog.Error("failed to add job to trace", "job_id", jobID, "trace_id", traceID, "error", err)
 			return nil, status.Error(codes.Unavailable, "failed to persist trace metadata")
 		}
 	}
@@ -283,11 +283,15 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 
 	if err := s.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
 		_ = s.jobStore.SetState(ctx, jobID, model.JobStateFailed)
-		logging.Error("api-gateway", "job publish failed", "job_id", jobID, "error", err)
+		slog.Error("job publish failed", "job_id", jobID, "error", err)
 		return nil, status.Errorf(codes.Unavailable, "failed to enqueue job")
 	}
 
-	logging.Info("api-gateway", "job submitted", "job_id", jobID)
+	slog.Info("job submitted",
+		"jobId", jobID,
+		"traceId", traceID,
+		"topic", payloadReq.Topic,
+	)
 	return &pb.SubmitJobResponse{JobId: jobID, TraceId: traceID}, nil
 }
 
@@ -313,7 +317,7 @@ func (s *server) requireRoleGRPC(ctx context.Context, roles ...string) error {
 			return nil
 		}
 	}
-	logging.Warn("api-gateway", "gRPC permission denied", "role", role, "required", roles)
+	slog.Warn("gRPC permission denied", "role", role, "required", roles)
 	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
@@ -333,7 +337,7 @@ func resolveGRPCTenant(ctx context.Context, requested, fallback string) (string,
 		// Unscoped key: reject arbitrary tenant selection to prevent
 		// impersonation. Fall through to default tenant.
 		if requested != "" && requested != strings.TrimSpace(fallback) {
-			logging.Warn("api-gateway", "gRPC tenant denied: unscoped credentials", "requested", requested)
+			slog.Warn("gRPC tenant denied: unscoped credentials", "requested", requested)
 			return "", status.Error(codes.PermissionDenied, "unscoped credentials cannot select tenant")
 		}
 	}

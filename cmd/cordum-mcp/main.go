@@ -3,13 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/cordum/cordum/core/infra/buildinfo"
+	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/mcp"
 	mcpresources "github.com/cordum/cordum/core/mcp/resources"
 	mcptools "github.com/cordum/cordum/core/mcp/tools"
@@ -21,6 +22,7 @@ const (
 )
 
 func main() {
+	logging.Init("mcp-server")
 	buildinfo.Log("cordum-mcp")
 
 	gatewayAddr := flag.String("addr", envOrDefault("CORDUM_GATEWAY_ADDR", defaultGatewayAddr), "Cordum API gateway address")
@@ -32,7 +34,8 @@ func main() {
 
 	transportMode, httpAddr, cfgErr := resolveTransportConfig()
 	if cfgErr != nil {
-		log.Fatalf("transport config: %v", cfgErr)
+		slog.Error("transport config failed", "error", cfgErr)
+		os.Exit(1)
 	}
 
 	var transport mcp.Transport
@@ -44,7 +47,7 @@ func main() {
 	}
 	defer func() {
 		if err := transport.Close(); err != nil {
-			log.Printf("mcp transport close failed: %v", err)
+			slog.Error("mcp transport close failed", "error", err)
 		}
 	}()
 
@@ -57,13 +60,15 @@ func main() {
 		WithAllowedHosts(allowedHosts).
 		WithAllowPrivateHosts(*allowPrivateGateway)
 	if err := mcptools.Register(toolRegistry, toolClient); err != nil {
-		log.Fatalf("register mcp tools: %v", err)
+		slog.Error("register mcp tools failed", "error", err)
+		os.Exit(1)
 	}
 	resourceClient := mcpresources.NewGatewayClient(*gatewayAddr, *apiKey, httpClient).
 		WithAllowedHosts(allowedHosts).
 		WithAllowPrivateHosts(*allowPrivateGateway)
 	if err := mcpresources.Register(resourceRegistry, resourceClient); err != nil {
-		log.Fatalf("register mcp resources: %v", err)
+		slog.Error("register mcp resources failed", "error", err)
+		os.Exit(1)
 	}
 
 	server := mcp.NewServer(transport, toolRegistry, resourceRegistry, mcp.ServerConfig{
@@ -84,17 +89,19 @@ func main() {
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		go func() {
-			log.Printf("cordum-mcp listening on http %s (gateway=%s)", httpAddr, strings.TrimSpace(*gatewayAddr))
+			slog.Info("cordum-mcp listening", "transport", "http", "addr", httpAddr, "gateway", strings.TrimSpace(*gatewayAddr))
 			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("mcp http server failed: %v", err)
+				slog.Error("mcp http server failed", "error", err)
+				os.Exit(1)
 			}
 		}()
 	} else {
-		log.Printf("cordum-mcp listening on stdio (gateway=%s)", strings.TrimSpace(*gatewayAddr))
+		slog.Info("cordum-mcp listening", "transport", "stdio", "gateway", strings.TrimSpace(*gatewayAddr))
 	}
 
 	if err := server.Serve(); err != nil {
-		log.Fatalf("mcp server failed: %v", err)
+		slog.Error("mcp server failed", "error", err)
+		os.Exit(1)
 	}
 }
 

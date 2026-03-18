@@ -14,7 +14,7 @@ docker compose up -d
 docker compose ps
 
 # View logs
-docker compose logs -f cordum-api
+docker compose logs -f api-gateway
 docker compose logs -f cordum-scheduler
 
 # Dashboard available at
@@ -28,15 +28,15 @@ open http://localhost:8082
 make build
 
 # Build specific service
-make build SERVICE=cordum-api
+make build SERVICE=cordum-api-gateway
 make build SERVICE=cordum-scheduler
-make build SERVICE=cordum-context
+make build SERVICE=cordum-context-engine
 
 # Build with race detector (for testing)
-go build -race ./cmd/cordum-api
+go build -race ./cmd/cordum-api-gateway
 
 # Build Docker images
-make docker SERVICE=cordum-api
+make docker SERVICE=cordum-api-gateway
 docker compose build
 ```
 
@@ -215,16 +215,16 @@ docker compose ps
 
 # View logs
 docker compose logs -f <service>
-docker compose logs --tail=100 cordum-api
+docker compose logs --tail=100 api-gateway
 
 # Restart service
 docker compose restart cordum-scheduler
 
 # Rebuild and restart
-docker compose up -d --build cordum-api
+docker compose up -d --build api-gateway
 
 # Shell into container
-docker compose exec cordum-api sh
+docker compose exec api-gateway sh
 docker compose exec redis sh
 
 # View container resource usage
@@ -265,7 +265,7 @@ git rebase origin/main
 LOG_LEVEL=debug go run ./cmd/cordum-scheduler
 
 # Run with delve debugger
-dlv debug ./cmd/cordum-api -- --config config.yaml
+dlv debug ./cmd/cordum-api-gateway -- --config config.yaml
 
 # Profile CPU
 go test -cpuprofile cpu.prof -bench=. ./core/safety/...

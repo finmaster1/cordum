@@ -109,6 +109,20 @@ export default function PoolsPage() {
 
   return (
     <div className="space-y-6">
+      {systemConfigQuery.isError && (
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-destructive/5 px-4 py-3">
+          <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Failed to load pool configuration</p>
+            <p className="text-xs text-muted-foreground">
+              {systemConfigQuery.error instanceof Error ? systemConfigQuery.error.message : "An unexpected error occurred"}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => systemConfigQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>Worker Pool Topology</CardTitle>

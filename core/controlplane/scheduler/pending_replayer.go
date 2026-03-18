@@ -2,9 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
 
@@ -68,7 +68,7 @@ func (r *PendingReplayer) Start(ctx context.Context) {
 			if r.lockKey != "" && r.lockTTL > 0 {
 				token, err := r.store.TryAcquireLock(ctx, r.lockKey, r.lockTTL)
 				if err != nil {
-					logging.Error("pending-replayer", "lock acquisition failed", "error", err)
+					slog.Error("lock acquisition failed", "error", err)
 					continue
 				}
 				if token == "" {
@@ -99,30 +99,30 @@ func (r *PendingReplayer) replayPending(ctx context.Context, cutoff time.Time) {
 		GetJobRequest(context.Context, string) (*pb.JobRequest, error)
 	})
 	if !ok {
-		logging.Error("pending-replayer", "job store missing GetJobRequest")
+		slog.Error("job store missing GetJobRequest")
 		return
 	}
 
 	cutoffMicros := cutoff.UnixNano() / int64(time.Microsecond)
 	records, err := r.store.ListJobsByState(ctx, JobStatePending, cutoffMicros, 200)
 	if err != nil {
-		logging.Error("pending-replayer", "list pending jobs failed", "error", err)
+		slog.Error("list pending jobs failed", "error", err)
 		return
 	}
 	if len(records) == 0 {
 		return
 	}
 
-	logging.Info("pending-replayer", "replaying pending jobs", "count", len(records))
+	slog.Info("replaying pending jobs", "count", len(records))
 	replayed := 0
 	for _, rec := range records {
 		req, err := store.GetJobRequest(ctx, rec.ID)
 		if err != nil || req == nil {
-			logging.Error("pending-replayer", "load job request failed", "job_id", rec.ID, "error", err)
+			slog.Error("load job request failed", "job_id", rec.ID, "error", err)
 			continue
 		}
 		if err := r.engine.handleJobRequest(req, rec.TraceID); err != nil {
-			logging.Error("pending-replayer", "replay job failed", "job_id", rec.ID, "error", err)
+			slog.Error("replay job failed", "job_id", rec.ID, "error", err)
 		} else {
 			replayed++
 			if r.metrics != nil {
@@ -131,7 +131,7 @@ func (r *PendingReplayer) replayPending(ctx context.Context, cutoff time.Time) {
 		}
 	}
 	if replayed > 0 {
-		logging.Info("pending-replayer", "replayed orphaned pending jobs", "count", replayed, "total", len(records))
+		slog.Info("replayed orphaned pending jobs", "count", replayed, "total", len(records))
 	}
 }
 
@@ -149,7 +149,7 @@ func (r *PendingReplayer) replayApproved(ctx context.Context, cutoff time.Time) 
 	cutoffMicros := cutoff.UnixNano() / int64(time.Microsecond)
 	records, err := r.store.ListJobsByState(ctx, JobStateApproval, cutoffMicros, 200)
 	if err != nil {
-		logging.Error("pending-replayer", "list approval jobs failed", "error", err)
+		slog.Error("list approval jobs failed", "error", err)
 		return
 	}
 	if len(records) == 0 {
@@ -167,13 +167,13 @@ func (r *PendingReplayer) replayApproved(ctx context.Context, cutoff time.Time) 
 			continue
 		}
 		if err := r.engine.handleJobRequest(req, rec.TraceID); err != nil {
-			logging.Error("pending-replayer", "replay approved job failed", "job_id", rec.ID, "error", err)
+			slog.Error("replay approved job failed", "job_id", rec.ID, "error", err)
 		} else {
 			replayed++
 		}
 	}
 	if replayed > 0 {
-		logging.Info("pending-replayer", "replayed approved jobs", "count", replayed)
+		slog.Info("replayed approved jobs", "count", replayed)
 	}
 }
 
@@ -192,23 +192,23 @@ func (r *PendingReplayer) replayScheduled(ctx context.Context, cutoff time.Time)
 	cutoffMicros := cutoff.UnixNano() / int64(time.Microsecond)
 	records, err := r.store.ListJobsByState(ctx, JobStateScheduled, cutoffMicros, 200)
 	if err != nil {
-		logging.Error("pending-replayer", "list scheduled jobs failed", "error", err)
+		slog.Error("list scheduled jobs failed", "error", err)
 		return
 	}
 	if len(records) == 0 {
 		return
 	}
 
-	logging.Info("pending-replayer", "replaying stuck scheduled jobs", "count", len(records))
+	slog.Info("replaying stuck scheduled jobs", "count", len(records))
 	replayed := 0
 	for _, rec := range records {
 		req, err := store.GetJobRequest(ctx, rec.ID)
 		if err != nil || req == nil {
-			logging.Error("pending-replayer", "load scheduled job request failed", "job_id", rec.ID, "error", err)
+			slog.Error("load scheduled job request failed", "job_id", rec.ID, "error", err)
 			continue
 		}
 		if err := r.engine.handleJobRequest(req, rec.TraceID); err != nil {
-			logging.Error("pending-replayer", "replay scheduled job failed", "job_id", rec.ID, "error", err)
+			slog.Error("replay scheduled job failed", "job_id", rec.ID, "error", err)
 		} else {
 			replayed++
 			if r.metrics != nil {
@@ -217,6 +217,6 @@ func (r *PendingReplayer) replayScheduled(ctx context.Context, cutoff time.Time)
 		}
 	}
 	if replayed > 0 {
-		logging.Info("pending-replayer", "replayed stuck scheduled jobs", "count", replayed, "total", len(records))
+		slog.Info("replayed stuck scheduled jobs", "count", replayed, "total", len(records))
 	}
 }

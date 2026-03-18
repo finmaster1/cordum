@@ -2,12 +2,12 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/cordum/cordum/core/infra/bus"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/model"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
@@ -16,6 +16,9 @@ const (
 	reconcilerLockKey = "cordum:workflow-engine:reconciler:default"
 )
 
+// Reconciler polls for stuck workflow runs and advances them.
+type Reconciler = reconciler
+
 type reconciler struct {
 	workflowStore *RedisStore
 	engine        *Engine
@@ -23,6 +26,11 @@ type reconciler struct {
 	pollInterval  time.Duration
 	lockTTL       time.Duration
 	runScanLimit  int64
+}
+
+// NewReconciler creates a workflow reconciler that polls for stuck runs.
+func NewReconciler(workflowStore *RedisStore, engine *Engine, jobStore model.JobStore, pollInterval time.Duration, runScanLimit int64) *reconciler {
+	return newReconciler(workflowStore, engine, jobStore, pollInterval, runScanLimit)
 }
 
 func newReconciler(workflowStore *RedisStore, engine *Engine, jobStore model.JobStore, pollInterval time.Duration, runScanLimit int64) *reconciler {
@@ -56,7 +64,7 @@ func (r *reconciler) Start(ctx context.Context) {
 			}
 			token, err := r.jobStore.TryAcquireLock(ctx, reconcilerLockKey, r.lockTTL)
 			if err != nil {
-				logging.Error("workflow-engine", "reconciler lock acquisition failed", "error", err)
+				slog.Error("reconciler lock acquisition failed", "error", err)
 				continue
 			}
 			if token == "" {
@@ -89,7 +97,14 @@ func (r *reconciler) HandleJobResult(ctx context.Context, jr *pb.JobResult) erro
 		defer func() { _ = r.jobStore.ReleaseLock(context.Background(), lockKey, token) }()
 	}
 	if r.engine != nil {
-		r.engine.HandleJobResult(ctx, jr)
+		if err := r.engine.HandleJobResult(ctx, jr); err != nil {
+			if errors.Is(err, ErrRunNotFound) {
+				slog.Info("reconciler: discarding result for deleted run",
+					"run_id", runID, "job_id", jr.JobId)
+				return nil
+			}
+			return bus.RetryAfter(err, 1*time.Second)
+		}
 	}
 	return nil
 }
@@ -99,7 +114,7 @@ func (r *reconciler) tick(ctx context.Context) {
 	for _, status := range statuses {
 		ids, err := r.workflowStore.ListRunIDsByStatus(ctx, status, r.runScanLimit)
 		if err != nil {
-			logging.Error("workflow-engine", "list runs by status", "status", status, "error", err)
+			slog.Error("list runs by status", "status", status, "error", err)
 			continue
 		}
 		for _, runID := range ids {
@@ -111,7 +126,7 @@ func (r *reconciler) tick(ctx context.Context) {
 	for _, status := range terminalStatuses {
 		ids, err := r.workflowStore.ListRunIDsByStatus(ctx, status, r.runScanLimit)
 		if err != nil {
-			logging.Error("workflow-engine", "list terminal runs by status", "status", status, "error", err)
+			slog.Error("list terminal runs by status", "status", status, "error", err)
 			continue
 		}
 		for _, runID := range ids {
@@ -127,7 +142,7 @@ func (r *reconciler) reconcileRun(ctx context.Context, runID string) {
 	lockKey := runLockKey(runID)
 	token, err := r.jobStore.TryAcquireLock(ctx, lockKey, 30*time.Second)
 	if err != nil {
-		logging.Error("workflow-engine", "reconciler run lock failed", "run_id", runID, "error", err)
+		slog.Error("reconciler run lock failed", "run_id", runID, "error", err)
 		return
 	}
 	if token == "" {
@@ -150,7 +165,7 @@ func (r *reconciler) reconcileRun(ctx context.Context, runID string) {
 		}
 		state, err := r.jobStore.GetState(ctx, sr.JobID)
 		if err != nil {
-			logging.Error("workflow-engine", "reconciler: GetState failed, skipping step",
+			slog.Error("reconciler: GetState failed, skipping step",
 				"run_id", runID, "job_id", sr.JobID, "error", err)
 			continue
 		}
@@ -165,7 +180,7 @@ func (r *reconciler) reconcileRun(ctx context.Context, runID string) {
 		if status == pb.JobStatus_JOB_STATUS_SUCCEEDED {
 			resultPtr, err = r.jobStore.GetResultPtr(ctx, sr.JobID)
 			if err != nil {
-				logging.Error("workflow-engine", "reconciler: GetResultPtr failed, deferring step completion",
+				slog.Error("reconciler: GetResultPtr failed, deferring step completion",
 					"run_id", runID, "job_id", sr.JobID, "error", err)
 				continue
 			}
@@ -174,7 +189,7 @@ func (r *reconciler) reconcileRun(ctx context.Context, runID string) {
 		if status != pb.JobStatus_JOB_STATUS_SUCCEEDED {
 			failureReason, err = r.jobStore.GetFailureReason(ctx, sr.JobID)
 			if err != nil {
-				logging.Warn("workflow-engine", "reconciler: GetFailureReason failed, using generic message",
+				slog.Warn("reconciler: GetFailureReason failed, using generic message",
 					"run_id", runID, "job_id", sr.JobID, "error", err)
 			}
 		}
@@ -189,11 +204,12 @@ func (r *reconciler) reconcileRun(ctx context.Context, runID string) {
 		if status != pb.JobStatus_JOB_STATUS_SUCCEEDED && jr.ErrorMessage == "" {
 			jr.ErrorMessage = fmt.Sprintf("job %s terminated with state %s (no error details available)", sr.JobID, state)
 		}
-		r.engine.HandleJobResult(ctx, jr)
+		// Ignore ErrRunNotFound — run may have been deleted between scan and processing.
+		_ = r.engine.HandleJobResult(ctx, jr)
 	}
 
 	if err := r.engine.StartRun(ctx, run.WorkflowID, run.ID); err != nil {
-		logging.Error("workflow-engine", "reconciler: StartRun failed, will retry next tick",
+		slog.Error("reconciler: StartRun failed, will retry next tick",
 			"run_id", run.ID, "workflow_id", run.WorkflowID, "error", err)
 	}
 }
@@ -224,7 +240,7 @@ func (r *reconciler) reconcileOrphanedJobs(ctx context.Context, runID string) {
 	lockKey := runLockKey(runID)
 	token, err := r.jobStore.TryAcquireLock(ctx, lockKey, 30*time.Second)
 	if err != nil {
-		logging.Error("workflow-engine", "reconciler orphan lock failed", "run_id", runID, "error", err)
+		slog.Error("reconciler orphan lock failed", "run_id", runID, "error", err)
 		return
 	}
 	if token == "" {

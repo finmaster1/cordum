@@ -1,18 +1,22 @@
 package main
 
 import (
-	"log"
+	"log/slog"
+	"os"
 
-	"github.com/cordum/cordum/core/workflow"
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/config"
+	"github.com/cordum/cordum/core/infra/logging"
+	"github.com/cordum/cordum/core/workflow"
 )
 
 func main() {
-	log.Println("cordum workflow engine starting...")
+	logging.Init("workflow-engine")
+	slog.Info("cordum workflow engine starting...")
 	buildinfo.Log("cordum-workflow-engine")
 	cfg := config.Load()
 	if err := workflow.Run(cfg); err != nil {
-		log.Fatalf("workflow engine error: %v", err)
+		slog.Error("workflow engine error", "error", err)
+		os.Exit(1)
 	}
 }

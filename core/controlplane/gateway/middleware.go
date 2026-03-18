@@ -3,7 +3,9 @@ package gateway
 import (
 	"bufio"
 	"context"
+	crand "crypto/rand"
 	"fmt"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -15,7 +17,6 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/infra/env"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -176,7 +177,7 @@ func (rl *redisRateLimiter) Allow(key string) bool {
 
 	count, err := rateLimitScript.Run(ctx, rl.client, []string{redisKey}, rateLimitTTLSec).Int64()
 	if err != nil {
-		logging.Warn("rate-limiter", "redis rate limit unavailable, denying request", "error", err)
+		slog.Warn("redis rate limit unavailable, denying request", "error", err)
 		return false
 	}
 	return count <= int64(rl.burst)
@@ -216,6 +217,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Tenant-ID, X-Principal-Id, X-Principal-Role, X-Request-Id, Idempotency-Key, X-Idempotency-Key")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, X-Trace-Id")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -477,6 +479,11 @@ func apiKeyMiddleware(auth AuthProvider, next http.Handler) http.Handler {
 			writeErrorJSON(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		loggerFromContext(r.Context()).Debug("auth resolved",
+			"tenant", authCtx.Tenant,
+			"principal", authCtx.PrincipalID,
+			"authSource", string(authCtx.AuthSource),
+		)
 		ctx := context.WithValue(r.Context(), authContextKey{}, authCtx)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -502,6 +509,7 @@ func tenantMiddleware(auth AuthProvider, next http.Handler) http.Handler {
 			writeErrorJSON(w, http.StatusForbidden, "tenant id required")
 			return
 		}
+		loggerFromContext(r.Context()).Debug("tenant resolved", "tenantId", tenantID)
 		if authCtx := authFromRequest(r); authCtx != nil && authCtx.Tenant != "" && !authCtx.AllowCrossTenant {
 			if strings.TrimSpace(authCtx.Tenant) != tenantID {
 				writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
@@ -546,4 +554,74 @@ func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// loggerKey is the context key for the request-scoped logger.
+type loggerKey struct{}
+
+// requestIdKey is the context key for the request ID string.
+type requestIdKey struct{}
+
+// requestIdFromContext returns the request ID from the context, or empty string.
+func requestIdFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIdKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// loggerFromContext returns the request-scoped *slog.Logger, falling back to
+// slog.Default() if no logger is attached.
+func loggerFromContext(ctx context.Context) *slog.Logger {
+	if l, ok := ctx.Value(loggerKey{}).(*slog.Logger); ok && l != nil {
+		return l
+	}
+	return slog.Default()
+}
+
+// requestLoggingMiddleware injects a request-scoped logger into context and
+// logs request entry (debug) and completion (info) with method, path, status,
+// and duration.
+func requestLoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+		if requestID == "" {
+			requestID = generateRequestID()
+		}
+
+		// Echo X-Request-Id in all responses so callers can correlate.
+		w.Header().Set("X-Request-Id", requestID)
+
+		logger := slog.Default().With(
+			"requestId", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+		)
+
+		logger.Debug("request received", "remoteAddr", r.RemoteAddr)
+
+		ctx := context.WithValue(r.Context(), loggerKey{}, logger)
+		ctx = context.WithValue(ctx, requestIdKey{}, requestID)
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+
+		next.ServeHTTP(rec, r.WithContext(ctx))
+
+		duration := time.Since(start)
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/mcp/") {
+			logger.Info("request completed",
+				"status", rec.status,
+				"duration", duration.String(),
+			)
+		}
+	})
+}
+
+// generateRequestID creates a short random request ID using crypto/rand.
+func generateRequestID() string {
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%x", b[:])
 }

@@ -3,18 +3,21 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
+	"log/slog"
+
 	schemas "github.com/cordum/cordum/core/infra/schema"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -99,7 +102,7 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 		token, err := lm.locker.TryAcquireLock(ctx, key, runLockTTL)
 		cancel()
 		if err != nil {
-			logging.Warn("workflow-engine", "distributed run lock acquire failed, using local-only",
+			slog.Warn("distributed run lock acquire failed, using local-only",
 				"run_id", runID, "error", err)
 		} else if token == "" {
 			// Another replica holds the lock — skip this run.
@@ -129,7 +132,7 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 						case <-ticker.C:
 							rCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
 							if err := renewer.RenewLock(rCtx, key, token, runLockTTL); err != nil {
-								logging.Warn("workflow-engine", "run lock renewal failed",
+								slog.Warn("run lock renewal failed",
 									"run_id", runID, "error", err)
 							}
 							rCancel()
@@ -150,7 +153,7 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 		if redisToken != "" && lm.locker != nil {
 			rCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			if err := lm.locker.ReleaseLock(rCtx, runLockKey(runID), redisToken); err != nil {
-				logging.Warn("workflow-engine", "distributed run lock release failed",
+				slog.Warn("distributed run lock release failed",
 					"run_id", runID, "error", err)
 			}
 			rCancel()
@@ -251,43 +254,49 @@ func (e *Engine) lockRun(runID string) (func(), bool) {
 }
 
 // HandleJobResult updates step/run state and dispatches next steps if ready.
-func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
+func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) error {
 	if res == nil || res.JobId == "" {
-		return
+		return nil
 	}
 	runID, stepID := splitJobID(res.JobId)
 	if runID == "" || stepID == "" {
-		return
+		return nil
 	}
+
+	slog.Debug("step result received", "component", "workflow", "runId", runID, "traceId", runID, "stepId", stepID, "jobId", res.JobId)
 
 	unlock, ok := e.lockRun(runID)
 	if !ok {
-		return // Another replica owns this run.
+		return nil // Another replica owns this run.
 	}
 	defer unlock()
 
 	run, err := e.store.GetRun(ctx, runID)
 	if err != nil {
-		logging.Error("workflow-engine", "get run failed", "run_id", runID, "error", err)
-		return
+		if errors.Is(err, redis.Nil) {
+			slog.Info("run not found (deleted or never existed)", "run_id", runID)
+			return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
+		}
+		slog.Error("get run failed (transient)", "run_id", runID, "error", err)
+		return fmt.Errorf("get run %s: %w", runID, err)
 	}
 	switch run.Status {
 	case RunStatusSucceeded, RunStatusFailed, RunStatusCancelled, RunStatusTimedOut:
 		e.markRunTerminal(run.ID)
-		return
+		return nil
 	}
 	wfDef, err := e.store.GetWorkflow(ctx, run.WorkflowID)
 	if err != nil {
-		logging.Error("workflow-engine", "get workflow failed", "workflow_id", run.WorkflowID, "error", err)
-		return
+		slog.Error("get workflow failed", "workflow_id", run.WorkflowID, "error", err)
+		return fmt.Errorf("get workflow %s: %w", run.WorkflowID, err)
 	}
 
 	now := time.Now().UTC()
 	if timedOut, err := e.enforceWorkflowTimeout(ctx, wfDef, run, now); err != nil {
-		logging.Error("workflow-engine", "enforce workflow timeout", "run_id", run.ID, "error", err)
-		return
+		slog.Error("enforce workflow timeout", "run_id", run.ID, "error", err)
+		return nil
 	} else if timedOut {
-		return
+		return nil
 	}
 
 	prevStatus := run.Status
@@ -311,7 +320,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			}
 		}
 		if child.JobID != "" && child.JobID != res.JobId {
-			return
+			return nil
 		}
 		if child.JobID == "" {
 			child.JobID = res.JobId
@@ -320,7 +329,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			child.Attempts = attempt
 		}
 		if child.JobID == res.JobId && shouldIgnoreProcessedResult(child) {
-			return
+			return nil
 		}
 		retry, delay := applyResult(child, res, stepDef)
 		if !retry && child.Status == StepStatusSucceeded && res.ResultPtr != "" {
@@ -368,7 +377,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 	} else {
 		stepRun := run.Steps[stepID]
 		if stepRun != nil && stepRun.JobID != "" && stepRun.JobID != res.JobId {
-			return
+			return nil
 		}
 		if stepRun == nil {
 			stepRun = &StepRun{StepID: stepID}
@@ -380,7 +389,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 			stepRun.Attempts = attempt
 		}
 		if stepRun.JobID == res.JobId && shouldIgnoreProcessedResult(stepRun) {
-			return
+			return nil
 		}
 		retry, delay := applyResult(stepRun, res, stepDef)
 		if !retry && stepRun.Status == StepStatusSucceeded && res.ResultPtr != "" {
@@ -414,12 +423,13 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 	run.UpdatedAt = now
 	updateRunStatus(run, wfDef, now)
 	if prevStatus != run.Status {
+		slog.Debug("run state transition", "component", "workflow", "runId", run.ID, "traceId", run.ID, "from", string(prevStatus), "to", string(run.Status))
 		e.appendTimeline(ctx, run, "run_status", "", "", string(run.Status), "", "", nil)
 	}
 
 	if err := e.store.UpdateRun(ctx, run); err != nil {
-		logging.Error("workflow-engine", "update run", "run_id", run.ID, "error", err)
-		return
+		slog.Error("update run", "run_id", run.ID, "error", err)
+		return nil
 	}
 	if isTerminalRunStatus(run.Status) {
 		e.markRunTerminal(run.ID)
@@ -427,9 +437,10 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) {
 
 	if run.Status == RunStatusRunning {
 		if err := e.scheduleReady(ctx, wfDef, run); err != nil {
-			logging.Error("workflow-engine", "schedule ready", "run_id", run.ID, "error", err)
+			slog.Error("schedule ready", "run_id", run.ID, "error", err)
 		}
 	}
+	return nil
 }
 
 // cancelForEachSiblings cancels running/pending forEach children when a sibling
@@ -445,7 +456,7 @@ func (e *Engine) cancelForEachSiblings(ctx context.Context, run *WorkflowRun, pa
 		}
 		if child.JobID != "" {
 			if err := e.publishJobCancel(child.JobID, "forEach sibling failed"); err != nil {
-				logging.Error("workflow-engine", "cancel forEach orphan publish failed",
+				slog.Error("cancel forEach orphan publish failed",
 					"job_id", child.JobID, "step_id", childID, "error", err)
 			}
 		}
@@ -458,7 +469,7 @@ func (e *Engine) cancelForEachSiblings(ctx context.Context, run *WorkflowRun, pa
 		if run != nil {
 			run.Steps[childID] = child
 		}
-		logging.Warn("workflow-engine", "cancelled forEach orphan",
+		slog.Warn("cancelled forEach orphan",
 			"run_id", run.ID, "parent_step", parent.StepID, "cancelled_child", childID, "child_job_id", child.JobID)
 		e.appendTimeline(ctx, run, "step_foreach_orphan_cancelled", childID, child.JobID, string(child.Status), "", "forEach sibling failed", nil)
 		cancelled++
@@ -501,7 +512,7 @@ func (e *Engine) activateOnErrorHandler(ctx context.Context, run *WorkflowRun, w
 	targetSR.Input["error"] = errCtx
 	run.Steps[stepDef.OnError] = targetSR
 	e.appendTimeline(ctx, run, "step_error_redirect", stepID, "", string(stepRun.Status), "", stepDef.OnError, nil)
-	logging.Info("workflow-engine", "on_error handler activated",
+	slog.Info("on_error handler activated",
 		"run_id", run.ID, "step_id", stepID, "handler", stepDef.OnError, "trigger", string(stepRun.Status))
 }
 
@@ -572,7 +583,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 			if step.Condition != "" && step.Type != StepTypeCondition && step.Type != StepTypeSwitch {
 				ok, err := evalCondition(step.Condition, buildEvalScope(run, nil))
 				if err != nil {
-					logging.Error("workflow-engine", "condition eval failed", "step_id", stepID, "error", err)
+					slog.Error("condition eval failed", "step_id", stepID, "error", err)
 					parentSR.Status = StepStatusFailed
 					if parentSR.StartedAt == nil {
 						parentSR.StartedAt = &now
@@ -671,7 +682,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 					run.Steps[stepID] = parentSR
 
 					if err := e.store.UpdateRun(ctx, run); err != nil {
-						logging.Error("workflow-engine", "approval gate pre-dispatch persist failed", "run_id", run.ID, "step_id", stepID, "error", err)
+						slog.Error("approval gate pre-dispatch persist failed", "run_id", run.ID, "step_id", stepID, "error", err)
 						parentSR.Status = StepStatusPending
 						parentSR.JobID = ""
 						parentSR.Attempts = 0
@@ -682,7 +693,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 
 					packet := makeJobPacket(run.ID, req)
 					if err := e.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
-						logging.Error("workflow-engine", "approval gate dispatch failed", "run_id", run.ID, "step_id", stepID, "error", err)
+						slog.Error("approval gate dispatch failed", "run_id", run.ID, "step_id", stepID, "error", err)
 						parentSR.Status = StepStatusPending
 						parentSR.JobID = ""
 						parentSR.Attempts = 0
@@ -1518,7 +1529,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 					}
 					packet := makeJobPacket(run.ID, req)
 					if err := e.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
-						logging.Error("workflow-engine", "publish loop step", "run_id", run.ID, "step_id", childID, "error", err)
+						slog.Error("publish loop step", "run_id", run.ID, "step_id", childID, "error", err)
 						child.Status = StepStatusFailed
 						child.Error = map[string]any{"message": err.Error()}
 					} else {
@@ -1731,7 +1742,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 					}
 					packet := makeJobPacket(run.ID, req)
 					if err := e.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
-						logging.Error("workflow-engine", "publish parallel child step", "run_id", run.ID, "step_id", childStepID, "error", err)
+						slog.Error("publish parallel child step", "run_id", run.ID, "step_id", childStepID, "error", err)
 						child.Status = StepStatusFailed
 						child.Error = map[string]any{"message": err.Error()}
 					} else {
@@ -1768,7 +1779,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 					var err error
 					items, err = evalForEach(step.ForEach, buildEvalScope(run, nil))
 					if err != nil {
-						logging.Error("workflow-engine", "for_each eval failed", "step_id", stepID, "error", err)
+						slog.Error("for_each eval failed", "step_id", stepID, "error", err)
 						parentSR.Status = StepStatusFailed
 						if parentSR.StartedAt == nil {
 							parentSR.StartedAt = &now
@@ -1883,7 +1894,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 					}
 					packet := makeJobPacket(run.ID, req)
 					if err := e.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
-						logging.Error("workflow-engine", "publish foreach step", "run_id", run.ID, "step_id", childID, "error", err)
+						slog.Error("publish foreach step", "run_id", run.ID, "step_id", childID, "error", err)
 						child.Status = StepStatusFailed
 						child.Error = map[string]any{"message": err.Error()}
 					} else {
@@ -2045,7 +2056,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 			case StepTypeWorker, StepTypeCondition, StepTypeApproval, StepTypeDelay, StepTypeNotify, StepTypeTransform, StepTypeStorage, StepTypeSwitch, StepTypeParallel, StepTypeLoop, StepTypeSubWorkflow:
 				// Handled above.
 			default:
-				logging.Warn("workflow-engine", "step has no dedicated handler, dispatching as generic job", "run_id", run.ID, "step_id", stepID, "step_type", string(step.Type))
+				slog.Warn("step has no dedicated handler, dispatching as generic job", "run_id", run.ID, "step_id", stepID, "step_type", string(step.Type))
 			}
 
 			// Respect backoff windows for retrying steps.
@@ -2068,7 +2079,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.Status = StepStatusFailed
 				parentSR.Error = map[string]any{"message": err.Error()}
 				run.Steps[stepID] = parentSR
-				logging.Error("workflow-engine", "step input build failed", "run_id", run.ID, "step_id", stepID, "error", err)
+				slog.Error("step input build failed", "run_id", run.ID, "step_id", stepID, "error", err)
 				e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
 				if e.OnStepFinished != nil {
 					e.OnStepFinished(run.ID, stepID, parentSR.Status)
@@ -2080,7 +2091,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.Error = map[string]any{"message": err.Error()}
 				parentSR.Input = payload
 				run.Steps[stepID] = parentSR
-				logging.Error("workflow-engine", "step context store failed", "run_id", run.ID, "step_id", stepID, "job_id", jobID, "error", err)
+				slog.Error("step context store failed", "run_id", run.ID, "step_id", stepID, "job_id", jobID, "error", err)
 				e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
 				if e.OnStepFinished != nil {
 					e.OnStepFinished(run.ID, stepID, parentSR.Status)
@@ -2110,7 +2121,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 			parentSR.Input = payload
 			run.Steps[stepID] = parentSR
 			if err := e.store.UpdateRun(ctx, run); err != nil {
-				logging.Error("workflow-engine", "pre-dispatch persist failed", "run_id", run.ID, "step_id", stepID, "error", err)
+				slog.Error("pre-dispatch persist failed", "run_id", run.ID, "step_id", stepID, "error", err)
 				parentSR.Status = StepStatusPending
 				parentSR.Attempts--
 				parentSR.JobID = ""
@@ -2120,9 +2131,10 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 			}
 
 			// Dispatch to NATS — state is already persisted so a crash here is safe.
+			slog.Debug("step dispatching", "component", "workflow", "runId", run.ID, "traceId", run.ID, "stepId", stepID, "jobId", jobID, "stepType", string(step.Type))
 			packet := makeJobPacket(run.ID, req)
 			if err := e.bus.Publish(capsdk.SubjectSubmit, packet); err != nil {
-				logging.Error("workflow-engine", "publish step", "run_id", run.ID, "step_id", stepID, "error", err)
+				slog.Error("publish step", "run_id", run.ID, "step_id", stepID, "error", err)
 				// Revert to pending for retry on next scheduleReady; idempotency key
 				// prevents duplicate execution if the message was actually delivered.
 				parentSR.Status = StepStatusPending

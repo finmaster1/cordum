@@ -232,7 +232,11 @@ export function useApproveJob() {
           );
         }
       }
-      logger.error("approvals", "Approve failed", { id, error: err.message });
+      if (is409) {
+        logger.info("approvals", "Approve stale — already resolved", { id });
+      } else {
+        logger.error("approvals", "Approve failed", { id, error: err.message });
+      }
       useToastStore.getState().addToast(
         is409
           ? { type: "info", title: "Already resolved", description: "This approval was already processed" }
@@ -289,7 +293,11 @@ export function useRejectJob() {
           );
         }
       }
-      logger.error("approvals", "Reject failed", { id, error: err.message });
+      if (is409) {
+        logger.info("approvals", "Reject stale — already resolved", { id });
+      } else {
+        logger.error("approvals", "Reject failed", { id, error: err.message });
+      }
       useToastStore.getState().addToast(
         is409
           ? { type: "info", title: "Already resolved", description: "This approval was already processed" }

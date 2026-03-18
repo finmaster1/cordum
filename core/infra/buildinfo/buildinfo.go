@@ -2,7 +2,7 @@ package buildinfo
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 var (
@@ -16,7 +16,7 @@ func Info() string {
 	return fmt.Sprintf("version=%s commit=%s date=%s", Version, Commit, Date)
 }
 
-// Log writes the build summary with the service name.
+// Log writes the build summary with the service name using slog.
 func Log(service string) {
-	log.Printf("%s %s", service, Info())
+	slog.Info("build info", "service", service, "version", Version, "commit", Commit, "date", Date)
 }

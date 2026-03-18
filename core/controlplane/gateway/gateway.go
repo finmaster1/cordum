@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -26,7 +27,6 @@ import (
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
 	"github.com/cordum/cordum/core/infra/locks"
-	"github.com/cordum/cordum/core/infra/logging"
 	infraMetrics "github.com/cordum/cordum/core/infra/metrics"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/cordum/cordum/core/infra/registry"
@@ -203,7 +203,7 @@ func (s *server) Close() {
 	// in-flight handlers can finish their safety RPCs during the drain window.
 	if s.safetyConn != nil {
 		if err := s.safetyConn.Close(); err != nil {
-			logging.Error("api-gateway", "safety conn close failed", "error", err)
+			slog.Error("safety conn close failed", "error", err)
 		}
 	}
 	if nb, ok := s.bus.(*bus.NatsBus); ok {
@@ -211,18 +211,18 @@ func (s *server) Close() {
 	}
 	if s.auditExporter != nil {
 		if err := s.auditExporter.Close(); err != nil {
-			logging.Error("api-gateway", "audit exporter close failed", "error", err)
+			slog.Error("audit exporter close failed", "error", err)
 		}
 	}
 	if s.userStore != nil {
 		if err := s.userStore.Close(); err != nil {
-			logging.Error("api-gateway", "user store close failed", "error", err)
+			slog.Error("user store close failed", "error", err)
 		}
 	}
 	if s.keyStore != nil {
 		if ks, ok := s.keyStore.(*RedisKeyStore); ok {
 			if err := ks.Close(); err != nil {
-				logging.Error("api-gateway", "key store close failed", "error", err)
+				slog.Error("key store close failed", "error", err)
 			}
 		}
 	}
@@ -280,7 +280,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 
 			// Seed default admin user if configured
 			if err := seedDefaultAdminUser(context.Background(), userStore, tenantID); err != nil {
-				logging.Error("api-gateway", "seed admin user failed", "error", err)
+				slog.Error("seed admin user failed", "error", err)
 			}
 		}
 
@@ -296,7 +296,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 				oidcProvider.WithRedis(oidcRedis)
 				defer func() { _ = oidcRedis.Close() }()
 			} else {
-				logging.Error("api-gateway", "oidc redis cache unavailable, continuing without", "error", rErr)
+				slog.Error("oidc redis cache unavailable, continuing without", "error", rErr)
 			}
 			oidcAdapter := NewOIDCAuthAdapter(oidcProvider, tenantID)
 			composite, err := NewCompositeAuthProvider(basic, oidcAdapter)
@@ -305,7 +305,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 			}
 			provider = composite
 			oidcCfg := oidcProvider.Config()
-			logging.Info("api-gateway", "[OIDC] enabled",
+			slog.Info("[OIDC] enabled",
 				"issuer", oidcCfg.IssuerURL,
 				"audience", oidcCfg.Audience,
 			)
@@ -313,7 +313,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	}
 
 	if env.IsProduction() && env.Bool("CORDUM_DASHBOARD_EMBED_API_KEY") {
-		logging.Error("api-gateway", "SECURITY WARNING: CORDUM_DASHBOARD_EMBED_API_KEY is enabled in production — API key will be exposed in browser JavaScript")
+		slog.Error("SECURITY WARNING: CORDUM_DASHBOARD_EMBED_API_KEY is enabled in production — API key will be exposed in browser JavaScript")
 	}
 
 	memStore, err := store.NewRedisStore(cfg.RedisURL)
@@ -337,7 +337,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err := bus.PublishHandshake(natsBus, "api-gateway", pb.ComponentRole_COMPONENT_ROLE_GATEWAY, map[string]bool{
 		"http": true, "grpc": true, "websocket": true, "mcp": true,
 	}); err != nil {
-		logging.Warn("api-gateway", "handshake publish failed", "error", err)
+		slog.Warn("handshake publish failed", "error", err)
 	}
 
 	workflowStore, err := wf.NewRedisWorkflowStore(cfg.RedisURL)
@@ -353,10 +353,10 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	}
 	defer configSvc.Close()
 	if err := seedDefaultPackCatalogs(context.Background(), configSvc); err != nil {
-		logging.Error("api-gateway", "seed pack catalogs failed", "error", err)
+		slog.Error("seed pack catalogs failed", "error", err)
 	}
 	if err := configSvc.EnsureDefault(context.Background()); err != nil {
-		logging.Warn("api-gateway", "auto-bootstrap default config failed", "error", err)
+		slog.Warn("auto-bootstrap default config failed", "error", err)
 	}
 	schemaRegistry, err := schema.NewRegistry(cfg.RedisURL)
 	if err != nil {
@@ -400,7 +400,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 			if env.IsProduction() || env.Bool("SAFETY_KERNEL_TLS_REQUIRED") {
 				return fmt.Errorf("safety kernel dial failed: %w", err)
 			}
-			logging.Error("api-gateway", "safety kernel dial failed", "error", err)
+			slog.Error("safety kernel dial failed", "error", err)
 		} else {
 			safetyConn = conn
 			safetyClient = client
@@ -421,7 +421,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 			// Start consumer in the same process — queue group ensures only
 			// one replica across the cluster handles each event.
 			if _, err := audit.NewNATSAuditConsumer(natsBus, bufExporter.Backend()); err != nil {
-				logging.Warn("api-gateway", "audit NATS consumer failed to start, falling back to local buffer", "error", err)
+				slog.Warn("audit NATS consumer failed to start, falling back to local buffer", "error", err)
 			}
 		} else {
 			auditSender = bufExporter
@@ -485,6 +485,15 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 		return fmt.Errorf("start bus taps: %w", err)
 	}
 
+	// Start workflow reconciler as a safety net for stuck runs. The reconciler
+	// polls every 5 seconds, scanning Running/Pending/Waiting runs for completed
+	// jobs that were missed (e.g. due to lock contention during NATS delivery).
+	// Uses its own distributed lock so multiple gateway replicas won't conflict.
+	reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
+	defer reconcilerCancel()
+	wfReconciler := wf.NewReconciler(workflowStore, workflowEng, jobStore, 5*time.Second, 200)
+	go wfReconciler.Start(reconcilerCtx)
+
 	grpcLis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		return fmt.Errorf("listen grpc (%s): %w", grpcAddr, err)
@@ -528,9 +537,9 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	}
 
 	go func() {
-		logging.Info("api-gateway", "grpc listening", "addr", grpcAddr)
+		slog.Info("grpc listening", "addr", grpcAddr)
 		if err := grpcServer.Serve(grpcLis); err != nil {
-			logging.Error("api-gateway", "grpc server error", "error", err)
+			slog.Error("grpc server error", "error", err)
 		}
 	}()
 
@@ -556,9 +565,9 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 		MaxHeaderBytes:    defaultMaxHeaderBytes,
 	}
 	go func() {
-		logging.Info("api-gateway", "metrics listening", "addr", metricsAddr+"/metrics")
+		slog.Info("metrics listening", "addr", metricsAddr+"/metrics")
 		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logging.Error("api-gateway", "metrics server error", "error", err)
+			slog.Error("metrics server error", "error", err)
 		}
 	}()
 
@@ -716,11 +725,11 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 		registrar.RegisterRoutes(mux, s.instrumented)
 	}
 
-	// Middleware chain: CORS → rate limit → auth → tenant → body limit → mux
+	// Middleware chain: logging → CORS → rate limit → auth → tenant → body limit → mux
 	// SECURITY: Rate limiter MUST run before auth so that invalid API key
 	// brute-force attempts are rate-limited by IP. When auth context is
 	// absent, rateLimitKey falls back to IP-based keying automatically.
-	handler := corsMiddleware(rateLimitMiddleware(s.auth, s.apiRL, s.publicRL, apiKeyMiddleware(s.auth, tenantMiddleware(s.auth, maxBodyMiddleware(mux)))))
+	handler := requestLoggingMiddleware(corsMiddleware(rateLimitMiddleware(s.auth, s.apiRL, s.publicRL, apiKeyMiddleware(s.auth, tenantMiddleware(s.auth, maxBodyMiddleware(mux))))))
 
 	httpTLSCert := strings.TrimSpace(os.Getenv(envGatewayHTTPTLSCert))
 	httpTLSKey := strings.TrimSpace(os.Getenv(envGatewayHTTPTLSKey))
@@ -733,7 +742,7 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 		return fmt.Errorf("http tls required in production")
 	}
 
-	logging.Info("api-gateway", "http listening", "addr", httpAddr)
+	slog.Info("http listening", "addr", httpAddr)
 	srv := &http.Server{
 		Addr:              httpAddr,
 		Handler:           handler,
@@ -761,7 +770,7 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 	go func() {
 		defer close(shutdownDone)
 		<-sigCtx.Done()
-		logging.Info("api-gateway", "shutting down gracefully", "timeout", shutdownTimeout.String())
+		slog.Info("shutting down gracefully", "timeout", shutdownTimeout.String())
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -774,7 +783,7 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 
 		// Drain HTTP server (stops accepting, waits for in-flight requests).
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logging.Error("api-gateway", "http shutdown error", "error", err)
+			slog.Error("http shutdown error", "error", err)
 		}
 
 		// Drain gRPC server with timeout — fallback to force Stop if it hangs.
@@ -786,9 +795,9 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 			}()
 			select {
 			case <-grpcDone:
-				logging.Info("api-gateway", "gRPC server drained")
+				slog.Info("gRPC server drained")
 			case <-shutdownCtx.Done():
-				logging.Warn("api-gateway", "gRPC graceful stop timed out, forcing")
+				slog.Warn("gRPC graceful stop timed out, forcing")
 				grpcServer.Stop()
 			}
 		}
@@ -799,7 +808,7 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 
 		// Shut down metrics server.
 		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
-			logging.Error("api-gateway", "metrics shutdown error", "error", err)
+			slog.Error("metrics shutdown error", "error", err)
 		}
 	}()
 
@@ -815,22 +824,25 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 			// before returning, so defers (s.Close, store closes) fire AFTER
 			// in-flight handlers complete.
 			<-shutdownDone
-			logging.Info("api-gateway", "http server closed")
+			slog.Info("http server closed")
 			return nil
 		}
-		logging.Error("api-gateway", "http server error", "error", err)
+		slog.Error("http server error", "error", err)
 		return fmt.Errorf("http server failed: %w", err)
 	}
 	return nil
 }
 
-// instrumented wraps handlers to record metrics.
+// instrumented wraps handlers to record metrics and debug logging.
 func (s *server) instrumented(route string, fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		logger := loggerFromContext(r.Context())
+		logger.Debug("handler entry", "route", route)
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		fn(rec, r)
 		duration := time.Since(start)
+		logger.Debug("handler exit", "route", route, "status", rec.status, "duration", duration.String())
 		if s.metrics != nil {
 			s.metrics.ObserveRequest(r.Method, route, fmt.Sprintf("%d", rec.status), duration.Seconds())
 		}
@@ -854,7 +866,7 @@ func (s *server) instrumented(route string, fn http.HandlerFunc) http.HandlerFun
 				event.AuthSource = authCtx.AuthSource
 			}
 			if err := exporter.ExportAudit(r.Context(), event); err != nil {
-				logging.Error("api-gateway", "audit export failed", "error", err)
+				slog.Error("audit export failed", "error", err)
 			}
 		}
 	}

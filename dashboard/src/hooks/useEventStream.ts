@@ -166,6 +166,8 @@ const INVALIDATION_MAP: Record<string, string[][]> = {
   "pack.": [["packs"]],
   "safety.": [["safety"]],
   "audit.": [["audit"]],
+  "scheduler.": [["jobs"], ["workers"]],
+  "context.": [["context"]],
 };
 
 function invalidateForEvent(
@@ -249,6 +251,7 @@ export function useEventStream(): void {
           logger.debug("ws", "Unrecognized packet dropped");
           return;
         }
+        logger.debug("ws", "Message received", { type: event.type, id: event.id });
 
         // Buffer into Zustand store for live feed
         addEvent(event);
@@ -291,9 +294,10 @@ export function useEventStream(): void {
         logger.error("ws", "Connection error");
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         wsRef.current = null;
         if (unmountedRef.current) {
+          logger.info("ws", "Disconnected", { code: ev.code, reason: ev.reason });
           setStatus("disconnected");
           return;
         }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/infra/bus"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
@@ -164,8 +164,17 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		}
 		// Enrich with workflow labels from the original job request so the
 		// dashboard can distinguish gate approvals from policy approvals.
+		// Also skip approvals whose workflow run has already terminated.
 		if req, err := s.jobStore.GetJobRequest(r.Context(), job.ID); err == nil && req != nil {
 			if req.Labels != nil {
+				// Filter out stale approvals: if the run is terminal, skip this item.
+				if runID := strings.TrimSpace(req.Labels["run_id"]); runID != "" && s.workflowStore != nil {
+					if run, runErr := s.workflowStore.GetRun(r.Context(), runID); runErr == nil && run != nil {
+						if wf.IsTerminalRunStatus(run.Status) {
+							continue
+						}
+					}
+				}
 				if v := req.Labels["workflow_id"]; v != "" {
 					item["workflow_id"] = v
 				}
@@ -470,7 +479,7 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if err := s.bus.Publish(capsdk.SubjectDLQ, packet); err != nil {
-		logging.Error("api-gateway", "publish dlq on approval reject failed", "job_id", jobID, "error", err)
+		slog.Error("publish dlq on approval reject failed", "job_id", jobID, "error", err)
 	}
 	// For workflow approval gates, also publish to SubjectResult so the
 	// workflow engine's HandleJobResult picks up the denial and transitions
@@ -478,7 +487,7 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 	rejectTopic, _ := s.jobStore.GetTopic(r.Context(), jobID)
 	if rejectTopic == capsdk.SubjectWorkflowApprovalGate {
 		if err := s.bus.Publish(capsdk.SubjectResult, packet); err != nil {
-			logging.Error("api-gateway", "publish result on workflow gate reject failed", "job_id", jobID, "error", err)
+			slog.Error("publish result on workflow gate reject failed", "job_id", jobID, "error", err)
 		}
 	}
 	s.appendAuditEntryNamed(r.Context(), "reject", "job", jobID, rejectTopic, policyActorID(r), policyRole(r), "reject job "+jobID)

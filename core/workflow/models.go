@@ -111,7 +111,8 @@ type Step struct {
 	Input          map[string]any    `json:"input,omitempty"` // can contain expressions
 	InputSchema    map[string]any    `json:"input_schema,omitempty"`
 	InputSchemaID  string            `json:"input_schema_id,omitempty"`
-	OutputPath     string            `json:"output_path,omitempty"` // context path
+	OutputPath     string            `json:"output_path,omitempty"`      // context path (WHERE to store)
+	ResultDataPath string            `json:"result_data_path,omitempty"` // dot-path into job result (WHAT to extract)
 	OutputSchema   map[string]any    `json:"output_schema,omitempty"`
 	OutputSchemaID string            `json:"output_schema_id,omitempty"`
 	Meta           *StepMeta         `json:"meta,omitempty"`

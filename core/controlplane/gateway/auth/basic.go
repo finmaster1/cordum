@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -553,7 +552,7 @@ func (b *BasicAuthProvider) maybeReloadKeys() {
 	}
 	info, err := os.Stat(b.keysPath)
 	if err != nil {
-		log.Printf("auth: failed to stat api keys: %v", err)
+		slog.Warn("auth: failed to stat api keys", "error", err)
 		return
 	}
 	mod := info.ModTime()
@@ -565,7 +564,7 @@ func (b *BasicAuthProvider) maybeReloadKeys() {
 	}
 	keys, requireKey, keysPath, keysModTime, allowHeaderPrincipal, err := loadBasicAPIKeys()
 	if err != nil {
-		log.Printf("auth: failed to reload api keys: %v", err)
+		slog.Warn("auth: failed to reload api keys", "error", err)
 		return
 	}
 	b.keysMu.Lock()

@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
+	"log/slog"
+
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
 
@@ -188,7 +189,7 @@ func (e *Engine) scheduleAfter(delay time.Duration, workflowID, runID string) {
 		fireAt := time.Now().Add(delay)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		if err := e.store.AddDelayTimer(ctx, workflowID, runID, fireAt); err != nil {
-			logging.Warn("workflow-engine", "failed to persist delay timer",
+			slog.Warn("failed to persist delay timer",
 				"workflow_id", workflowID, "run_id", runID, "error", err)
 		}
 		cancel()
@@ -222,7 +223,7 @@ func (e *Engine) scheduleAfter(delay time.Duration, workflowID, runID string) {
 		startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := e.StartRun(startCtx, workflowID, runID); err != nil {
 			startCancel()
-			logging.Error("workflow-engine", "delay timer: StartRun failed, durable timer preserved for poller retry",
+			slog.Error("delay timer: StartRun failed, durable timer preserved for poller retry",
 				"workflow_id", workflowID, "run_id", runID, "error", err)
 			return
 		}
@@ -230,7 +231,7 @@ func (e *Engine) scheduleAfter(delay time.Duration, workflowID, runID string) {
 		if e.store != nil {
 			rCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			if err := e.store.RemoveDelayTimer(rCtx, workflowID, runID); err != nil {
-				logging.Warn("workflow-engine", "failed to remove delay timer after successful resume",
+				slog.Warn("failed to remove delay timer after successful resume",
 					"workflow_id", workflowID, "run_id", runID, "error", err)
 			}
 			rCancel()
@@ -252,17 +253,17 @@ func (e *Engine) recoverDelayTimers(ctx context.Context) {
 	// 1. Pop and fire all past-due timers atomically.
 	fired, err := e.store.PopFiredDelays(ctx, now)
 	if err != nil {
-		logging.Warn("workflow-engine", "failed to pop fired delay timers", "error", err)
+		slog.Warn("failed to pop fired delay timers", "error", err)
 	}
 	for _, member := range fired {
 		wfID, rID := splitDelayMember(member)
 		if wfID == "" || rID == "" {
 			continue
 		}
-		logging.Info("workflow-engine", "recovering past-due delay timer",
+		slog.Info("recovering past-due delay timer",
 			"workflow_id", wfID, "run_id", rID)
 		if err := e.StartRun(ctx, wfID, rID); err != nil {
-			logging.Error("workflow-engine", "recovery: StartRun failed for past-due timer, reconciler will retry",
+			slog.Error("recovery: StartRun failed for past-due timer, reconciler will retry",
 				"workflow_id", wfID, "run_id", rID, "error", err)
 		}
 	}
@@ -270,7 +271,7 @@ func (e *Engine) recoverDelayTimers(ctx context.Context) {
 	// 2. Re-schedule future timers with remaining delay.
 	future, err := e.store.ListFutureDelays(ctx, now)
 	if err != nil {
-		logging.Warn("workflow-engine", "failed to list future delay timers", "error", err)
+		slog.Warn("failed to list future delay timers", "error", err)
 		return
 	}
 	for _, z := range future {
@@ -287,7 +288,7 @@ func (e *Engine) recoverDelayTimers(ctx context.Context) {
 		if remaining <= 0 {
 			remaining = time.Millisecond // fire immediately
 		}
-		logging.Info("workflow-engine", "re-scheduling future delay timer",
+		slog.Info("re-scheduling future delay timer",
 			"workflow_id", wfID, "run_id", rID, "remaining", remaining.String())
 		// scheduleAfter will re-ZADD (idempotent via ZADD) and set up time.AfterFunc.
 		e.scheduleAfter(remaining, wfID, rID)
@@ -295,7 +296,7 @@ func (e *Engine) recoverDelayTimers(ctx context.Context) {
 
 	total := len(fired) + len(future)
 	if total > 0 {
-		logging.Info("workflow-engine", "delay timer recovery complete",
+		slog.Info("delay timer recovery complete",
 			"fired", len(fired), "rescheduled", len(future))
 	}
 }
@@ -360,7 +361,7 @@ func (e *Engine) startDelayPoller(ctx context.Context) {
 			fired, err := e.store.PopFiredDelays(popCtx, time.Now())
 			popCancel()
 			if err != nil {
-				logging.Warn("workflow-engine", "delay poller: pop failed", "error", err)
+				slog.Warn("delay poller: pop failed", "error", err)
 				continue
 			}
 			for _, member := range fired {
@@ -368,10 +369,10 @@ func (e *Engine) startDelayPoller(ctx context.Context) {
 				if wfID == "" || rID == "" {
 					continue
 				}
-				logging.Info("workflow-engine", "delay poller: firing recovered timer",
+				slog.Info("delay poller: firing recovered timer",
 					"workflow_id", wfID, "run_id", rID)
 				if err := e.StartRun(ctx, wfID, rID); err != nil {
-					logging.Error("workflow-engine", "delay poller: StartRun failed, reconciler will retry",
+					slog.Error("delay poller: StartRun failed, reconciler will retry",
 						"workflow_id", wfID, "run_id", rID, "error", err)
 				}
 			}
@@ -383,9 +384,9 @@ func (e *Engine) startDelayPoller(ctx context.Context) {
 				removed, err := e.store.CleanStaleDelays(cleanCtx, cutoff)
 				cleanCancel()
 				if err != nil {
-					logging.Warn("workflow-engine", "delay poller: stale cleanup failed", "error", err)
+					slog.Warn("delay poller: stale cleanup failed", "error", err)
 				} else if removed > 0 {
-					logging.Info("workflow-engine", "delay poller: cleaned stale timers", "removed", removed)
+					slog.Info("delay poller: cleaned stale timers", "removed", removed)
 				}
 			}
 		}

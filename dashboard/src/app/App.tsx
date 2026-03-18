@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "../components/layout/AppShell";
 import { CommandPalette } from "../components/CommandPalette";
-import { useLiveBus } from "../hooks/useLiveBus";
+import { useEventStream } from "../hooks/useEventStream";
 import { useUiStore } from "../state/ui";
 import { useAuthConfig } from "../hooks/useAuthConfig";
 import { useConfigStore } from "../state/config";
@@ -75,7 +75,7 @@ function AuthGate({ children }: { children: ReactNode }) {
 }
 
 function MainApp() {
-  useLiveBus();
+  useEventStream();
   const setCommandOpen = useUiStore((state) => state.setCommandOpen);
 
   useEffect(() => {

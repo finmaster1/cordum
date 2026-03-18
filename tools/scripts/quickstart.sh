@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Cordum Quickstart — deterministic deploy with health checks & artifact capture
+# Cordum Quickstart — zero-config bootstrap with health checks & artifact capture
 #
 # Usage:
 #   ./tools/scripts/quickstart.sh [--clean] [--artifacts-dir DIR] [--skip-build]
@@ -12,6 +12,9 @@
 #   --skip-build      Reuse existing images (do not rebuild)
 #   --skip-smoke      Skip the post-deploy smoke test
 #   --health-timeout  Seconds to wait for health readiness (default: 120)
+#
+# This script auto-creates .env, generates credentials, and starts the full
+# stack. No manual setup needed — just run it.
 # =============================================================================
 set -euo pipefail
 
@@ -25,13 +28,72 @@ require() {
 log() { echo "[quickstart] $*"; }
 die() { echo "[quickstart] ERROR: $*" >&2; exit 1; }
 
+# --- Generate a random hex string (no openssl dependency) ---
+gen_hex() {
+  local len="${1:-32}"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex "$len"
+  elif [[ -r /dev/urandom ]]; then
+    head -c "$len" /dev/urandom | xxd -p | tr -d '\n' | head -c $((len * 2))
+  elif command -v python >/dev/null 2>&1; then
+    python -c "import secrets; print(secrets.token_hex($len))"
+  else
+    die "cannot generate random key — install openssl, or ensure /dev/urandom is readable"
+  fi
+}
+
+# --- Pre-flight checks ---
 require docker
 require curl
 
-if [[ -z "${REDIS_PASSWORD:-}" ]]; then
-  log "warning: REDIS_PASSWORD not set — using dev default 'cordum-dev'"
-  log "         Set REDIS_PASSWORD for production deployments"
+# Check Go version (needed for cert generation and cordumctl)
+if command -v go >/dev/null 2>&1; then
+  go_version="$(go version | grep -oP 'go\K[0-9]+\.[0-9]+')"
+  go_major="${go_version%%.*}"
+  go_minor="${go_version#*.}"
+  if [[ "$go_major" -lt 1 ]] || { [[ "$go_major" -eq 1 ]] && [[ "$go_minor" -lt 24 ]]; }; then
+    die "Go 1.24+ required (found go${go_version}). Upgrade at https://go.dev/dl/"
+  fi
 fi
+
+# Check Docker is running
+if ! docker info >/dev/null 2>&1; then
+  die "cannot connect to the Docker daemon. Start Docker Desktop or the docker service."
+fi
+
+# --- Auto-create .env if it doesn't exist ---
+if [[ ! -f ".env" ]]; then
+  if [[ -f ".env.example" ]]; then
+    log "creating .env from .env.example"
+    cp .env.example .env
+  else
+    log "creating minimal .env"
+    touch .env
+  fi
+
+  # Auto-generate API key
+  if ! grep -q '^CORDUM_API_KEY=.\+' .env 2>/dev/null; then
+    generated_key="$(gen_hex 32)"
+    if grep -q '^CORDUM_API_KEY=' .env 2>/dev/null; then
+      sed -i "s/^CORDUM_API_KEY=.*/CORDUM_API_KEY=${generated_key}/" .env
+    else
+      echo "CORDUM_API_KEY=${generated_key}" >> .env
+    fi
+    log "generated API key"
+  fi
+
+  # Auto-generate Redis password (not the weak default)
+  if grep -q '^REDIS_PASSWORD=cordum-dev' .env 2>/dev/null; then
+    generated_redis_pw="$(gen_hex 16)"
+    sed -i "s/^REDIS_PASSWORD=cordum-dev/REDIS_PASSWORD=${generated_redis_pw}/" .env
+    log "generated Redis password (replaced weak default)"
+  fi
+fi
+
+# Load .env into environment for this script
+set -a
+source .env 2>/dev/null || true
+set +a
 
 compose_cmd=()
 if docker compose version >/dev/null 2>&1; then
@@ -41,10 +103,6 @@ elif command -v docker-compose >/dev/null 2>&1; then
   log "warning: docker-compose v1 detected; prefer Docker Compose v2."
 else
   die "docker compose plugin required"
-fi
-
-if ! docker info >/dev/null 2>&1; then
-  die "cannot connect to the Docker daemon. Ensure Docker is running."
 fi
 
 port_in_use() {
@@ -181,14 +239,17 @@ warn_port 9080 "api-gateway grpc"
 warn_port 9092 "gateway metrics"
 warn_port 9093 "workflow-engine http"
 warn_port 50051 "safety-kernel grpc"
-warn_port 50070 "context-engine grpc"
+warn_port 50400 "context-engine grpc"
 warn_port 4222 "nats client"
 warn_port 6379 "redis"
 
 # --- Env vars ---
 API_KEY=${CORDUM_API_KEY:-${API_KEY:-}}
 if [[ -z "${API_KEY}" ]]; then
-  die "CORDUM_API_KEY is required; export it before running quickstart."
+  # Last resort: generate on the fly if .env creation somehow missed it
+  API_KEY="$(gen_hex 32)"
+  export CORDUM_API_KEY="${API_KEY}"
+  log "generated API key on the fly (set CORDUM_API_KEY to persist)"
 fi
 export CORDUM_API_KEY="${API_KEY}"
 ORG_ID=${CORDUM_ORG_ID:-${CORDUM_TENANT_ID:-default}}
@@ -277,9 +338,33 @@ else
   log "warning: config endpoint returned ${config_status} — settings page may show empty state"
 fi
 
-echo "  Gateway:   ${API_BASE}"
-echo "  Dashboard: http://localhost:8082"
-echo "  API key:   ${API_KEY:0:8}... (masked — check .env or CORDUM_API_KEY env var)"
+echo ""
+echo "  ┌─────────────────────────────────────────────────────────┐"
+echo "  │  Cordum is running!                                     │"
+echo "  ├─────────────────────────────────────────────────────────┤"
+echo "  │  Dashboard:      http://localhost:8082                  │"
+echo "  │  API Gateway:    ${API_BASE}                            │"
+echo "  │  API Key:        ${API_KEY:0:8}... (see .env)           │"
+echo "  ├─────────────────────────────────────────────────────────┤"
+echo "  │  Login:          admin / admin123                       │"
+echo "  │  (change via CORDUM_ADMIN_PASSWORD in .env)             │"
+echo "  ├─────────────────────────────────────────────────────────┤"
+echo "  │  Ports:                                                 │"
+echo "  │    8082  Dashboard                                      │"
+echo "  │    8081  API Gateway (HTTPS)                            │"
+echo "  │    9080  gRPC Gateway                                   │"
+echo "  │    4222  NATS                                           │"
+echo "  │    6379  Redis                                          │"
+echo "  │    9092  Gateway Metrics                                │"
+echo "  │    9093  Workflow Engine Health                          │"
+echo "  │   50051  Safety Kernel (gRPC)                           │"
+echo "  │   50400  Context Engine (gRPC)                          │"
+echo "  ├─────────────────────────────────────────────────────────┤"
+echo "  │  Stop:  docker compose down                             │"
+echo "  │  Logs:  docker compose logs -f api-gateway              │"
+echo "  │  Reset: docker compose down -v                          │"
+echo "  └─────────────────────────────────────────────────────────┘"
+echo ""
 
 # --- Capture artifacts ---
 if [[ -n "${ARTIFACTS_DIR}" ]]; then

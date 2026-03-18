@@ -57,11 +57,13 @@ func TestSwitchMatchesCase(t *testing.T) {
 		t.Fatalf("expected target_step beta, got %#v", got)
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     runID + ":beta@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:beta",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final := mustGetRun(t, store, runID)
 	if final.Status != RunStatusSucceeded {
@@ -101,11 +103,13 @@ func TestSwitchDefaultBranch(t *testing.T) {
 		t.Fatalf("expected alpha cancellation reason %q, got %#v", switchBranchNotTakenReason, alpha.Error)
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     runID + ":fallback@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:fallback",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final := mustGetRun(t, store, runID)
 	if final.Status != RunStatusSucceeded {
@@ -174,11 +178,13 @@ func TestSwitchOutputPath(t *testing.T) {
 		t.Fatalf("expected output_path target_step alpha, got %#v", got)
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     runID + ":alpha@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:alpha",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	final := mustGetRun(t, store, runID)
 	if final.Status != RunStatusSucceeded {
 		t.Fatalf("expected run succeeded, got %s", final.Status)
@@ -220,11 +226,13 @@ func TestSwitchUnmatchedBranchesSkipped(t *testing.T) {
 		t.Fatalf("expected run still running until matched branch completes, got %s", current.Status)
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     runID + ":alpha@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:alpha",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	final := mustGetRun(t, store, runID)
 	if final.Status != RunStatusSucceeded {
 		t.Fatalf("expected run succeeded after matched branch completion, got %s", final.Status)
@@ -429,11 +437,13 @@ func TestSwitchMapFormatCases(t *testing.T) {
 		t.Fatalf("expected 1 dispatch for matched beta branch, got %d", got)
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     "run-map-cases:step_beta@1",
 		Status:    pb.JobStatus_JOB_STATUS_SUCCEEDED,
 		ResultPtr: "redis://res:beta",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	final := mustGetRun(t, store, "run-map-cases")
 	if final.Status != RunStatusSucceeded {
 		t.Fatalf("expected run succeeded, got %s", final.Status)

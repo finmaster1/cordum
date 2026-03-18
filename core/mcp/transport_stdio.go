@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -17,7 +17,7 @@ import (
 type StdioTransport struct {
 	scanner *bufio.Scanner
 	out     *bufio.Writer
-	logger  *log.Logger
+	logger  *slog.Logger
 
 	maxMessageBytes int
 	closed          atomic.Bool
@@ -53,7 +53,7 @@ func NewStdioTransportWithIO(in io.Reader, out io.Writer, stderr io.Writer, maxM
 	t := &StdioTransport{
 		scanner:         scanner,
 		out:             bufio.NewWriter(out),
-		logger:          log.New(stderr, "mcp-stdio: ", log.LstdFlags|log.Lmsgprefix),
+		logger:          slog.New(slog.NewTextHandler(stderr, nil)),
 		maxMessageBytes: maxMessageBytes,
 	}
 	if c, ok := in.(io.Closer); ok {
@@ -91,7 +91,7 @@ func (t *StdioTransport) ReadMessage() (*JSONRPCMessage, error) {
 		}
 		msg, err := decodeMessage([]byte(line))
 		if err != nil {
-			t.logger.Printf("dropping invalid json-rpc input: %v", err)
+			t.logger.Warn("mcp-stdio: dropping invalid json-rpc input", "err", err)
 			return nil, err
 		}
 		return msg, nil

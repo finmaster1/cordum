@@ -599,6 +599,59 @@ func TestStartRunWithOptionsEncodesInput(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Regression: GetRun deserializes Input field
+// ---------------------------------------------------------------------------
+
+func TestGetRunIncludesInput(t *testing.T) {
+	serverResp := `{
+		"id": "run-123",
+		"workflow_id": "wf-1",
+		"status": "running",
+		"input": {"date_range": {"start": "last_24h", "end": "now"}, "count": 5}
+	}`
+	client := newTestClient(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, serverResp), nil
+	}))
+
+	run, err := client.GetRun(context.Background(), "run-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Input == nil {
+		t.Fatal("expected Input to be populated, got nil")
+	}
+	dr, ok := run.Input["date_range"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected date_range map in Input, got: %v", run.Input)
+	}
+	if dr["start"] != "last_24h" || dr["end"] != "now" {
+		t.Fatalf("unexpected date_range values: %v", dr)
+	}
+	if run.Input["count"] != float64(5) {
+		t.Fatalf("expected count=5, got: %v", run.Input["count"])
+	}
+}
+
+func TestGetRunEmptyInput(t *testing.T) {
+	serverResp := `{"id": "run-456", "workflow_id": "wf-2", "status": "pending", "input": {}}`
+	client := newTestClient(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, serverResp), nil
+	}))
+
+	run, err := client.GetRun(context.Background(), "run-456")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Input with omitempty: empty map should still deserialize (JSON has "input": {})
+	if run.Input == nil {
+		t.Fatal("expected Input to be non-nil for empty object")
+	}
+	if len(run.Input) != 0 {
+		t.Fatalf("expected empty Input map, got: %v", run.Input)
+	}
+}
+
 func TestStartRunWithOptionsNilInputSendsEmptyObject(t *testing.T) {
 	client := newTestClient(roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		body, err := io.ReadAll(req.Body)

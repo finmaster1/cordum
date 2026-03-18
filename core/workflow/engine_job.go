@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/cordum/cordum/core/infra/store"
@@ -26,6 +27,10 @@ func (e *Engine) buildJobPayload(run *WorkflowRun, step *Step, item any) (map[st
 	base := map[string]any{}
 	if step != nil && len(step.Input) > 0 {
 		scope := buildEvalScope(run, item)
+		var runInputKeys, stepInputKeys []string
+		for k := range run.Input { runInputKeys = append(runInputKeys, k) }
+		for k := range step.Input { stepInputKeys = append(stepInputKeys, k) }
+		slog.Info("buildJobPayload", "run_id", run.ID, "run_input", runInputKeys, "step_input", stepInputKeys, "scope_input_type", fmt.Sprintf("%T", scope["input"]))
 		evaluated, err := evalTemplates(step.Input, scope)
 		if err != nil {
 			return nil, err

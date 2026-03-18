@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -106,14 +107,18 @@ func TestEngineForEachFanoutAndAggregateSuccess(t *testing.T) {
 		t.Fatalf("expected 2 fan-out publishes, got %d", bus.Count())
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-foreach:fan[0]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-foreach:fan[1]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
@@ -233,10 +238,12 @@ func TestEngineRetriesAndBackoff(t *testing.T) {
 		t.Fatalf("expected 1 publish, got %d", bus.Count())
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-retry:step@1",
 		Status: pb.JobStatus_JOB_STATUS_FAILED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Poll until the backoff retry triggers a second publish.
 	deadline := time.Now().Add(5 * time.Second)
@@ -250,10 +257,12 @@ func TestEngineRetriesAndBackoff(t *testing.T) {
 		t.Fatalf("expected retry publish, got %d", bus.Count())
 	}
 
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-retry:step@2",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
 		t.Fatalf("expected run succeeded after retry, got %s", final.Status)
@@ -868,11 +877,13 @@ func TestOnError_RedirectsToHandlerOnFailure(t *testing.T) {
 	}
 
 	// Fail the main step.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerr:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "something broke",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Run should NOT be failed yet — on_error handler should be dispatched.
 	mid, _ := store.GetRun(context.Background(), run.ID)
@@ -898,10 +909,12 @@ func TestOnError_RedirectsToHandlerOnFailure(t *testing.T) {
 	}
 
 	// Let the handler succeed.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-onerr:handler@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
@@ -955,10 +968,12 @@ func TestOnError_NotTriggeredOnSuccess(t *testing.T) {
 	}
 
 	// Main step succeeds — handler should NOT be activated.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-onerr-ok:main@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	// Handler should not have been activated — run should still resolve.
@@ -1017,18 +1032,22 @@ func TestOnError_HandlerFailsCausesRunFailure(t *testing.T) {
 	}
 
 	// Fail the main step.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerr-fail:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "main broke",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Now fail the handler too.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerr-fail:handler@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "handler also broke",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusFailed {
@@ -1301,10 +1320,12 @@ func TestForEach_ExpressionEvaluatedOnce(t *testing.T) {
 	}
 
 	// Complete first child → triggers second dispatch via HandleJobResult.
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-foreach-once:fan[0]@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// The second scheduleReady should use stored items, not re-evaluate.
 	afterSecond, _ := store.GetRun(context.Background(), run.ID)
@@ -1470,5 +1491,166 @@ func TestCondition_FalsePath_EmitsEvents(t *testing.T) {
 	// Timeline event should have been emitted.
 	if !hasTimelineEventForRun(t, store, run.ID, "step_condition_skipped") {
 		t.Fatal("expected step_condition_skipped timeline event for false condition")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: HandleJobResult returns ErrRunNotFound for deleted runs
+// ---------------------------------------------------------------------------
+
+func TestHandleJobResultDeletedRunReturnsErrRunNotFound(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis: %v", err)
+	}
+	defer srv.Close()
+
+	store, err := NewRedisWorkflowStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer store.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(store, bus)
+
+	// Create workflow + run, start it, then delete the run.
+	wfDef := &Workflow{
+		ID: "wf-deleted",
+		Steps: map[string]*Step{
+			"step": {ID: "step", Type: StepTypeWorker, Topic: "job.default"},
+		},
+	}
+	if err := store.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+	run := &WorkflowRun{
+		ID: "run-deleted", WorkflowID: wfDef.ID,
+		Steps: map[string]*StepRun{}, Status: RunStatusPending,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	// Delete the run.
+	if err := store.DeleteRun(context.Background(), run.ID); err != nil {
+		t.Fatalf("delete run: %v", err)
+	}
+
+	// Now send a job result for the deleted run — should return ErrRunNotFound.
+	resultErr := engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:  "run-deleted:step@1",
+		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
+	})
+	if resultErr == nil {
+		t.Fatal("expected ErrRunNotFound for deleted run, got nil")
+	}
+	if !errors.Is(resultErr, ErrRunNotFound) {
+		t.Fatalf("expected ErrRunNotFound, got: %v", resultErr)
+	}
+}
+
+func TestHandleJobResultExistingRunReturnsNil(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis: %v", err)
+	}
+	defer srv.Close()
+
+	store, err := NewRedisWorkflowStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer store.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(store, bus)
+
+	wfDef := &Workflow{
+		ID: "wf-exists",
+		Steps: map[string]*Step{
+			"step": {ID: "step", Type: StepTypeWorker, Topic: "job.default"},
+		},
+	}
+	if err := store.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+	run := &WorkflowRun{
+		ID: "run-exists", WorkflowID: wfDef.ID,
+		Steps: map[string]*StepRun{}, Status: RunStatusPending,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	// Job result for existing run — should return nil (success).
+	resultErr := engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:  "run-exists:step@1",
+		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
+	})
+	if resultErr != nil {
+		t.Fatalf("expected nil for existing run, got: %v", resultErr)
+	}
+}
+
+func TestHandleJobResultTransientRedisErrorIsNotErrRunNotFound(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis: %v", err)
+	}
+	defer srv.Close()
+
+	store, err := NewRedisWorkflowStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer store.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(store, bus)
+
+	// Create workflow + run, start it, then close Redis to simulate transient failure.
+	wfDef := &Workflow{
+		ID: "wf-transient",
+		Steps: map[string]*Step{
+			"step": {ID: "step", Type: StepTypeWorker, Topic: "job.default"},
+		},
+	}
+	if err := store.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+	run := &WorkflowRun{
+		ID: "run-transient", WorkflowID: wfDef.ID,
+		Steps: map[string]*StepRun{}, Status: RunStatusPending,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	// Close miniredis to simulate transient Redis failure.
+	srv.Close()
+
+	// HandleJobResult should return an error that is NOT ErrRunNotFound.
+	resultErr := engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:  "run-transient:step@1",
+		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
+	})
+	if resultErr == nil {
+		t.Fatal("expected error on Redis failure, got nil")
+	}
+	if errors.Is(resultErr, ErrRunNotFound) {
+		t.Fatalf("transient Redis error must NOT be ErrRunNotFound, got: %v", resultErr)
 	}
 }

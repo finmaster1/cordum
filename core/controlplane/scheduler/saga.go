@@ -5,10 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/google/uuid"
@@ -167,7 +167,7 @@ func (s *SagaManager) Rollback(ctx context.Context, workflowID string) error {
 			return fmt.Errorf("saga lock: %w", err)
 		}
 		if !ok {
-			logging.Info("scheduler-saga", "rollback already in progress", "workflow_id", workflowID)
+			slog.Info("rollback already in progress", "workflow_id", workflowID)
 			return nil
 		}
 		defer func() {
@@ -194,7 +194,7 @@ func (s *SagaManager) Rollback(ctx context.Context, workflowID string) error {
 			if len(rawHex) > 128 {
 				rawHex = rawHex[:128] + "..."
 			}
-			logging.Error("scheduler-saga", "unmarshal compensation failed",
+			slog.Error("unmarshal compensation failed",
 				"workflow_id", workflowID, "error", err,
 				"raw_bytes_len", len(data), "raw_hex", rawHex)
 			if s.metrics != nil {
@@ -233,7 +233,7 @@ func (s *SagaManager) sendBrokenCompensationToDLQ(workflowID string, raw []byte,
 		},
 	}
 	if err := s.bus.Publish(capsdk.SubjectDLQ, packet); err != nil {
-		logging.Error("scheduler-saga", "failed to send broken compensation to DLQ",
+		slog.Error("failed to send broken compensation to DLQ",
 			"workflow_id", workflowID, "error", err)
 	}
 }
@@ -275,15 +275,15 @@ func (s *SagaManager) dispatchCompensation(req *pb.JobRequest, workflowID string
 		record, err := s.safety.Check(safetyCtx, req)
 		safetyCancel()
 		if err != nil {
-			logging.Warn("scheduler-saga", "safety check error for compensation, proceeding",
+			slog.Warn("safety check error for compensation, proceeding",
 				"job_id", req.JobId, "workflow_id", workflowID, "error", err)
 		} else if record.Decision == SafetyDeny {
-			logging.Warn("scheduler-saga", "compensation denied by safety, skipping",
+			slog.Warn("compensation denied by safety, skipping",
 				"job_id", req.JobId, "workflow_id", workflowID,
 				"reason", record.Reason, "rule_id", record.RuleID)
 			return nil
 		} else if record.Decision == SafetyUnavailable {
-			logging.Warn("scheduler-saga", "safety unavailable for compensation, proceeding",
+			slog.Warn("safety unavailable for compensation, proceeding",
 				"job_id", req.JobId, "workflow_id", workflowID)
 		}
 	}

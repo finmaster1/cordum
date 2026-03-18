@@ -18,7 +18,7 @@ Common issues and debugging procedures for Cordum. Each entry includes symptoms,
 
 | Cause | Fix |
 |-------|-----|
-| Missing `CORDUM_API_KEY` | `export CORDUM_API_KEY="$(openssl rand -hex 32)"` |
+| Missing `CORDUM_API_KEY` | Run `./tools/scripts/quickstart.sh` (auto-generates) or `export CORDUM_API_KEY="$(openssl rand -hex 32)"` |
 | Port conflicts (8081, 4222, 6379) | Check with `lsof -i :8081` or `netstat -tlnp \| grep 8081` |
 | Image pull errors | Verify Docker login: `docker login ghcr.io` |
 | Stale containers | `docker compose down -v && docker compose up` |
@@ -86,6 +86,73 @@ MSYS_NO_PATHCONV=1 docker exec cordum-redis redis-cli PING
 
 ```bash
 go test -count=3 ./core/...
+```
+
+### Can't login to dashboard
+
+**Symptoms**: Dashboard login page rejects credentials.
+
+**Fix**: Default credentials are `admin` / `admin123`. These are set via `CORDUM_ADMIN_USERNAME` and `CORDUM_ADMIN_PASSWORD` in `.env`. If you changed the password and forgot it, update `.env` and restart:
+
+```bash
+# Edit .env: set CORDUM_ADMIN_PASSWORD=your-new-password
+docker compose restart api-gateway
+```
+
+### `openssl` not found
+
+**Symptoms**: API key generation fails because `openssl` is not installed.
+
+**Fix**: `quickstart.sh` handles this automatically with fallbacks (`/dev/urandom` → Python `secrets`). For manual generation without openssl:
+
+```bash
+# Using /dev/urandom
+head -c 32 /dev/urandom | xxd -p | tr -d '\n'
+
+# Using Python
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### Go build fails
+
+**Symptoms**: `go build` or `make build` fails with syntax or module errors.
+
+**Fix**: Cordum requires **Go 1.24+**. Check your version:
+
+```bash
+go version
+# If below 1.24, upgrade: https://go.dev/dl/
+```
+
+### Dashboard `npm install` fails
+
+**Symptoms**: `npm install` or `npm run build` fails in the `dashboard/` directory.
+
+**Fix**: Requires **Node 18+**. If you use nvm, the dashboard includes `.nvmrc`:
+
+```bash
+cd dashboard
+nvm use    # reads .nvmrc (Node 20)
+npm install
+```
+
+### 502 Bad Gateway from dashboard
+
+**Symptoms**: Dashboard loads but API calls return 502.
+
+**Fix**: The API gateway container may still be starting or has crashed. Check its logs:
+
+```bash
+docker compose logs api-gateway --tail=50
+
+# If the gateway is not running, restart it
+docker compose restart api-gateway
+```
+
+If the issue persists after a gateway rebuild, the dashboard nginx may have cached a stale IP. Restart nginx:
+
+```bash
+docker compose restart dashboard
 ```
 
 ---

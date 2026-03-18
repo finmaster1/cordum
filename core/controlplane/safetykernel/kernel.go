@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -142,7 +142,7 @@ func Run(cfg *config.Config) error {
 	}
 	resultClient, err := redisutil.NewClient(cfg.RedisURL)
 	if err != nil {
-		log.Printf("safety-kernel: output result redis client disabled: %v", err)
+		slog.Warn("safety-kernel: output result redis client disabled", "err", err)
 	}
 	srv := &server{
 		cacheTTL:     parseDurationEnv(envDecisionCacheTTL),
@@ -176,7 +176,7 @@ func Run(cfg *config.Config) error {
 		reflection.Register(grpcServer)
 	}
 
-	log.Printf("safety-kernel: listening on %s", cfg.SafetyKernelAddr)
+	slog.Info("safety-kernel: listening", "addr", cfg.SafetyKernelAddr)
 
 	// Graceful shutdown: on SIGINT/SIGTERM, drain in-flight RPCs then stop.
 	sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -184,7 +184,7 @@ func Run(cfg *config.Config) error {
 
 	go func() {
 		<-sigCtx.Done()
-		log.Println("safety-kernel: shutting down gracefully...")
+		slog.Info("safety-kernel: shutting down gracefully")
 
 		const shutdownTimeout = 15 * time.Second
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -197,9 +197,9 @@ func Run(cfg *config.Config) error {
 		}()
 		select {
 		case <-grpcDone:
-			log.Println("safety-kernel: gRPC server drained")
+			slog.Info("safety-kernel: gRPC server drained")
 		case <-shutdownCtx.Done():
-			log.Println("safety-kernel: gRPC graceful stop timed out, forcing")
+			slog.Warn("safety-kernel: gRPC graceful stop timed out, forcing")
 			grpcServer.Stop()
 		}
 	}()
@@ -314,11 +314,13 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 	}
 	input.SecretsPresent = secretsPresent(input.Meta, req.GetLabels())
 
+	slog.Debug("policy evaluation starting", "component", "safety", "tenant", tenant, "topic", topic, "jobId", req.GetJobId())
 	var policyDecision config.PolicyDecision
+	evalStart := time.Now()
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("safety-kernel: CRITICAL policy evaluation panic: %v\n%s", r, debug.Stack())
+				slog.Error("safety-kernel: CRITICAL policy evaluation panic", "panic", r, "stack", string(debug.Stack()))
 				policyDecision = config.PolicyDecision{
 					Decision: "deny",
 					Reason:   fmt.Sprintf("policy evaluation panic: %v", r),
@@ -336,6 +338,7 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 			}
 		}
 	}()
+	slog.Debug("policy evaluation complete", "component", "safety", "tenant", tenant, "topic", topic, "decision", policyDecision.Decision, "ruleId", policyDecision.RuleID, "duration", time.Since(evalStart).String())
 	if strings.HasPrefix(policyDecision.Reason, "no matching rule") {
 		defaultDecisionTotal.WithLabelValues(policyDecision.Decision).Inc()
 	}
@@ -392,6 +395,8 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 		ApprovalRef:      approvalRef,
 		Remediations:     toProtoRemediations(policyDecision.Remediations),
 	}
+
+	slog.Info("policy evaluation result", "component", "safety", "tenant", tenant, "topic", topic, "jobId", req.GetJobId(), "decision", resp.Decision.String(), "ruleId", resp.RuleId)
 
 	if cacheKey != "" && s.cacheTTL > 0 {
 		cacheResp := clonePolicyResponse(resp)
@@ -692,7 +697,7 @@ func (s *server) watchPolicy(ctx context.Context, loader *policyLoader) {
 				if ctx.Err() != nil {
 					return
 				}
-				log.Printf("safety-kernel: policy reload failed: %v", err)
+				slog.Error("safety-kernel: policy reload failed", "err", err)
 				continue
 			}
 			s.mu.RLock()
@@ -700,7 +705,7 @@ func (s *server) watchPolicy(ctx context.Context, loader *policyLoader) {
 			s.mu.RUnlock()
 			if snapshot != "" && snapshot != current {
 				s.setPolicy(policy, snapshot)
-				log.Printf("safety-kernel: policy snapshot updated %s", snapshot)
+				slog.Info("safety-kernel: policy snapshot updated", "snapshot", snapshot)
 			}
 		}
 	}
@@ -726,9 +731,9 @@ func (s *server) setPolicy(policy *config.SafetyPolicy, snapshot string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if err := s.resultClient.LPush(ctx, snapshotHistoryKey, snapshot).Err(); err != nil {
-			log.Printf("safety-kernel: snapshot redis LPUSH failed: %v", err)
+			slog.Warn("safety-kernel: snapshot redis LPUSH failed", "err", err)
 		} else if err := s.resultClient.LTrim(ctx, snapshotHistoryKey, 0, snapshotHistoryMax-1).Err(); err != nil {
-			log.Printf("safety-kernel: snapshot redis LTRIM failed: %v", err)
+			slog.Warn("safety-kernel: snapshot redis LTRIM failed", "err", err)
 		}
 	}
 
@@ -737,7 +742,7 @@ func (s *server) setPolicy(policy *config.SafetyPolicy, snapshot string) {
 	s.cache = map[string]cacheEntry{}
 	s.cacheMu.Unlock()
 
-	log.Printf("safety-kernel: policy updated, cache invalidated (version=%d)", newVersion)
+	slog.Info("safety-kernel: policy updated, cache invalidated", "version", newVersion)
 }
 
 type policyLoader struct {
@@ -773,7 +778,7 @@ func newPolicyLoader(cfg *config.Config, source string) *policyLoader {
 	}
 	svc, err := configsvc.New(cfg.RedisURL)
 	if err != nil {
-		log.Printf("safety-kernel: config service disabled: %v", err)
+		slog.Warn("safety-kernel: config service disabled", "err", err)
 		return loader
 	}
 	loader.configSvc = svc

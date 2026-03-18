@@ -413,3 +413,145 @@ func TestParseArgsFlagAfterPositional(t *testing.T) {
 		t.Fatalf("expected positional arg 'my-workflow', got %v", fs.Args())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Regression: single-dash flags and various input forms
+// ---------------------------------------------------------------------------
+
+func TestParseArgsSingleDashInput(t *testing.T) {
+	// Verify -input (single dash) works the same as --input.
+	t.Setenv("CORDUM_GATEWAY", "http://localhost:8081")
+	t.Setenv("CORDUM_API_KEY", "")
+	t.Setenv("CORDUM_TENANT_ID", "default")
+	t.Setenv("CORDUM_TLS_CA", "")
+	t.Setenv("CORDUM_TLS_INSECURE", "")
+
+	fs := newFlagSet("run start")
+	input := fs.String("input", "", "input json")
+	dryRun := fs.Bool("dry-run", false, "dry run mode")
+
+	fs.ParseArgs([]string{"my-workflow", "-input", `{"k":"v"}`, "-dry-run"})
+
+	if *input != `{"k":"v"}` {
+		t.Fatalf("expected input flag parsed with single dash, got %q", *input)
+	}
+	if !*dryRun {
+		t.Fatal("expected dry-run=true with single dash")
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "my-workflow" {
+		t.Fatalf("expected positional arg 'my-workflow', got %v", fs.Args())
+	}
+}
+
+func TestParseArgsInputEqualsJSON(t *testing.T) {
+	// Verify -input='{"k":"v"}' equals syntax works.
+	t.Setenv("CORDUM_GATEWAY", "http://localhost:8081")
+	t.Setenv("CORDUM_API_KEY", "")
+	t.Setenv("CORDUM_TENANT_ID", "default")
+	t.Setenv("CORDUM_TLS_CA", "")
+	t.Setenv("CORDUM_TLS_INSECURE", "")
+
+	fs := newFlagSet("run start")
+	input := fs.String("input", "", "input json")
+
+	fs.ParseArgs([]string{"my-workflow", `-input={"k":"v"}`})
+
+	if *input != `{"k":"v"}` {
+		t.Fatalf("expected input from equals syntax, got %q", *input)
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "my-workflow" {
+		t.Fatalf("expected positional arg, got %v", fs.Args())
+	}
+}
+
+func TestParseArgsComplexNestedJSON(t *testing.T) {
+	// Verify deeply nested JSON survives parsing.
+	t.Setenv("CORDUM_GATEWAY", "http://localhost:8081")
+	t.Setenv("CORDUM_API_KEY", "")
+	t.Setenv("CORDUM_TENANT_ID", "default")
+	t.Setenv("CORDUM_TLS_CA", "")
+	t.Setenv("CORDUM_TLS_INSECURE", "")
+
+	nested := `{"date_range":{"start":"last_24h","end":"now"},"filters":{"type":["signal","alert"],"min_score":0.5}}`
+	fs := newFlagSet("run start")
+	input := fs.String("input", "", "input json")
+
+	fs.ParseArgs([]string{"my-workflow", "--input", nested})
+
+	if *input != nested {
+		t.Fatalf("nested JSON not preserved, got %q", *input)
+	}
+	parsed, err := parseJSONArg(*input)
+	if err != nil {
+		t.Fatalf("parseJSONArg failed: %v", err)
+	}
+	m, ok := parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", parsed)
+	}
+	dr, ok := m["date_range"].(map[string]any)
+	if !ok || dr["start"] != "last_24h" {
+		t.Fatalf("nested values not preserved: %v", m)
+	}
+}
+
+func TestParseArgsInputFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "input.json")
+	if err := os.WriteFile(path, []byte(`{"source":"file","count":42}`), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	parsed, err := parseJSONArg(path)
+	if err != nil {
+		t.Fatalf("parseJSONArg from file failed: %v", err)
+	}
+	m, ok := parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", parsed)
+	}
+	if m["source"] != "file" {
+		t.Fatalf("expected source=file, got %v", m["source"])
+	}
+}
+
+func TestParseArgsInputFromStdin(t *testing.T) {
+	// Save and restore os.Stdin.
+	origStdin := os.Stdin
+	defer func() { os.Stdin = origStdin }()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	go func() {
+		_, _ = w.Write([]byte(`{"from":"stdin","ok":true}`))
+		_ = w.Close()
+	}()
+
+	parsed, err := parseJSONArg("-")
+	if err != nil {
+		t.Fatalf("parseJSONArg from stdin failed: %v", err)
+	}
+	m, ok := parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", parsed)
+	}
+	if m["from"] != "stdin" {
+		t.Fatalf("expected from=stdin, got %v", m["from"])
+	}
+}
+
+func TestReorderArgsSingleDashValueFlag(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.String("input", "", "input json")
+
+	// Single-dash -input should work identically to --input.
+	args := []string{"my-workflow", "-input", `{"key":"val"}`}
+	got := reorderArgs(fs, args)
+	want := []string{"-input", `{"key":"val"}`, "my-workflow"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorderArgs single-dash = %v, want %v", got, want)
+	}
+}

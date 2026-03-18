@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -401,10 +401,10 @@ func (s *server) contentForScan(ctx context.Context, req *pb.OutputCheckRequest)
 				return truncateOutputContent(data)
 			}
 			if !errors.Is(err, redis.Nil) {
-				log.Printf("safety-kernel: output pointer fetch failed: %v", err)
+				slog.Warn("safety-kernel: output pointer fetch failed", "err", err)
 			}
 		} else {
-			log.Printf("safety-kernel: invalid output pointer: %v", err)
+			slog.Warn("safety-kernel: invalid output pointer", "err", err)
 		}
 	}
 	msg := strings.TrimSpace(req.GetErrorMessage())
@@ -463,7 +463,7 @@ func scanWithContentPatterns(content []byte, rule compiledOutputRule) []outputFi
 	for _, pattern := range rule.patterns {
 		hits := runRegexWithTimeout(pattern.re, text, maxFindingsPerPattern)
 		if hits == nil {
-			log.Printf("safety-kernel: regex timeout for rule %q pattern %q", rule.id, pattern.raw)
+			slog.Warn("safety-kernel: regex timeout", "rule", rule.id, "pattern", pattern.raw)
 			continue
 		}
 		for _, hit := range hits {
@@ -538,7 +538,7 @@ func compileOutputRules(policy *config.SafetyPolicy) []compiledOutputRule {
 		}
 		decision, ok := parseOutputDecision(rule.Decision)
 		if !ok {
-			log.Printf("safety-kernel: skipping output rule %q: invalid decision %q", rule.ID, rule.Decision)
+			slog.Warn("safety-kernel: skipping output rule, invalid decision", "rule", rule.ID, "decision", rule.Decision)
 			continue
 		}
 
@@ -554,13 +554,13 @@ func compileOutputRules(policy *config.SafetyPolicy) []compiledOutputRule {
 				continue
 			}
 			if err := validateRegexComplexity(pat); err != nil {
-				log.Printf("safety-kernel: rejecting output rule %q pattern %q: %v", rule.ID, pat, err)
+				slog.Warn("safety-kernel: rejecting output rule pattern", "rule", rule.ID, "pattern", pat, "err", err)
 				regexRejectedTotal.Inc()
 				continue
 			}
 			compiled, err := regexp.Compile(pat)
 			if err != nil {
-				log.Printf("safety-kernel: skipping output rule %q pattern %q: %v", rule.ID, pat, err)
+				slog.Warn("safety-kernel: skipping output rule pattern", "rule", rule.ID, "pattern", pat, "err", err)
 				continue
 			}
 			patterns = append(patterns, compiledOutputPattern{raw: pat, re: compiled})
@@ -689,13 +689,13 @@ func loadOutputScanners() map[string]OutputScanner {
 		if os.IsNotExist(err) {
 			return scanners
 		}
-		log.Printf("safety-kernel: scanner config read failed: %v", err)
+		slog.Warn("safety-kernel: scanner config read failed", "err", err)
 		return scanners
 	}
 
 	var cfg outputScannersFile
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Printf("safety-kernel: scanner config parse failed: %v", err)
+		slog.Warn("safety-kernel: scanner config parse failed", "err", err)
 		return scanners
 	}
 	if len(cfg.Scanners) == 0 {
@@ -716,7 +716,7 @@ func loadOutputScanners() map[string]OutputScanner {
 			scanners["code_injection"] = scanner
 		}
 	}
-	log.Printf("safety-kernel: loaded scanner config (%d scanners)", len(cfg.Scanners))
+	slog.Info("safety-kernel: loaded scanner config", "count", len(cfg.Scanners))
 	return scanners
 }
 
@@ -748,7 +748,7 @@ func compileScannerSpec(name string, spec outputScannerSpecFile) OutputScanner {
 		}
 		re, err := regexp.Compile(raw)
 		if err != nil {
-			log.Printf("safety-kernel: invalid scanner pattern %s/%s: %v", normalizedName, pattern.Name, err)
+			slog.Warn("safety-kernel: invalid scanner pattern", "scanner", normalizedName, "pattern", pattern.Name, "err", err)
 			continue
 		}
 		confidence := pattern.Confidence

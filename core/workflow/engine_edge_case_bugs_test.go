@@ -308,11 +308,13 @@ func TestBug_OnErrorNotTriggeredOnStepTimeout(t *testing.T) {
 	}
 
 	// Complete "main" with TIMEOUT result
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-timeout-onerror:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_TIMEOUT,
 		ErrorMessage: "step timed out after 30s",
-	})
+	}); err != nil {
+		t.Fatalf("handle timeout result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -438,11 +440,13 @@ func TestBug_ForEachOrphanChildrenOnFailure(t *testing.T) {
 	}
 
 	// Fail child fan[0] — aggregateChildren marks parent as Failed
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-foreach-orphan:fan[0]@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "child 0 failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle fan[0] result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -539,11 +543,13 @@ func TestBug_ParallelAllStrategyOrphanChildrenOnFailure(t *testing.T) {
 	}
 
 	// Fail child_a → "all" strategy immediately fails
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-parallel-orphan:child_a@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "child_a failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle child_a result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -624,11 +630,13 @@ func TestInvariant_OnErrorActivatedOnFailedStep(t *testing.T) {
 	}
 
 	// Fail "main" step
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-onerror-fail:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "main failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle main failed result: %v", err)
+	}
 
 	mid, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -659,10 +667,12 @@ func TestInvariant_OnErrorActivatedOnFailedStep(t *testing.T) {
 	}
 
 	// Complete handler → run should succeed
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-onerror-fail:handler@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -725,10 +735,12 @@ func TestInvariant_ParallelAnyStrategyCancelsOnSuccess(t *testing.T) {
 	}
 
 	// Succeed child_a → "any" strategy is satisfied
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-parallel-any:child_a@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -911,11 +923,13 @@ func TestEdgeCase_ForEachMaxParallelPartialDispatchFailure(t *testing.T) {
 	}
 
 	// Fail fan[0] → parent should fail
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-foreach-throttle:fan[0]@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "fan[0] failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -996,14 +1010,18 @@ func TestInvariant_ParallelNOfMSuccessfullyCompletes(t *testing.T) {
 	}
 
 	// Succeed child_a and child_b → 2 of 3 satisfied
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-parallel-nofm:child_a@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-parallel-nofm:child_b@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {
@@ -1111,11 +1129,13 @@ func TestBug_ChainedOnErrorHandlersPreemptedByUpdateRunStatus(t *testing.T) {
 	}
 
 	// Fail main → handler1 should activate
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-chained-onerror:main@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "main failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	mid1, _ := store.GetRun(context.Background(), run.ID)
 	if mid1.Steps["handler1"] == nil || mid1.Steps["handler1"].Status == "" {
@@ -1126,11 +1146,13 @@ func TestBug_ChainedOnErrorHandlersPreemptedByUpdateRunStatus(t *testing.T) {
 	}
 
 	// Fail handler1 → handler2 should activate
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-chained-onerror:handler1@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "handler1 also failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	mid2, _ := store.GetRun(context.Background(), run.ID)
 
@@ -1150,10 +1172,12 @@ func TestBug_ChainedOnErrorHandlersPreemptedByUpdateRunStatus(t *testing.T) {
 	}
 
 	// Succeed handler2 → run should succeed
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:  "run-chained-onerror:handler2@1",
 		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, _ := store.GetRun(context.Background(), run.ID)
 	if final.Status != RunStatusSucceeded {
@@ -1244,11 +1268,13 @@ func TestBug_SubWorkflowFailureDoesNotTriggerOnError(t *testing.T) {
 	childRunID := subStep.JobID
 
 	// Fail the child step → child run should fail
-	engine.HandleJobResult(ctx, &pb.JobResult{
+	if err := engine.HandleJobResult(ctx, &pb.JobResult{
 		JobId:        childRunID + ":child_step@1",
 		Status:       pb.JobStatus_JOB_STATUS_FAILED,
 		ErrorMessage: "child step failed",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	// Re-schedule parent to pick up child completion
 	if err := engine.StartRun(ctx, parentWf.ID, parentRun.ID); err != nil {
@@ -1430,11 +1456,13 @@ func TestBug_ForEachTimedOutChildActivatesOnError(t *testing.T) {
 	}
 
 	// Timeout child fan[0] — aggregateChildren marks parent as Failed
-	engine.HandleJobResult(context.Background(), &pb.JobResult{
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:        "run-foreach-timeout:fan[0]@1",
 		Status:       pb.JobStatus_JOB_STATUS_TIMEOUT,
 		ErrorMessage: "child 0 timed out",
-	})
+	}); err != nil {
+		t.Fatalf("handle job result: %v", err)
+	}
 
 	final, err := store.GetRun(context.Background(), run.ID)
 	if err != nil {

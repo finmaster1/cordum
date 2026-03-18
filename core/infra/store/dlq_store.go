@@ -57,7 +57,9 @@ func NewDLQStore(url string, entryTTL time.Duration) (*DLQStore, error) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("connect redis: %w", err)
 	}
-	return &DLQStore{client: client, entryTTL: resolveDLQEntryTTL(entryTTL)}, nil
+	resolved := resolveDLQEntryTTL(entryTTL)
+	slog.Debug("dlq store connected", "component", "store", "entryTTL", resolved.String())
+	return &DLQStore{client: client, entryTTL: resolved}, nil
 }
 
 func (s *DLQStore) Close() error {

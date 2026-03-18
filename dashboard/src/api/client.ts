@@ -56,10 +56,13 @@ function authHeaders(): Record<string, string> {
 async function handleResponse<T>(res: Response, meta: { method: string; path: string; requestId: string; startMs: number }): Promise<T> {
   const durationMs = Math.round(performance.now() - meta.startMs);
 
+  const traceId = res.headers.get("X-Trace-Id") ?? undefined;
+
   if (res.ok) {
     logger.info("api-client", `${res.status} ${meta.path}`, {
       method: meta.method,
       requestId: meta.requestId,
+      ...(traceId ? { traceId } : {}),
       durationMs,
     });
     // 204 No Content

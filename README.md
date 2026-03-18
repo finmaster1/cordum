@@ -88,35 +88,75 @@ graph LR
 
 ## Quickstart
 
-**Prerequisites:** Docker, Docker Compose, Go 1.24+
+**Prerequisites:** Docker (4GB+ RAM), Docker Compose, Go 1.24+
 
 ```bash
 git clone https://github.com/cordum-io/cordum.git
 cd cordum
-export CORDUM_API_KEY="$(openssl rand -hex 32)"
 ./tools/scripts/quickstart.sh
 ```
 
-Dashboard opens at **http://localhost:8082**. API, scheduler, safety kernel, and TLS are all running.
+That's it. The script auto-creates `.env`, generates API keys and Redis password, builds all services, and runs health checks. No manual configuration needed.
+
+**Dashboard:** http://localhost:8082
+**Login:** `admin` / `admin123` (change in `.env` → `CORDUM_ADMIN_PASSWORD`)
 
 <details>
 <summary>Manual setup (without quickstart script)</summary>
 
 ```bash
-export CORDUM_API_KEY="$(openssl rand -hex 32)"
+cp .env.example .env
+# Edit .env: set CORDUM_API_KEY (or generate: openssl rand -hex 32)
+export CORDUM_API_KEY="your-key-here"
 go run ./cmd/cordumctl up
 open http://localhost:8082
 ```
 </details>
 
-### Common Pitfalls
+### Ports
+
+| Port | Service |
+|------|---------|
+| 8082 | Dashboard |
+| 8081 | API Gateway (HTTPS) |
+| 9080 | gRPC Gateway |
+| 4222 | NATS |
+| 6379 | Redis |
+| 9092 | Gateway Metrics |
+| 9093 | Workflow Engine Health |
+| 50051 | Safety Kernel (gRPC) |
+| 50400 | Context Engine (gRPC) |
+
+### After Setup
+
+```bash
+# Submit a test job
+curl -sS --cacert ./certs/ca/ca.crt \
+  -X POST https://localhost:8081/api/v1/jobs \
+  -H "X-API-Key: $CORDUM_API_KEY" -H "X-Tenant-ID: default" \
+  -H "Content-Type: application/json" \
+  -d '{"topic":"job.default","context":{"prompt":"hello"}}'
+
+# Stop the stack
+docker compose down
+
+# View logs
+docker compose logs -f api-gateway
+```
+
+### Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Port 4222/6379/8082 already in use | Stop existing NATS/Redis/web services or change ports in `docker-compose.yml` |
+| Port already in use | `docker compose down` then retry, or check `lsof -i :8082` |
 | Docker out of memory | Allocate at least 4 GB RAM to Docker Desktop |
-| Stale config after pool changes | Delete Redis key: `redis-cli DEL cfg:system:default` |
-| TLS cert errors on retry | Remove `./certs/` directory and re-run — certs auto-regenerate |
+| Can't login to dashboard | Default credentials: admin / admin123 |
+| TLS/SSL cert errors | Remove `./certs/` and re-run — certs auto-regenerate |
+| `openssl` not found | Not needed — quickstart.sh auto-generates keys without it |
+| Go build fails | Requires Go 1.24+ — check with `go version` |
+| Stale config after changes | `redis-cli DEL cfg:system:default` then restart |
+
+For detailed troubleshooting, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Key Features
 

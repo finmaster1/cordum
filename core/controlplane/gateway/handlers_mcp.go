@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/infra/buildinfo"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/mcp"
 	mcpresources "github.com/cordum/cordum/core/mcp/resources"
 	mcptools "github.com/cordum/cordum/core/mcp/tools"
@@ -53,11 +53,11 @@ func (s *server) registerMCPRoutes(mux *http.ServeMux) error {
 
 	cfg := s.loadMCPConfig(context.Background())
 	if !cfg.Enabled {
-		logging.Info("api-gateway", "mcp runtime disabled by config")
+		slog.Info("mcp runtime disabled by config")
 		return nil
 	}
 	if cfg.Transport != "http" {
-		logging.Info("api-gateway", "mcp http runtime disabled", "transport", cfg.Transport)
+		slog.Info("mcp http runtime disabled", "transport", cfg.Transport)
 		return nil
 	}
 
@@ -90,21 +90,20 @@ func (s *server) registerMCPRoutes(mux *http.ServeMux) error {
 	})
 	go func() {
 		if err := mcpServer.Serve(); err != nil {
-			logging.Error("api-gateway", "mcp server loop failed", "error", err)
+			slog.Error("mcp server loop failed", "error", err)
 		}
 	}()
 	if s.shutdownCh != nil {
 		go func() {
 			<-s.shutdownCh
 			if err := transport.Close(); err != nil {
-				logging.Warn("api-gateway", "mcp transport close failed", "error", err)
+				slog.Warn("mcp transport close failed", "error", err)
 			}
 			s.clearMCPRuntime()
 		}()
 	}
 
-	logging.Info(
-		"api-gateway",
+	slog.Info(
 		"mcp routes enabled",
 		"transport", cfg.Transport,
 		"port", cfg.Port,
@@ -222,7 +221,7 @@ func (s *server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 				return
 			case <-ticker.C:
 				if _, err := s.auth.AuthenticateHTTP(r); err != nil {
-					logging.Warn("api-gateway", "mcp sse re-auth failed, disconnecting session",
+					slog.Warn("mcp sse re-auth failed, disconnecting session",
 						"error", err,
 						"remote", r.RemoteAddr,
 					)

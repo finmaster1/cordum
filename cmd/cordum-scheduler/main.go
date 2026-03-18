@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
+	"github.com/cordum/cordum/core/infra/logging"
 	infraMetrics "github.com/cordum/cordum/core/infra/metrics"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	agentregistry "github.com/cordum/cordum/core/infra/registry"
@@ -141,7 +141,8 @@ func sanitizeLogValue(s string) string {
 }
 
 func main() {
-	log.Println("cordum scheduler starting...")
+	logging.Init("scheduler")
+	slog.Info("cordum scheduler starting...")
 	buildinfo.Log("cordum-scheduler")
 
 	cfg := config.Load()
@@ -150,17 +151,18 @@ func main() {
 	if err != nil {
 		explicitPath := os.Getenv("TIMEOUT_CONFIG_PATH")
 		if env.IsProduction() && explicitPath != "" {
-			log.Fatalf("timeout config load failed (production mode, TIMEOUT_CONFIG_PATH=%s): %v", sanitizeLogValue(explicitPath), sanitizeLogValue(err.Error())) // #nosec G104 G706 -- sanitized values
+			slog.Error("timeout config load failed", "path", sanitizeLogValue(explicitPath), "error", sanitizeLogValue(err.Error()))
+			os.Exit(1)
 		}
-		log.Printf("using default timeout config (could not load %s): %v", sanitizeLogValue(cfg.TimeoutConfigPath), sanitizeLogValue(err.Error()))
+		slog.Warn("using default timeout config", "path", sanitizeLogValue(cfg.TimeoutConfigPath), "error", sanitizeLogValue(err.Error()))
 	}
 	if timeoutsCfg == nil {
 		timeoutsCfg = config.DefaultTimeouts()
 	}
 	if err == nil && cfg.TimeoutConfigPath != "" {
-		log.Printf("timeout config loaded from %s", cfg.TimeoutConfigPath)
+		slog.Info("timeout config loaded", "path", cfg.TimeoutConfigPath)
 	} else if err != nil {
-		log.Printf("timeout config: using built-in defaults")
+		slog.Info("timeout config: using built-in defaults")
 	}
 
 	metrics := infraMetrics.NewProm("cordum_scheduler")
@@ -170,7 +172,8 @@ func main() {
 	}
 	if env.IsProduction() {
 		if err := infraMetrics.ValidateBindAddr(metricsAddr, env.Bool("SCHEDULER_METRICS_PUBLIC")); err != nil {
-			log.Fatalf("metrics bind rejected: %v", err)
+			slog.Error("metrics bind rejected", "error", err)
+			os.Exit(1)
 		}
 	}
 	metricsMux := http.NewServeMux()
@@ -187,47 +190,51 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 	go func() {
-		log.Printf("scheduler metrics on %s/metrics", metricsAddr) // #nosec G706 -- metricsAddr is from server config, not user input
+		slog.Info("scheduler metrics started", "addr", metricsAddr+"/metrics")
 		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("metrics server error: %v", err)
+			slog.Error("metrics server error", "error", err)
 		}
 	}()
 
 	jobStore, err := store.NewRedisJobStore(cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("failed to connect to Redis for job store: %v", err)
+		slog.Error("failed to connect to Redis for job store", "error", err)
+		os.Exit(1)
 	}
 	defer jobStore.Close()
 
 	var dlqStore *store.DLQStore
 	dlqStore, err = store.NewDLQStore(cfg.RedisURL, 0)
 	if err != nil {
-		log.Printf("scheduler dlq sink disabled: %v", err)
+		slog.Warn("scheduler dlq sink disabled", "error", err)
 	} else {
 		defer dlqStore.Close()
 	}
 
 	natsBus, err := bus.NewNatsBus(cfg.NatsURL)
 	if err != nil {
-		log.Fatalf("failed to connect to NATS: %v", err)
+		slog.Error("failed to connect to NATS", "error", err)
+		os.Exit(1)
 	}
 	defer natsBus.Close()
 
 	if err := bus.PublishHandshake(natsBus, "scheduler", pb.ComponentRole_COMPONENT_ROLE_SCHEDULER, map[string]bool{
 		"safety_check": true, "routing": true, "compensation": true,
 	}); err != nil {
-		log.Printf("handshake publish failed: %v", err)
+		slog.Warn("handshake publish failed", "error", err)
 	}
 
 	sagaRedis, err := redisutil.NewClient(cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("failed to connect to Redis for saga: %v", err)
+		slog.Error("failed to connect to Redis for saga", "error", err)
+		os.Exit(1)
 	}
 	{
 		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		if err := sagaRedis.Ping(pingCtx).Err(); err != nil {
 			cancel()
-			log.Fatalf("failed to ping Redis for saga: %v", err)
+			slog.Error("failed to ping Redis for saga", "error", err)
+			os.Exit(1)
 		}
 		cancel()
 	}
@@ -236,7 +243,8 @@ func main() {
 
 	safetyClient, err := scheduler.NewSafetyClient(cfg.SafetyKernelAddr)
 	if err != nil {
-		log.Fatalf("failed to connect to safety kernel: %v", err)
+		slog.Error("failed to connect to safety kernel", "error", err)
+		os.Exit(1)
 	}
 	defer safetyClient.Close()
 	safetyClient.WithRedis(sagaRedis)
@@ -251,19 +259,22 @@ func main() {
 	if cfg.OutputPolicyEnabled {
 		outputSafetyClient, err = scheduler.NewOutputSafetyClientWithRedis(cfg.SafetyKernelAddr, cfg.RedisURL)
 		if err != nil {
-			log.Fatalf("failed to connect output policy client: %v", err)
+			slog.Error("failed to connect output policy client", "error", err)
+			os.Exit(1)
 		}
 		defer outputSafetyClient.Close()
 	}
 
 	poolCfg, err := config.LoadPoolConfig(cfg.PoolConfigPath)
 	if err != nil {
-		log.Fatalf("failed to load pool config (%s): %v", cfg.PoolConfigPath, err)
+		slog.Error("failed to load pool config", "path", cfg.PoolConfigPath, "error", err)
+		os.Exit(1)
 	}
 
 	configSvc, err := configsvc.New(cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("failed to connect to Redis for config service: %v", err)
+		slog.Error("failed to connect to Redis for config service", "error", err)
+		os.Exit(1)
 	}
 	defer configSvc.Close()
 
@@ -280,15 +291,15 @@ func main() {
 	defer instReg.Stop()
 
 	if err := configSvc.EnsureDefault(ctx); err != nil {
-		log.Printf("auto-bootstrap default config failed: %v", err)
+		slog.Warn("auto-bootstrap default config failed", "error", err)
 	}
 	if err := bootstrapConfig(ctx, configSvc, poolCfg, timeoutsCfg); err != nil {
-		log.Printf("config bootstrap failed: %v", err)
+		slog.Warn("config bootstrap failed", "error", err)
 	}
 
 	snapshot, err := loadConfigSnapshot(ctx, configSvc, poolCfg, timeoutsCfg)
 	if err != nil {
-		log.Printf("config snapshot failed: %v", err)
+		slog.Warn("config snapshot failed", "error", err)
 	}
 	if snapshot.Pools == nil {
 		snapshot.Pools = poolCfg
@@ -296,7 +307,7 @@ func main() {
 	if snapshot.Timeouts == nil {
 		snapshot.Timeouts = timeoutsCfg
 	}
-	log.Printf("loaded %d topic mappings (config + %s)", len(snapshot.Pools.Topics), cfg.PoolConfigPath)
+	slog.Info("loaded topic mappings", "count", len(snapshot.Pools.Topics), "path", cfg.PoolConfigPath)
 
 	routing := scheduler.PoolRouting{
 		Topics: snapshot.Pools.Topics,
@@ -336,12 +347,13 @@ func main() {
 	engine.WithCounterClient(jobStore.Client())
 
 	if err := engine.Start(); err != nil {
-		log.Fatalf("failed to start scheduler engine: %v", err)
+		slog.Error("failed to start scheduler engine", "error", err)
+		os.Exit(1)
 	}
 
 	snapshotStore, err := store.NewRedisStore(cfg.RedisURL)
 	if err != nil {
-		log.Printf("worker snapshot disabled: failed to connect to Redis: %v", err)
+		slog.Warn("worker snapshot disabled: failed to connect to Redis", "error", err)
 	} else {
 		defer snapshotStore.Close()
 
@@ -362,7 +374,7 @@ func main() {
 			if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 				snapshotInterval = parsed
 			} else {
-				log.Printf("invalid WORKER_SNAPSHOT_INTERVAL=%q, using default %s", raw, snapshotInterval) // #nosec -- value is config input for diagnostics.
+				slog.Warn("invalid WORKER_SNAPSHOT_INTERVAL, using default", "raw", raw, "default", snapshotInterval)
 			}
 		}
 		const snapshotLockKey = "cordum:scheduler:snapshot:writer"
@@ -392,7 +404,7 @@ func main() {
 					snap.WriterID = instanceID
 					data, err := json.Marshal(snap)
 					if err != nil {
-						log.Printf("worker snapshot marshal failed: %v", err)
+						slog.Error("worker snapshot marshal failed", "error", err)
 						releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
 						_ = jobStore.ReleaseLock(releaseCtx, snapshotLockKey, token)
 						releaseCancel()
@@ -400,7 +412,7 @@ func main() {
 					}
 					writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
 					if err := snapshotStore.PutResult(writeCtx, agentregistry.SnapshotKey, data); err != nil {
-						log.Printf("worker snapshot write failed: %v", err)
+						slog.Error("worker snapshot write failed", "error", err)
 					}
 					writeCancel()
 
@@ -422,17 +434,17 @@ func main() {
 
 	go watchConfigChanges(ctx, configSvc, poolCfg, timeoutsCfg, strategy, reconciler, natsBus)
 
-	log.Println("scheduler running. waiting for signals...")
+	slog.Info("scheduler running, waiting for signals...")
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
 	const shutdownTimeout = 15 * time.Second
-	log.Printf("scheduler shutting down gracefully (timeout=%s)", shutdownTimeout)
+	slog.Info("scheduler shutting down gracefully", "timeout", shutdownTimeout)
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("metrics server shutdown error: %v", err)
+		slog.Error("metrics server shutdown error", "error", err)
 	}
 	engine.Stop()
 	cancel()

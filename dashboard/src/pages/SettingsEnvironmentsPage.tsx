@@ -35,7 +35,7 @@ export default function SettingsEnvironmentsPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-      <PageHeader title="Environments" subtitle="Manage deployment environments and connections" actions={<><Button variant="primary" size="sm" onClick={() => toast.info("Not configured")}>
+      <PageHeader title="Environments" subtitle="Manage deployment environments and connections" actions={<><Button variant="primary" size="sm" disabled title="Environment management not yet available">
           <Plus className="w-3 h-3 mr-1" />Add Environment
         </Button></>} />
 
@@ -79,7 +79,7 @@ export default function SettingsEnvironmentsPage() {
                 </div>
               </div>
               <div className="flex gap-2 pt-3 border-t border-border">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => toast.info("Not configured")}>
+                <Button variant="outline" size="sm" className="flex-1" disabled title="Environment configuration not yet available">
                   <Shield className="w-3 h-3 mr-1" />Configure
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => window.open(env.url, "_blank", "noopener,noreferrer")}>

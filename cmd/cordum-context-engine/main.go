@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +18,7 @@ import (
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
+	"github.com/cordum/cordum/core/infra/logging"
 	infraMetrics "github.com/cordum/cordum/core/infra/metrics"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"google.golang.org/grpc"
@@ -29,6 +30,7 @@ import (
 )
 
 func main() {
+	logging.Init("context-engine")
 	cfg := config.Load()
 	buildinfo.Log("cordum-context-engine")
 
@@ -39,7 +41,8 @@ func main() {
 	}
 	if env.IsProduction() {
 		if err := infraMetrics.ValidateBindAddr(metricsAddr, env.Bool("CONTEXT_ENGINE_METRICS_PUBLIC")); err != nil {
-			log.Fatalf("metrics bind rejected: %v", err)
+			slog.Error("metrics bind rejected", "error", err)
+			os.Exit(1)
 		}
 	}
 	metricsMux := http.NewServeMux()
@@ -59,21 +62,23 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 	go func() {
-		log.Printf("context engine metrics on %s/metrics", metricsAddr) // #nosec G706 -- metricsAddr is from server config, not user input
+		slog.Info("context engine metrics started", "addr", metricsAddr+"/metrics")
 		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("metrics server error: %v", err)
+			slog.Error("metrics server error", "error", err)
 		}
 	}()
 
 	svc, err := engine.NewService(cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("context engine init failed: %v", err)
+		slog.Error("context engine init failed", "error", err)
+		os.Exit(1)
 	}
 
 	addr := cfg.ContextEngineAddr
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", addr, err)
+		slog.Error("failed to listen", "addr", addr, "error", err)
+		os.Exit(1)
 	}
 
 	serverCreds := grpc.Creds(insecure.NewCredentials())
@@ -81,23 +86,26 @@ func main() {
 	keyFile := strings.TrimSpace(os.Getenv("CONTEXT_ENGINE_TLS_KEY"))
 	if certFile != "" || keyFile != "" {
 		if certFile == "" || keyFile == "" {
-			log.Fatalf("context engine tls requires both CONTEXT_ENGINE_TLS_CERT and CONTEXT_ENGINE_TLS_KEY")
+			slog.Error("context engine tls requires both CONTEXT_ENGINE_TLS_CERT and CONTEXT_ENGINE_TLS_KEY")
+			os.Exit(1)
 		}
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			log.Fatalf("context engine tls keypair: %v", err)
+			slog.Error("context engine tls keypair failed", "error", err)
+			os.Exit(1)
 		}
-		cfg := &tls.Config{
+		tlsCfg := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
 		}
 		if env.TLSMinVersion() == tls.VersionTLS13 {
-			cfg.MinVersion = tls.VersionTLS13
+			tlsCfg.MinVersion = tls.VersionTLS13
 		}
-		serverCreds = grpc.Creds(credentials.NewTLS(cfg))
+		serverCreds = grpc.Creds(credentials.NewTLS(tlsCfg))
 	}
 	if env.IsProduction() && certFile == "" {
-		log.Fatalf("context engine tls required in production")
+		slog.Error("context engine tls required in production")
+		os.Exit(1)
 	}
 
 	server := grpc.NewServer(serverCreds)
@@ -109,7 +117,7 @@ func main() {
 		reflection.Register(server)
 	}
 
-	log.Printf("context engine listening on %s (redis=%s)", addr, cfg.RedisURL)
+	slog.Info("context engine listening", "addr", addr, "redis", cfg.RedisURL)
 
 	// Graceful shutdown: on SIGINT/SIGTERM, drain in-flight RPCs then stop.
 	sigCtx, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -117,7 +125,7 @@ func main() {
 
 	go func() {
 		<-sigCtx.Done()
-		log.Println("context-engine shutting down gracefully...")
+		slog.Info("context-engine shutting down gracefully...")
 
 		const shutdownTimeout = 15 * time.Second
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -131,18 +139,19 @@ func main() {
 		}()
 		select {
 		case <-grpcDone:
-			log.Println("context-engine gRPC server drained")
+			slog.Info("context-engine gRPC server drained")
 		case <-shutdownCtx.Done():
-			log.Println("context-engine gRPC graceful stop timed out, forcing")
+			slog.Warn("context-engine gRPC graceful stop timed out, forcing")
 			server.Stop()
 		}
 
 		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("context-engine metrics shutdown error: %v", err)
+			slog.Error("context-engine metrics shutdown error", "error", err)
 		}
 	}()
 
 	if err := server.Serve(lis); err != nil {
-		log.Fatalf("context engine server error: %v", err)
+		slog.Error("context engine server error", "error", err)
+		os.Exit(1)
 	}
 }

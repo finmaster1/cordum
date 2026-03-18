@@ -512,7 +512,7 @@ func TestCleanupRunIdempotencyReservationLogsDeleteFailures(t *testing.T) {
 		"failed to cleanup idempotency key after run creation failure",
 		"key=idem-key",
 		"run_id=run-123",
-		"error=redis unavailable",
+		`error="redis unavailable"`,
 	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("expected log output to contain %q, got %q", want, logOutput)
@@ -575,8 +575,8 @@ func TestMarkRunFailedAfterStartErrorLogsPersistenceFailures(t *testing.T) {
 		"failed to persist run failure status",
 		"failed to append run failure timeline event",
 		"run_id=run-log",
-		"error=update failed",
-		"error=timeline failed",
+		`error="update failed"`,
+		`error="timeline failed"`,
 	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("expected log output to contain %q, got %q", want, logOutput)
@@ -650,5 +650,68 @@ func TestWorkflowRunCursorIsMicroseconds(t *testing.T) {
 	s.handleListAllRuns(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("unexpected status on page 2: %d %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestHandleDeleteRunCancelsInFlightJobs(t *testing.T) {
+	s, bus, _ := newTestGateway(t)
+	s.workflowEng = wf.NewEngine(s.workflowStore, bus).
+		WithMemory(s.memStore).
+		WithConfig(s.configSvc).
+		WithSchemaRegistry(s.schemaRegistry)
+
+	wfDef := &wf.Workflow{
+		ID:    "wf-del-cancel",
+		OrgID: "default",
+		Steps: map[string]*wf.Step{
+			"step": {ID: "step", Type: wf.StepTypeWorker, Topic: "job.default"},
+		},
+	}
+	if err := s.workflowStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	run := &wf.WorkflowRun{
+		ID: "run-del-cancel", WorkflowID: wfDef.ID, OrgID: "default",
+		Steps:     map[string]*wf.StepRun{},
+		Status:    wf.RunStatusPending,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.workflowStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := s.workflowEng.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	// Record bus messages before delete.
+	bus.mu.Lock()
+	beforeCount := len(bus.published)
+	bus.mu.Unlock()
+
+	// Delete the running run via the handler.
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workflow-runs/"+run.ID, nil)
+	req.Header.Set("X-Tenant-ID", "default")
+	req.SetPathValue("id", run.ID)
+	rec := httptest.NewRecorder()
+	s.handleDeleteRun(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// CancelRun should have published cancel messages for in-flight steps.
+	bus.mu.Lock()
+	afterCount := len(bus.published)
+	bus.mu.Unlock()
+
+	if afterCount <= beforeCount {
+		t.Fatalf("expected cancel messages to be published before deletion, got %d messages before and %d after", beforeCount, afterCount)
+	}
+
+	// Run should be gone from the store.
+	_, err := s.workflowStore.GetRun(context.Background(), run.ID)
+	if err == nil {
+		t.Fatal("expected run to be deleted from store")
 	}
 }

@@ -3,12 +3,12 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/store"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	wf "github.com/cordum/cordum/core/workflow"
@@ -165,7 +165,7 @@ func (s *server) handleGetRunChat(w http.ResponseWriter, r *http.Request) {
 	for i, raw := range items {
 		ev := chatEvent{}
 		if err := json.Unmarshal([]byte(raw), &ev); err != nil {
-			logging.Warn("chat", "corrupt history event, treating as system", "index", i, "error", err)
+			slog.Warn("corrupt history event, treating as system", "index", i, "error", err)
 			trimmed := strings.TrimSpace(raw)
 			if trimmed == "" {
 				continue
@@ -302,7 +302,7 @@ func (s *server) emitChatEvent(run *wf.WorkflowRun, msg chatMessage) {
 	env.Payload.ChatMessage = chatBusMessage(msg)
 	data, err := json.Marshal(env)
 	if err != nil {
-		logging.Error("api-gateway", "chat event marshal failed", "error", err)
+		slog.Error("chat event marshal failed", "error", err)
 		return
 	}
 	s.enqueueWSEvent(data, run.OrgID, "")

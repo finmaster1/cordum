@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -222,7 +221,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// Brute-force protection: check throttle before password validation.
 			if redisStore, ok := userStore.(*RedisUserStore); ok {
 				if err := redisStore.CheckLoginThrottle(r.Context(), username, clientIP(r)); err != nil {
-					logging.Warn("api-gateway", "rate limit exceeded", "method", r.Method, "path", r.URL.Path, "error", err)
+					slog.Warn("rate limit exceeded", "method", r.Method, "path", r.URL.Path, "error", err)
 					writeErrorJSON(w, http.StatusTooManyRequests, "rate limit exceeded")
 					return
 				}

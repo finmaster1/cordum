@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { get, post, del } from "@/api/client";
+import { get, post, put, del } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge, type BadgeVariant } from "@/components/ui/StatusBadge";
@@ -68,6 +68,18 @@ export default function SettingsUsersPage() {
     },
     onError: (err: Error) => {
       toast.error("Failed to create user", { description: err.message });
+    },
+  });
+
+  const updateRoleMutation = useMutation({
+    mutationFn: async ({ id, role }: { id: string; role: string }) =>
+      put(`/users/${id}`, { roles: [role] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("Role updated");
+    },
+    onError: (err: Error) => {
+      toast.error("Failed to update role", { description: err.message });
     },
   });
 
@@ -155,7 +167,14 @@ export default function SettingsUsersPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge variant={ROLES.find(r => r.value === user.role)?.color || "muted"}>{user.role}</StatusBadge>
+                      <select
+                        value={user.role}
+                        onChange={(e) => updateRoleMutation.mutate({ id: user.id, role: e.target.value })}
+                        disabled={updateRoleMutation.isPending}
+                        className="h-7 px-2 text-xs font-medium rounded-lg border border-border bg-surface-0 text-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+                      >
+                        {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                      </select>
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge variant={user.status === "active" ? "healthy" : user.status === "invited" ? "warning" : "danger"}>{user.status}</StatusBadge>

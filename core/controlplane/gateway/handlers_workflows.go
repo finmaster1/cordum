@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/schema"
 	"github.com/cordum/cordum/core/infra/store"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -39,7 +39,7 @@ func cleanupRunIdempotencyReservation(ctx context.Context, idempotencyKey, runID
 		return
 	}
 	if err := deleteFn(ctx, idempotencyKey); err != nil {
-		logging.Error("api-gateway", failureContext, "key", idempotencyKey, "run_id", runID, "error", err)
+		slog.Error(failureContext, "key", idempotencyKey, "run_id", runID, "error", err)
 	}
 }
 
@@ -66,14 +66,14 @@ func markRunFailedAfterStartError(ctx context.Context, workflowStore runFailureP
 		failedRun.Error["message"] = startErr.Error()
 	}
 	if updateErr := workflowStore.UpdateRun(ctx, failedRun); updateErr != nil {
-		logging.Error("api-gateway", updateLogMessage, "run_id", runID, "error", updateErr)
+		slog.Error(updateLogMessage, "run_id", runID, "error", updateErr)
 	}
 	if timelineErr := workflowStore.AppendTimelineEvent(ctx, failedRun.ID, &wf.TimelineEvent{
 		Type:    "run_status",
 		Status:  string(wf.RunStatusFailed),
 		Message: startErr.Error(),
 	}); timelineErr != nil {
-		logging.Error("api-gateway", timelineLogMessage, "run_id", runID, "error", timelineErr)
+		slog.Error(timelineLogMessage, "run_id", runID, "error", timelineErr)
 	}
 }
 
@@ -94,7 +94,7 @@ func (s *server) acquireWorkflowAdmissionLock(ctx context.Context, orgID string)
 				releaseCtx, releaseCancel := context.WithTimeout(context.Background(), time.Second)
 				defer releaseCancel()
 				if err := s.jobStore.ReleaseLock(releaseCtx, lockKey, token); err != nil {
-					logging.Error("api-gateway", "release workflow admission lock failed", "org_id", orgID, "error", err)
+					slog.Error("release workflow admission lock failed", "org_id", orgID, "error", err)
 				}
 			}, nil
 		}
@@ -228,7 +228,7 @@ func (s *server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		wfDef.Steps[id] = &s
 	}
 	if err := s.workflowStore.SaveWorkflow(r.Context(), wfDef); err != nil {
-		logging.Error("api-gateway", "workflow save failed", "error", err, "id", wfDef.ID)
+		slog.Error("workflow save failed", "error", err, "id", wfDef.ID)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to save workflow")
 		return
 	}
@@ -288,7 +288,7 @@ func (s *server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusNotFound, "not found")
 			return
 		}
-		logging.Error("api-gateway", "workflow delete failed", "error", err, "id", id)
+		slog.Error("workflow delete failed", "error", err, "id", id)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to delete workflow")
 		return
 	}
@@ -308,7 +308,7 @@ func (s *server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.workflowStore.ListWorkflows(r.Context(), orgID, 100)
 	if err != nil {
-		logging.Error("api-gateway", "workflow list failed", "error", err)
+		slog.Error("workflow list failed", "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to list workflows")
 		return
 	}
@@ -344,7 +344,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusNotFound, "workflow not found")
 			return
 		}
-		logging.Error("api-gateway", "workflow get failed", "error", err, "id", wfID)
+		slog.Error("workflow get failed", "error", err, "id", wfID)
 		writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -403,7 +403,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	if limit > 0 {
 		releaseAdmissionLock, err = s.acquireWorkflowAdmissionLock(r.Context(), orgID)
 		if err != nil {
-			logging.Error("api-gateway", "workflow admission lock failed", "org_id", orgID, "error", err)
+			slog.Error("workflow admission lock failed", "org_id", orgID, "error", err)
 			writeErrorJSON(w, http.StatusServiceUnavailable, "workflow concurrency gate unavailable")
 			return
 		}
@@ -428,7 +428,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, map[string]string{"run_id": existingID})
 				return
 			} else if err != nil && !errors.Is(err, redis.Nil) {
-				logging.Error("api-gateway", "run idempotency lookup failed", "error", err)
+				slog.Error("run idempotency lookup failed", "error", err)
 			}
 			writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
 			return
@@ -447,7 +447,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 					s.workflowStore.DeleteRunIdempotencyKey,
 				)
 			}
-			logging.Error("api-gateway", "count active runs failed", "org_id", orgID, "error", err)
+			slog.Error("count active runs failed", "org_id", orgID, "error", err)
 			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to enforce max concurrent runs")
 			return
 		}
@@ -465,6 +465,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	reqID := requestIdFromContext(r.Context())
 	run := &wf.WorkflowRun{
 		ID:             runID,
 		WorkflowID:     wfID,
@@ -477,9 +478,13 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
 		IdempotencyKey: idempotencyKey,
+		Metadata:       map[string]string{},
+	}
+	if reqID != "" {
+		run.Metadata["request_id"] = reqID
 	}
 	if dryRun {
-		run.Metadata = map[string]string{"dry_run": "true"}
+		run.Metadata["dry_run"] = "true"
 		run.Labels = map[string]string{"dry_run": "true"}
 	}
 	if err := s.workflowStore.CreateRun(r.Context(), run); err != nil {
@@ -492,7 +497,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 				s.workflowStore.DeleteRunIdempotencyKey,
 			)
 		}
-		logging.Error("api-gateway", "run create failed", "error", err, "run_id", runID)
+		slog.Error("run create failed", "error", err, "run_id", runID)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to create run")
 		return
 	}
@@ -511,7 +516,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 				} else if token != "" {
 					defer func() {
 						if err := s.jobStore.ReleaseLock(r.Context(), lockKey, token); err != nil {
-							logging.Error("api-gateway", "release run lock failed", "run_id", runID, "error", err)
+							slog.Error("release run lock failed", "run_id", runID, "error", err)
 						}
 					}()
 					return s.workflowEng.StartRun(r.Context(), wfID, runID)
@@ -521,12 +526,12 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 			return s.workflowEng.StartRun(r.Context(), wfID, runID)
 		}()
 		if startErr != nil {
-			logging.Error("api-gateway", "start workflow run failed", "workflow_id", wfID, "run_id", runID, "error", startErr)
+			slog.Error("start workflow run failed", "workflow_id", wfID, "run_id", runID, "error", startErr)
 			markRunFailedAfterStartError(r.Context(), s.workflowStore, runID, startErr, "failed to persist run failure status", "failed to append run failure timeline event")
 		}
 		if startErr == nil && s.workflowStore != nil {
 			if updated, err := s.workflowStore.GetRun(r.Context(), runID); err == nil && updated != nil && updated.Status == wf.RunStatusFailed {
-				logging.Warn("api-gateway", "run failed during initialization", "run_id", runID, "workflow_id", wfID)
+				slog.Warn("run failed during initialization", "run_id", runID, "workflow_id", wfID)
 			}
 		}
 	}
@@ -534,7 +539,14 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	if wfDef != nil {
 		startWfName = wfDef.Name
 	}
+	loggerFromContext(r.Context()).Info("workflow run started",
+		"runId", runID,
+		"workflowId", wfID,
+		"requestId", reqID,
+	)
 	s.appendAuditEntryNamed(r.Context(), "start", "run", runID, startWfName, policyActorID(r), policyRole(r), "start run "+runID)
+	// For workflows, the runId serves as the traceId for the entire execution tree.
+	w.Header().Set("X-Trace-Id", runID)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{"run_id": runID})
 }
@@ -576,7 +588,7 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 	if limit > 0 {
 		releaseAdmissionLock, err = s.acquireWorkflowAdmissionLock(r.Context(), origRun.OrgID)
 		if err != nil {
-			logging.Error("api-gateway", "workflow admission lock failed", "org_id", origRun.OrgID, "error", err)
+			slog.Error("workflow admission lock failed", "org_id", origRun.OrgID, "error", err)
 			writeErrorJSON(w, http.StatusServiceUnavailable, "workflow concurrency gate unavailable")
 			return
 		}
@@ -587,7 +599,7 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 		}()
 		count, err := s.workflowStore.CountActiveRuns(r.Context(), origRun.OrgID)
 		if err != nil {
-			logging.Error("api-gateway", "count active reruns failed", "org_id", origRun.OrgID, "error", err)
+			slog.Error("count active reruns failed", "org_id", origRun.OrgID, "error", err)
 			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to enforce max concurrent runs")
 			return
 		}
@@ -603,7 +615,7 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 	}
 	newID, err := s.workflowEng.RerunFrom(r.Context(), runID, strings.TrimSpace(req.FromStep), req.DryRun)
 	if err != nil {
-		logging.Error("api-gateway", "run rerun failed", "error", err, "run_id", runID)
+		slog.Error("run rerun failed", "error", err, "run_id", runID)
 		writeErrorJSON(w, http.StatusBadRequest, "rerun failed")
 		return
 	}
@@ -626,7 +638,7 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 			} else if token != "" {
 				defer func() {
 					if err := s.jobStore.ReleaseLock(r.Context(), lockKey, token); err != nil {
-						logging.Error("api-gateway", "release rerun lock failed", "run_id", newID, "error", err)
+						slog.Error("release rerun lock failed", "run_id", newID, "error", err)
 					}
 				}()
 				return s.workflowEng.StartRun(r.Context(), wfID, newID)
@@ -636,7 +648,7 @@ func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
 		return s.workflowEng.StartRun(r.Context(), wfID, newID)
 	}()
 	if startErr != nil {
-		logging.Error("api-gateway", "start rerun failed", "workflow_id", wfID, "run_id", newID, "error", startErr)
+		slog.Error("start rerun failed", "workflow_id", wfID, "run_id", newID, "error", startErr)
 		markRunFailedAfterStartError(r.Context(), s.workflowStore, newID, startErr, "failed to persist rerun failure status", "failed to append rerun failure timeline event")
 	}
 	rerunWfName := ""
@@ -671,7 +683,7 @@ func (s *server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	runs, err := s.workflowStore.ListRunsByWorkflow(r.Context(), wfID, 100)
 	if err != nil {
-		logging.Error("api-gateway", "run list failed", "error", err, "workflow_id", wfID)
+		slog.Error("run list failed", "error", err, "workflow_id", wfID)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to list runs")
 		return
 	}
@@ -727,7 +739,7 @@ func (s *server) handleListAllRuns(w http.ResponseWriter, r *http.Request) {
 
 	runs, err := s.workflowStore.ListRuns(r.Context(), cursor, limit)
 	if err != nil {
-		logging.Error("api-gateway", "run list all failed", "error", err)
+		slog.Error("run list all failed", "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to list runs")
 		return
 	}
@@ -846,7 +858,7 @@ func (s *server) handleGetRunTimeline(w http.ResponseWriter, r *http.Request) {
 	limit = clampListLimit(limit)
 	events, err := s.workflowStore.ListTimelineEvents(r.Context(), id, limit)
 	if err != nil {
-		logging.Error("api-gateway", "run timeline failed", "error", err, "run_id", id)
+		slog.Error("run timeline failed", "error", err, "run_id", id)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to load timeline")
 		return
 	}
@@ -877,13 +889,23 @@ func (s *server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		if wfDef, err := s.workflowStore.GetWorkflow(r.Context(), run.WorkflowID); err == nil && wfDef != nil {
 			delRunWfName = wfDef.Name
 		}
+		// Cancel in-flight jobs before deleting the run data. This prevents
+		// orphaned NATS messages from completed jobs arriving after deletion.
+		// Best-effort: if cancel fails, proceed with deletion anyway — the
+		// gateway-side ErrRunNotFound discard handles any stragglers.
+		if s.workflowEng != nil && run.Status != wf.RunStatusSucceeded && run.Status != wf.RunStatusFailed && run.Status != wf.RunStatusCancelled && run.Status != wf.RunStatusTimedOut {
+			if err := s.workflowEng.CancelRun(r.Context(), id); err != nil {
+				slog.Warn("pre-delete cancel failed, proceeding with deletion",
+					"run_id", id, "error", err)
+			}
+		}
 	}
 	if err := s.workflowStore.DeleteRun(r.Context(), id); err != nil {
 		if errors.Is(err, redis.Nil) {
 			writeErrorJSON(w, http.StatusNotFound, "not found")
 			return
 		}
-		logging.Error("api-gateway", "run delete failed", "error", err, "run_id", id)
+		slog.Error("run delete failed", "error", err, "run_id", id)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to delete run")
 		return
 	}
@@ -1006,7 +1028,7 @@ func (s *server) handleWorkflowDryRun(w http.ResponseWriter, r *http.Request) {
 			Labels:     step.RouteLabels,
 		}, s.configSvc, s.tenant)
 		if err != nil {
-			logging.Error("api-gateway", "dry-run build request failed", "step_id", stepID, "error", err)
+			slog.Error("dry-run build request failed", "step_id", stepID, "error", err)
 			result.Decision = "ERROR"
 			result.Reason = "internal error during dry-run evaluation"
 			results = append(results, result)
@@ -1015,7 +1037,7 @@ func (s *server) handleWorkflowDryRun(w http.ResponseWriter, r *http.Request) {
 
 		resp, err := s.safetyClient.Simulate(r.Context(), checkReq)
 		if err != nil {
-			logging.Error("api-gateway", "dry-run safety kernel error", "step_id", stepID, "error", err)
+			slog.Error("dry-run safety kernel error", "step_id", stepID, "error", err)
 			result.Decision = "ERROR"
 			result.Reason = "safety evaluation unavailable"
 			results = append(results, result)

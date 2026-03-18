@@ -442,3 +442,76 @@ func TestReconcilerProceedsOnGetFailureReasonError(t *testing.T) {
 		t.Fatalf("expected step Failed despite GetFailureReason error, got %s", updated.Steps["step"].Status)
 	}
 }
+
+// TestReconcilerHandleJobResultDeletedRunReturnsNil verifies that the
+// reconciler's HandleJobResult returns nil (not an error) when the underlying
+// engine returns ErrRunNotFound for a deleted run. This ensures NATS ACKs the
+// message instead of retrying.
+func TestReconcilerHandleJobResultDeletedRunReturnsNil(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis unavailable: %v", err)
+	}
+	defer srv.Close()
+
+	redisURL := "redis://" + srv.Addr()
+	workflowStore, err := NewRedisWorkflowStore(redisURL)
+	if err != nil {
+		t.Fatalf("workflow store: %v", err)
+	}
+	defer workflowStore.Close()
+
+	jobStore, err := store.NewRedisJobStore(redisURL)
+	if err != nil {
+		t.Fatalf("job store: %v", err)
+	}
+	defer jobStore.Close()
+
+	bus := &stubBus{}
+	engine := NewEngine(workflowStore, bus)
+
+	// Create a workflow and run, start it, then delete the run.
+	wfDef := &Workflow{
+		ID:    "wf-rec-del",
+		OrgID: "org",
+		Steps: map[string]*Step{
+			"step": {ID: "step", Type: StepTypeWorker, Topic: "job.default"},
+		},
+	}
+	if err := workflowStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+	run := &WorkflowRun{
+		ID: "run-rec-del", WorkflowID: wfDef.ID, OrgID: "org",
+		Steps: map[string]*StepRun{}, Status: RunStatusPending,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := workflowStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	// Get the dispatched job ID before deleting.
+	updated, _ := workflowStore.GetRun(context.Background(), run.ID)
+	stepRun := updated.Steps["step"]
+	if stepRun == nil || stepRun.JobID == "" {
+		t.Fatal("expected dispatched job ID")
+	}
+
+	// Delete the run.
+	if err := workflowStore.DeleteRun(context.Background(), run.ID); err != nil {
+		t.Fatalf("delete run: %v", err)
+	}
+
+	// Reconciler HandleJobResult should return nil (ACK, discard) for deleted run.
+	rec := newReconciler(workflowStore, engine, jobStore, time.Millisecond, 10)
+	jr := &pb.JobResult{
+		JobId:  stepRun.JobID,
+		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
+	}
+	if err := rec.HandleJobResult(context.Background(), jr); err != nil {
+		t.Fatalf("expected nil for deleted run result, got: %v", err)
+	}
+}

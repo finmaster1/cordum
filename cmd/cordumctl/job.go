@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -154,6 +155,15 @@ func parseJSONArg(value string) (any, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, nil
+	}
+	// Read from stdin when value is "-". This bypasses all shell quoting and
+	// MSYS path-conversion issues on Windows.
+	if value == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read stdin: %w", err)
+		}
+		return parseJSONBytes(data)
 	}
 	// If the value looks like a JSON literal (starts with { or [), skip the
 	// file-existence check entirely. This avoids platform-specific os.Stat

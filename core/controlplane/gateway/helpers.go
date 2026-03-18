@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -18,7 +19,6 @@ import (
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
 	"github.com/cordum/cordum/core/infra/locks"
-	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/store"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/gorilla/websocket"
@@ -755,7 +755,7 @@ func maxJSONBodyBytes() int64 {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		logging.Warn("api-gateway", "json encode failed", "error", err)
+		slog.Warn("json encode failed", "error", err)
 	}
 }
 
@@ -765,33 +765,33 @@ func writeErrorJSON(w http.ResponseWriter, status int, message string) {
 	w.WriteHeader(status)
 	resp := map[string]any{"error": message, "status": status}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logging.Warn("api-gateway", "json encode error response failed", "error", err)
+		slog.Warn("json encode error response failed", "error", err)
 	}
 }
 
 // writeInternalError logs the real error server-side and returns a generic message to the client.
 // Use for ALL 5xx responses to prevent leaking internal details (Redis URLs, config paths, etc.).
 func writeInternalError(w http.ResponseWriter, r *http.Request, operation string, err error) {
-	logging.Error("api-gateway", operation+" failed", "method", r.Method, "path", r.URL.Path, "error", err)
+	slog.Error(operation+" failed", "method", r.Method, "path", r.URL.Path, "error", err)
 	writeErrorJSON(w, http.StatusInternalServerError, "internal error")
 }
 
 // writeBadGateway logs an upstream failure server-side and returns a generic message.
 func writeBadGateway(w http.ResponseWriter, r *http.Request, operation string, err error) {
-	logging.Error("api-gateway", operation+" upstream failed", "method", r.Method, "path", r.URL.Path, "error", err)
+	slog.Error(operation+" upstream failed", "method", r.Method, "path", r.URL.Path, "error", err)
 	writeErrorJSON(w, http.StatusBadGateway, "upstream service error")
 }
 
 // writeServiceUnavailable logs a service-unavailable error server-side and returns a generic message.
 func writeServiceUnavailable(w http.ResponseWriter, r *http.Request, operation string, err error) {
-	logging.Error("api-gateway", operation+" unavailable", "method", r.Method, "path", r.URL.Path, "error", err)
+	slog.Error(operation+" unavailable", "method", r.Method, "path", r.URL.Path, "error", err)
 	writeErrorJSON(w, http.StatusServiceUnavailable, "service unavailable")
 }
 
 // writeForbidden logs the auth failure server-side and returns a generic message.
 // Use for ALL 403 responses to avoid leaking tenant IDs and role requirements.
 func writeForbidden(w http.ResponseWriter, r *http.Request, err error) {
-	logging.Warn("api-gateway", "access denied", "method", r.Method, "path", r.URL.Path, "error", err)
+	slog.Warn("access denied", "method", r.Method, "path", r.URL.Path, "error", err)
 	writeErrorJSON(w, http.StatusForbidden, "access denied")
 }
 
