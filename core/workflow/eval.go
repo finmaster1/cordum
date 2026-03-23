@@ -69,21 +69,57 @@ func compileExpr(exprStr string) (*vm.Program, error) {
 // Supported: all expr-lang operators (==, !=, >, <, >=, <=, &&, ||, !,
 // arithmetic, ternary, in, contains, startsWith, endsWith), dot paths,
 // array indexing, and custom functions: length(), first().
+//
+// Sandbox controls: expression length limit, blocked patterns, and
+// result size limits are enforced via the package-level ExprSandboxConfig.
 func Eval(exprStr string, ctx map[string]any) (any, error) {
 	exprStr = strings.TrimSpace(exprStr)
 	if exprStr == "" {
 		return nil, errors.New("empty expression")
 	}
 
+	// Enforce expression length limit before parsing
+	if len(exprStr) > defaultSandbox.MaxExprLength {
+		return nil, fmt.Errorf("expression exceeds maximum length of %d bytes", defaultSandbox.MaxExprLength)
+	}
+
+	// Check for blocked patterns (injection/probing indicators)
+	lower := strings.ToLower(exprStr)
+	for _, pattern := range blockedPatterns {
+		if strings.Contains(lower, pattern) {
+			return nil, fmt.Errorf("expression contains blocked pattern")
+		}
+	}
+
 	program, err := compileExpr(exprStr)
 	if err != nil {
-		return nil, fmt.Errorf("eval %q: %w", exprStr, err)
+		return nil, fmt.Errorf("expression compilation failed: %w", sanitizeExprError(err))
 	}
 	result, err := expr.Run(program, ctx)
 	if err != nil {
-		return nil, fmt.Errorf("eval %q: %w", exprStr, err)
+		return nil, fmt.Errorf("expression evaluation failed: %w", sanitizeExprError(err))
 	}
 	return result, nil
+}
+
+// sanitizeExprError removes internal details from expr-lang errors
+// to prevent leaking variable names or Go types in error messages.
+func sanitizeExprError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	// Remove file paths and Go type names from error messages
+	if strings.Contains(msg, "cannot fetch") {
+		return fmt.Errorf("property access failed on nil value")
+	}
+	if strings.Contains(msg, "undefined:") {
+		return fmt.Errorf("undefined variable or function")
+	}
+	if strings.Contains(msg, "invalid operation") {
+		return fmt.Errorf("invalid operation in expression")
+	}
+	return err
 }
 
 func truthy(v any) bool {

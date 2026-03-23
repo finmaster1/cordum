@@ -158,24 +158,32 @@ func evalForEach(expr string, scope map[string]any) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	var result []any
 	switch v := val.(type) {
 	case []any:
-		return v, nil
+		result = v
 	case []string:
-		out := make([]any, len(v))
+		result = make([]any, len(v))
 		for i, s := range v {
-			out[i] = s
+			result[i] = s
 		}
-		return out, nil
 	case []int:
-		out := make([]any, len(v))
+		result = make([]any, len(v))
 		for i, s := range v {
-			out[i] = s
+			result[i] = s
 		}
-		return out, nil
 	case nil:
 		return []any{}, nil
 	default:
 		return nil, fmt.Errorf("for_each expression must return array, got %T", val)
 	}
+	// Cap result size to prevent memory exhaustion from large array expressions
+	if len(result) > defaultSandbox.MaxResultItems {
+		slog.Warn("for_each result truncated",
+			"expression", expr,
+			"original_size", len(result),
+			"max_size", defaultSandbox.MaxResultItems)
+		result = result[:defaultSandbox.MaxResultItems]
+	}
+	return result, nil
 }

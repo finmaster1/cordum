@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,12 +18,13 @@ import (
 
 const (
 	defaultHTTPIncomingBuffer = 256
-	defaultSSEEventBuffer     = 64
+	defaultSSEEventBuffer     = 256
 )
 
 type httpSession struct {
 	id     string
 	events chan []byte
+	closed atomic.Bool // set before events channel is closed
 }
 
 // HTTPTransport supports SSE + HTTP POST transport for MCP JSON-RPC messages.
@@ -312,6 +314,7 @@ func (t *HTTPTransport) removeSession(sessionID string) {
 		return
 	}
 	delete(t.sessions, sessionID)
+	session.closed.Store(true) // set before close to prevent send-on-closed-channel
 	close(session.events)
 }
 
@@ -321,11 +324,25 @@ func (t *HTTPTransport) removePending(key string) {
 	delete(t.pending, key)
 }
 
-func (t *HTTPTransport) writeSessionEvent(sessionID string, msg *JSONRPCMessage) error {
+func (t *HTTPTransport) writeSessionEvent(sessionID string, msg *JSONRPCMessage) (retErr error) {
+	// Defense-in-depth: recover from send on closed channel in case the
+	// closed flag check races with removeSession in another goroutine.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Debug("writeSessionEvent recovered from panic", "session_id", sessionID, "panic", r)
+			retErr = errors.New("session closed during write")
+		}
+	}()
+
 	t.mu.RLock()
 	session, ok := t.sessions[sessionID]
 	t.mu.RUnlock()
 	if !ok || session == nil {
+		return nil
+	}
+	// Check closed flag before sending — set by removeSession before
+	// channel close to prevent send-on-closed-channel panic.
+	if session.closed.Load() {
 		return nil
 	}
 	data, err := json.Marshal(msg)

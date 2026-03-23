@@ -134,7 +134,7 @@ func normalizeParallelStrategy(value any) (string, error) {
 func summarizeParallelChildren(parent *StepRun, childStepIDs []string) (succeeded int, failed int, running int) {
 	for _, childStepID := range childStepIDs {
 		var child *StepRun
-		if parent != nil {
+		if parent != nil && parent.Children != nil {
 			child = parent.Children[childStepID]
 		}
 		if child == nil {
@@ -190,8 +190,11 @@ func (e *Engine) cancelParallelChildren(parent *StepRun, run *WorkflowRun, child
 		if parent == nil {
 			break
 		}
-		child := parent.Children[childStepID]
-		if child == nil && run != nil {
+		var child *StepRun
+		if parent.Children != nil {
+			child = parent.Children[childStepID]
+		}
+		if child == nil && run != nil && run.Steps != nil {
 			child = run.Steps[childStepID]
 		}
 		if child == nil || isTerminalStepStatus(child.Status) {
@@ -211,8 +214,14 @@ func (e *Engine) cancelParallelChildren(parent *StepRun, run *WorkflowRun, child
 		if child.Error == nil {
 			child.Error = map[string]any{"message": "cancelled by parallel strategy"}
 		}
+		if parent.Children == nil {
+			parent.Children = make(map[string]*StepRun)
+		}
 		parent.Children[childStepID] = child
 		if run != nil {
+			if run.Steps == nil {
+				run.Steps = make(map[string]*StepRun)
+			}
 			run.Steps[childStepID] = child
 		}
 		cancelled++
@@ -222,7 +231,7 @@ func (e *Engine) cancelParallelChildren(parent *StepRun, run *WorkflowRun, child
 
 func aggregateParallelOutputs(run *WorkflowRun, childStepIDs []string) map[string]any {
 	outputs := make(map[string]any, len(childStepIDs))
-	if run == nil {
+	if run == nil || run.Context == nil {
 		return outputs
 	}
 	stepsCtx, _ := run.Context["steps"].(map[string]any)
