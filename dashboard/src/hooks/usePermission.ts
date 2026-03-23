@@ -31,6 +31,3 @@ export function usePermission(requiredRoles: string[]): {
   return { allowed: hasRole, userRoles };
 }
 
-export function useIsAdmin(): boolean {
-  return usePermission(["admin"]).allowed;
-}

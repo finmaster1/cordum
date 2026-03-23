@@ -8,12 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cordum/cordum/core/controlplane/gateway/validation"
 	"github.com/cordum/cordum/core/infra/schema"
 	"github.com/cordum/cordum/core/infra/store"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -1065,35 +1065,19 @@ func (s *server) handleWorkflowDryRun(w http.ResponseWriter, r *http.Request) {
 // Workflow validation helpers (from workflow_validate.go)
 // ---------------------------------------------------------------------------
 
-const maxWorkflowStepIDLen = 64
-
-var workflowStepIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
+// validateWorkflowStepID delegates to the shared validation package.
 func validateWorkflowStepID(stepID string) error {
-	if stepID == "" {
-		return errors.New("workflow step id required")
-	}
-	if len(stepID) > maxWorkflowStepIDLen {
-		return fmt.Errorf("workflow step id %q exceeds %d characters", truncateForError(stepID, 256), maxWorkflowStepIDLen)
-	}
-	if !workflowStepIDPattern.MatchString(stepID) {
-		return fmt.Errorf("workflow step id %q must match %s", truncateForError(stepID, 256), workflowStepIDPattern.String())
-	}
-	return nil
+	return validation.WorkflowStepID(stepID)
+}
+
+// validateWorkflowStepMap delegates to the shared validation package.
+func validateWorkflowStepMap(steps map[string]any) error {
+	return validation.WorkflowStepMap(steps)
 }
 
 func validateWorkflowSteps(steps map[string]wf.Step) error {
 	for id := range steps {
-		if err := validateWorkflowStepID(id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateWorkflowStepMap(steps map[string]any) error {
-	for id := range steps {
-		if err := validateWorkflowStepID(id); err != nil {
+		if err := validation.WorkflowStepID(id); err != nil {
 			return err
 		}
 	}
@@ -1118,7 +1102,7 @@ func validateDAG(steps map[string]wf.Step) error {
 				continue
 			}
 			if _, ok := steps[dep]; !ok {
-				return fmt.Errorf("step %q depends on non-existent step %q", truncateForError(id, 256), truncateForError(dep, 256))
+				return fmt.Errorf("step %q depends on non-existent step %q", validation.TruncateForError(id, 256), validation.TruncateForError(dep, 256))
 			}
 		}
 	}

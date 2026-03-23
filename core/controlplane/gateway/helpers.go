@@ -870,3 +870,22 @@ func clampListLimit(limit int64) int64 {
 	}
 	return limit
 }
+
+// parsePagination extracts limit and cursor from query parameters.
+// Returns clamped limit and cursor defaulting to now (microseconds).
+func parsePagination(r *http.Request, defaultLimit int64) (limit, cursor int64) {
+	limit = defaultLimit
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	limit = clampListLimit(limit)
+	cursor = time.Now().UnixNano() / int64(time.Microsecond)
+	if q := r.URL.Query().Get("cursor"); q != "" {
+		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
+			cursor = v
+		}
+	}
+	return limit, cursor
+}

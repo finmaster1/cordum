@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -53,7 +52,14 @@ func (s *server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusConflict, "workflow run is busy, retry")
 			return
 		}
-		defer func() { _ = s.jobStore.ReleaseLock(context.Background(), lockKey, token) }()
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.jobStore.ReleaseLock(ctx, lockKey, token); err != nil {
+				slog.Warn("approval lock release failed, will expire via TTL",
+					"lock_key", lockKey, "error", err)
+			}
+		}()
 	}
 
 	if err := s.workflowEng.CancelRun(r.Context(), runID); err != nil {
@@ -81,19 +87,7 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, r, err)
 		return
 	}
-	limit := int64(100)
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	limit = clampListLimit(limit)
-	cursor := time.Now().UnixNano() / int64(time.Microsecond)
-	if q := r.URL.Query().Get("cursor"); q != "" {
-		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
-			cursor = v
-		}
-	}
+	limit, cursor := parsePagination(r, 100)
 	// Pending approvals (APPROVAL_REQUIRED state).
 	jobs, err := s.jobStore.ListJobsByState(r.Context(), model.JobStateApproval, cursor, limit)
 	if err != nil {
