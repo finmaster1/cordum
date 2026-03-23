@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
+import type { StepRun } from "../types/api";
 
 const statusVariant = (status?: string): "default" | "success" | "warning" | "danger" | "info" => {
   if (!status) {
@@ -66,8 +67,8 @@ export default function ContextInspectorPage() {
 
   const run = runQuery.data;
   const job = jobQuery.data;
-  const steps = useMemo(() => Object.values(run?.steps || {}) as Array<Record<string, any>>, [run]);
-  const activeStep = steps.find((step: any) => ["running", "waiting", "pending"].includes(step.status));
+  const steps = useMemo<StepRun[]>(() => Object.values(run?.steps || {}), [run]);
+  const activeStep = steps.find((step) => ["running", "waiting", "pending"].includes(step.status));
   const contextPayload = run?.context && Object.keys(run.context).length > 0 ? run.context : run?.input;
 
   return (
@@ -123,7 +124,7 @@ export default function ContextInspectorPage() {
                   <div className="mt-1 text-sm font-semibold text-ink">
                     {formatDuration(
                       run.completed_at && (run.started_at || run.created_at)
-                        ? new Date(run.completed_at).getTime() - new Date(run.started_at || run.created_at).getTime()
+                        ? new Date(run.completed_at).getTime() - new Date(run.started_at ?? run.created_at ?? "").getTime()
                         : 0
                     )}
                   </div>
@@ -155,7 +156,7 @@ export default function ContextInspectorPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {steps.map((step: any) => (
+                {steps.map((step) => (
                   <div key={step.step_id} className="rounded-2xl border border-border bg-card/70 p-3">
                     <div className="flex items-center justify-between">
                       <div>

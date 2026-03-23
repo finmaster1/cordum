@@ -39,7 +39,7 @@ export function SimulatorDecisionSummary({
   const variant = getDecisionDisplayVariant(decision);
 
   return (
-    <InstrumentCard accent={variant as any} className="space-y-3">
+    <InstrumentCard accent={variant} className="space-y-3">
       <div className="flex items-center gap-3">
         <DecisionIcon decision={decision} />
         <div className="flex-1 min-w-0">

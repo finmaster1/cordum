@@ -37,11 +37,16 @@ const noopDragOver = (_e: React.DragEvent) => {};
 function makeRule(overrides: Partial<PolicyRule> = {}): PolicyRule {
   return {
     id: "rule-1",
+    name: "test-rule",
+    match: {},
+    decision: "deny",
+    priority: 100,
+    enabled: true,
     matchCriteria: { capabilities: ["code.write"], riskTags: ["pii"] },
     decisionType: "deny",
     reason: "Too risky",
     ...overrides,
-  } as any as PolicyRule;
+  } as PolicyRule;
 }
 
 function renderCard(

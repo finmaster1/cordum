@@ -779,7 +779,7 @@ export default function SystemPage() {
             <div className="mt-4 rounded-2xl border border-border bg-card/70 p-4 text-xs text-muted-foreground">
               <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Updated</div>
               <div className="mb-2 text-sm font-semibold text-ink">
-                {formatDateTime(configQuery.data?.updated_at)}
+                {configQuery.data?.updated_at ? formatDateTime(configQuery.data.updated_at) : "-"}
               </div>
               <Textarea readOnly rows={8} value={JSON.stringify(configQuery.data?.data || {}, null, 2)} />
             </div>

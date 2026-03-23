@@ -632,3 +632,20 @@ export type AuthLoginResponse = {
   expires_at: string;
   user: AuthUser;
 };
+
+export type PolicySnapshotsListResponse = {
+  snapshots?: string[];
+};
+
+export type ChatMessagePayload = {
+  id?: string;
+  runId?: string;
+  role?: "user" | "agent" | "system";
+  content?: string;
+  stepId?: string;
+  jobId?: string;
+  agentId?: string;
+  agentName?: string;
+  createdAt?: string;
+  metadata?: Record<string, unknown>;
+};

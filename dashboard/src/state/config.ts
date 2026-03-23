@@ -8,10 +8,10 @@ import type { User } from "../api/types";
 // React Query client reference — set once by App.tsx to avoid circular import
 // ---------------------------------------------------------------------------
 
-let _queryClient: { clear: () => void } | null = null;
+let _queryClient: { clear: () => void; cancelQueries: () => void } | null = null;
 
 /** Called by App.tsx to register the QueryClient for cache clearing on logout/tenant-switch. */
-export function registerQueryClient(qc: { clear: () => void }): void {
+export function registerQueryClient(qc: { clear: () => void; cancelQueries: () => void }): void {
   _queryClient = qc;
 }
 
@@ -161,10 +161,12 @@ export const useConfigStore = create<ConfigState>((set, get) => {
           const next = { ...s, ...safePatch };
           return { ...next, isAuthenticated: !!next.apiKey };
         }
-        // Reset event store and query cache on tenant switch to prevent cross-tenant data leakage
+        // Reset event store and query cache on tenant switch to prevent cross-tenant data leakage.
+        // Order matters: cancel in-flight queries BEFORE clearing cache and applying new tenant.
         if (patch.tenantId !== undefined && patch.tenantId !== s.tenantId) {
-          useEventStore.getState().reset();
+          _queryClient?.cancelQueries();
           _queryClient?.clear();
+          useEventStore.getState().reset();
         }
         const next = { ...s, ...patch };
         const locked = s.tenantLocked || !!(next.tenantId);

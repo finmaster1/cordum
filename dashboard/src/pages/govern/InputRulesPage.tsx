@@ -21,6 +21,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SafetyDecisionBadge } from "@/components/ui/SafetyDecisionBadge";
 import { InfoBanner } from "@/components/ui/InfoBanner";
 import { InstrumentCard } from "@/components/ui/InstrumentCard";
+import { getDecisionDisplayVariant } from "@/components/policy/simulator/SimulatorDecisionSummary";
 import { usePolicyRules, usePolicyBundles } from "@/hooks/usePolicies";
 import { usePolicyAccess } from "@/hooks/usePolicyAccess";
 import { useWorkflows } from "@/hooks/useWorkflows";
@@ -723,7 +724,7 @@ function RuleCard({
 
   return (
     <InstrumentCard
-      accent={decision as any}
+      accent={getDecisionDisplayVariant(decision)}
       className={cn(
         "transition-all",
         dimmed ? "opacity-40" : ""

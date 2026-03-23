@@ -77,10 +77,15 @@ function render(bundleId = "bundle-1") {
 
 function makeRule(overrides: Partial<PolicyRule> & { id: string }): PolicyRule {
   return {
+    name: "test-rule",
+    match: {},
+    decision: "allow",
+    priority: 100,
+    enabled: true,
     matchCriteria: {},
     decisionType: "allow",
     ...overrides,
-  } as any as PolicyRule;
+  } as PolicyRule;
 }
 
 beforeEach(() => {

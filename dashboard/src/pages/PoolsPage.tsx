@@ -36,7 +36,7 @@ export default function PoolsPage() {
     queryFn: () => api.getConfig("system", "default"),
   });
 
-  const workers = useMemo(() => (workersQuery.data || []) as Heartbeat[], [workersQuery.data]);
+  const workers = useMemo(() => workersQuery.data || [], [workersQuery.data]);
 
   const cutoff = Date.now() - STALE_WORKER_MINUTES * 60 * 1000;
   const staleWorkers = useMemo(() => {

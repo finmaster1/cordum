@@ -21,9 +21,9 @@ const { navigateMock, mockState } = vi.hoisted(() => {
     navigateMock: vi.fn(),
     mockState: {
       canEdit: true,
-      rules: [] as any[],
-      bundles: [] as any[],
-      workflows: [] as any[],
+      rules: [] as unknown[],
+      bundles: [] as unknown[],
+      workflows: [] as unknown[],
     },
   };
 });

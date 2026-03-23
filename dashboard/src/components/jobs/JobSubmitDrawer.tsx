@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
-import { useForm, Controller, type UseFormSetError } from "react-hook-form";
+import { useForm, Controller, type UseFormSetError, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ChevronDown, ChevronRight, Loader, RefreshCw, X } from "lucide-react";
@@ -192,7 +192,7 @@ export function JobSubmitDrawer({ open, onClose, onSuccess }: JobSubmitDrawerPro
     reset,
     formState: { errors },
   } = useForm<FormValues>({
-    resolver: zodResolver(submitJobSchema) as any,
+    resolver: zodResolver(submitJobSchema) as Resolver<FormValues>,
     defaultValues: DEFAULT_VALUES,
   });
 

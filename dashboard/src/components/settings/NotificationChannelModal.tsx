@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { X, Mail, Hash, Bell, Globe, Loader, Plus, Trash2 } from "lucide-react";
 import { Button } from "../ui/Button";
@@ -303,7 +303,7 @@ export function NotificationChannelModal({
     setValue,
     formState: { errors },
   } = useForm<ChannelForm>({
-    resolver: zodResolver(notificationChannelSchema) as any,
+    resolver: zodResolver(notificationChannelSchema) as Resolver<ChannelForm>,
     defaultValues: {
       name: channel?.name ?? "",
       type: channel?.type ?? "email",
@@ -346,7 +346,7 @@ export function NotificationChannelModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {/* Name */}
           <div>
             <label className="mb-1 block text-xs font-semibold text-muted-foreground">

@@ -55,7 +55,7 @@ describe("Command palette navigation integrity", () => {
 describe("Auth/tenant cache isolation", () => {
   it("logout clears React Query cache via registered queryClient", () => {
     let cleared = false;
-    registerQueryClient({ clear: () => { cleared = true; } });
+    registerQueryClient({ clear: () => { cleared = true; }, cancelQueries: () => {} });
 
     // Set up a logged-in state
     useConfigStore.setState({
@@ -86,7 +86,7 @@ describe("Auth/tenant cache isolation", () => {
 
   it("tenant switch via update() clears query cache", () => {
     let cleared = false;
-    registerQueryClient({ clear: () => { cleared = true; } });
+    registerQueryClient({ clear: () => { cleared = true; }, cancelQueries: () => {} });
 
     useConfigStore.setState({
       apiKey: "key",

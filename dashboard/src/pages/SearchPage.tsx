@@ -49,7 +49,7 @@ export default function SearchPage() {
 
   const workflows = useMemo(() => {
     const q = query.toLowerCase();
-    return (workflowsQuery.data || [])
+    return (workflowsQuery.data?.items || [])
       .filter((workflow: Workflow) =>
         [workflow.id, workflow.name, workflow.description]
           .filter(Boolean)
@@ -112,7 +112,7 @@ export default function SearchPage() {
               <div className="text-sm text-muted-foreground">No matching runs.</div>
             ) : (
               <div className="space-y-3">
-                {runs.map((run: any) => (
+                {runs.map((run) => (
                   <div key={run.id} className="rounded-2xl border border-border bg-card/70 p-3">
                     <div className="flex items-center justify-between">
                       <div>
@@ -141,7 +141,7 @@ export default function SearchPage() {
                 {workflows.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No matching workflows.</div>
                 ) : (
-                  workflows.map((workflow: any) => (                <div key={workflow.id} className="rounded-2xl border border-border bg-card/70 p-3">
+                  workflows.map((workflow) => (                <div key={workflow.id} className="rounded-2xl border border-border bg-card/70 p-3">
                   <div className="text-sm font-semibold text-ink">{workflow.name || workflow.id}</div>
                   <div className="text-xs text-muted-foreground">{workflow.description || "No description"}</div>
                   <div className="mt-2 flex justify-end">
@@ -169,7 +169,7 @@ export default function SearchPage() {
               <div className="text-sm text-muted-foreground">No matching packs.</div>
             ) : (
               <div className="space-y-3">
-                {packs.map((pack: any) => (
+                {packs.map((pack) => (
                   <div key={pack.id} className="rounded-2xl border border-border bg-card/70 p-3">
                     <div className="text-sm font-semibold text-ink">{pack.manifest?.metadata?.title || pack.id}</div>
                     <div className="text-xs text-muted-foreground">{pack.manifest?.metadata?.description || "No description"}</div>
@@ -198,7 +198,7 @@ export default function SearchPage() {
               <div className="text-sm text-muted-foreground">No matching jobs.</div>
             ) : (
               <div className="space-y-3">
-                {jobs.map((job: any) => (
+                {jobs.map((job) => (
                   <div key={job.id} className="rounded-2xl border border-border bg-card/70 p-3">
                     <div className="flex items-center justify-between">
                       <div>

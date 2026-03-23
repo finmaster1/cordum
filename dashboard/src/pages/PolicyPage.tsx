@@ -162,29 +162,29 @@ export default function PolicyPage() {
       api.listApprovals(
         100,
         typeof pageParam === "number" || typeof pageParam === "string" ? pageParam : undefined,
-      ) as unknown as Promise<ApprovalsResponse>,
+      ),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as number | string | undefined,
   });
   const snapshotsQuery = useQuery<{ snapshots?: string[] }>({
     queryKey: ["policy", "snapshots"],
-    queryFn: () => api.listPolicySnapshots() as unknown as Promise<{ snapshots?: string[] }>,
+    queryFn: () => api.listPolicySnapshots(),
   });
   const policyBundlesQuery = useQuery<PolicyBundlesResponse>({
     queryKey: ["policy", "bundles"],
-    queryFn: () => api.getPolicyBundles() as unknown as Promise<PolicyBundlesResponse>,
+    queryFn: () => api.getPolicyBundles(),
   });
   const policyRulesQuery = useQuery<PolicyRulesResponse>({
     queryKey: ["policy", "rules"],
-    queryFn: () => api.listPolicyRules() as unknown as Promise<PolicyRulesResponse>,
+    queryFn: () => api.listPolicyRules(),
   });
   const policyBundleSnapshotsQuery = useQuery<PolicyBundleSnapshotsResponse>({
     queryKey: ["policy", "bundle-snapshots"],
-    queryFn: () => api.listPolicyBundleSnapshots() as unknown as Promise<PolicyBundleSnapshotsResponse>,
+    queryFn: () => api.listPolicyBundleSnapshots(),
   });
   const policyAuditQuery = useQuery<PolicyAuditResponse>({
     queryKey: ["policy", "audit"],
-    queryFn: () => api.listPolicyAudit() as unknown as Promise<PolicyAuditResponse>,
+    queryFn: () => api.listPolicyAudit(),
   });
 
   const approveMutation = useMutation({
@@ -275,7 +275,7 @@ export default function PolicyPage() {
 
   const snapshotDetailQuery = useQuery<PolicyBundleSnapshot>({
     queryKey: ["policy", "bundle-snapshot", selectedSnapshotId],
-    queryFn: () => api.getPolicyBundleSnapshot(selectedSnapshotId) as unknown as Promise<PolicyBundleSnapshot>,
+    queryFn: () => api.getPolicyBundleSnapshot(selectedSnapshotId),
     enabled: Boolean(selectedSnapshotId),
   });
 
@@ -313,7 +313,7 @@ export default function PolicyPage() {
 
   const policyBundleDetailQuery = useQuery<PolicyBundleDetail>({
     queryKey: ["policy", "bundle", selectedBundleId],
-    queryFn: () => api.getPolicyBundle(selectedBundleId) as unknown as Promise<PolicyBundleDetail>,
+    queryFn: () => api.getPolicyBundle(selectedBundleId),
     enabled: Boolean(selectedBundleId && selectedBundle),
     refetchOnWindowFocus: false,
   });

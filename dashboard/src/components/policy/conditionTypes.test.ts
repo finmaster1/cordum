@@ -8,6 +8,18 @@ import {
   toMatchCriteria,
   toYaml,
 } from "./conditionTypes";
+
+function testRule(overrides: Partial<PolicyRule>): PolicyRule {
+  return {
+    id: "test",
+    name: "test-rule",
+    match: {},
+    decision: "allow",
+    priority: 100,
+    enabled: true,
+    ...overrides,
+  } as PolicyRule;
+}
 import type { Condition, ConditionGroup } from "./conditionTypes";
 
 // ---------------------------------------------------------------------------
@@ -89,11 +101,11 @@ describe("createConditionGroup", () => {
 
 describe("fromRule", () => {
   it("converts rule with capabilities into condition group", () => {
-    const rule = {
+    const rule = testRule({
       id: "r1",
       matchCriteria: { capabilities: ["code.write", "code.exec"] },
       decisionType: "deny",
-    } as any as PolicyRule;
+    });
     const group = fromRule(rule);
     expect(group.logic).toBe("AND");
     expect(group.conditions).toHaveLength(1);
@@ -105,11 +117,11 @@ describe("fromRule", () => {
   });
 
   it("converts rule with riskTags into condition group", () => {
-    const rule = {
+    const rule = testRule({
       id: "r2",
       matchCriteria: { riskTags: ["pii", "secrets"] },
       decisionType: "require_approval",
-    } as any as PolicyRule;
+    });
     const group = fromRule(rule);
     expect(group.conditions).toHaveLength(1);
 
@@ -119,14 +131,14 @@ describe("fromRule", () => {
   });
 
   it("converts rule with both capabilities and riskTags", () => {
-    const rule = {
+    const rule = testRule({
       id: "r3",
       matchCriteria: {
         capabilities: ["code.write"],
         riskTags: ["pii"],
       },
       decisionType: "deny",
-    } as any as PolicyRule;
+    });
     const group = fromRule(rule);
     expect(group.conditions).toHaveLength(2);
     expect((group.conditions[0] as Condition).field).toBe("capability");
@@ -134,32 +146,32 @@ describe("fromRule", () => {
   });
 
   it("returns empty group for rule with no match criteria", () => {
-    const rule = {
+    const rule = testRule({
       id: "r4",
       matchCriteria: {},
       decisionType: "allow",
-    } as any as PolicyRule;
+    });
     const group = fromRule(rule);
     expect(group.conditions).toHaveLength(0);
   });
 
   it("preserves OR logic from rule", () => {
-    const rule = {
+    const rule = testRule({
       id: "r5",
       matchCriteria: { capabilities: ["a"] },
       decisionType: "deny",
       logic: "OR",
-    } as any as PolicyRule;
+    });
     const group = fromRule(rule);
     expect(group.logic).toBe("OR");
   });
 
   it("defaults to AND logic when rule.logic is absent", () => {
-    const rule = {
+    const rule = testRule({
       id: "r6",
       matchCriteria: { capabilities: ["a"] },
       decisionType: "deny",
-    } as any as PolicyRule;
+    });
     const group = fromRule(rule);
     expect(group.logic).toBe("AND");
   });

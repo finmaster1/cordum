@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -32,7 +32,7 @@ import {
   createCondition,
 } from "./conditionTypes";
 
-const MonacoEditor = lazy(() => import("@monaco-editor/react").then((m) => ({ default: m.default }))) as any;
+const MonacoEditor = lazy(() => import("@monaco-editor/react"));
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -118,9 +118,9 @@ export function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
   const existingLabels = (rule?.source?.labels as string[] | undefined) ?? [];
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<RuleFormData>({
-    resolver: zodResolver(ruleSchema) as any,
+    resolver: zodResolver(ruleSchema) as Resolver<RuleFormData>,
     defaultValues: {
-      decisionType: (rule?.decisionType ?? "allow") as any,
+      decisionType: (rule?.decisionType ?? "allow") as RuleFormData["decisionType"],
       reason: rule?.reason ?? "",
       maxPerMinute: existingThrottle?.maxPerMinute ?? 60,
       burstLimit: existingThrottle?.burstLimit,
@@ -231,7 +231,7 @@ export function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Left: form */}
         <form
-          onSubmit={handleSubmit(onSubmit as any)}
+          onSubmit={handleSubmit(onSubmit)}
           className="space-y-5"
         >
           <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">

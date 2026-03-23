@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, RefreshCw } from "lucide-react";
+import { validateRegex, truncateSampleText } from "../../lib/regexValidator";
 import {
   useOutputRules,
   useToggleOutputRule,
@@ -111,16 +112,24 @@ function OutputRuleEditorModal({
     if (!source) {
       return { valid: false, matched: false, message: "Pattern is required." };
     }
+
+    // Validate pattern safety before execution (ReDoS protection)
+    const validation = validateRegex(source);
+    if (!validation.valid) {
+      return { valid: false, matched: false, message: validation.error ?? "Invalid pattern." };
+    }
+
     try {
       const re = new RegExp(source);
-      if (!sampleText) {
+      const text = truncateSampleText(sampleText);
+      if (!text) {
         return {
           valid: true,
           matched: false,
           message: "Enter sample output text to test this pattern.",
         };
       }
-      const matched = re.test(sampleText);
+      const matched = re.test(text);
       return {
         valid: true,
         matched,

@@ -1,6 +1,43 @@
 import { get, post, put, del } from "../api/client";
 import type { User, Approval, DLQEntry } from "../api/types";
 import { mapDLQEntry, mapApprovalItem, type BackendDLQEntry, type BackendApprovalItem } from "../api/transform";
+import type {
+  PolicyBundlesResponse,
+  PolicyBundleDetail,
+  PolicyBundleSnapshot,
+  PolicyBundleSnapshotsResponse,
+  PolicyBundleSnapshotSummary,
+  PolicyPublishResponse,
+  PolicyRollbackResponse,
+  PolicyRulesResponse,
+  PolicyAuditResponse,
+  PolicyCheckResponse,
+  PolicyBundleSimulateRequest,
+  PolicySnapshotsListResponse,
+  WorkflowRunsResponse,
+  WorkflowRun,
+  Workflow,
+  JobsResponse,
+  JobDetail,
+  Heartbeat,
+  ConfigDocument,
+  PackListResponse,
+  ArtifactResponse,
+  Lock,
+  MemoryResult,
+  JobRecord,
+  ChatMessagePayload,
+} from "../types/api";
+
+type QueryParams = Record<string, string | number | boolean | null | undefined>;
+
+function buildQueryString(params?: QueryParams): string {
+  if (!params) return "";
+  const entries = Object.entries(params)
+    .filter((pair): pair is [string, string | number | boolean] => pair[1] != null)
+    .map(([k, v]) => [k, String(v)]);
+  return entries.length > 0 ? "?" + new URLSearchParams(entries).toString() : "";
+}
 
 interface SessionResponse {
   user: User;
@@ -14,6 +51,77 @@ interface ApprovalsResponse {
 interface DLQResponse {
   items: DLQEntry[];
   next_cursor?: number | string | null;
+}
+
+interface WorkflowListResponse {
+  items: Workflow[];
+}
+
+interface PoolListResponse {
+  items: PoolSummary[];
+}
+
+interface PoolSummary {
+  name: string;
+  workers: number;
+  active_jobs: number;
+  capacity: number;
+  utilization: number;
+  topics?: string[];
+  worker_list?: Heartbeat[];
+  captured_at?: string;
+}
+
+interface StatusResponse {
+  version?: string;
+  uptime_sec?: number;
+  services?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface SchemaEntry {
+  id?: string;
+  name?: string;
+  version?: string;
+  [key: string]: unknown;
+}
+
+interface ApprovalActionBody {
+  reason?: string;
+  note?: string;
+  comment?: string;
+}
+
+interface RerunBody {
+  from_step?: string;
+  dry_run?: boolean;
+}
+
+interface PublishBody {
+  note?: string;
+  dry_run?: boolean;
+}
+
+interface RollbackBody {
+  snapshot_id: string;
+  note?: string;
+}
+
+interface SnapshotCaptureBody {
+  note?: string;
+}
+
+interface ConfigBody {
+  data?: Record<string, unknown>;
+  meta?: Record<string, string>;
+}
+
+interface ChatSendBody {
+  content: string;
+  role?: string;
+  stepId?: string;
+  jobId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export function wsUrl(path?: string, params?: Record<string, string | undefined>): string {
@@ -65,98 +173,96 @@ export const api = {
   // Policy methods
   // ---------------------------------------------------------------------------
 
-  listPolicySnapshots(): Promise<any[]> {
-    return get<any[]>("/policy/snapshots");
+  listPolicySnapshots(): Promise<PolicySnapshotsListResponse> {
+    return get<PolicySnapshotsListResponse>("/policy/snapshots");
   },
 
-  getPolicyBundles(): Promise<any[]> {
-    return get<any[]>("/policy/bundles");
+  getPolicyBundles(): Promise<PolicyBundlesResponse> {
+    return get<PolicyBundlesResponse>("/policy/bundles");
   },
 
-  listPolicyRules(): Promise<any[]> {
-    return get<any[]>("/policy/rules");
+  listPolicyRules(): Promise<PolicyRulesResponse> {
+    return get<PolicyRulesResponse>("/policy/rules");
   },
 
-  listPolicyBundleSnapshots(): Promise<any[]> {
-    return get<any[]>("/policy/bundles/snapshots");
+  listPolicyBundleSnapshots(): Promise<PolicyBundleSnapshotsResponse> {
+    return get<PolicyBundleSnapshotsResponse>("/policy/bundles/snapshots");
   },
 
-  listPolicyAudit(): Promise<any[]> {
-    return get<any[]>("/policy/audit");
+  listPolicyAudit(): Promise<PolicyAuditResponse> {
+    return get<PolicyAuditResponse>("/policy/audit");
   },
 
-  getPolicyBundleSnapshot(id: string): Promise<any> {
-    return get<any>(`/policy/bundles/snapshots/${id}`);
+  getPolicyBundleSnapshot(id: string): Promise<PolicyBundleSnapshot> {
+    return get<PolicyBundleSnapshot>(`/policy/bundles/snapshots/${id}`);
   },
 
-  getPolicyBundle(id: string): Promise<any> {
-    return get<any>(`/policy/bundles/${id}`);
+  getPolicyBundle(id: string): Promise<PolicyBundleDetail> {
+    return get<PolicyBundleDetail>(`/policy/bundles/${id}`);
   },
 
-  putPolicyBundle(id: string, body: any): Promise<any> {
-    return put<any>(`/policy/bundles/${id}`, body);
+  putPolicyBundle(id: string, body: Partial<PolicyBundleDetail>): Promise<PolicyBundleDetail> {
+    return put<PolicyBundleDetail>(`/policy/bundles/${id}`, body);
   },
 
-  publishPolicyBundles(body: any): Promise<any> {
-    return post<any>("/policy/bundles/publish", body);
+  publishPolicyBundles(body: PublishBody): Promise<PolicyPublishResponse> {
+    return post<PolicyPublishResponse>("/policy/bundles/publish", body);
   },
 
-  rollbackPolicyBundles(body: any): Promise<any> {
-    return post<any>("/policy/bundles/rollback", body);
+  rollbackPolicyBundles(body: RollbackBody): Promise<PolicyRollbackResponse> {
+    return post<PolicyRollbackResponse>("/policy/bundles/rollback", body);
   },
 
-  capturePolicyBundleSnapshot(body: any): Promise<any> {
-    return post<any>("/policy/bundles/snapshots", body);
+  capturePolicyBundleSnapshot(body: SnapshotCaptureBody): Promise<PolicyBundleSnapshotSummary> {
+    return post<PolicyBundleSnapshotSummary>("/policy/bundles/snapshots", body);
   },
 
-  simulatePolicyBundle(id: string, body: any): Promise<any> {
-    return post<any>(`/policy/bundles/${id}/simulate`, body);
+  simulatePolicyBundle(id: string, body: PolicyBundleSimulateRequest): Promise<PolicyCheckResponse> {
+    return post<PolicyCheckResponse>(`/policy/bundles/${id}/simulate`, body);
   },
 
-  policySimulate(body: any): Promise<any> {
-    return post<any>("/policy/simulate", body);
+  policySimulate(body: Record<string, unknown>): Promise<PolicyCheckResponse> {
+    return post<PolicyCheckResponse>("/policy/simulate", body);
   },
 
-  policyExplain(body: any): Promise<any> {
-    return post<any>("/policy/explain", body);
+  policyExplain(body: Record<string, unknown>): Promise<PolicyCheckResponse> {
+    return post<PolicyCheckResponse>("/policy/explain", body);
   },
 
-  policyEvaluate(body: any): Promise<any> {
-    return post<any>("/policy/evaluate", body);
+  policyEvaluate(body: Record<string, unknown>): Promise<PolicyCheckResponse> {
+    return post<PolicyCheckResponse>("/policy/evaluate", body);
   },
 
   // ---------------------------------------------------------------------------
   // Job / Approval methods
   // ---------------------------------------------------------------------------
 
-  approveJob(id: string, body?: any): Promise<void> {
+  approveJob(id: string, body?: ApprovalActionBody): Promise<void> {
     return post<void>(`/approvals/${id}/approve`, body);
   },
 
-  rejectJob(id: string, body?: any): Promise<void> {
+  rejectJob(id: string, body?: ApprovalActionBody): Promise<void> {
     return post<void>(`/approvals/${id}/reject`, body);
   },
 
-  listJobs(params?: any): Promise<any> {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return get<any>(`/jobs${qs}`);
+  listJobs(params?: QueryParams): Promise<JobsResponse> {
+    return get<JobsResponse>(`/jobs${buildQueryString(params)}`);
   },
 
-  getJob(id: string): Promise<any> {
-    return get<any>(`/jobs/${id}`);
+  getJob(id: string): Promise<JobDetail> {
+    return get<JobDetail>(`/jobs/${id}`);
   },
 
   // ---------------------------------------------------------------------------
   // Workflow / Run methods
   // ---------------------------------------------------------------------------
 
-  listWorkflowRuns(params?: any): Promise<any> {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return get<any>(`/workflows/runs${qs}`);
+  listWorkflowRuns(params?: QueryParams): Promise<WorkflowRunsResponse> {
+    return get<WorkflowRunsResponse>(`/workflows/runs${buildQueryString(params)}`);
   },
 
-  getRun(id: string): Promise<any> {
-    return get<any>(`/workflows/runs/${id}`);
+  getRun(id: string): Promise<WorkflowRun> {
+    return get<WorkflowRun>(`/workflows/runs/${id}`);
   },
 
   cancelRun(workflowIdOrRunId: string, runId?: string): Promise<void> {
@@ -164,128 +270,124 @@ export const api = {
     return post<void>(`/workflows/runs/${id}/cancel`);
   },
 
-  rerunRun(id: string, body?: any): Promise<any> {
-    return post<any>(`/workflows/runs/${id}/rerun`, body);
+  rerunRun(id: string, body?: RerunBody): Promise<WorkflowRun> {
+    return post<WorkflowRun>(`/workflows/runs/${id}/rerun`, body);
   },
 
-  listWorkflows(params?: any): Promise<any> {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return get<any>(`/workflows${qs}`);
+  listWorkflows(params?: QueryParams): Promise<WorkflowListResponse> {
+    return get<WorkflowListResponse>(`/workflows${buildQueryString(params)}`);
   },
 
   // ---------------------------------------------------------------------------
   // Worker / Pool methods
   // ---------------------------------------------------------------------------
 
-  listWorkers(params?: any): Promise<any> {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return get<any>(`/workers${qs}`);
+  listWorkers(params?: QueryParams): Promise<Heartbeat[]> {
+    return get<Heartbeat[]>(`/workers${buildQueryString(params)}`);
   },
 
-  getWorker(id: string): Promise<any> {
-    return get<any>(`/workers/${encodeURIComponent(id)}`);
+  getWorker(id: string): Promise<Heartbeat> {
+    return get<Heartbeat>(`/workers/${encodeURIComponent(id)}`);
   },
 
-  getWorkerJobs(workerId: string, limit = 20): Promise<any> {
-    return get<any>(`/workers/${encodeURIComponent(workerId)}/jobs?limit=${limit}`);
+  getWorkerJobs(workerId: string, limit = 20): Promise<JobsResponse> {
+    return get<JobsResponse>(`/workers/${encodeURIComponent(workerId)}/jobs?limit=${limit}`);
   },
 
-  listPools(): Promise<any> {
-    return get<any>("/pools");
+  listPools(): Promise<PoolListResponse> {
+    return get<PoolListResponse>("/pools");
   },
 
-  getPool(name: string): Promise<any> {
-    return get<any>(`/pools/${encodeURIComponent(name)}`);
+  getPool(name: string): Promise<PoolSummary> {
+    return get<PoolSummary>(`/pools/${encodeURIComponent(name)}`);
   },
 
-  getStatus(): Promise<any> {
-    return get<any>("/status");
+  getStatus(): Promise<StatusResponse> {
+    return get<StatusResponse>("/status");
   },
 
   // ---------------------------------------------------------------------------
   // Config methods
   // ---------------------------------------------------------------------------
 
-  getConfig(scope?: string, scopeId?: string): Promise<any> {
+  getConfig(scope?: string, scopeId?: string): Promise<ConfigDocument> {
     const parts = [scope, scopeId].filter(Boolean);
     const path = parts.length > 0 ? `/config/${parts.join("/")}` : "/config";
-    return get<any>(path);
+    return get<ConfigDocument>(path);
   },
 
-  setConfig(scope: string, scopeId: string, data?: any, meta?: any): Promise<any> {
-    return put<any>(`/config/${scope}/${scopeId}`, { data, meta });
+  setConfig(scope: string, scopeId: string, data?: Record<string, unknown>, meta?: Record<string, string>): Promise<ConfigDocument> {
+    return put<ConfigDocument>(`/config/${scope}/${scopeId}`, { data, meta } satisfies ConfigBody);
   },
 
   // ---------------------------------------------------------------------------
   // Schema methods
   // ---------------------------------------------------------------------------
 
-  listSchemas(params?: any): Promise<any> {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return get<any>(`/schemas${qs}`);
+  listSchemas(params?: QueryParams): Promise<SchemaEntry[]> {
+    return get<SchemaEntry[]>(`/schemas${buildQueryString(params)}`);
   },
 
   // ---------------------------------------------------------------------------
   // Pack methods
   // ---------------------------------------------------------------------------
 
-  listPacks(params?: any): Promise<any> {
-    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return get<any>(`/packs${qs}`);
+  listPacks(params?: QueryParams): Promise<PackListResponse> {
+    return get<PackListResponse>(`/packs${buildQueryString(params)}`);
   },
 
   // ---------------------------------------------------------------------------
   // Artifact / Lock / Memory methods
   // ---------------------------------------------------------------------------
 
-  getArtifact(id: string): Promise<any> {
-    return get<any>(`/artifacts/${id}`);
+  getArtifact(id: string): Promise<ArtifactResponse> {
+    return get<ArtifactResponse>(`/artifacts/${id}`);
   },
 
-  putArtifact(id: string, body: any): Promise<any> {
-    return put<any>(`/artifacts/${id}`, body);
+  putArtifact(id: string, body: unknown): Promise<ArtifactResponse> {
+    return put<ArtifactResponse>(`/artifacts/${id}`, body);
   },
 
-  getLock(id: string): Promise<any> {
-    return get<any>(`/locks/${id}`);
+  getLock(id: string): Promise<Lock> {
+    return get<Lock>(`/locks/${id}`);
   },
 
-  acquireLock(resource: string, owner?: string, ttlMs?: number): Promise<any> {
-    return post<any>("/locks", { resource, owner, ttl_ms: ttlMs });
+  acquireLock(resource: string, owner?: string, ttlMs?: number): Promise<Lock> {
+    return post<Lock>("/locks", { resource, owner, ttl_ms: ttlMs });
   },
 
   releaseLock(resource: string, owner?: string): Promise<void> {
     return del<void>(`/locks/${encodeURIComponent(resource)}${owner ? `?owner=${encodeURIComponent(owner)}` : ""}`);
   },
 
-  renewLock(resource: string, owner?: string, ttlMs?: number): Promise<any> {
-    return post<any>(`/locks/${encodeURIComponent(resource)}/renew`, { owner, ttl_ms: ttlMs });
+  renewLock(resource: string, owner?: string, ttlMs?: number): Promise<Lock> {
+    return post<Lock>(`/locks/${encodeURIComponent(resource)}/renew`, { owner, ttl_ms: ttlMs });
   },
 
-  getMemory(ptr?: string, key?: string): Promise<any> {
-    if (ptr) return get<any>(`/memory/${encodeURIComponent(ptr)}`);
-    if (key) return get<any>(`/memory?key=${encodeURIComponent(key)}`);
-    return get<any>("/memory");
+  getMemory(ptr?: string, key?: string): Promise<MemoryResult> {
+    if (ptr) return get<MemoryResult>(`/memory/${encodeURIComponent(ptr)}`);
+    if (key) return get<MemoryResult>(`/memory?key=${encodeURIComponent(key)}`);
+    return get<MemoryResult>("/memory");
   },
 
   // ---------------------------------------------------------------------------
   // Trace methods
   // ---------------------------------------------------------------------------
 
-  getTrace(id: string): Promise<any> {
-    return get<any>(`/traces/${id}`);
+  getTrace(id: string): Promise<JobRecord[]> {
+    return get<JobRecord[]>(`/traces/${id}`);
   },
 
   // ---------------------------------------------------------------------------
   // Chat methods
   // ---------------------------------------------------------------------------
 
-  getRunChat(runId: string): Promise<any> {
-    return get<any>(`/workflows/runs/${runId}/chat`);
+  getRunChat(runId: string): Promise<ChatMessagePayload[]> {
+    return get<ChatMessagePayload[]>(`/workflows/runs/${runId}/chat`);
   },
 
-  sendChatMessage(runId: string, body: any): Promise<any> {
-    return post<any>(`/workflows/runs/${runId}/chat`, body);
+  sendChatMessage(runId: string, body: ChatSendBody): Promise<ChatMessagePayload> {
+    return post<ChatMessagePayload>(`/workflows/runs/${runId}/chat`, body);
   },
 
   // ---------------------------------------------------------------------------

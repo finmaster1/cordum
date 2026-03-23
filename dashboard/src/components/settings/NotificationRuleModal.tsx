@@ -1,4 +1,4 @@
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { X, Loader } from "lucide-react";
 import { Button } from "../ui/Button";
@@ -32,7 +32,7 @@ export function NotificationRuleModal({
     control,
     formState: { errors },
   } = useForm<NotificationRuleForm>({
-    resolver: zodResolver(notificationRuleSchema) as any,
+    resolver: zodResolver(notificationRuleSchema) as Resolver<NotificationRuleForm>,
     defaultValues: {
       eventPattern: rule?.eventPattern ?? "",
       channelIds: rule?.channelIds ?? [],
@@ -82,7 +82,7 @@ export function NotificationRuleModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {/* Event pattern */}
           <div>
             <label className="mb-1 block text-xs font-semibold text-muted-foreground">
