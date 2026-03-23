@@ -26,7 +26,7 @@ import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Textarea } from "../../ui/Textarea";
 import { RunStatusBadge } from "../../StatusBadge";
-import { useApproveJob, useRejectJob, useApproveStep } from "../../../hooks/useApprovals";
+import { useApproveJob, useRejectJob } from "../../../hooks/useApprovals";
 import type { WorkflowStep, WorkflowRun } from "../../../api/types";
 import { cn } from "../../../lib/utils";
 
@@ -329,8 +329,6 @@ function ApprovalDetail({
   const queryClient = useQueryClient();
   const approveJob = useApproveJob();
   const rejectJob = useRejectJob();
-  const approveStep = useApproveStep();
-
   const [comment, setComment] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -358,7 +356,7 @@ function ApprovalDetail({
   const isWaiting =
     runStep?.status === "waiting" || runStep?.status === "pending";
 
-  const isPending = approveJob.isPending || rejectJob.isPending || approveStep.isPending;
+  const isPending = approveJob.isPending || rejectJob.isPending;
 
   const invalidateRuns = () => {
     queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
@@ -386,18 +384,6 @@ function ApprovalDetail({
           onError: (err) => setActionError(err.message),
         },
       );
-    } else if (run?.workflowId && run?.id) {
-      approveStep.mutate(
-        { workflowId: run.workflowId, runId: run.id, stepId: step.id, approved: true },
-        {
-          onSuccess: () => {
-            setActionSuccess("Approved");
-            setComment("");
-            invalidateRuns();
-          },
-          onError: (err) => setActionError(err.message),
-        },
-      );
     }
   };
 
@@ -409,18 +395,6 @@ function ApprovalDetail({
     if (jobId && JOB_ID_PATTERN.test(jobId)) {
       rejectJob.mutate(
         { id: jobId, reason, comment: comment.trim() || undefined },
-        {
-          onSuccess: () => {
-            setActionSuccess("Rejected");
-            setComment("");
-            invalidateRuns();
-          },
-          onError: (err) => setActionError(err.message),
-        },
-      );
-    } else if (run?.workflowId && run?.id) {
-      approveStep.mutate(
-        { workflowId: run.workflowId, runId: run.id, stepId: step.id, approved: false },
         {
           onSuccess: () => {
             setActionSuccess("Rejected");
@@ -494,7 +468,7 @@ function ApprovalDetail({
               onClick={handleApprove}
               disabled={isPending}
             >
-              {approveJob.isPending || approveStep.isPending ? (
+              {approveJob.isPending ? (
                 <Loader className="h-3 w-3 animate-spin" />
               ) : null}
               Approve

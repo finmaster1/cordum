@@ -249,8 +249,6 @@ export function useApproveJob() {
   });
 }
 
-// Keep old name as alias for backwards compat
-export const useApproveApproval = useApproveJob;
 
 // Reject a job approval request (reason required)
 interface RejectInput {
@@ -310,20 +308,6 @@ export function useRejectJob() {
   });
 }
 
-// Keep old name as alias for backwards compat
-export const useRejectApproval = useRejectJob;
-
-export function useApproveStep() {
-  return {
-    mutate: (
-      _vars: { workflowId: string; runId: string; stepId: string; approved: boolean },
-      _opts?: { onSuccess?: () => void; onError?: (err: Error) => void },
-    ) => {
-      _opts?.onSuccess?.();
-    },
-    isPending: false,
-  };
-}
 
 /** @internal exported for unit tests */
 export const __approvalsInternal = {

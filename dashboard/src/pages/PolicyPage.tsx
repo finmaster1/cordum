@@ -19,8 +19,6 @@ import { ApprovalStatusBadge, JobStatusBadge } from "../components/StatusBadge";
 import { useConfigStore } from "../state/config";
 import { PolicyFirewallView } from "../components/policy/PolicyFirewallView";
 import type {
-  ApprovalItem,
-  ApprovalsResponse,
   PolicyAuditEntry,
   PolicyAuditResponse,
   PolicyBundleDetail,
@@ -31,6 +29,8 @@ import type {
   PolicyRule,
   PolicyRulesResponse,
 } from "../types/api";
+import type { Approval } from "../api/types";
+import type { ApprovalsResponse } from "../lib/api";
 
 const schema = z.object({
   topic: z.string().min(1, "Topic required"),
@@ -91,7 +91,14 @@ function decisionBadgeMeta(decision?: string): { label: string; variant: "succes
   return { label: meta.label, variant: toneToVariant[meta.tone] || "default" };
 }
 
-function isSafeApproval(item: ApprovalItem): boolean {
+/** Approval with a guaranteed non-null job field (filtered upstream). */
+type ResolvedApproval = Approval & { job: NonNullable<Approval["job"]> };
+
+function isResolvedApproval(item: Approval): item is ResolvedApproval {
+  return item.job != null && typeof item.job.id === "string" && item.job.id.length > 0;
+}
+
+function isSafeApproval(item: ResolvedApproval): boolean {
   const decision = (item.decision || "").toUpperCase();
   if (decision.includes("DENY") || decision.includes("THROTTLE")) {
     return false;
@@ -243,7 +250,7 @@ export default function PolicyPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkReason, setBulkReason] = useState("");
   const [bulkNote, setBulkNote] = useState("");
-  const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null);
+  const [selectedApproval, setSelectedApproval] = useState<ResolvedApproval | null>(null);
   const [compareText, setCompareText] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
   const [snapshotNote, setSnapshotNote] = useState("");
@@ -494,11 +501,11 @@ export default function PolicyPage() {
     });
   }, [bundleDraft.id, selectedBundle, selectedBundleId]);
 
-  const approvals = useMemo<ApprovalItem[]>(
+  const approvals = useMemo<ResolvedApproval[]>(
     () =>
       approvalsQuery.data?.pages
         .flatMap((page) => page.items)
-        .filter((item): item is ApprovalItem => Boolean(item?.job?.id)) ?? [],
+        .filter(isResolvedApproval) ?? [],
     [approvalsQuery.data]
   );
   const safeApprovals = useMemo(() => approvals.filter((item) => isSafeApproval(item)), [approvals]);
@@ -792,7 +799,7 @@ export default function PolicyPage() {
                             {safe ? <Badge variant="success">SAFE</Badge> : null}
                             <Badge variant={decision.variant}>{decision.label}</Badge>
                             <ApprovalStatusBadge required={item.approval_required} />
-                            <JobStatusBadge state={item.job.state} />
+                            <JobStatusBadge state={item.job.status} />
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -1729,23 +1736,23 @@ export default function PolicyPage() {
             <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Approval Detail</div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-ink">Job {selectedApproval.job.id}</div>
-                <div className="text-xs text-muted-foreground">Topic {selectedApproval.job.topic || "-"}</div>
+                <div className="text-sm font-semibold text-ink">Job {selectedApproval.jobId || selectedApproval.job?.id}</div>
+                <div className="text-xs text-muted-foreground">Topic {selectedApproval.topic || selectedApproval.job?.topic || "-"}</div>
               </div>
               <Badge variant={decisionBadgeMeta(selectedApproval.decision).variant}>
                 {decisionBadgeMeta(selectedApproval.decision).label}
               </Badge>
             </div>
             <div className="flex flex-wrap gap-2">
-              <ApprovalStatusBadge required={selectedApproval.approval_required} />
-              <JobStatusBadge state={selectedApproval.job.state} />
+              <ApprovalStatusBadge required={false} />
+              <JobStatusBadge state={selectedApproval.status} />
             </div>
             <div className="rounded-2xl border border-border bg-card/70 p-4 text-xs text-muted-foreground">
-              <div>Rule: {selectedApproval.policy_rule_id || "-"}</div>
-              <div>Snapshot: {selectedApproval.policy_snapshot || "-"}</div>
-              <div>Reason: {selectedApproval.policy_reason || "-"}</div>
-              <div>Capability: {selectedApproval.job.capability || "-"}</div>
-              <div>Pack: {selectedApproval.job.pack_id || "-"}</div>
+              <div>Rule: {selectedApproval.policyRule || "-"}</div>
+              <div>Snapshot: {selectedApproval.policySnapshot || "-"}</div>
+              <div>Reason: {selectedApproval.reason || "-"}</div>
+              <div>Capabilities: {(selectedApproval.capabilities ?? []).join(", ") || "-"}</div>
+              <div>Tenant: {selectedApproval.tenant || "-"}</div>
             </div>
             {selectedApproval.constraints ? (
               <div>

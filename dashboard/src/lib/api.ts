@@ -43,7 +43,7 @@ interface SessionResponse {
   user: User;
 }
 
-interface ApprovalsResponse {
+export interface ApprovalsResponse {
   items: Approval[];
   next_cursor?: number | null;
 }

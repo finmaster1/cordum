@@ -224,18 +224,6 @@ export type Heartbeat = {
   [key: string]: unknown;
 };
 
-export type ApprovalItem = {
-  job: JobRecord;
-  decision?: string;
-  policy_snapshot?: string;
-  policy_rule_id?: string;
-  policy_reason?: string;
-  constraints?: Record<string, unknown>;
-  job_hash?: string;
-  approval_required?: boolean;
-  approval_ref?: string;
-};
-
 export type SafetyDecisionRecord = {
   decision?: string;
   reason?: string;
@@ -246,11 +234,6 @@ export type SafetyDecisionRecord = {
   approval_required?: boolean;
   approval_ref?: string;
   checked_at?: number;
-};
-
-export type ApprovalsResponse = {
-  items: ApprovalItem[];
-  next_cursor?: number | null;
 };
 
 export type WorkflowRunsResponse = {
