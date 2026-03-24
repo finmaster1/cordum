@@ -17,7 +17,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   return (
     <div className={cn("flex items-center gap-1 border-b border-border", className)}>
       {tabs.map((tab) => (
-        <button
+        <button type="button"
           key={tab.id}
           onClick={() => onChange(tab.id)}
           className={cn(

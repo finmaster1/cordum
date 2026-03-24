@@ -16,6 +16,7 @@ import { useStatus } from "../../hooks/useStatus";
 import { logger } from "../../lib/logger";
 import { useToastStore } from "../../state/toast";
 import type { PolicyRule } from "../../api/types";
+import { ErrorBanner } from "../../components/ui/ErrorBanner";
 
 type FailMode = "open" | "closed";
 type FailureAction = "allow" | "deny";
@@ -323,7 +324,7 @@ export default function OutputSafetySettings() {
   usePageTitle("Settings - Output Safety");
 
   const queryClient = useQueryClient();
-  const { data: configData, isLoading: configLoading } = useConfig();
+  const { data: configData, isLoading: configLoading, isError: configError, error: configErr, refetch: refetchConfig } = useConfig();
   const { data: status } = useStatus();
   const bundles = usePolicyBundles();
   const audit = usePolicyAudit();
@@ -521,6 +522,10 @@ export default function OutputSafetySettings() {
   const onSaveOverrides = () => {
     saveOverridesMutation.mutate(form.topicOverrides);
   };
+
+  if (configError) {
+    return <ErrorBanner message={configErr instanceof Error ? configErr.message : "Failed to load output safety settings"} onRetry={() => void refetchConfig()} />;
+  }
 
   if (configLoading) {
     return (

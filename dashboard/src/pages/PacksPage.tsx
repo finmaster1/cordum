@@ -54,7 +54,7 @@ export default function PacksPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-1 p-1 rounded-2xl bg-surface-1">
           {tabs.map(tab => (
-            <button
+            <button type="button"
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn(

@@ -16,6 +16,7 @@ import { DialogOverlay } from "@/components/ui/DialogOverlay";
 import { Search, UserPlus, Users, Shield, Trash2, X, Mail, Key } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 interface User {
   id: string;
@@ -43,7 +44,7 @@ export default function SettingsUsersPage() {
   const [inviteRole, setInviteRole] = useState("operator");
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
-  const { data: users, isLoading } = useQuery({
+  const { data: users, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await get<{ data?: User[] }>("/users");
@@ -100,6 +101,10 @@ export default function SettingsUsersPage() {
     !search || u.email.toLowerCase().includes(search.toLowerCase()) || u.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load users"} onRetry={() => void refetch()} />;
+  }
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <PageHeader title="Users & RBAC" subtitle="Manage team access and role-based permissions" actions={<><Button variant="primary" size="sm" onClick={() => setInviteOpen(true)}>
@@ -110,7 +115,7 @@ export default function SettingsUsersPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-1 p-1 rounded-2xl bg-surface-1">
           {tabs.map(tab => (
-            <button
+            <button type="button"
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn(
@@ -181,7 +186,7 @@ export default function SettingsUsersPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{user.lastActive}</td>
                     <td className="px-4 py-3 text-right">
-                      <button onClick={() => setDeleteTarget(user)} className="p-1.5 rounded hover:bg-destructive/10 transition-colors">
+                      <button type="button" onClick={() => setDeleteTarget(user)} className="p-1.5 rounded hover:bg-destructive/10 transition-colors">
                         <Trash2 className="w-3.5 h-3.5 text-destructive" />
                       </button>
                     </td>
@@ -233,7 +238,7 @@ export default function SettingsUsersPage() {
       <DialogOverlay open={inviteOpen} onClose={() => { setInviteOpen(false); resetInviteForm(); }} label="Create user" className="w-[420px] bg-surface-1 border border-border rounded-xl shadow-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-display font-semibold text-foreground">Create User</h3>
-          <button onClick={() => { setInviteOpen(false); resetInviteForm(); }} className="p-1 rounded hover:bg-surface-2 transition-colors">
+          <button type="button" onClick={() => { setInviteOpen(false); resetInviteForm(); }} className="p-1 rounded hover:bg-surface-2 transition-colors">
             <X className="w-4 h-4 text-muted-foreground" />
           </button>
         </div>

@@ -181,7 +181,7 @@ export default function PackDetail({ packId, pack: prefetched, onClose }: PackDe
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
             <ArrowLeft className="h-4 w-4 text-muted-foreground" />
           </button>
           <span className="text-sm text-muted-foreground">Loading...</span>
@@ -199,7 +199,7 @@ export default function PackDetail({ packId, pack: prefetched, onClose }: PackDe
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
             <ArrowLeft className="h-4 w-4 text-muted-foreground" />
           </button>
           <span className="text-sm text-danger">
@@ -220,7 +220,7 @@ export default function PackDetail({ packId, pack: prefetched, onClose }: PackDe
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <button onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
             <ArrowLeft className="h-4 w-4 text-muted-foreground" />
           </button>
           <Package className="h-6 w-6 text-accent" />
@@ -231,7 +231,7 @@ export default function PackDetail({ packId, pack: prefetched, onClose }: PackDe
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={statusVariant(pack.status)}>{pack.status}</Badge>
-          <button onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 hover:bg-surface2">
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>

@@ -45,7 +45,7 @@ export function markCriticalPath(
     if (!children.has(step.id)) children.set(step.id, []);
     for (const dep of step.depends_on ?? step.dependsOn ?? []) {
       if (!children.has(dep)) children.set(dep, []);
-      children.get(dep)!.push(step.id);
+      children.get(dep)?.push(step.id);
     }
   }
 

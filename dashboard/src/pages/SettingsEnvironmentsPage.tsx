@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Globe, Copy, Plus, Server, Shield, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 interface Environment {
   id: string;
@@ -25,13 +26,17 @@ interface Environment {
 }
 
 export default function SettingsEnvironmentsPage() {
-  const { data: envs, isLoading } = useQuery({
+  const { data: envs, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["environments"],
     queryFn: async () => {
       const res = await get<{ data?: Environment[] }>("/environments");
       return res.data || [];
     },
   });
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load environments"} onRetry={() => void refetch()} />;
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -60,7 +65,7 @@ export default function SettingsEnvironmentsPage() {
                   <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">URL</span>
                   <div className="flex items-center gap-1">
                     <span className="text-xs font-mono text-foreground">{env.url}</span>
-                    <button onClick={() => { navigator.clipboard.writeText(env.url); toast.success("Copied"); }} className="p-0.5 rounded hover:bg-surface-2">
+                    <button type="button" onClick={() => { navigator.clipboard.writeText(env.url); toast.success("Copied"); }} className="p-0.5 rounded hover:bg-surface-2">
                       <Copy className="w-3 h-3 text-muted-foreground" />
                     </button>
                   </div>

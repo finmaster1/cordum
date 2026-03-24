@@ -23,7 +23,7 @@ function WorkerNodeComponent({ id, data, selected }: NodeProps<WorkerNodeData>) 
           <div className="builder-node__type">Worker</div>
         </div>
         {!isReadOnly ? (
-          <button
+          <button type="button"
             onClick={(e) => {
               e.stopPropagation();
               data.onDelete(id);

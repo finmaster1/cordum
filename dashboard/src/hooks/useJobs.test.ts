@@ -91,8 +91,8 @@ describe("useJobs internals", () => {
     };
 
     const updatedList = __jobsInternal.applyOptimisticCancelToList(list, "job-1");
-    expect(updatedList?.items[0].status).toBe("cancelled");
-    expect(updatedList?.items[1].status).toBe("pending");
+    expect(updatedList?.items![0].status).toBe("cancelled");
+    expect(updatedList?.items![1].status).toBe("pending");
 
     const updatedDetail = __jobsInternal.applyOptimisticCancelToDetail(
       makeJob({ id: "job-3", status: "running" }),
@@ -124,9 +124,9 @@ describe("useJobs internals", () => {
       };
 
       const result = __jobsInternal.applyOptimisticCancelToList(list, "job-2");
-      expect(result?.items[0].status).toBe("running"); // unchanged
-      expect(result?.items[1].status).toBe("cancelled"); // changed
-      expect(result?.items[2].status).toBe("running"); // unchanged
+      expect(result?.items![0].status).toBe("running"); // unchanged
+      expect(result?.items![1].status).toBe("cancelled"); // changed
+      expect(result?.items![2].status).toBe("running"); // unchanged
     });
 
     it("applyOptimisticCancelToList preserves all other job fields", () => {
@@ -139,7 +139,7 @@ describe("useJobs internals", () => {
       const list = { items: [original], next_cursor: null };
 
       const result = __jobsInternal.applyOptimisticCancelToList(list, "job-1");
-      const updated = result?.items[0];
+      const updated = result?.items![0];
       expect(updated?.topic).toBe("test.topic");
       expect(updated?.pool).toBe("gpu-pool");
       expect(updated?.id).toBe("job-1");
@@ -153,7 +153,7 @@ describe("useJobs internals", () => {
 
       const result = __jobsInternal.applyOptimisticCancelToList(list, "nonexistent");
       // Should return list unchanged (no item has the target ID)
-      expect(result?.items[0].status).toBe("running");
+      expect(result?.items![0].status).toBe("running");
     });
 
     it("applyOptimisticCancelToList returns undefined for undefined input", () => {
@@ -176,13 +176,13 @@ describe("useJobs internals", () => {
 
       // Cancel A
       const afterCancelA = __jobsInternal.applyOptimisticCancelToList(list, "job-A");
-      expect(afterCancelA?.items[0].status).toBe("cancelled");
-      expect(afterCancelA?.items[1].status).toBe("pending");
+      expect(afterCancelA?.items![0].status).toBe("cancelled");
+      expect(afterCancelA?.items![1].status).toBe("pending");
 
       // Cancel B on already-modified list
       const afterCancelB = __jobsInternal.applyOptimisticCancelToList(afterCancelA!, "job-B");
-      expect(afterCancelB?.items[0].status).toBe("cancelled");
-      expect(afterCancelB?.items[1].status).toBe("cancelled");
+      expect(afterCancelB?.items![0].status).toBe("cancelled");
+      expect(afterCancelB?.items![1].status).toBe("cancelled");
     });
   });
 });

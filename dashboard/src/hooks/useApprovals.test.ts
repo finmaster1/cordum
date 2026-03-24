@@ -47,17 +47,17 @@ describe("useApprovals internals", () => {
         makeApproval({ id: "a-2", status: "pending" }),
       ],
     };
-    const original = list.items[0];
+    const original = list.items![0];
 
     const removed = __approvalsInternal.removeApprovalFromList(list, "a-1");
-    expect(removed?.items.map((item) => item.id)).toEqual(["a-2"]);
+    expect(removed?.items!.map((item) => item.id)).toEqual(["a-2"]);
 
     const restored = __approvalsInternal.restoreApprovalToList(
       removed,
       "a-1",
       original,
     );
-    expect(restored?.items.map((item) => item.id)).toEqual(["a-2", "a-1"]);
+    expect(restored?.items!.map((item) => item.id)).toEqual(["a-2", "a-1"]);
 
     const unchanged = __approvalsInternal.restoreApprovalToList(
       restored,
@@ -102,11 +102,11 @@ describe("useApprovals internals", () => {
 
       // Step 1: Approve A → remove A
       const afterRemoveA = __approvalsInternal.removeApprovalFromList(list, "a-1");
-      expect(afterRemoveA?.items.map((i) => i.id)).toEqual(["a-2", "a-3"]);
+      expect(afterRemoveA?.items!.map((i) => i.id)).toEqual(["a-2", "a-3"]);
 
       // Step 2: Approve B → remove B from the already-modified list
       const afterRemoveB = __approvalsInternal.removeApprovalFromList(afterRemoveA!, "a-2");
-      expect(afterRemoveB?.items.map((i) => i.id)).toEqual(["a-3"]);
+      expect(afterRemoveB?.items!.map((i) => i.id)).toEqual(["a-3"]);
 
       // Snapshot for B captured the state AFTER A was removed
       const snapshotB = {
@@ -121,8 +121,8 @@ describe("useApprovals internals", () => {
       expect(originalB?.id).toBe("a-2");
       const afterRestoreB = __approvalsInternal.restoreApprovalToList(afterRemoveB!, "a-2", originalB);
       // A should still be removed, only B restored
-      expect(afterRestoreB?.items.map((i) => i.id)).toEqual(["a-3", "a-2"]);
-      expect(afterRestoreB?.items.find((i) => i.id === "a-1")).toBeUndefined();
+      expect(afterRestoreB?.items!.map((i) => i.id)).toEqual(["a-3", "a-2"]);
+      expect(afterRestoreB?.items!.find((i) => i.id === "a-1")).toBeUndefined();
     });
 
     it("double restore of same item is idempotent", () => {
@@ -131,7 +131,7 @@ describe("useApprovals internals", () => {
       };
 
       const removed = __approvalsInternal.removeApprovalFromList(list, "a-1");
-      const original = list.items[0];
+      const original = list.items![0];
 
       const restored = __approvalsInternal.restoreApprovalToList(removed!, "a-1", original);
       const restoredAgain = __approvalsInternal.restoreApprovalToList(restored!, "a-1", original);

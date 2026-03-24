@@ -14,7 +14,8 @@ import { Button } from "../components/ui/Button";
 import { ProgressBar } from "../components/ProgressBar";
 import { RunStatusBadge } from "../components/StatusBadge";
 import { Drawer } from "../components/ui/Drawer";
-import type { WorkflowRun } from "../types/api";
+import type { RawWorkflowRun } from "../types/api";
+import { ErrorBanner } from "../components/ui/ErrorBanner";
 
 const statusOptions = ["all", "running", "waiting", "pending", "succeeded", "failed", "cancelled", "timed_out"];
 const timeOptions = [
@@ -24,7 +25,7 @@ const timeOptions = [
   { label: "30d", value: "30d" },
 ];
 
-function runProgress(run: WorkflowRun) {
+function runProgress(run: RawWorkflowRun) {
   const steps = Object.values(run.steps || {});
   if (steps.length === 0) {
     return { percent: 0, activeStep: "", activeStatus: "" };
@@ -45,11 +46,11 @@ function runProgress(run: WorkflowRun) {
   };
 }
 
-function runUpdatedAt(run: WorkflowRun) {
+function runUpdatedAt(run: RawWorkflowRun) {
   return run.updated_at || run.started_at || run.created_at || "";
 }
 
-function runDurationMs(run: WorkflowRun): number {
+function runDurationMs(run: RawWorkflowRun): number {
   const startIso = run.started_at || run.created_at;
   if (!startIso) {
     return 0;
@@ -65,7 +66,7 @@ function runDurationMs(run: WorkflowRun): number {
   return Math.max(0, end - start);
 }
 
-function withinRange(run: WorkflowRun, range: string) {
+function withinRange(run: RawWorkflowRun, range: string) {
   if (range === "all") {
     return true;
   }
@@ -140,7 +141,7 @@ export default function RunsPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedViewId, setSelectedViewId] = useState("all");
-  const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
+  const [selectedRun, setSelectedRun] = useState<RawWorkflowRun | null>(null);
 
   const cancelMutation = useMutation({
     mutationFn: ({ workflowId, runId }: { workflowId: string; runId: string }) =>
@@ -208,6 +209,10 @@ export default function RunsPage() {
     setSearchQuery("");
     setSelectedViewId("all");
   };
+
+  if (runsQuery.isError) {
+    return <ErrorBanner message={runsQuery.error instanceof Error ? runsQuery.error.message : "Failed to load runs"} onRetry={() => void runsQuery.refetch()} />;
+  }
 
   return (
     <div className="space-y-6">

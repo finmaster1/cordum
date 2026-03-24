@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Card } from "../ui/Card";
+import { CardSkeleton } from "../ui/CardSkeleton";
 import { ProgressBar } from "../ProgressBar";
 import { RunStatusBadge } from "../StatusBadge";
 import { useRecentRuns } from "../../hooks/useStatus";
@@ -30,14 +31,7 @@ export function ActiveWorkflowCards() {
   const runs = (data?.items ?? []).filter((r: WorkflowRun) => ACTIVE_STATUSES.has(r.status));
 
   if (isLoading) {
-    return (
-      <Card>
-        <div className="space-y-3">
-          <div className="h-4 w-1/3 rounded bg-surface2 animate-pulse" />
-          <div className="h-20 rounded bg-surface2 animate-pulse" />
-        </div>
-      </Card>
-    );
+    return <CardSkeleton rows={2} />;
   }
 
   return (

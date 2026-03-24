@@ -649,7 +649,7 @@ export function NodeConfigPanel({ node, onSave, onClose, onDelete, allNodes }: N
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h3 className="text-sm font-semibold text-ink capitalize">{nodeType} Config</h3>
-        <button
+        <button type="button"
           onClick={onClose}
           className="rounded-lg p-1 text-muted-foreground hover:bg-surface2 hover:text-ink transition-colors"
         >

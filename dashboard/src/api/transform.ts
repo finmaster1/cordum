@@ -482,14 +482,14 @@ export function normalizeOutputDecision(raw?: string): OutputDecision {
 
 function mapOutputFinding(raw: BackendOutputFinding): OutputFinding {
   return {
-    type: raw.type || "",
-    severity: raw.severity || "",
-    detail: raw.detail || "",
-    scanner: raw.scanner,
-    confidence: raw.confidence,
-    matched_pattern: raw.matched_pattern,
-    offset: raw.offset,
-    length: raw.length,
+    type: raw.type ?? "",
+    severity: raw.severity ?? "",
+    detail: raw.detail ?? "",
+    scanner: raw.scanner ?? undefined,
+    confidence: raw.confidence ?? undefined,
+    matched_pattern: raw.matched_pattern ?? undefined,
+    offset: raw.offset ?? undefined,
+    length: raw.length ?? undefined,
   };
 }
 

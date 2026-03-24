@@ -9,6 +9,7 @@ import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import type { StepRun } from "../types/api";
+import { ErrorBanner } from "../components/ui/ErrorBanner";
 
 const statusVariant = (status?: string): "default" | "success" | "warning" | "danger" | "info" => {
   if (!status) {
@@ -70,6 +71,12 @@ export default function ContextInspectorPage() {
   const steps = useMemo<StepRun[]>(() => Object.values(run?.steps || {}), [run]);
   const activeStep = steps.find((step) => ["running", "waiting", "pending"].includes(step.status));
   const contextPayload = run?.context && Object.keys(run.context).length > 0 ? run.context : run?.input;
+
+  const hasError = runQuery.isError || jobQuery.isError;
+  if (hasError) {
+    const errorMessage = runQuery.error?.message || jobQuery.error?.message || "Failed to load data";
+    return <ErrorBanner message={errorMessage} onRetry={() => { void runQuery.refetch(); void jobQuery.refetch(); }} />;
+  }
 
   return (
     <div className="space-y-6">

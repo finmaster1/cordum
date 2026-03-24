@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { Search, Plus, Workflow, RefreshCw, Eye, GitBranch } from "lucide-react";
 import { formatRelativeTime, clickableRowProps } from "@/lib/utils";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 interface WorkflowSummary {
   id: string;
@@ -31,7 +32,7 @@ export default function WorkflowsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
-  const { data: workflows, isLoading, refetch } = useQuery({
+  const { data: workflows, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["workflows"],
     queryFn: async () => {
       const res = await get<WorkflowSummary[] | { items: WorkflowSummary[] }>("/workflows?limit=200");
@@ -58,6 +59,10 @@ export default function WorkflowsPage() {
     const q = search.toLowerCase();
     return w.name.toLowerCase().includes(q) || w.id.toLowerCase().includes(q) || (w.description ?? "").toLowerCase().includes(q);
   });
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load workflows"} onRetry={() => void refetch()} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -156,7 +161,7 @@ export default function WorkflowsPage() {
                     {w.lastRunAt ? formatRelativeTime(w.lastRunAt) : "Never"}
                   </td>
                   <td className="px-5 py-3">
-                    <button className="p-1 rounded hover:bg-surface-2 transition-colors" aria-label="View details">
+                    <button type="button" className="p-1 rounded hover:bg-surface-2 transition-colors" aria-label="View details">
                       <Eye className="w-3.5 h-3.5 text-muted-foreground" />
                     </button>
                   </td>

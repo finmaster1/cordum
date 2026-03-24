@@ -116,7 +116,7 @@ export function NotificationPopover() {
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <button type="button"
         onClick={() => setOpen(!open)}
         className="relative p-2 rounded-md hover:bg-surface-2 transition-colors"
         aria-label="Notifications"
@@ -154,7 +154,7 @@ export function NotificationPopover() {
                 )}
               </div>
               {unreadCount > 0 && (
-                <button
+                <button type="button"
                   onClick={markAllRead}
                   className="flex items-center gap-1 text-[11px] text-cordum hover:text-cordum-bright transition-colors"
                 >
@@ -192,7 +192,7 @@ export function NotificationPopover() {
                             )}
                             {notif.title}
                           </p>
-                          <button
+                          <button type="button"
                             onClick={() => dismiss(notif.id)}
                             className="shrink-0 p-0.5 rounded hover:bg-surface-3 text-muted-foreground hover:text-foreground transition-colors"
                           >
@@ -210,7 +210,7 @@ export function NotificationPopover() {
 
             {/* Footer */}
             <div className="px-4 py-2.5 border-t border-border">
-              <button
+              <button type="button"
                 onClick={() => { setOpen(false); navigate("/audit"); }}
                 className="w-full text-center text-[11px] text-cordum hover:text-cordum-bright transition-colors font-medium"
               >

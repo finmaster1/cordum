@@ -26,6 +26,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { useApproveJob, useRejectJob } from "@/hooks/useApprovals";
 import { useStatus } from "@/hooks/useStatus";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ChartTooltip } from "@/components/ui/ChartTooltip";
 import { MetricValue } from "@/components/ui/MetricValue";
 import { InstrumentCard } from "@/components/ui/InstrumentCard";
@@ -37,7 +38,7 @@ export default function HomePage() {
   const approveMut = useApproveJob();
   const rejectMut = useRejectJob();
 
-  const { data: jobsData, isLoading: jobsLoading } = useQuery({
+  const { data: jobsData, isLoading: jobsLoading, isError: jobsError, error: jobsErr, refetch: refetchJobs } = useQuery({
     queryKey: ["jobs", "home"],
     queryFn: async () => {
       const res = await get<{ items: BackendJobRecord[]; total?: number }>("/jobs?limit=200");
@@ -47,7 +48,7 @@ export default function HomePage() {
     refetchInterval: 10_000,
   });
 
-  const { data: workers, isLoading: workersLoading } = useQuery({
+  const { data: workers, isLoading: workersLoading, isError: workersError, error: workersErr, refetch: refetchWorkers } = useQuery({
     queryKey: ["workers", "home"],
     queryFn: async () => {
       const res = await get<{ items: BackendHeartbeat[] }>("/workers");
@@ -56,7 +57,7 @@ export default function HomePage() {
     refetchInterval: 15_000,
   });
 
-  const { data: approvalsData, isLoading: approvalsLoading } = useQuery({
+  const { data: approvalsData, isLoading: approvalsLoading, isError: approvalsError, error: approvalsErr, refetch: refetchApprovals } = useQuery({
     queryKey: ["approvals", "home"],
     queryFn: async () => {
       const res = await get<{ items: BackendApprovalItem[] }>("/approvals?limit=100");
@@ -168,6 +169,12 @@ export default function HomePage() {
   ];
 
   const isLoading = jobsLoading || workersLoading || approvalsLoading;
+
+  const hasError = jobsError || workersError || approvalsError;
+  if (hasError) {
+    const errorMessage = jobsErr?.message || workersErr?.message || approvalsErr?.message || "Failed to load dashboard data";
+    return <ErrorBanner message={errorMessage} onRetry={() => { void refetchJobs(); void refetchWorkers(); void refetchApprovals(); }} />;
+  }
 
   return (
     <div className="space-y-6">

@@ -122,7 +122,7 @@ export default function WorkflowDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <button
+          <button type="button"
             onClick={() => navigate("/workflows")}
             className="p-2 rounded-full hover:bg-surface-2 transition-colors"
           >
@@ -208,7 +208,7 @@ export default function WorkflowDetailPage() {
       {/* Tabs */}
       <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-2xl p-0.5 w-fit">
         {tabs.map((tab) => (
-          <button
+          <button type="button"
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(

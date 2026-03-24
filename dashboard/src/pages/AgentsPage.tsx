@@ -21,6 +21,7 @@ import { cn, formatRelativeTime, clickableRowProps } from "@/lib/utils";
 import { useWorkers } from "@/hooks/useWorkers";
 import { PoolGroupedView } from "@/components/agents/PoolGroupedView";
 import { WorkerDetailDrawer } from "@/components/agents/WorkerDetailDrawer";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 function workerStatusVariant(status: string) {
   switch (status) {
@@ -39,7 +40,7 @@ export default function AgentsPage() {
   const [drawerWorkerId, setDrawerWorkerId] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const { data: workers, isLoading, refetch } = useQuery({
+  const { data: workers, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["workers"],
     queryFn: async () => {
       const res = await get<{ items?: BackendHeartbeat[] } | BackendHeartbeat[]>(
@@ -73,6 +74,10 @@ export default function AgentsPage() {
     return true;
   });
 
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load agents"} onRetry={() => void refetch()} />;
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -89,7 +94,7 @@ export default function AgentsPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-4 border-b border-border">
-        <button
+        <button type="button"
           onClick={() => setTab("fleet")}
           className={cn(
             "pb-2 text-sm font-medium border-b-2 transition-colors",
@@ -98,7 +103,7 @@ export default function AgentsPage() {
         >
           Fleet Overview
         </button>
-        <button
+        <button type="button"
           onClick={() => setTab("registry")}
           className={cn(
             "pb-2 text-sm font-medium border-b-2 transition-colors",
@@ -107,7 +112,7 @@ export default function AgentsPage() {
         >
           Agent Registry
         </button>
-        <button
+        <button type="button"
           onClick={() => setTab("pools")}
           className={cn(
             "pb-2 text-sm font-medium border-b-2 transition-colors",
@@ -192,7 +197,7 @@ export default function AgentsPage() {
         </div>
         <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-2xl p-0.5">
           {["all", "idle", "busy", "draining", "offline"].map((s) => (
-            <button
+            <button type="button"
               key={s}
               onClick={() => setStatusFilter(s)}
               className={cn(
@@ -268,7 +273,7 @@ export default function AgentsPage() {
                         </span>
                       ))}
                       {(w.capabilities?.length ?? 0) > 3 && (
-                        <span className="text-[10px] text-muted-foreground">+{w.capabilities!.length - 3}</span>
+                        <span className="text-[10px] text-muted-foreground">+{(w.capabilities?.length ?? 0) - 3}</span>
                       )}
                     </div>
                   </td>
@@ -365,7 +370,7 @@ function AgentRegistryTab() {
                       <span key={c} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cordum/10 text-cordum">{c}</span>
                     ))}
                     {(w.capabilities?.length ?? 0) > 3 && (
-                      <span className="text-[10px] font-mono text-muted-foreground">+{w.capabilities!.length - 3}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">+{(w.capabilities?.length ?? 0) - 3}</span>
                     )}
                   </div>
                 </td>

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { usePipelineMetrics } from "../../hooks/useStatus";
 import { Card } from "../ui/Card";
+import { CardSkeleton } from "../ui/CardSkeleton";
 
 // ---------------------------------------------------------------------------
 // Stage config
@@ -80,14 +81,7 @@ export function JobPipelineFunnel() {
   const maxStageCount = Math.max(1, ...data.map((d) => d.count));
 
   if (isLoading) {
-    return (
-      <Card className="flex h-[430px] min-h-[430px] flex-col">
-        <div className="space-y-3">
-          <div className="h-4 w-1/3 rounded bg-surface2 animate-pulse" />
-          <div className="h-48 rounded bg-surface2 animate-pulse" />
-        </div>
-      </Card>
-    );
+    return <CardSkeleton rows={2} className="flex h-[430px] min-h-[430px] flex-col" />;
   }
 
   if (!pipeline) {

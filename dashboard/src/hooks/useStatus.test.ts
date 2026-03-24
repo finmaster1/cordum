@@ -253,8 +253,8 @@ describe("useStatus hooks", () => {
       expect(hook.result.current?.isSuccess).toBe(true);
     });
 
-    expect(hook.result.current?.data?.items).toHaveLength(1);
-    expect(hook.result.current?.data?.items[0]).toMatchObject({ id: "w1", activeJobs: 1, capacity: 5 });
+    expect(hook.result.current?.data?.items!).toHaveLength(1);
+    expect(hook.result.current?.data?.items![0]).toMatchObject({ id: "w1", activeJobs: 1, capacity: 5 });
     hook.unmount();
   });
 
@@ -281,7 +281,7 @@ describe("useStatus hooks", () => {
       expect(hook.result.current?.isSuccess).toBe(true);
     });
 
-    expect(hook.result.current?.data?.items[0]).toMatchObject({ id: "j1", status: "running" });
+    expect(hook.result.current?.data?.items![0]).toMatchObject({ id: "j1", status: "running" });
     hook.unmount();
   });
 
@@ -329,7 +329,7 @@ describe("useStatus hooks", () => {
       expect(hook.result.current?.isSuccess).toBe(true);
     });
 
-    expect(hook.result.current?.data?.items[0]).toMatchObject({ id: "run-1", workflowId: "wf-1" });
+    expect(hook.result.current?.data?.items![0]).toMatchObject({ id: "run-1", workflowId: "wf-1" });
     hook.unmount();
   });
 

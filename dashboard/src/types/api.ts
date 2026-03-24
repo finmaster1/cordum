@@ -1,4 +1,9 @@
-export type Workflow = {
+// ---------------------------------------------------------------------------
+// Raw backend response types (snake_case, matching Go API responses).
+// Frontend models live in api/types.ts (camelCase).
+// ---------------------------------------------------------------------------
+
+export type RawWorkflow = {
   id: string;
   org_id: string;
   team_id: string;
@@ -56,7 +61,7 @@ export type Step = {
   route_labels?: Record<string, string>;
 };
 
-export type WorkflowRun = {
+export type RawWorkflowRun = {
   id: string;
   workflow_id: string;
   org_id: string;
@@ -118,16 +123,6 @@ export type TimelineEvent = {
   message?: string;
   data?: Record<string, unknown>;
 };
-
-export type JobStatus = 
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "approval"
-  | "denied"
-  | "timed_out";
 
 export type JobRecord = {
   id: string;
@@ -198,7 +193,7 @@ export type JobDetail = {
   step_id?: string;
 };
 
-export type DLQEntry = {
+export type RawDLQEntry = {
   job_id: string;
   topic?: string;
   status?: string;
@@ -210,7 +205,7 @@ export type DLQEntry = {
 };
 
 export type DLQResponse = {
-  items: DLQEntry[];
+  items: RawDLQEntry[];
   next_cursor?: number | null;
 };
 
@@ -237,7 +232,7 @@ export type SafetyDecisionRecord = {
 };
 
 export type WorkflowRunsResponse = {
-  items: WorkflowRun[];
+  items: RawWorkflowRun[];
   next_cursor?: number | null;
 };
 
@@ -254,7 +249,7 @@ export type Lock = {
   ttl_ms: number;
 };
 
-export type ArtifactMetadata = {
+export type RawArtifactMetadata = {
   content_type: string;
   retention: "short" | "standard" | "audit";
   labels?: Record<string, string>;
@@ -263,7 +258,7 @@ export type ArtifactMetadata = {
 export type ArtifactResponse = {
   artifact_ptr: string;
   content_base64?: string;
-  metadata?: ArtifactMetadata;
+  metadata?: RawArtifactMetadata;
   size_bytes?: number;
 };
 
@@ -361,44 +356,6 @@ export type PackVerifyResult = {
 export type PackVerifyResponse = {
   pack_id: string;
   results: PackVerifyResult[];
-};
-
-export type MarketplaceCatalog = {
-  id: string;
-  title?: string;
-  url?: string;
-  enabled?: boolean;
-  updated_at?: string;
-  error?: string;
-};
-
-export type MarketplacePack = {
-  id: string;
-  version: string;
-  title?: string;
-  description?: string;
-  author?: string;
-  homepage?: string;
-  source?: string;
-  image?: string;
-  license?: string;
-  url?: string;
-  sha256?: string;
-  catalog_id?: string;
-  catalog_title?: string;
-  capabilities?: string[];
-  requires?: string[];
-  risk_tags?: string[];
-  installed_version?: string;
-  installed_status?: string;
-  installed_at?: string;
-};
-
-export type MarketplaceResponse = {
-  catalogs: MarketplaceCatalog[];
-  items: MarketplacePack[];
-  fetched_at?: string;
-  cached?: boolean;
 };
 
 export type LicenseInfo = {
@@ -503,7 +460,7 @@ export type PolicyRuleSource = {
   sha256?: string;
 };
 
-export type PolicyRule = {
+export type RawPolicyRule = {
   id?: string;
   decision?: string;
   reason?: string;
@@ -519,7 +476,7 @@ export type PolicyRuleError = {
 };
 
 export type PolicyRulesResponse = {
-  items: PolicyRule[];
+  items: RawPolicyRule[];
   errors?: PolicyRuleError[];
 };
 
@@ -581,19 +538,6 @@ export type BusPacket = {
       metadata?: Record<string, unknown>;
     };
   };
-};
-
-export type AuthConfig = {
-  password_enabled: boolean;
-  user_auth_enabled: boolean;
-  saml_enabled: boolean;
-  saml_enterprise: boolean;
-  saml_login_url?: string;
-  saml_metadata_url?: string;
-  session_ttl: string;
-  require_rbac: boolean;
-  require_principal: boolean;
-  default_tenant: string;
 };
 
 export type AuthUser = {

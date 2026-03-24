@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "../ui/Card";
+import { CardSkeleton } from "../ui/CardSkeleton";
+import { CardEmpty } from "../ui/CardEmpty";
 import { useDLQ } from "../../hooks/useDLQ";
 
 // ---------------------------------------------------------------------------
@@ -11,35 +13,12 @@ export function DLQSummary() {
   const { data, isLoading } = useDLQ({ limit: 5 });
   const entries = data?.items ?? [];
 
-  // Loading skeleton
   if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Failed Jobs</CardTitle>
-        </CardHeader>
-        <div className="space-y-2 animate-pulse">
-          <div className="h-4 w-1/3 rounded bg-surface2" />
-          <div className="h-3 w-full rounded bg-surface2" />
-          <div className="h-3 w-4/5 rounded bg-surface2" />
-        </div>
-      </Card>
-    );
+    return <CardSkeleton rows={3} title="Failed Jobs" />;
   }
 
-  // Empty — no failures
   if (entries.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Failed Jobs</CardTitle>
-        </CardHeader>
-        <div className="flex items-center gap-2 text-sm text-success">
-          <CheckCircle className="h-4 w-4" />
-          No failed jobs
-        </div>
-      </Card>
-    );
+    return <CardEmpty title="Failed Jobs" message="No failed jobs" />;
   }
 
   // Show recent failures

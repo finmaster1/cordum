@@ -15,8 +15,8 @@ import type {
   PolicyBundleSimulateRequest,
   PolicySnapshotsListResponse,
   WorkflowRunsResponse,
-  WorkflowRun,
-  Workflow,
+  RawWorkflowRun,
+  RawWorkflow,
   JobsResponse,
   JobDetail,
   Heartbeat,
@@ -28,6 +28,7 @@ import type {
   JobRecord,
   ChatMessagePayload,
 } from "../types/api";
+import { API_PATHS } from "./constants";
 
 type QueryParams = Record<string, string | number | boolean | null | undefined>;
 
@@ -54,7 +55,7 @@ interface DLQResponse {
 }
 
 interface WorkflowListResponse {
-  items: Workflow[];
+  items: RawWorkflow[];
 }
 
 interface PoolListResponse {
@@ -126,7 +127,7 @@ interface ChatSendBody {
 
 export function wsUrl(path?: string, params?: Record<string, string | undefined>): string {
   const base = window.location.origin.replace(/^http/, "ws");
-  const p = path || "/api/v1/stream";
+  const p = path || API_PATHS.stream;
   const qs = params
     ? "?" + Object.entries(params)
         .filter(([, v]) => v != null && v !== "")
@@ -261,8 +262,8 @@ export const api = {
     return get<WorkflowRunsResponse>(`/workflows/runs${buildQueryString(params)}`);
   },
 
-  getRun(id: string): Promise<WorkflowRun> {
-    return get<WorkflowRun>(`/workflows/runs/${id}`);
+  getRun(id: string): Promise<RawWorkflowRun> {
+    return get<RawWorkflowRun>(`/workflows/runs/${id}`);
   },
 
   cancelRun(workflowIdOrRunId: string, runId?: string): Promise<void> {
@@ -270,8 +271,8 @@ export const api = {
     return post<void>(`/workflows/runs/${id}/cancel`);
   },
 
-  rerunRun(id: string, body?: RerunBody): Promise<WorkflowRun> {
-    return post<WorkflowRun>(`/workflows/runs/${id}/rerun`, body);
+  rerunRun(id: string, body?: RerunBody): Promise<RawWorkflowRun> {
+    return post<RawWorkflowRun>(`/workflows/runs/${id}/rerun`, body);
   },
 
   listWorkflows(params?: QueryParams): Promise<WorkflowListResponse> {

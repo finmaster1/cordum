@@ -79,7 +79,7 @@ export function OutputRuleCard({
         <div className="flex items-center gap-1 shrink-0">
           {canEdit && (
             <>
-              <button
+              <button type="button"
                 aria-label={`Toggle ${rule.id}`}
                 className="rounded p-1.5 text-muted-foreground hover:bg-surface-2 transition-colors"
                 onClick={onToggleEnabled}
@@ -87,7 +87,7 @@ export function OutputRuleCard({
               >
                 <Power className="h-3.5 w-3.5" />
               </button>
-              <button
+              <button type="button"
                 aria-label={`Move ${rule.id} up`}
                 className="rounded p-1.5 text-muted-foreground hover:bg-surface-2 disabled:opacity-40 transition-colors"
                 disabled={index === 0}
@@ -96,7 +96,7 @@ export function OutputRuleCard({
               >
                 <ArrowUp className="h-3.5 w-3.5" />
               </button>
-              <button
+              <button type="button"
                 aria-label={`Move ${rule.id} down`}
                 className="rounded p-1.5 text-muted-foreground hover:bg-surface-2 disabled:opacity-40 transition-colors"
                 disabled={index === total - 1}
@@ -105,7 +105,7 @@ export function OutputRuleCard({
               >
                 <ArrowDown className="h-3.5 w-3.5" />
               </button>
-              <button 
+              <button type="button" 
                 aria-label={`Edit ${rule.id}`} 
                 className="rounded p-1.5 text-muted-foreground hover:bg-surface-2 transition-colors" 
                 onClick={onEdit}
@@ -113,7 +113,7 @@ export function OutputRuleCard({
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>
-              <button 
+              <button type="button" 
                 aria-label={`Delete ${rule.id}`} 
                 className="rounded p-1.5 text-destructive hover:bg-destructive/10 transition-colors"
                 onClick={onDelete}
@@ -124,7 +124,7 @@ export function OutputRuleCard({
             </>
           )}
           {!canEdit && (
-            <button 
+            <button type="button" 
               aria-label={`View ${rule.id}`} 
               className="rounded p-1.5 text-muted-foreground hover:bg-surface-2 transition-colors" 
               onClick={onView}

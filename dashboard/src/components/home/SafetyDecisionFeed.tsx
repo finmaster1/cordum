@@ -212,7 +212,7 @@ export function SafetyDecisionFeed() {
             <div className="px-5 py-2 flex items-center gap-2 text-[11px] text-[var(--color-warning)]">
               <AlertTriangleIcon />
               Refresh failed — showing cached data
-              <button onClick={() => refetch()} className="underline hover:no-underline ml-1">
+              <button type="button" onClick={() => refetch()} className="underline hover:no-underline ml-1">
                 Retry
               </button>
             </div>

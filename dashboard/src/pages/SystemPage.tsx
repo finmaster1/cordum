@@ -13,7 +13,8 @@ import { Textarea } from "../components/ui/Textarea";
 import { Input } from "../components/ui/Input";
 import { ProgressBar } from "../components/ProgressBar";
 import { useConfigStore } from "../state/config";
-import type { DLQEntry, Heartbeat, LicenseInfo } from "../types/api";
+import type { RawDLQEntry, Heartbeat, LicenseInfo } from "../types/api";
+import { ErrorBanner } from "../components/ui/ErrorBanner";
 
 type DiffLine = {
   left: string;
@@ -106,7 +107,7 @@ function buildLineDiff(left: string, right: string): DiffLine[] {
   return out;
 }
 
-function buildDlqTrend(entries: DLQEntry[]): DlqTrendPoint[] {
+function buildDlqTrend(entries: RawDLQEntry[]): DlqTrendPoint[] {
   const buckets = new Map<string, number>();
   entries.forEach((entry) => {
     const date = new Date(entry.created_at);
@@ -252,7 +253,7 @@ export default function SystemPage() {
   const licensePlan = license?.plan || licenseLabel;
 
   const workers = useMemo(() => (workersQuery.data || []) as Heartbeat[], [workersQuery.data]);
-  const dlqEntries = useMemo<DLQEntry[]>(
+  const dlqEntries = useMemo<RawDLQEntry[]>(
     () =>
       (dlqQuery.data?.pages.flatMap((page) => page.items ?? []) ?? []).map((entry) => ({
         job_id: entry.jobId || entry.id,
@@ -413,6 +414,13 @@ export default function SystemPage() {
   const baseConfigText = useMemo(() => JSON.stringify(systemConfigQuery.data?.data || {}, null, 2), [systemConfigQuery.data]);
   const currentConfigText = useMemo(() => JSON.stringify(configQuery.data?.data || {}, null, 2), [configQuery.data]);
   const configDiff = useMemo(() => buildLineDiff(baseConfigText, currentConfigText), [baseConfigText, currentConfigText]);
+
+  const hasError = statusQuery.isError || workersQuery.isError || dlqQuery.isError || schemasQuery.isError || systemConfigQuery.isError;
+  if (hasError) {
+    const errorMessage = statusQuery.error?.message || workersQuery.error?.message || dlqQuery.error?.message || schemasQuery.error?.message || systemConfigQuery.error?.message || "Failed to load system data";
+    const retryAll = () => { void statusQuery.refetch(); void workersQuery.refetch(); void dlqQuery.refetch(); void schemasQuery.refetch(); void systemConfigQuery.refetch(); };
+    return <ErrorBanner message={errorMessage} onRetry={retryAll} />;
+  }
 
   return (
     <div className="space-y-6">

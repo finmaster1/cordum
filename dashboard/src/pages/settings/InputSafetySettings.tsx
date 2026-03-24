@@ -12,6 +12,7 @@ import { useStatus } from "../../hooks/useStatus";
 import { FailOpenCounter } from "../../components/settings/FailOpenCounter";
 import { logger } from "../../lib/logger";
 import { useToastStore } from "../../state/toast";
+import { ErrorBanner } from "../../components/ui/ErrorBanner";
 
 type FailMode = "open" | "closed";
 
@@ -96,7 +97,7 @@ export default function InputSafetySettings() {
   usePageTitle("Settings - Input Safety");
 
   const queryClient = useQueryClient();
-  const { data: configData, isLoading: configLoading } = useConfig();
+  const { data: configData, isLoading: configLoading, isError: configError, error: configErr, refetch: refetchConfig } = useConfig();
   const { data: status } = useStatus();
   const addToast = useToastStore((s) => s.addToast);
 
@@ -137,6 +138,10 @@ export default function InputSafetySettings() {
   const onSave = () => {
     saveMutation.mutate(form);
   };
+
+  if (configError) {
+    return <ErrorBanner message={configErr instanceof Error ? configErr.message : "Failed to load input safety settings"} onRetry={() => void refetchConfig()} />;
+  }
 
   if (configLoading) {
     return (

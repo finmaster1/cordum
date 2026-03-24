@@ -1,4 +1,4 @@
-import type { DLQEntry } from "../types/api";
+import type { RawDLQEntry } from "../types/api";
 
 export type DLQGuidance = {
   title: string;
@@ -168,7 +168,7 @@ const REASON_CODE_MAP: Record<string, ReasonCodeMapping> = {
   },
 };
 
-export function getDLQGuidance(entry: DLQEntry): DLQGuidance | null {
+export function getDLQGuidance(entry: RawDLQEntry): DLQGuidance | null {
   const code = entry.reason_code?.toLowerCase();
   if (!code) return null;
 

@@ -18,7 +18,7 @@ export function BundleDetailTabs({ active, onChange }: BundleDetailTabsProps) {
   return (
     <div className="flex gap-1 border-b border-border">
       {TABS.map((tab) => (
-        <button
+        <button type="button"
           key={tab.id}
           className={cn(
             "px-3 py-2 text-xs font-mono transition-colors border-b-2 -mb-px",

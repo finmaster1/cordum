@@ -434,7 +434,7 @@ export default function InputRulesPage() {
         <div className="flex flex-wrap items-center gap-2">
           {(["all", "global", "tenant", "workflow"] as ScopeFilter[]).map(
             (s) => (
-              <button
+              <button type="button"
                 key={s}
                 onClick={() => setFilter("scope", s === "all" ? "" : s)}
                 className={cn(
@@ -505,7 +505,7 @@ export default function InputRulesPage() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>Tenant:</span>
               {availableTenants.map((t) => (
-                <button
+                <button type="button"
                   key={t}
                   onClick={() =>
                     setFilter("q", searchText === t ? "" : t)
@@ -526,7 +526,7 @@ export default function InputRulesPage() {
 
       {/* ── Context evaluator (collapsible) ── */}
       <div className="rounded-2xl border border-border bg-surface-1">
-        <button
+        <button type="button"
           onClick={() => setContextOpen(!contextOpen)}
           className="flex w-full items-center gap-2 px-4 py-2.5 text-xs font-semibold text-foreground"
         >
@@ -773,34 +773,34 @@ function RuleCard({
               Match
             </p>
             <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs font-mono">
-              {match!.topics && match!.topics.length > 0 && (
+              {match?.topics && match?.topics.length > 0 && (
                 <span className="text-foreground">
                   <span className="text-muted-foreground/60">Topics:</span>{" "}
-                  {match!.topics.join(", ")}
+                  {match?.topics.join(", ")}
                 </span>
               )}
-              {match!.tenants && match!.tenants.length > 0 && (
+              {match?.tenants && match?.tenants.length > 0 && (
                 <span className="text-foreground">
                   <span className="text-muted-foreground/60">Tenants:</span>{" "}
-                  {match!.tenants.join(", ")}
+                  {match?.tenants.join(", ")}
                 </span>
               )}
-              {match!.capabilities && match!.capabilities.length > 0 && (
+              {match?.capabilities && match?.capabilities.length > 0 && (
                 <span className="text-foreground">
                   <span className="text-muted-foreground/60">Capabilities:</span>{" "}
-                  {match!.capabilities.join(", ")}
+                  {match?.capabilities.join(", ")}
                 </span>
               )}
-              {match!.risk_tags && match!.risk_tags.length > 0 && (
+              {match?.risk_tags && match?.risk_tags.length > 0 && (
                 <span className="text-foreground">
                   <span className="text-muted-foreground/60">Risk Tags:</span>{" "}
-                  {match!.risk_tags.join(", ")}
+                  {match?.risk_tags.join(", ")}
                 </span>
               )}
-              {match!.actor_ids && match!.actor_ids.length > 0 && (
+              {match?.actor_ids && match?.actor_ids.length > 0 && (
                 <span className="text-foreground">
                   <span className="text-muted-foreground/60">Actor IDs:</span>{" "}
-                  {match!.actor_ids.join(", ")}
+                  {match?.actor_ids.join(", ")}
                 </span>
               )}
             </div>
@@ -830,7 +830,7 @@ function RuleCard({
           {!dimmed && (
             <div className="flex items-center gap-1">
               {canEdit && (
-                <button
+                <button type="button"
                   onClick={onEdit}
                   className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                   title={rule.bundle_id ? "Edit in bundle" : "Edit rule"}
@@ -838,7 +838,7 @@ function RuleCard({
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
               )}
-              <button
+              <button type="button"
                 onClick={onSimulate}
                 className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                 title="Simulate"

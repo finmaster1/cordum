@@ -7,7 +7,8 @@ import { Card, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
 import { JobStatusBadge, RunStatusBadge } from "../components/StatusBadge";
-import type { JobRecord, PackRecord, Workflow, WorkflowRun } from "../types/api";
+import type { JobRecord, PackRecord, RawWorkflow, RawWorkflowRun } from "../types/api";
+import { ErrorBanner } from "../components/ui/ErrorBanner";
 
 export default function SearchPage() {
   const navigate = useNavigate();
@@ -39,7 +40,7 @@ export default function SearchPage() {
   const runs = useMemo(() => {
     const q = query.toLowerCase();
     return (runsQuery.data?.items || [])
-      .filter((run: WorkflowRun) =>
+      .filter((run: RawWorkflowRun) =>
         [run.id, run.workflow_id, run.status, run.org_id, run.team_id]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(q))
@@ -50,7 +51,7 @@ export default function SearchPage() {
   const workflows = useMemo(() => {
     const q = query.toLowerCase();
     return (workflowsQuery.data?.items || [])
-      .filter((workflow: Workflow) =>
+      .filter((workflow: RawWorkflow) =>
         [workflow.id, workflow.name, workflow.description]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(q))
@@ -79,6 +80,14 @@ export default function SearchPage() {
       )
       .slice(0, 8);
   }, [jobsQuery.data, query]);
+
+  const hasError = runsQuery.isError || workflowsQuery.isError || packsQuery.isError || jobsQuery.isError;
+  const errorMessage = runsQuery.error?.message || workflowsQuery.error?.message || packsQuery.error?.message || jobsQuery.error?.message || "Failed to load search results";
+  const retryAll = () => { void runsQuery.refetch(); void workflowsQuery.refetch(); void packsQuery.refetch(); void jobsQuery.refetch(); };
+
+  if (hasError) {
+    return <ErrorBanner message={errorMessage} onRetry={retryAll} />;
+  }
 
   return (
     <div className="space-y-6">

@@ -13,6 +13,7 @@ import { SkeletonTable } from "@/components/ui/Skeleton";
 import { Search, RefreshCw, FileText, Download } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 interface AuditEvent {
   id: string;
@@ -36,7 +37,7 @@ export default function AuditLogPage() {
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("");
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["audit", actionFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: "200" });
@@ -59,6 +60,10 @@ export default function AuditLogPage() {
     const q = search.toLowerCase();
     return e.action.toLowerCase().includes(q) || e.actor.toLowerCase().includes(q) || e.resource.toLowerCase().includes(q) || (e.detail ?? "").toLowerCase().includes(q);
   });
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load audit log"} onRetry={() => void refetch()} />;
+  }
 
   return (
     <div className="space-y-6">

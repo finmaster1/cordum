@@ -396,4 +396,51 @@ describe("transform contract hardening", () => {
       expect(run.steps).toEqual([]);
     });
   });
+
+  describe("mapOutputSafetyRecord", () => {
+    it("handles finding with all optional fields missing", () => {
+      const result = mapOutputSafetyRecord({
+        decision: "ALLOW",
+        findings: [{ type: "pii", severity: "high", detail: "found SSN" }],
+      });
+      expect(result).toBeDefined();
+      expect(result!.findings).toHaveLength(1);
+      expect(result!.findings![0].scanner).toBeUndefined();
+      expect(result!.findings![0].confidence).toBeUndefined();
+      expect(result!.findings![0].matched_pattern).toBeUndefined();
+      expect(result!.findings![0].offset).toBeUndefined();
+      expect(result!.findings![0].length).toBeUndefined();
+    });
+
+    it("preserves optional fields when present", () => {
+      const result = mapOutputSafetyRecord({
+        decision: "QUARANTINE",
+        findings: [{
+          type: "secret",
+          severity: "critical",
+          detail: "API key",
+          scanner: "regex",
+          confidence: 0.95,
+          matched_pattern: "sk-.*",
+          offset: 42,
+          length: 51,
+        }],
+      });
+      expect(result!.findings![0].scanner).toBe("regex");
+      expect(result!.findings![0].confidence).toBe(0.95);
+      expect(result!.findings![0].matched_pattern).toBe("sk-.*");
+      expect(result!.findings![0].offset).toBe(42);
+      expect(result!.findings![0].length).toBe(51);
+    });
+
+    it("returns undefined for null/undefined input", () => {
+      expect(mapOutputSafetyRecord(undefined)).toBeUndefined();
+      expect(mapOutputSafetyRecord(null as unknown as undefined)).toBeUndefined();
+    });
+
+    it("handles empty findings array", () => {
+      const result = mapOutputSafetyRecord({ decision: "ALLOW", findings: [] });
+      expect(result!.findings).toEqual([]);
+    });
+  });
 });

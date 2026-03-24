@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import {
   BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
@@ -88,7 +89,7 @@ export default function AgentDetailPage() {
   const queryClient = useQueryClient();
 
   const { data: agent, isLoading: agentLoading, error: agentError } = useWorker(id);
-  const { data: jobs, isLoading: jobsLoading } = useWorkerJobs(id);
+  const { data: jobs, isLoading: jobsLoading, isError: jobsError, error: jobsErr, refetch: refetchJobs } = useWorkerJobs(id);
   const { data: bundlesData } = usePolicyBundles();
   const bundles = bundlesData?.items ?? [];
 
@@ -156,6 +157,10 @@ export default function AgentDetailPage() {
         <SkeletonTable rows={5} />
       </div>
     );
+  }
+
+  if (jobsError) {
+    return <ErrorBanner message={jobsErr instanceof Error ? jobsErr.message : "Failed to load agent jobs"} onRetry={() => void refetchJobs()} />;
   }
 
   return (

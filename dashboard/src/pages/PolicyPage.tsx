@@ -26,11 +26,12 @@ import type {
   PolicyBundleSnapshotsResponse,
   PolicyBundleSummary,
   PolicyBundlesResponse,
-  PolicyRule,
+  RawPolicyRule,
   PolicyRulesResponse,
 } from "../types/api";
 import type { Approval } from "../api/types";
 import type { ApprovalsResponse } from "../lib/api";
+import { ErrorBanner } from "../components/ui/ErrorBanner";
 
 const schema = z.object({
   topic: z.string().min(1, "Topic required"),
@@ -627,6 +628,13 @@ export default function PolicyPage() {
     }
     setPublishSelection(new Set(secopsBundles.map((item) => item.id)));
   };
+
+  const hasError = approvalsQuery.isError || policyBundlesQuery.isError || policyRulesQuery.isError || policyAuditQuery.isError;
+  if (hasError) {
+    const errorMessage = approvalsQuery.error?.message || policyBundlesQuery.error?.message || policyRulesQuery.error?.message || policyAuditQuery.error?.message || "Failed to load policy data";
+    const retryAll = () => { void approvalsQuery.refetch(); void policyBundlesQuery.refetch(); void policyRulesQuery.refetch(); void policyAuditQuery.refetch(); };
+    return <ErrorBanner message={errorMessage} onRetry={retryAll} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -1370,7 +1378,7 @@ export default function PolicyPage() {
               <div className="space-y-3">
                 {policyRules.map((rule, index) => {
                   const decision = decisionBadgeMeta(rule.decision as string | undefined);
-                  const source = rule.source as PolicyRule["source"] | undefined;
+                  const source = rule.source as RawPolicyRule["source"] | undefined;
                   const sourceLabel = source?.pack_id
                     ? `${source.pack_id}${source.overlay_name ? ` / ${source.overlay_name}` : ""}`
                     : source?.fragment_id || "unknown";

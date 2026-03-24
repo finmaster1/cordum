@@ -236,7 +236,7 @@ export default function DLQPage() {
                     <td className="px-4 py-3 text-right text-xs text-muted-foreground font-mono">{formatRelativeTime(d.failedAt ?? d.createdAt ?? "")}</td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-1 justify-end">
-                        <button
+                        <button type="button"
                           onClick={() => retryMutation.mutate({ id: d.id })}
                           disabled={retryMutation.isPending || purgeMutation.isPending}
                           className="p-1.5 rounded hover:bg-surface-2 transition-colors text-cordum disabled:opacity-50 disabled:pointer-events-none"
@@ -244,7 +244,7 @@ export default function DLQPage() {
                         >
                           <Play className="w-3.5 h-3.5" />
                         </button>
-                        <button
+                        <button type="button"
                           onClick={() => purgeMutation.mutate(d.id)}
                           disabled={purgeMutation.isPending || retryMutation.isPending}
                           className="p-1.5 rounded hover:bg-surface-2 transition-colors text-destructive disabled:opacity-50 disabled:pointer-events-none"
@@ -307,7 +307,7 @@ export default function DLQPage() {
                 <span className="font-bold text-cordum">{selected.size}</span> selected
               </span>
               <div className="w-px h-5 bg-border" />
-              <button
+              <button type="button"
                 onClick={() => setConfirmBulk("retry")}
                 disabled={bulkRetryMutation.isPending || bulkPurgeMutation.isPending}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-cordum/10 text-cordum hover:bg-cordum/20 transition-colors disabled:opacity-50 disabled:pointer-events-none"
@@ -315,7 +315,7 @@ export default function DLQPage() {
                 <Play className="w-3 h-3" />
                 Retry All
               </button>
-              <button
+              <button type="button"
                 onClick={() => setConfirmBulk("purge")}
                 disabled={bulkRetryMutation.isPending || bulkPurgeMutation.isPending}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:pointer-events-none"
@@ -323,7 +323,7 @@ export default function DLQPage() {
                 <Trash2 className="w-3 h-3" />
                 Purge All
               </button>
-              <button
+              <button type="button"
                 onClick={() => setSelected(new Set())}
                 className="p-1.5 rounded-full hover:bg-surface-2 text-muted-foreground transition-colors"
               >

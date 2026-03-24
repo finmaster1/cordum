@@ -78,13 +78,13 @@ export function GlobalOutputRuleEditorDrawer({
 
   return (
     <div className="fixed inset-0 z-[125] flex justify-end">
-      <button className="absolute inset-0 bg-black/50" aria-label="Close output rule editor" onClick={onClose} />
+      <button type="button" className="absolute inset-0 bg-black/50" aria-label="Close output rule editor" onClick={onClose} />
       <div className="relative h-full w-full max-w-lg overflow-y-auto border-l border-border bg-surface-1 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold text-foreground">
             {rule ? "Edit Output Rule" : "New Output Rule"}
           </h2>
-          <button className="rounded-md p-2 text-muted-foreground hover:bg-surface-2" onClick={onClose} aria-label="Close output rule editor">
+          <button type="button" className="rounded-md p-2 text-muted-foreground hover:bg-surface-2" onClick={onClose} aria-label="Close output rule editor">
             <X className="h-4 w-4" />
           </button>
         </div>

@@ -128,7 +128,7 @@ function CreateUserModal({
           <h3 className="font-display text-lg font-semibold text-ink">
             Create User
           </h3>
-          <button onClick={onClose} className="rounded-full p-1 hover:bg-surface2">
+          <button type="button" onClick={onClose} className="rounded-full p-1 hover:bg-surface2">
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
@@ -234,7 +234,7 @@ function ChangePasswordModal({
           <h3 className="font-display text-lg font-semibold text-ink">
             Reset Password for {user.username}
           </h3>
-          <button onClick={onClose} className="rounded-full p-1 hover:bg-surface2">
+          <button type="button" onClick={onClose} className="rounded-full p-1 hover:bg-surface2">
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>

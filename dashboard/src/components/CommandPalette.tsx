@@ -190,7 +190,7 @@ export function CommandPalette() {
                       {items.map((item) => {
                         const globalIndex = flatItems.indexOf(item);
                         return (
-                          <button
+                          <button type="button"
                             key={item.id}
                             data-index={globalIndex}
                             onClick={() => handleSelect(item)}

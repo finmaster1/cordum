@@ -25,6 +25,7 @@ import { cn, formatRelativeTime, clickableRowProps } from "@/lib/utils";
 import { toast } from "sonner";
 import { useSubmitJob } from "@/hooks/useJobs";
 import { SafetyDecisionBadge } from "@/components/ui/SafetyDecisionBadge";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 function jobStatusVariant(status: string) {
   switch (status) {
@@ -88,7 +89,7 @@ function SubmitJobDialog({ open, onClose }: { open: boolean; onClose: () => void
           >
             <div className="px-6 py-4 border-b border-border flex items-center justify-between">
               <h3 className="font-display font-semibold text-foreground">Submit Job</h3>
-              <button onClick={onClose} className="p-1 rounded hover:bg-surface-2 text-muted-foreground"><X className="w-4 h-4" /></button>
+              <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-2 text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="px-6 py-5 space-y-4">
               <div>
@@ -148,7 +149,7 @@ export default function JobsPage() {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const { data, isLoading, refetch, dataUpdatedAt } = useQuery({
+  const { data, isLoading, isError, error, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["jobs"],
     queryFn: async () => {
       const res = await get<{ items: BackendJobRecord[]; total?: number }>("/jobs?limit=500");
@@ -266,6 +267,10 @@ export default function JobsPage() {
 
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load jobs"} onRetry={() => void refetch()} />;
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -309,7 +314,7 @@ export default function JobsPage() {
         </div>
         <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-2xl p-0.5">
           {tabs.map((tab) => (
-            <button
+            <button type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
@@ -334,7 +339,7 @@ export default function JobsPage() {
         <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Safety:</span>
         <div className="flex items-center gap-1">
           {safetyTabs.map((tab) => (
-            <button
+            <button type="button"
               key={tab.id}
               onClick={() => setSafetyFilter(tab.id)}
               className={cn(
@@ -439,7 +444,7 @@ export default function JobsPage() {
                     {job.updatedAt ? formatRelativeTime(new Date(job.updatedAt).toISOString()) : "—"}
                   </td>
                   <td className="px-5 py-2.5">
-                    <button className="p-1 rounded hover:bg-surface-2 transition-colors" aria-label="View details">
+                    <button type="button" className="p-1 rounded hover:bg-surface-2 transition-colors" aria-label="View details">
                       <Eye className="w-3.5 h-3.5 text-muted-foreground" />
                     </button>
                   </td>

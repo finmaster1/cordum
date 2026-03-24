@@ -133,12 +133,12 @@ describe("usePolicies hooks", () => {
     await hook.waitFor(() => {
       expect(hook.result.current?.isSuccess).toBe(true);
     });
-    expect(hook.result.current?.data?.items[0]).toMatchObject({
+    expect(hook.result.current?.data?.items![0]).toMatchObject({
       id: "secops/default",
       version: 2,
       enabled: true,
     });
-    expect(hook.result.current?.data?.items[0].rules).toHaveLength(1);
+    expect(hook.result.current?.data?.items![0].rules).toHaveLength(1);
     hook.unmount();
   });
 

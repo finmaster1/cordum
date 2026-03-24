@@ -13,6 +13,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Bell, Mail, MessageSquare, Webhook, Save, Plus, TestTube } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 interface Channel {
   id: string;
@@ -41,7 +42,7 @@ export default function SettingsNotificationsPage() {
     return init;
   });
 
-  const { data: channels, isLoading } = useQuery({
+  const { data: channels, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["notification-channels"],
     queryFn: async () => {
       const res = await get<{ data?: Channel[] }>("/notifications/channels");
@@ -66,13 +67,17 @@ export default function SettingsNotificationsPage() {
   const tabs = ["events", "channels"];
   const categories = [...new Set(EVENTS.map(e => e.category))];
 
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load notification settings"} onRetry={() => void refetch()} />;
+  }
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <PageHeader title="Notifications" subtitle="Configure alert channels and event preferences" />
 
       <div className="flex items-center gap-1 p-1 rounded-2xl bg-surface-1 w-fit">
         {tabs.map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
+          <button type="button" key={tab} onClick={() => setActiveTab(tab)}
             className={cn("px-4 py-1.5 text-xs font-medium rounded-2xl transition-colors capitalize",
               activeTab === tab ? "bg-cordum/10 text-cordum" : "text-muted-foreground hover:text-foreground")}>
             {tab}
@@ -95,7 +100,7 @@ export default function SettingsNotificationsPage() {
                       <p className="text-xs font-medium text-foreground">{event.label}</p>
                       <p className="text-[10px] font-mono text-muted-foreground">{event.key}</p>
                     </div>
-                    <button
+                    <button type="button"
                       onClick={() => setPreferences(prev => ({ ...prev, [event.key]: !prev[event.key] }))}
                       className={cn("w-9 h-5 rounded-full relative transition-colors",
                         preferences[event.key] ? "bg-cordum" : "bg-surface-2")}>

@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { useEventStore } from "@/state/events";
 import { useCancelJob, useRetryJob } from "@/hooks/useJobs";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 function jobStatusVariant(status: string) {
   switch (status) {
@@ -305,7 +306,7 @@ export default function JobDetailPage() {
   const cancelMut = useCancelJob();
   const retryMut = useRetryJob();
 
-  const { data: job, isLoading } = useQuery({
+  const { data: job, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["job", id],
     queryFn: async () => {
       const res = await get<BackendJobDetail>(`/jobs/${id}`);
@@ -325,6 +326,10 @@ export default function JobDetailPage() {
       toast.success("Job ID copied");
     }
   };
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load job details"} onRetry={() => void refetch()} />;
+  }
 
   if (isLoading) {
     return (
@@ -376,7 +381,7 @@ export default function JobDetailPage() {
             <StatusBadge variant={jobStatusVariant(job.status)} dot pulse={job.status === "running"}>
               {job.status}
             </StatusBadge>
-            <button onClick={copyId} className="p-2 rounded-full hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors" title="Copy Job ID">
+            <button type="button" onClick={copyId} className="p-2 rounded-full hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors" title="Copy Job ID">
               <Copy className="w-3.5 h-3.5" />
             </button>
             {job.status === "failed" && (
@@ -427,7 +432,7 @@ export default function JobDetailPage() {
       {/* Tabs — showcase style */}
       <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-2xl p-0.5 w-fit">
         {tabs.map((tab) => (
-          <button
+          <button type="button"
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(

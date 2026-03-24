@@ -12,6 +12,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Save, RotateCcw, AlertTriangle, Settings, Shield, Database, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 type ConfigValue = string | number | boolean;
 
@@ -67,7 +68,7 @@ export default function SettingsConfigPage() {
   const [originalValues, setOriginalValues] = useState<Record<string, ConfigValue>>({});
   const [activeGroup, setActiveGroup] = useState("general");
 
-  const { data: configData, isLoading } = useQuery({
+  const { data: configData, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["config"],
     queryFn: async () => {
       const res = await get<Record<string, unknown>>("/config");
@@ -104,6 +105,10 @@ export default function SettingsConfigPage() {
   };
 
   const currentGroup = GROUPS.find(g => g.id === activeGroup);
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load configuration"} onRetry={() => void refetch()} />;
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -143,7 +148,7 @@ export default function SettingsConfigPage() {
             {GROUPS.map(g => {
               const Icon = g.icon;
               return (
-                <button
+                <button type="button"
                   key={g.id}
                   onClick={() => setActiveGroup(g.id)}
                   className={cn(
@@ -198,7 +203,7 @@ export default function SettingsConfigPage() {
                         </select>
                       )}
                       {field.type === "toggle" && (
-                        <button
+                        <button type="button"
                           onClick={() => updateValue(field.key, !values[field.key])}
                           className={cn(
                             "w-9 h-5 rounded-full relative transition-colors",

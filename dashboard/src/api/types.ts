@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 export interface ApiResponse<T> {
-  items: T extends Array<infer _> ? T : T[];
+  items?: T extends Array<infer _> ? T : T[];
   next_cursor?: number | null;
 }
 

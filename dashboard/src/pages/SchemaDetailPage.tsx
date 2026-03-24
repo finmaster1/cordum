@@ -17,6 +17,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { ArrowLeft, FileJson, Copy, Clock, Hash, Edit, Plus, Trash2 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 const FIELD_TYPES = ["string", "number", "boolean", "array", "object", "integer"] as const;
 const SCHEMA_TYPES = ["input", "output", "config"] as const;
@@ -88,7 +89,7 @@ function SchemaCreateForm() {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate("/schemas")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
+        <button type="button" onClick={() => navigate("/schemas")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
           <ArrowLeft className="w-4 h-4 text-muted-foreground" />
         </button>
         <FileJson className="w-5 h-5 text-cordum" />
@@ -169,7 +170,7 @@ export default function SchemaDetailPage() {
 
   const isCreateMode = id === "new";
 
-  const { data: schema, isLoading } = useQuery({
+  const { data: schema, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["schema", id],
     queryFn: async () => {
       const res = await get<{ data?: { id: string; name: string; type: string; versions: SchemaVersion[]; currentVersion: string } }>(`/schemas/${id}`);
@@ -183,6 +184,10 @@ export default function SchemaDetailPage() {
 
   if (isCreateMode) {
     return <SchemaCreateForm />;
+  }
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load schema"} onRetry={() => void refetch()} />;
   }
 
   if (isLoading) {
@@ -202,7 +207,7 @@ export default function SchemaDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/schemas")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
+          <button type="button" onClick={() => navigate("/schemas")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
             <ArrowLeft className="w-4 h-4 text-muted-foreground" />
           </button>
           <FileJson className="w-5 h-5 text-cordum" />
@@ -222,7 +227,7 @@ export default function SchemaDetailPage() {
       {/* Tabs */}
       <div className="flex items-center gap-1 p-1 rounded-2xl bg-surface-1 w-fit">
         {tabs.map(tab => (
-          <button
+          <button type="button"
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
@@ -294,7 +299,7 @@ export default function SchemaDetailPage() {
         <div className="instrument-card p-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 bg-surface-0 border-b border-border">
             <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">JSON Schema</span>
-            <button
+            <button type="button"
               onClick={() => { navigator.clipboard.writeText(JSON.stringify(currentVersion, null, 2)); toast.success("Copied"); }}
               className="p-1 rounded hover:bg-surface-2 transition-colors"
             >

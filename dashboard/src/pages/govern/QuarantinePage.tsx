@@ -223,7 +223,7 @@ function QuarantineItemCard({
               </Button>
             </div>
           )}
-          <button className="p-1 rounded hover:bg-surface-2 transition-colors text-muted-foreground">
+          <button type="button" className="p-1 rounded hover:bg-surface-2 transition-colors text-muted-foreground">
             {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
         </div>
@@ -466,7 +466,7 @@ export default function QuarantinePage() {
                   { id: "low", label: "Low" },
                 ] as { id: SeverityFilter; label: string }[]
               ).map((tab) => (
-                <button
+                <button type="button"
                   key={tab.id}
                   onClick={() => setSeverityFilter(tab.id)}
                   className={cn(
@@ -481,7 +481,7 @@ export default function QuarantinePage() {
               ))}
             </div>
             {(search || severityFilter !== "all") && (
-              <button
+              <button type="button"
                 onClick={() => {
                   setSearch("");
                   setSeverityFilter("all");

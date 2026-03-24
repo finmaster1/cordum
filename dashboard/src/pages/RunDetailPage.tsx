@@ -294,7 +294,7 @@ export default function WorkflowRunDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-surface-0 shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(`/workflows/${workflowId}`)} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
+          <button type="button" onClick={() => navigate(`/workflows/${workflowId}`)} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
             <ArrowLeft className="w-4 h-4 text-muted-foreground" />
           </button>
           <div>
@@ -422,7 +422,7 @@ export default function WorkflowRunDetailPage() {
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Step Output</p>
                     {selectedStep.output && (
-                      <button
+                      <button type="button"
                         onClick={() => { if (selectedStep.output) { navigator.clipboard.writeText(selectedStep.output); toast.success("Copied"); } }}
                         className="p-1 rounded hover:bg-surface-2 transition-colors"
                       >

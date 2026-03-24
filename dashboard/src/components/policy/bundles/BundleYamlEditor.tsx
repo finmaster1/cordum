@@ -23,7 +23,7 @@ export function BundleYamlEditor({ yaml, editable, onChange }: BundleYamlEditorP
         <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
           bundle content
         </p>
-        <button
+        <button type="button"
           className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
           onClick={() => {
             navigator.clipboard.writeText(yaml);

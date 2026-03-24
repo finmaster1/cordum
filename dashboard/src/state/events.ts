@@ -4,7 +4,7 @@ import type { StreamEvent } from "../api/types";
 
 export type LiveEvent = StreamEvent;
 
-export type WsStatus = "connected" | "connecting" | "disconnected" | "reconnecting";
+export type WsStatus = "connected" | "connecting" | "disconnected" | "reconnecting" | "degraded";
 
 // ---------------------------------------------------------------------------
 // Safety decision events (pushed from WebSocket)

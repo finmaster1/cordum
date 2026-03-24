@@ -231,7 +231,7 @@ export default function LoginPage() {
         <div className="surface-card space-y-5 rounded-3xl border border-border bg-[color:var(--surface-glass)] p-6 shadow-glow backdrop-blur-xl">
           {/* Auth Mode Selector */}
           <div className="relative">
-            <button
+            <button type="button"
               onClick={() => setShowModeSelector(!showModeSelector)}
               className="w-full flex items-center justify-between h-9 px-3 text-sm bg-surface-0 border border-border rounded-2xl text-foreground hover:bg-surface-1 transition-colors"
             >
@@ -251,7 +251,7 @@ export default function LoginPage() {
                   className="absolute top-full left-0 right-0 mt-1 bg-surface-1 border border-border rounded-2xl shadow-xl z-20 overflow-hidden"
                 >
                   {authModes.map((mode) => (
-                    <button
+                    <button type="button"
                       key={mode.id}
                       onClick={() => { setAuthMode(mode.id); setShowModeSelector(false); }}
                       className={cn(

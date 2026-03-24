@@ -16,6 +16,7 @@ import { DialogOverlay } from "@/components/ui/DialogOverlay";
 import { Key, Plus, Copy, Trash2, X } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 interface ApiKey {
   id: string;
@@ -84,7 +85,7 @@ export default function SettingsKeysPage() {
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null);
 
-  const { data: keys, isLoading } = useQuery({
+  const { data: keys, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["api-keys"],
     queryFn: async () => {
       const res = await get<{ data?: ApiKey[] }>("/auth/keys");
@@ -105,6 +106,10 @@ export default function SettingsKeysPage() {
   });
 
   const SCOPES = ["read", "write", "admin"];
+
+  if (isError) {
+    return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load API keys"} onRetry={() => void refetch()} />;
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -142,7 +147,7 @@ export default function SettingsKeysPage() {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{key.lastUsed ? formatRelativeTime(key.lastUsed) : "Never"}</td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => setDeleteTarget(key)} className="p-1.5 rounded hover:bg-destructive/10 transition-colors">
+                    <button type="button" onClick={() => setDeleteTarget(key)} className="p-1.5 rounded hover:bg-destructive/10 transition-colors">
                       <Trash2 className="w-3.5 h-3.5 text-destructive" />
                     </button>
                   </td>
@@ -158,7 +163,7 @@ export default function SettingsKeysPage() {
       <DialogOverlay open={createOpen} onClose={() => setCreateOpen(false)} label={createdKey ? "Key Created" : "Create API key"} className="w-[420px] bg-surface-1 border border-border rounded-xl shadow-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-display font-semibold text-foreground">{createdKey ? "Key Created" : "Create API Key"}</h3>
-          <button onClick={() => setCreateOpen(false)} className="p-1 rounded hover:bg-surface-2"><X className="w-4 h-4 text-muted-foreground" /></button>
+          <button type="button" onClick={() => setCreateOpen(false)} className="p-1 rounded hover:bg-surface-2"><X className="w-4 h-4 text-muted-foreground" /></button>
         </div>
         {createdKey ? (
           <div className="space-y-4">
@@ -166,7 +171,7 @@ export default function SettingsKeysPage() {
               <p className="text-xs text-[var(--color-warning)] mb-2">Copy this key now — it won't be shown again.</p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-xs font-mono text-foreground bg-surface-2 px-3 py-2 rounded">{createdKey}</code>
-                <button onClick={() => { navigator.clipboard.writeText(createdKey); toast.success("Copied"); }} className="p-2 rounded hover:bg-surface-2">
+                <button type="button" onClick={() => { navigator.clipboard.writeText(createdKey); toast.success("Copied"); }} className="p-2 rounded hover:bg-surface-2">
                   <Copy className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
               </div>
@@ -184,7 +189,7 @@ export default function SettingsKeysPage() {
               <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">Scopes</label>
               <div className="flex gap-2">
                 {SCOPES.map(s => (
-                  <button key={s} onClick={() => setNewKeyScopes(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}
+                  <button type="button" key={s} onClick={() => setNewKeyScopes(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}
                     className={cn("px-3 py-1.5 text-xs rounded-2xl border transition-colors capitalize",
                       newKeyScopes.includes(s) ? "bg-cordum/10 border-cordum/30 text-cordum" : "border-border text-muted-foreground hover:text-foreground")}>
                     {s}

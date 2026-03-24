@@ -67,7 +67,7 @@ function DAGLegend({ onClose }: { onClose: () => void }) {
     <div className="w-56 space-y-2.5 rounded-2xl border border-border bg-[color:var(--surface-glass)] p-3 text-xs shadow-soft backdrop-blur-md">
       <div className="flex items-center justify-between">
         <span className="font-semibold text-ink">Legend</span>
-        <button onClick={onClose} className="p-0.5 text-muted-foreground hover:text-ink">
+        <button type="button" onClick={onClose} className="p-0.5 text-muted-foreground hover:text-ink">
           <X className="h-3 w-3" />
         </button>
       </div>
@@ -200,14 +200,14 @@ export function RunDAG({ workflow, run, onNodeClick, className }: RunDAGProps) {
           className="!bg-surface-1 !border-border"
         />
         <Panel position="top-right" className="flex gap-1">
-          <button
+          <button type="button"
             onClick={() => setShowLegend((v) => !v)}
             className="rounded-full border border-border bg-surface-1 p-1.5 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-ink"
             title="Legend"
           >
             <Info className="h-4 w-4" />
           </button>
-          <button
+          <button type="button"
             onClick={() => setFullscreen((v) => !v)}
             className="rounded-full border border-border bg-surface-1 p-1.5 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-ink"
             title={fullscreen ? "Exit fullscreen" : "Fullscreen"}

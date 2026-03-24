@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Server } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "../ui/Card";
+import { CardSkeleton } from "../ui/CardSkeleton";
 import { ProgressBar } from "../ProgressBar";
 import { useWorkers } from "../../hooks/useWorkers";
 import { cn } from "../../lib/utils";
@@ -129,13 +130,7 @@ export function PoolUtilizationGrid() {
         <h2 className="font-display text-lg font-semibold text-ink">Pool Utilization</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <div className="space-y-3">
-                <div className="h-4 w-1/2 rounded bg-surface2" />
-                <div className="h-2 w-full rounded bg-surface2" />
-                <div className="h-3 w-2/3 rounded bg-surface2" />
-              </div>
-            </Card>
+            <CardSkeleton key={i} rows={3} />
           ))}
         </div>
       </div>

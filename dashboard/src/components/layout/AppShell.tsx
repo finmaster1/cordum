@@ -191,7 +191,7 @@ export function AppShell({ children }: AppShellProps) {
       <KeyboardShortcutsDialog />
 
       {/* Mobile hamburger */}
-      <button
+      <button type="button"
         onClick={() => setMobileOpen(true)}
         className="md:hidden fixed top-3 left-3 z-50 p-2 rounded-md bg-surface-1 border border-border text-muted-foreground hover:text-foreground transition-colors"
         aria-label="Open navigation"
@@ -231,7 +231,7 @@ export function AppShell({ children }: AppShellProps) {
                     <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Control Plane</span>
                   </div>
                 </div>
-                <button
+                <button type="button"
                   onClick={() => setMobileOpen(false)}
                   className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                   aria-label="Close navigation"
@@ -291,7 +291,7 @@ export function AppShell({ children }: AppShellProps) {
                   <Settings className="w-4 h-4 shrink-0" />
                   <span>Settings</span>
                 </NavLink>
-                <button
+                <button type="button"
                   onClick={toggleTheme}
                   className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                 >
@@ -425,7 +425,7 @@ export function AppShell({ children }: AppShellProps) {
             <ExternalLink className="w-4 h-4 shrink-0" />
             {!collapsed && <span>Docs</span>}
           </a>
-          <button
+          <button type="button"
             onClick={toggleTheme}
             className={cn(
               "flex items-center gap-3 w-full px-3 py-2 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors",
@@ -457,7 +457,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
 
         {/* Collapse toggle */}
-        <button
+        <button type="button"
           onClick={() => setCollapsed(!collapsed)}
           className="absolute -right-3 top-20 w-6 h-6 rounded-full bg-surface-2 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -480,7 +480,7 @@ export function AppShell({ children }: AppShellProps) {
         {/* Top bar */}
         <header className="sticky top-0 z-40 flex items-center justify-between h-12 px-6 border-b border-border bg-background/80 backdrop-blur-xl shrink-0">
           <div className="flex items-center gap-4">
-            <button
+            <button type="button"
               onClick={() => {
                 window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
               }}
@@ -498,7 +498,7 @@ export function AppShell({ children }: AppShellProps) {
 
             {/* Pending approvals badge in top bar */}
             {pendingApprovals > 0 && (
-              <button
+              <button type="button"
                 onClick={() => navigate("/approvals")}
                 className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-status-warning/10 border border-status-warning/20 text-status-warning text-xs font-medium hover:bg-status-warning/20 transition-colors"
               >
@@ -518,7 +518,7 @@ export function AppShell({ children }: AppShellProps) {
                     {(user.display_name || user.username || "U").charAt(0).toUpperCase()}
                   </span>
                 </div>
-                <button
+                <button type="button"
                   onClick={logout}
                   className="p-1 rounded-md text-muted-foreground hover:text-destructive transition-colors"
                   title="Logout"

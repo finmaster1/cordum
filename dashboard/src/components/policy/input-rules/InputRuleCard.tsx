@@ -100,7 +100,7 @@ export function InputRuleCard({
         <div className="flex items-center gap-1">
           {canEdit && (
             <>
-              <button
+              <button type="button"
                 aria-label={`Move ${rule.id} up`}
                 className="rounded p-1 text-muted-foreground hover:bg-surface-2 disabled:opacity-40"
                 disabled={index === 0}
@@ -108,7 +108,7 @@ export function InputRuleCard({
               >
                 <ArrowUp className="h-3.5 w-3.5" />
               </button>
-              <button
+              <button type="button"
                 aria-label={`Move ${rule.id} down`}
                 className="rounded p-1 text-muted-foreground hover:bg-surface-2 disabled:opacity-40"
                 disabled={index === total - 1}
@@ -116,7 +116,7 @@ export function InputRuleCard({
               >
                 <ArrowDown className="h-3.5 w-3.5" />
               </button>
-              <button
+              <button type="button"
                 aria-label={`Edit ${rule.id}`}
                 className="rounded p-1 text-muted-foreground hover:bg-surface-2"
                 onClick={onEdit}
@@ -126,7 +126,7 @@ export function InputRuleCard({
             </>
           )}
           {!canEdit && (
-            <button
+            <button type="button"
               aria-label={`View ${rule.id}`}
               className="rounded p-1 text-muted-foreground hover:bg-surface-2"
               onClick={onView}
@@ -135,7 +135,7 @@ export function InputRuleCard({
             </button>
           )}
           {canEdit && (
-            <button
+            <button type="button"
               aria-label={`Delete ${rule.id}`}
               className="rounded p-1 text-destructive hover:bg-destructive/10"
               onClick={onDelete}

@@ -48,7 +48,7 @@ export function GlobalYamlPane({
         </p>
         <div className="flex items-center gap-1">
           {activeRuleId && activeLine && (
-            <button
+            <button type="button"
               className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
               onClick={jumpToActiveRule}
             >
@@ -56,7 +56,7 @@ export function GlobalYamlPane({
               {activeRuleId} @ line {activeLine}
             </button>
           )}
-          <button
+          <button type="button"
             className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
             onClick={() => {
               navigator.clipboard.writeText(yaml);

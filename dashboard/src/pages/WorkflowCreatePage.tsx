@@ -247,7 +247,7 @@ export default function WorkflowBuilderPage() {
       {/* Top Bar */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-surface-0 shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/workflows")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
+          <button type="button" onClick={() => navigate("/workflows")} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
             <ArrowLeft className="w-4 h-4 text-muted-foreground" />
           </button>
           <input
@@ -292,7 +292,7 @@ export default function WorkflowBuilderPage() {
               {NODE_TYPES.map((nt) => {
                 const Icon = nt.icon;
                 return (
-                  <button
+                  <button type="button"
                     key={nt.type}
                     onClick={() => addNode(nt.type)}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl hover:bg-surface-1 transition-colors text-left group"
@@ -314,7 +314,7 @@ export default function WorkflowBuilderPage() {
             <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-3">Packs</p>
             <div className="space-y-1">
               {["slack.send", "github.create-pr", "jira.create-issue", "email.send"].map((pack) => (
-                <button
+                <button type="button"
                   key={pack}
                   onClick={() => {
                     addNode("worker");
@@ -404,7 +404,7 @@ export default function WorkflowBuilderPage() {
                       <span className="text-[9px] font-mono text-[var(--color-warning)]">human-gate</span>
                     </div>
                   )}
-                  <button
+                  <button type="button"
                     onClick={(e) => startConnect(node.id, e)}
                     className="mt-1.5 w-full text-[9px] font-mono text-muted-foreground hover:text-cordum bg-surface-2 rounded px-2 py-0.5 transition-colors"
                   >
@@ -429,7 +429,7 @@ export default function WorkflowBuilderPage() {
                 <nodeTypeInfo.icon className={cn("w-4 h-4", nodeTypeInfo.color.split(" ")[0])} />
                 <span className="text-sm font-display font-semibold text-foreground">{nodeTypeInfo.label} Config</span>
               </div>
-              <button onClick={() => setSelectedNode(null)} className="p-1 rounded hover:bg-surface-2 transition-colors">
+              <button type="button" onClick={() => setSelectedNode(null)} className="p-1 rounded hover:bg-surface-2 transition-colors">
                 <X className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
             </div>

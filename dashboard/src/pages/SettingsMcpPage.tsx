@@ -111,7 +111,7 @@ export default function SettingsMcpPage() {
 
           {/* Tabs */}
           <div className="flex items-center gap-4 border-b border-border">
-            <button
+            <button type="button"
               onClick={() => setTab("servers")}
               className={cn(
                 "pb-2 text-sm font-medium border-b-2 transition-colors",
@@ -121,7 +121,7 @@ export default function SettingsMcpPage() {
               <Plug className="w-3.5 h-3.5 inline mr-1.5" />
               Servers (1)
             </button>
-            <button
+            <button type="button"
               onClick={() => setTab("analytics")}
               className={cn(
                 "pb-2 text-sm font-medium border-b-2 transition-colors",

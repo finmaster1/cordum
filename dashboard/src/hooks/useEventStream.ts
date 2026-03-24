@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfigStore } from "../state/config";
 import { useEventStore } from "../state/events";
+import { useToastStore } from "../state/toast";
 import type { StreamEvent } from "../api/types";
+import { API_PATHS } from "../lib/constants";
 import { normalizeDecisionType } from "../api/transform";
 import { logger } from "../lib/logger";
 
@@ -13,6 +15,7 @@ import { logger } from "../lib/logger";
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 const BACKOFF_FACTOR = 2;
+const PARSE_FAILURE_THRESHOLD = 5;
 
 // ---------------------------------------------------------------------------
 // Derive WebSocket URL from API base URL or current origin
@@ -22,7 +25,7 @@ function wsUrl(apiBaseUrl?: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const override = import.meta.env.VITE_WS_URL;
   if (override) {
-    return `${override.replace(/\/+$/, "")}/api/v1/stream`;
+    return `${override.replace(/\/+$/, "")}${API_PATHS.stream}`;
   }
   const base = (apiBaseUrl || import.meta.env.VITE_API_URL || "/api/v1").trim();
   const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
@@ -205,6 +208,7 @@ export function useEventStream(): void {
   const backoffRef = useRef(MIN_BACKOFF_MS);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmountedRef = useRef(false);
+  const parseFailuresRef = useRef(0);
 
   useEffect(() => {
     unmountedRef.current = false;
@@ -243,9 +247,26 @@ export function useEventStream(): void {
         try {
           packet = JSON.parse(msg.data as string) as BusPacket;
         } catch {
-          logger.warn("ws", "Non-JSON frame dropped", { length: (msg.data as string).length });
+          parseFailuresRef.current++;
+          logger.warn("ws", "Non-JSON frame dropped", {
+            length: (msg.data as string).length,
+            consecutiveFailures: parseFailuresRef.current,
+          });
+          if (parseFailuresRef.current >= PARSE_FAILURE_THRESHOLD) {
+            setStatus("degraded");
+            useToastStore.getState().addToast({
+              type: "error",
+              title: "Event stream degraded",
+              description: "Receiving invalid data — reconnecting...",
+              duration: 8000,
+            });
+            parseFailuresRef.current = 0;
+            ws.close();
+          }
           return;
         }
+        // Reset consecutive failure counter on successful parse.
+        parseFailuresRef.current = 0;
         const event = busPacketToEvent(packet);
         if (!event) {
           logger.debug("ws", "Unrecognized packet dropped");

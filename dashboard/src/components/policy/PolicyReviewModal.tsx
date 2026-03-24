@@ -167,7 +167,7 @@ export function PolicyReviewModal({ bundle, onClose, onApproved }: PolicyReviewM
               {changedCount > 0 && <> &middot; {changedCount} change{changedCount !== 1 ? "s" : ""}</>}
             </p>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1 text-muted-foreground hover:bg-surface2 hover:text-ink transition-colors">
+          <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted-foreground hover:bg-surface2 hover:text-ink transition-colors">
             <X className="h-4 w-4" />
           </button>
         </div>

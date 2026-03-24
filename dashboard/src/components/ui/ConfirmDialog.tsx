@@ -98,7 +98,7 @@ export function ConfirmDialog({
                   <h3 id="confirm-dialog-title" className="text-sm font-display font-semibold text-foreground">{title}</h3>
                   <div id="confirm-dialog-desc" className="text-xs text-muted-foreground mt-1 leading-relaxed">{resolvedDescription}</div>
                 </div>
-                <button
+                <button type="button"
                   onClick={handleClose}
                   className="shrink-0 p-1 rounded-md hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -124,14 +124,14 @@ export function ConfirmDialog({
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-surface-0/50">
-                <button
+                <button type="button"
                   onClick={handleClose}
                   disabled={resolvedLoading}
                   className="h-8 px-4 text-xs font-medium rounded-full border border-border text-foreground hover:bg-surface-2 transition-colors disabled:opacity-50"
                 >
                   {cancelLabel}
                 </button>
-                <button
+                <button type="button"
                   onClick={handleConfirm}
                   disabled={!canConfirm || resolvedLoading}
                   className={`h-8 px-4 text-xs font-medium rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${

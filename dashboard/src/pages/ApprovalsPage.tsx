@@ -174,7 +174,7 @@ export default function ApprovalsPage() {
             { id: "denied", label: "Denied", count: denied.length },
             { id: "all", label: "All", count: all.length },
           ].map((tab) => (
-            <button
+            <button type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
@@ -325,7 +325,7 @@ export default function ApprovalsPage() {
                 <h2 id="approval-drawer-title" className="font-display font-semibold text-sm text-foreground">Approval Detail</h2>
                 <p className="text-xs text-muted-foreground font-mono mt-0.5">{selectedApproval.id}</p>
               </div>
-              <button
+              <button type="button"
                 onClick={() => setSelectedApproval(null)}
                 className="p-1.5 rounded-full hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors"
               >

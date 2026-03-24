@@ -64,7 +64,7 @@ export function KeyboardShortcutsDialog() {
                   <Command className="w-4 h-4 text-cordum" />
                   Keyboard Shortcuts
                 </h3>
-                <button
+                <button type="button"
                   onClick={() => setOpen(false)}
                   className="p-1 rounded-md hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors"
                 >
