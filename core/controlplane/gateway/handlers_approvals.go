@@ -22,17 +22,11 @@ import (
 )
 
 func (s *server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
-	if s.workflowEng == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow engine unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowEng) {
 		return
 	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	runID := r.PathValue("run_id")
-	if runID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing run_id")
+	runID, ok := requirePathParam(w, r, "run_id")
+	if !ok {
 		return
 	}
 	if s.workflowStore != nil {
@@ -79,12 +73,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
-	if s.jobStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "job store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.jobStore) {
 		return
 	}
 	limit, cursor := parsePagination(r, 100)
@@ -288,12 +277,7 @@ func (s *server) withApprovalLock(ctx context.Context, jobID string, fn func(ctx
 }
 
 func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
-	if s.jobStore == nil || s.bus == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "job store or bus unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.jobStore, s.bus) {
 		return
 	}
 	var body struct {
@@ -306,9 +290,8 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	jobID := r.PathValue("job_id")
-	if jobID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing job_id")
+	jobID, ok := requirePathParam(w, r, "job_id")
+	if !ok {
 		return
 	}
 
@@ -561,12 +544,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
-	if s.jobStore == nil || s.bus == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "job store or bus unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.jobStore, s.bus) {
 		return
 	}
 	var body struct {
@@ -579,9 +557,8 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	jobID := r.PathValue("job_id")
-	if jobID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing job_id")
+	jobID, ok := requirePathParam(w, r, "job_id")
+	if !ok {
 		return
 	}
 

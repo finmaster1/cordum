@@ -15,12 +15,7 @@ import (
 
 // DLQ handlers
 func (s *server) handleListDLQ(w http.ResponseWriter, r *http.Request) {
-	if s.dlqStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "dlq store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.dlqStore) {
 		return
 	}
 	limit, _ := parsePagination(r, 100)
@@ -46,12 +41,7 @@ func (s *server) handleListDLQ(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListDLQPage(w http.ResponseWriter, r *http.Request) {
-	if s.dlqStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "dlq store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.dlqStore) {
 		return
 	}
 	limit := int64(100)
@@ -102,17 +92,11 @@ func (s *server) handleListDLQPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDeleteDLQ(w http.ResponseWriter, r *http.Request) {
-	if s.dlqStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "dlq store unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.dlqStore) {
 		return
 	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	jobID := r.PathValue("job_id")
-	if jobID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing job_id")
+	jobID, ok := requirePathParam(w, r, "job_id")
+	if !ok {
 		return
 	}
 	if s.jobStore != nil {
@@ -142,9 +126,8 @@ func (s *server) handleRetryDLQ(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, r, err)
 		return
 	}
-	jobID := r.PathValue("job_id")
-	if jobID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing job_id")
+	jobID, ok := requirePathParam(w, r, "job_id")
+	if !ok {
 		return
 	}
 	if !s.requireJobTenantAccess(w, r, jobID) {

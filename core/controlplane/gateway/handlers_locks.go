@@ -92,12 +92,7 @@ func validateLockRequest(req lockRequest) error {
 }
 
 func (s *server) handleAcquireLock(w http.ResponseWriter, r *http.Request) {
-	if s.lockStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "lock store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.lockStore) {
 		return
 	}
 	tenantID, err := s.resolveTenant(r, "")
@@ -131,12 +126,7 @@ func (s *server) handleAcquireLock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleReleaseLock(w http.ResponseWriter, r *http.Request) {
-	if s.lockStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "lock store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.lockStore) {
 		return
 	}
 	tenantID, err := s.resolveTenant(r, "")
@@ -171,12 +161,7 @@ func (s *server) handleReleaseLock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRenewLock(w http.ResponseWriter, r *http.Request) {
-	if s.lockStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "lock store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.lockStore) {
 		return
 	}
 	tenantID, err := s.resolveTenant(r, "")

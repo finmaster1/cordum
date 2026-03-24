@@ -371,9 +371,8 @@ func (s *server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetJob(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	id, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 
@@ -603,9 +602,8 @@ func (s *server) handleListJobDecisions(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, http.StatusServiceUnavailable, "job store unavailable")
 		return
 	}
-	id := r.PathValue("id")
-	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	id, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 	if !s.requireJobTenantAccess(w, r, id) {
@@ -623,12 +621,7 @@ func (s *server) handleListJobDecisions(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *server) handleGetMemory(w http.ResponseWriter, r *http.Request) {
-	if s.memStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "memory store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.memStore) {
 		return
 	}
 
@@ -1020,9 +1013,8 @@ func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, r, err)
 		return
 	}
-	id := r.PathValue("id")
-	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	id, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 	if !s.requireJobTenantAccess(w, r, id) {
@@ -1112,9 +1104,8 @@ func (s *server) handleRemediateJob(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, r, err)
 		return
 	}
-	jobID := r.PathValue("id")
-	if jobID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	jobID, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 	var body remediateJobRequest

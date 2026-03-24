@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -912,23 +913,33 @@ func parsePagination(r *http.Request, defaultLimit int64) (limit, cursor int64) 
 // ---------- Handler guard helpers ----------
 
 // requireStoreAndRole checks that all provided stores are non-nil and the
-// caller has the required role. Returns false (and writes the error response)
-// if any check fails; the caller should return immediately.
-// Pass role="" to skip the role check (public endpoints).
-func (s *server) requireStoreAndRole(w http.ResponseWriter, r *http.Request, role string, stores ...any) bool {
+// caller has one of the required roles. Returns false (and writes the error
+// response) if any check fails; the caller should return immediately.
+// Pass no roles to skip the role check (public endpoints).
+func (s *server) requireStoreAndRole(w http.ResponseWriter, r *http.Request, roles []string, stores ...any) bool {
 	for _, store := range stores {
-		if store == nil {
+		if isNilStore(store) {
 			writeErrorJSON(w, http.StatusServiceUnavailable, "service unavailable")
 			return false
 		}
 	}
-	if role != "" {
-		if err := s.requireRole(r, role); err != nil {
+	if len(roles) > 0 {
+		if err := s.requireRole(r, roles...); err != nil {
 			writeForbidden(w, r, err)
 			return false
 		}
 	}
 	return true
+}
+
+// isNilStore checks if a value is nil, handling the Go nil-interface trap
+// where a typed nil pointer wrapped in any is != nil at the interface level.
+func isNilStore(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Ptr && rv.IsNil()
 }
 
 // requireJobTenantAccess verifies the caller has access to the tenant that

@@ -19,12 +19,7 @@ import (
 // Config handlers
 
 func (s *server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
-	if s.configSvc == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "config service unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.configSvc) {
 		return
 	}
 
@@ -101,8 +96,7 @@ func (s *server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	if s.configSvc == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "config service unavailable")
+	if !s.requireStoreAndRole(w, r, nil, s.configSvc) {
 		return
 	}
 	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
@@ -173,12 +167,7 @@ func (s *server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetEffectiveConfig(w http.ResponseWriter, r *http.Request) {
-	if err := s.requireRole(r, "admin", "operator"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	if s.configSvc == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "config service unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin", "operator"}, s.configSvc) {
 		return
 	}
 	orgID, err := s.resolveTenant(r, r.URL.Query().Get("org_id"))
@@ -244,12 +233,7 @@ type schemaRegisterRequest struct {
 }
 
 func (s *server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
-	if s.schemaRegistry == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "schema registry unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.schemaRegistry) {
 		return
 	}
 	var req schemaRegisterRequest
@@ -271,12 +255,7 @@ func (s *server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleListSchemas(w http.ResponseWriter, r *http.Request) {
-	if err := s.requireRole(r, "admin", "operator", "viewer"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	if s.schemaRegistry == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "schema registry unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin", "operator", "viewer"}, s.schemaRegistry) {
 		return
 	}
 	limit, _ := parsePagination(r, 100)
@@ -291,12 +270,7 @@ func (s *server) handleListSchemas(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
-	if err := s.requireRole(r, "admin", "operator", "viewer"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	if s.schemaRegistry == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "schema registry unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin", "operator", "viewer"}, s.schemaRegistry) {
 		return
 	}
 	id := r.PathValue("id")
@@ -324,12 +298,7 @@ func (s *server) handleGetSchema(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDeleteSchema(w http.ResponseWriter, r *http.Request) {
-	if s.schemaRegistry == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "schema registry unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.schemaRegistry) {
 		return
 	}
 	id := r.PathValue("id")

@@ -124,12 +124,7 @@ type createWorkflowRequest struct {
 }
 
 func (s *server) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
-	if s.workflowStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowStore) {
 		return
 	}
 	var req createWorkflowRequest
@@ -243,9 +238,8 @@ func (s *server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow store unavailable")
 		return
 	}
-	id := r.PathValue("id")
-	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	id, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 	wfDef, err := s.workflowStore.GetWorkflow(r.Context(), id)
@@ -262,17 +256,11 @@ func (s *server) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
-	if s.workflowStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow store unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowStore) {
 		return
 	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	id := r.PathValue("id")
-	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	id, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 	delWfName := ""
@@ -317,12 +305,7 @@ func (s *server) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
-	if s.workflowStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow store unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowStore) {
 		return
 	}
 	wfID := r.PathValue("id")
@@ -557,12 +540,7 @@ type rerunRequest struct {
 }
 
 func (s *server) handleRerunRun(w http.ResponseWriter, r *http.Request) {
-	if s.workflowEng == nil || s.workflowStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow engine unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowEng, s.workflowStore) {
 		return
 	}
 	runID := r.PathValue("id")
@@ -861,17 +839,11 @@ func (s *server) handleGetRunTimeline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
-	if s.workflowStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow store unavailable")
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowStore) {
 		return
 	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
-		return
-	}
-	id := r.PathValue("id")
-	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "missing id")
+	id, ok := requirePathParam(w, r, "id")
+	if !ok {
 		return
 	}
 	delRunWfName := ""
@@ -958,12 +930,7 @@ func (s *server) handleWorkflowDryRun(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "workflow store unavailable")
 		return
 	}
-	if s.safetyClient == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "safety kernel unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.safetyClient) {
 		return
 	}
 	id := r.PathValue("id")

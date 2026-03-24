@@ -952,12 +952,7 @@ func managedKeyToResponse(mk *ManagedKey) apiKeyResponse {
 
 // handleListKeys handles GET /api/v1/auth/keys.
 func (s *server) handleListKeys(w http.ResponseWriter, r *http.Request) {
-	if s.keyStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "key management unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.keyStore) {
 		return
 	}
 
@@ -984,12 +979,7 @@ func (s *server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateKey handles POST /api/v1/auth/keys.
 func (s *server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
-	if s.keyStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "key management unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.keyStore) {
 		return
 	}
 
@@ -1070,12 +1060,7 @@ func (s *server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 
 // handleRevokeKey handles DELETE /api/v1/auth/keys/{id}.
 func (s *server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
-	if s.keyStore == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "key management unavailable")
-		return
-	}
-	if err := s.requireRole(r, "admin"); err != nil {
-		writeForbidden(w, r, err)
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.keyStore) {
 		return
 	}
 
