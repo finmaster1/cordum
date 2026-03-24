@@ -481,7 +481,7 @@ func (e *Engine) cancelForEachSiblings(ctx context.Context, run *WorkflowRun, pa
 // Copies error context from stepRun.Error into the handler's Input["error"].
 // No-op if the step has no OnError defined or the handler is already terminal.
 func (e *Engine) activateOnErrorHandler(ctx context.Context, run *WorkflowRun, wfDef *Workflow, stepID string, stepRun *StepRun, now time.Time) {
-	if wfDef == nil || stepRun == nil {
+	if run == nil || wfDef == nil || stepRun == nil {
 		return
 	}
 	stepDef := wfDef.Steps[stepID]
@@ -699,7 +699,10 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 						parentSR.Attempts = 0
 						parentSR.StartedAt = nil
 						run.Steps[stepID] = parentSR
-						_ = e.store.UpdateRun(ctx, run)
+						if updateErr := e.store.UpdateRun(ctx, run); updateErr != nil {
+							slog.Error("workflow: failed to persist approval gate revert",
+								"run_id", run.ID, "step_id", stepID, "error", updateErr)
+						}
 					} else {
 						e.appendTimeline(ctx, run, "step_waiting", stepID, jobID, string(parentSR.Status), "", "approval requested", nil)
 						if e.OnStepDispatched != nil {
@@ -1994,7 +1997,10 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 							continue
 						}
 						val := inputMap["value"]
-						_ = setContextPath(run.Context, key, val)
+						if pathErr := setContextPath(run.Context, key, val); pathErr != nil {
+							slog.Warn("workflow: setContextPath failed for storage write",
+								"run_id", run.ID, "key", key, "error", pathErr)
+						}
 						output = map[string]any{"operation": "write", "key": key, "value": val}
 
 					case "delete":
@@ -2142,7 +2148,10 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 				parentSR.JobID = ""
 				parentSR.StartedAt = nil
 				run.Steps[stepID] = parentSR
-				_ = e.store.UpdateRun(ctx, run)
+				if updateErr := e.store.UpdateRun(ctx, run); updateErr != nil {
+					slog.Error("workflow: failed to persist dispatch revert",
+						"run_id", run.ID, "step_id", stepID, "error", updateErr)
+				}
 			} else {
 				var data map[string]any
 				if req.ContextPtr != "" {

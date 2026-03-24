@@ -639,3 +639,34 @@ func BenchmarkCheckOutputFastPath(b *testing.B) {
 		}
 	}
 }
+
+func TestContentForScanNilResultClient(t *testing.T) {
+	// Server with nil resultClient — simulates deployment without Redis result store.
+	srv := &server{
+		resultClient: nil,
+	}
+
+	// Request with a result pointer but no inline content.
+	req := &pb.OutputCheckRequest{
+		ResultPtr:    "redis://result:job-123",
+		ErrorMessage: "fallback error msg",
+	}
+
+	content, truncated := srv.contentForScan(context.Background(), req)
+	if truncated {
+		t.Fatal("expected no truncation for short error message")
+	}
+	// Should fall back to error message when resultClient is nil.
+	if string(content) != "fallback error msg" {
+		t.Fatalf("expected fallback to error message, got %q", string(content))
+	}
+
+	// Request with neither content nor error message.
+	req2 := &pb.OutputCheckRequest{
+		ResultPtr: "redis://result:job-456",
+	}
+	content2, _ := srv.contentForScan(context.Background(), req2)
+	if content2 != nil {
+		t.Fatalf("expected nil content when no fallback available, got %q", string(content2))
+	}
+}

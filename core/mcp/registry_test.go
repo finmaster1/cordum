@@ -138,6 +138,149 @@ func TestResourceDisabledByConfig(t *testing.T) {
 	}
 }
 
+func TestToolCallInvalidParams(t *testing.T) {
+	t.Parallel()
+	registry := NewToolRegistry()
+	if err := registry.Register(
+		Tool{
+			Name:        "test.validate",
+			Description: "tool with required params",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"required":   []any{"name"},
+				"properties": map[string]any{"name": map[string]any{"type": "string"}},
+			},
+		},
+		func(_ context.Context, params json.RawMessage) (*ToolCallResult, error) {
+			return &ToolCallResult{Content: []ContentItem{{Type: "text", Text: "ok"}}}, nil
+		},
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Missing required field "name" — should fail validation.
+	_, err := registry.Call(context.Background(), "test.validate", json.RawMessage(`{"other":"value"}`))
+	if err == nil {
+		t.Fatal("expected validation error for missing required field")
+	}
+	if !errors.Is(err, ErrInvalidParams) {
+		t.Fatalf("expected ErrInvalidParams, got: %v", err)
+	}
+}
+
+func TestToolCallValidParams(t *testing.T) {
+	t.Parallel()
+	registry := NewToolRegistry()
+	if err := registry.Register(
+		Tool{
+			Name:        "test.valid",
+			Description: "tool with schema",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"required":   []any{"name"},
+				"properties": map[string]any{"name": map[string]any{"type": "string"}},
+			},
+		},
+		func(_ context.Context, params json.RawMessage) (*ToolCallResult, error) {
+			return &ToolCallResult{Content: []ContentItem{{Type: "text", Text: "ok"}}}, nil
+		},
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	result, err := registry.Call(context.Background(), "test.valid", json.RawMessage(`{"name":"alice"}`))
+	if err != nil {
+		t.Fatalf("expected valid params to pass: %v", err)
+	}
+	if result.Content[0].Text != "ok" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestToolCallEmptyParams(t *testing.T) {
+	t.Parallel()
+	registry := NewToolRegistry()
+	if err := registry.Register(
+		Tool{
+			Name:        "test.empty",
+			Description: "tool with no required fields",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"name": map[string]any{"type": "string"}},
+			},
+		},
+		func(_ context.Context, params json.RawMessage) (*ToolCallResult, error) {
+			return &ToolCallResult{Content: []ContentItem{{Type: "text", Text: "ok"}}}, nil
+		},
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Empty params {} should pass when no required fields.
+	result, err := registry.Call(context.Background(), "test.empty", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("expected empty params to pass: %v", err)
+	}
+	if result.Content[0].Text != "ok" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestToolCallNullParams(t *testing.T) {
+	t.Parallel()
+	registry := NewToolRegistry()
+	if err := registry.Register(
+		Tool{
+			Name:        "test.null",
+			Description: "tool accepting null params",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"name": map[string]any{"type": "string"}},
+			},
+		},
+		func(_ context.Context, params json.RawMessage) (*ToolCallResult, error) {
+			return &ToolCallResult{Content: []ContentItem{{Type: "text", Text: "ok"}}}, nil
+		},
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// nil/empty params should be treated as empty map.
+	_, err := registry.Call(context.Background(), "test.null", nil)
+	if err != nil {
+		t.Fatalf("expected nil params to pass: %v", err)
+	}
+}
+
+func TestToolCallInvalidJSON(t *testing.T) {
+	t.Parallel()
+	registry := NewToolRegistry()
+	if err := registry.Register(
+		Tool{
+			Name:        "test.badjson",
+			Description: "tool for testing bad JSON",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"name": map[string]any{"type": "string"}},
+			},
+		},
+		func(_ context.Context, params json.RawMessage) (*ToolCallResult, error) {
+			return &ToolCallResult{Content: []ContentItem{{Type: "text", Text: "ok"}}}, nil
+		},
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Malformed JSON should return an error.
+	_, err := registry.Call(context.Background(), "test.badjson", json.RawMessage(`{invalid`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON params")
+	}
+	if !errors.Is(err, ErrInvalidParams) {
+		t.Fatalf("expected ErrInvalidParams, got: %v", err)
+	}
+}
+
 func TestURITemplateMatching(t *testing.T) {
 	t.Parallel()
 	registry := NewResourceRegistry()

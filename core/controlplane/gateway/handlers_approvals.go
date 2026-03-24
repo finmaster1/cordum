@@ -88,8 +88,11 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, cursor := parsePagination(r, 100)
+	// Overfetch slightly to account for items that will be filtered out
+	// by tenant access checks, so the client receives close to `limit` items.
+	fetchLimit := limit + 10
 	// Pending approvals (APPROVAL_REQUIRED state).
-	jobs, err := s.jobStore.ListJobsByState(r.Context(), model.JobStateApproval, cursor, limit)
+	jobs, err := s.jobStore.ListJobsByState(r.Context(), model.JobStateApproval, cursor, fetchLimit)
 	if err != nil {
 		writeInternalError(w, r, "list approvals", err)
 		return
@@ -99,7 +102,7 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 	// ApprovalRecord, now in PENDING (approved), DENIED, SUCCEEDED, or FAILED.
 	includeResolved := r.URL.Query().Get("include_resolved") != "false"
 	if includeResolved {
-		resolvedLimit := limit - int64(len(jobs))
+		resolvedLimit := fetchLimit - int64(len(jobs))
 		if resolvedLimit < 0 {
 			resolvedLimit = 0
 		}
@@ -113,6 +116,8 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 			}
 			resolved, err := s.jobStore.ListJobsByState(r.Context(), state, cursor, resolvedLimit)
 			if err != nil {
+				slog.Warn("list approvals: resolved jobs query failed",
+					"state", string(state), "error", err)
 				continue
 			}
 			for _, rj := range resolved {
@@ -120,7 +125,13 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				// Only include jobs that have an approval record (went through approval flow).
-				if approval, err := s.jobStore.GetApprovalRecord(r.Context(), rj.ID); err != nil || approval.ApprovedBy == "" {
+				approval, aprErr := s.jobStore.GetApprovalRecord(r.Context(), rj.ID)
+				if aprErr != nil {
+					slog.Warn("list approvals: approval record lookup failed for resolved job",
+						"job_id", rj.ID, "state", string(state), "error", aprErr)
+					continue
+				}
+				if approval.ApprovedBy == "" {
 					continue
 				}
 				jobs = append(jobs, rj)
@@ -132,9 +143,16 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0, len(jobs))
 	for _, job := range jobs {
 		if err := s.requireTenantAccess(r, job.Tenant); err != nil {
+			slog.Debug("list approvals: skipping item for tenant mismatch",
+				"job_id", job.ID, "tenant", job.Tenant)
 			continue
 		}
-		record, _ := s.jobStore.GetSafetyDecision(r.Context(), job.ID)
+		record, sdErr := s.jobStore.GetSafetyDecision(r.Context(), job.ID)
+		if sdErr != nil {
+			slog.Warn("list approvals: safety decision unavailable, skipping item",
+				"job_id", job.ID, "error", sdErr)
+			continue
+		}
 		item := map[string]any{
 			"job":               job,
 			"decision":          record.Decision,
@@ -200,8 +218,14 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
+	// Cap items to the requested limit (we may have overfetched).
+	if int64(len(items)) > limit {
+		items = items[:limit]
+	}
+	// Set pagination cursor based on actual results: if we fetched
+	// at least `limit` items worth of data, there may be more pages.
 	var nextCursor *int64
-	if int64(len(jobs)) == limit {
+	if int64(len(jobs)) >= limit {
 		nc := jobs[len(jobs)-1].UpdatedAt - 1
 		nextCursor = &nc
 	}
@@ -304,18 +328,27 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 			if state == model.JobStatePending || state == model.JobStateSucceeded ||
 				state == model.JobStateScheduled || state == model.JobStateDispatched ||
 				state == model.JobStateRunning {
-				req, _ := s.jobStore.GetJobRequest(ctx, jobID)
+				req, reqErr := s.jobStore.GetJobRequest(ctx, jobID)
+				if reqErr != nil {
+					slog.Warn("approve: idempotency check skipped, job request lookup failed",
+						"job_id", jobID, "error", reqErr)
+				}
 				if req != nil && req.Labels != nil && req.Labels["approval_granted"] == "true" {
-					rec, _ := s.jobStore.GetApprovalRecord(ctx, jobID)
-					traceID, _ := s.jobStore.GetTraceID(ctx, jobID)
+					rec, recErr := s.jobStore.GetApprovalRecord(ctx, jobID)
+					if recErr != nil {
+						slog.Warn("approve: idempotent approval record lookup failed",
+							"job_id", jobID, "error", recErr)
+					}
+					traceID, traceErr := s.jobStore.GetTraceID(ctx, jobID)
+					if traceErr != nil {
+						slog.Warn("approve: idempotent trace ID lookup failed",
+							"job_id", jobID, "error", traceErr)
+					}
 					slog.Info("approval idempotent — already approved",
 						"job_id", jobID, "trace_id", traceID,
 						"state", string(state), "approved_by", rec.ApprovedBy,
 						"actor", policyActorID(r))
-					result = struct {
-						status int
-						body   any
-					}{http.StatusOK, map[string]any{
+					result = handlerResult{http.StatusOK, map[string]any{
 						"job_id":      jobID,
 						"trace_id":    traceID,
 						"status":      "already_approved",
@@ -330,12 +363,11 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		if tenant, _ := s.jobStore.GetTenant(ctx, jobID); tenant != "" {
+		if tenant, tenantErr := s.jobStore.GetTenant(ctx, jobID); tenantErr != nil {
+			slog.Warn("approve: tenant lookup failed", "job_id", jobID, "error", tenantErr)
+		} else if tenant != "" {
 			if err := s.requireTenantAccess(r, tenant); err != nil {
-				result = struct {
-					status int
-					body   any
-				}{http.StatusForbidden, "tenant access denied"}
+				result = handlerResult{http.StatusForbidden, "tenant access denied"}
 				return nil
 			}
 		}
@@ -352,10 +384,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 					if wf.IsTerminalRunStatus(run.Status) {
 						msg := fmt.Sprintf("workflow run %s — approval no longer valid", run.Status)
 						s.appendAuditEntryNamed(ctx, "approve_failed", "job", jobID, "", policyActorID(r), policyRole(r), msg)
-						result = struct {
-							status int
-							body   any
-						}{http.StatusConflict, msg}
+						result = handlerResult{http.StatusConflict, msg}
 						return nil
 					}
 				}
@@ -389,25 +418,16 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if policySnapshot == "" {
 				s.appendAuditEntryNamed(ctx, "approve_failed", "job", jobID, "", policyActorID(r), policyRole(r), "approval policy snapshot unavailable")
-				result = struct {
-					status int
-					body   any
-				}{http.StatusConflict, "approval policy snapshot unavailable"}
+				result = handlerResult{http.StatusConflict, "approval policy snapshot unavailable"}
 				return nil
 			}
 			if s.safetyClient == nil {
-				result = struct {
-					status int
-					body   any
-				}{http.StatusServiceUnavailable, "safety kernel unavailable"}
+				result = handlerResult{http.StatusServiceUnavailable, "safety kernel unavailable"}
 				return nil
 			}
 			snapResp, err := s.safetyClient.ListSnapshots(ctx, &pb.ListSnapshotsRequest{})
 			if err != nil {
-				result = struct {
-					status int
-					body   any
-				}{http.StatusBadGateway, "list safety snapshots failed"}
+				result = handlerResult{http.StatusBadGateway, "list safety snapshots failed"}
 				return nil
 			}
 			currentSnapshot := ""
@@ -416,10 +436,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 			}
 			if currentSnapshot == "" || snapshotBase(currentSnapshot) != snapshotBase(policySnapshot) {
 				s.appendAuditEntryNamed(ctx, "approve_failed", "job", jobID, "", policyActorID(r), policyRole(r), "policy snapshot changed")
-				result = struct {
-					status int
-					body   any
-				}{http.StatusConflict, "policy snapshot changed; re-evaluate before approving"}
+				result = handlerResult{http.StatusConflict, "policy snapshot changed; re-evaluate before approving"}
 				return nil
 			}
 		}
@@ -449,10 +466,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		req.Labels[bus.LabelBusMsgID] = "approval:" + jobID
 		if err := s.jobStore.SetJobRequest(ctx, req); err != nil {
 			if strings.Contains(err.Error(), "transaction failed") {
-				result = struct {
-					status int
-					body   any
-				}{http.StatusConflict, "concurrent approval conflict; retry"}
+				result = handlerResult{http.StatusConflict, "concurrent approval conflict; retry"}
 				return nil
 			}
 			result = handlerResult{http.StatusInternalServerError, "failed to persist approval request"}
@@ -484,10 +498,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 					if wf.IsTerminalRunStatus(run.Status) {
 						msg := fmt.Sprintf("workflow run %s — approval no longer valid", run.Status)
 						s.appendAuditEntryNamed(ctx, "approve_failed", "job", jobID, "", policyActorID(r), policyRole(r), msg)
-						result = struct {
-							status int
-							body   any
-						}{http.StatusConflict, msg}
+						result = handlerResult{http.StatusConflict, msg}
 						return nil
 					}
 				}
@@ -496,16 +507,17 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 
 		if err := s.jobStore.SetState(ctx, jobID, model.JobStatePending); err != nil {
 			if strings.Contains(err.Error(), "transaction failed") {
-				result = struct {
-					status int
-					body   any
-				}{http.StatusConflict, "concurrent approval conflict; retry"}
+				result = handlerResult{http.StatusConflict, "concurrent approval conflict; retry"}
 				return nil
 			}
 			result = handlerResult{http.StatusInternalServerError, "set job state failed"}
 			return nil
 		}
-		traceID, _ := s.jobStore.GetTraceID(ctx, jobID)
+		traceID, traceErr := s.jobStore.GetTraceID(ctx, jobID)
+		if traceErr != nil {
+			slog.Warn("approve: trace ID lookup failed, using empty",
+				"job_id", jobID, "error", traceErr)
+		}
 		packet := &pb.BusPacket{
 			TraceId:         traceID,
 			SenderId:        "api-gateway",
@@ -524,10 +536,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 			"topic", req.GetTopic(), "actor", policyActorID(r),
 			"role", policyRole(r))
 		s.appendAuditEntryNamed(ctx, "approve", "job", jobID, req.GetTopic(), policyActorID(r), policyRole(r), "approve job "+jobID)
-		result = struct {
-			status int
-			body   any
-		}{http.StatusOK, map[string]string{"job_id": jobID, "trace_id": traceID}}
+		result = handlerResult{http.StatusOK, map[string]string{"job_id": jobID, "trace_id": traceID}}
 		return nil
 	})
 	if lockErr != nil {
@@ -586,11 +595,12 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		if state != model.JobStateApproval {
 			// Idempotency: if already denied, return success.
 			if state == model.JobStateDenied {
-				rec, _ := s.jobStore.GetApprovalRecord(ctx, jobID)
-				result = struct {
-					status int
-					body   any
-				}{http.StatusOK, map[string]any{
+				rec, recErr := s.jobStore.GetApprovalRecord(ctx, jobID)
+				if recErr != nil {
+					slog.Warn("reject: idempotent approval record lookup failed",
+						"job_id", jobID, "error", recErr)
+				}
+				result = handlerResult{http.StatusOK, map[string]any{
 					"job_id":      jobID,
 					"status":      "already_rejected",
 					"rejected_by": rec.ApprovedBy,
@@ -602,16 +612,19 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 			result = handlerResult{http.StatusConflict, "job not awaiting approval"}
 			return nil
 		}
-		if tenant, _ := s.jobStore.GetTenant(ctx, jobID); tenant != "" {
+		if tenant, tenantErr := s.jobStore.GetTenant(ctx, jobID); tenantErr != nil {
+			slog.Warn("reject: tenant lookup failed", "job_id", jobID, "error", tenantErr)
+		} else if tenant != "" {
 			if err := s.requireTenantAccess(r, tenant); err != nil {
-				result = struct {
-					status int
-					body   any
-				}{http.StatusForbidden, "tenant access denied"}
+				result = handlerResult{http.StatusForbidden, "tenant access denied"}
 				return nil
 			}
 		}
-		safetyRecord, _ := s.jobStore.GetSafetyDecision(ctx, jobID)
+		safetyRecord, safetyErr := s.jobStore.GetSafetyDecision(ctx, jobID)
+		if safetyErr != nil {
+			slog.Warn("reject: safety decision unavailable, proceeding with empty record",
+				"job_id", jobID, "error", safetyErr)
+		}
 		reason := strings.TrimSpace(body.Reason)
 		note := strings.TrimSpace(body.Note)
 		approvedBy := strings.TrimSpace(policyActorID(r))
@@ -635,7 +648,11 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 			result = handlerResult{http.StatusInternalServerError, "set job state failed"}
 			return nil
 		}
-		traceID, _ := s.jobStore.GetTraceID(ctx, jobID)
+		traceID, traceErr := s.jobStore.GetTraceID(ctx, jobID)
+		if traceErr != nil {
+			slog.Warn("reject: trace ID lookup failed, using empty",
+				"job_id", jobID, "error", traceErr)
+		}
 		errorMessage := "approval rejected"
 		if reason != "" {
 			errorMessage = reason
@@ -658,7 +675,10 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		if err := s.bus.Publish(capsdk.SubjectDLQ, packet); err != nil {
 			slog.Error("publish dlq on approval reject failed", "job_id", jobID, "error", err)
 		}
-		rejectTopic, _ := s.jobStore.GetTopic(ctx, jobID)
+		rejectTopic, topicErr := s.jobStore.GetTopic(ctx, jobID)
+		if topicErr != nil {
+			slog.Warn("reject: topic lookup failed", "job_id", jobID, "error", topicErr)
+		}
 		if rejectTopic == capsdk.SubjectWorkflowApprovalGate {
 			if err := s.bus.Publish(capsdk.SubjectResult, packet); err != nil {
 				slog.Error("publish result on workflow gate reject failed", "job_id", jobID, "error", err)
@@ -669,10 +689,7 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 			"actor", policyActorID(r), "role", policyRole(r),
 			"reason", reason)
 		s.appendAuditEntryNamed(ctx, "reject", "job", jobID, rejectTopic, policyActorID(r), policyRole(r), "reject job "+jobID)
-		result = struct {
-			status int
-			body   any
-		}{http.StatusOK, map[string]string{"job_id": jobID}}
+		result = handlerResult{http.StatusOK, map[string]string{"job_id": jobID}}
 		return nil
 	})
 	if lockErr != nil {

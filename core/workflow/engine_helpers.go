@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cordum/cordum/core/infra/maputil"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
 
@@ -31,20 +32,10 @@ func collectDependencies(wfDef *Workflow, stepID string, deps map[string]struct{
 	}
 }
 
-func cloneMap(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	data, err := json.Marshal(input)
-	if err != nil {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return map[string]any{}
-	}
-	return out
-}
+// cloneMap delegates to the shared maputil deep-clone implementation.
+// DeepCloneAnyMap is used (not shallow) because workflow context maps contain
+// nested step outputs that callers may mutate after cloning.
+var cloneMap = maputil.DeepCloneAnyMap
 
 func cloneContextForDeps(ctx map[string]any, deps map[string]struct{}) map[string]any {
 	if ctx == nil {
@@ -69,16 +60,8 @@ func cloneContextForDeps(ctx map[string]any, deps map[string]struct{}) map[strin
 	return out
 }
 
-func cloneStringMap(input map[string]string) map[string]string {
-	if input == nil {
-		return nil
-	}
-	out := make(map[string]string, len(input))
-	for k, v := range input {
-		out[k] = v
-	}
-	return out
-}
+// cloneStringMap delegates to the shared maputil implementation.
+var cloneStringMap = maputil.CloneStringMap
 
 func cloneStepRun(sr *StepRun) *StepRun {
 	if sr == nil {

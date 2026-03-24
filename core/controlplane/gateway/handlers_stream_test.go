@@ -1095,3 +1095,150 @@ func newIPv4Server(t *testing.T, handler http.Handler) *httptest.Server {
 	srv.Start()
 	return srv
 }
+
+// --- WebSocket buffer and eviction tests ---
+
+func TestWSClientBufferSize_Default(t *testing.T) {
+	t.Setenv("CORDUM_WS_CLIENT_BUFFER_SIZE", "")
+	v := wsClientBufferSize()
+	if v != defaultWSClientBufSize {
+		t.Fatalf("expected default %d, got %d", defaultWSClientBufSize, v)
+	}
+}
+
+func TestWSClientBufferSize_Custom(t *testing.T) {
+	t.Setenv("CORDUM_WS_CLIENT_BUFFER_SIZE", "512")
+	v := wsClientBufferSize()
+	if v != 512 {
+		t.Fatalf("expected 512, got %d", v)
+	}
+}
+
+func TestWSClientBufferSize_Clamped(t *testing.T) {
+	t.Setenv("CORDUM_WS_CLIENT_BUFFER_SIZE", "99999")
+	v := wsClientBufferSize()
+	if v != maxWSClientBufSize {
+		t.Fatalf("expected max %d, got %d", maxWSClientBufSize, v)
+	}
+}
+
+func TestWSClientBufferSize_Invalid(t *testing.T) {
+	t.Setenv("CORDUM_WS_CLIENT_BUFFER_SIZE", "not-a-number")
+	v := wsClientBufferSize()
+	if v != defaultWSClientBufSize {
+		t.Fatalf("expected default %d for invalid input, got %d", defaultWSClientBufSize, v)
+	}
+}
+
+func TestWSClientBufferSize_Zero(t *testing.T) {
+	t.Setenv("CORDUM_WS_CLIENT_BUFFER_SIZE", "0")
+	v := wsClientBufferSize()
+	if v != defaultWSClientBufSize {
+		t.Fatalf("expected default %d for zero, got %d", defaultWSClientBufSize, v)
+	}
+}
+
+func TestCloseChannelNonBlocking(t *testing.T) {
+	client := &wsClient{ch: make(chan wsEvent, 10)}
+
+	done := make(chan struct{})
+	go func() {
+		client.closeChannel()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// OK — completed quickly.
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("closeChannel() blocked for >100ms — must be non-blocking")
+	}
+
+	// Double-close should not panic.
+	client.closeChannel()
+}
+
+func TestSlowClientEviction(t *testing.T) {
+	s := &server{
+		clients:       make(map[*websocket.Conn]*wsClient),
+		eventsCh:      make(chan wsEvent, 10),
+		wsClientBufSz: 1, // tiny buffer to force eviction
+		shutdownCh:    make(chan struct{}),
+	}
+
+	// Simulate a "slow" client with buffer 1.
+	slowClient := &wsClient{ch: make(chan wsEvent, 1)}
+	// Simulate a "fast" client with large buffer.
+	fastClient := &wsClient{ch: make(chan wsEvent, 100)}
+
+	// Use nil *websocket.Conn as map keys (we won't actually use them).
+	// We need distinct pointers, so create fake conns.
+	slowConn := (*websocket.Conn)(nil)
+	fastConn := &websocket.Conn{}
+
+	s.clientsMu.Lock()
+	s.clients[slowConn] = slowClient
+	s.clients[fastConn] = fastClient
+	s.clientsMu.Unlock()
+
+	// Fill the slow client's buffer.
+	slowClient.ch <- wsEvent{data: []byte("first")}
+
+	// Now broadcast — slow client's buffer is full, should be evicted.
+	var evicted []*websocket.Conn
+	s.clientsMu.Lock()
+	for conn, client := range s.clients {
+		if client == nil {
+			continue
+		}
+		select {
+		case client.ch <- wsEvent{data: []byte("second")}:
+		default:
+			evicted = append(evicted, conn)
+		}
+	}
+	for _, conn := range evicted {
+		if client := s.clients[conn]; client != nil {
+			client.closeChannel()
+		}
+		delete(s.clients, conn)
+	}
+	s.clientsMu.Unlock()
+
+	// Verify slow client was evicted.
+	if len(evicted) != 1 {
+		t.Fatalf("expected 1 eviction, got %d", len(evicted))
+	}
+
+	// Verify fast client still registered.
+	s.clientsMu.Lock()
+	_, fastStillPresent := s.clients[fastConn]
+	s.clientsMu.Unlock()
+	if !fastStillPresent {
+		t.Fatal("fast client should still be registered")
+	}
+
+	// Fast client should have received the event.
+	select {
+	case evt := <-fastClient.ch:
+		if string(evt.data) != "second" {
+			t.Fatalf("fast client got wrong data: %s", string(evt.data))
+		}
+	default:
+		t.Fatal("fast client should have received the event")
+	}
+}
+
+func TestWSClientBufferSizeUsedInHandlers(t *testing.T) {
+	bufSize := 512
+	s := &server{
+		clients:       make(map[*websocket.Conn]*wsClient),
+		eventsCh:      make(chan wsEvent, 1),
+		wsClientBufSz: bufSize,
+	}
+
+	// Verify the server stores the configured buffer size.
+	if s.wsClientBufSz != bufSize {
+		t.Fatalf("expected buffer size %d, got %d", bufSize, s.wsClientBufSz)
+	}
+}

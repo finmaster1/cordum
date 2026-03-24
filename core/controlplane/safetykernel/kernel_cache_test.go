@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -433,5 +434,84 @@ func TestCacheVersionMismatchDeletesEntry(t *testing.T) {
 	srv.cacheMu.Unlock()
 	if exists {
 		t.Fatal("expected stale entry to be deleted from cache map")
+	}
+}
+
+func TestCachedDecisionImmutable(t *testing.T) {
+	srv := &server{
+		cacheTTL:     5 * time.Minute,
+		cache:        map[string]cacheEntry{},
+		cacheMaxSize: 100,
+	}
+	key := "immutable-key"
+	resp := &pb.PolicyCheckResponse{
+		Decision: pb.DecisionType_DECISION_TYPE_ALLOW,
+		Reason:   "original",
+		Remediations: []*pb.PolicyRemediation{
+			{Id: "r1", Title: "original-title"},
+		},
+	}
+	srv.setCachedDecision(key, resp)
+
+	// Get cached entry and mutate it.
+	got1 := srv.getCachedDecision(key)
+	if got1 == nil {
+		t.Fatal("expected cached decision")
+	}
+	got1.Decision = pb.DecisionType_DECISION_TYPE_DENY
+	got1.Reason = "mutated"
+	if len(got1.Remediations) > 0 {
+		got1.Remediations[0].Title = "mutated-title"
+	}
+
+	// Get again — must return original, unaffected by mutation.
+	got2 := srv.getCachedDecision(key)
+	if got2 == nil {
+		t.Fatal("expected cached decision on second get")
+	}
+	if got2.Decision != pb.DecisionType_DECISION_TYPE_ALLOW {
+		t.Fatalf("cached decision mutated: got %v, want ALLOW", got2.Decision)
+	}
+	if got2.Reason != "original" {
+		t.Fatalf("cached reason mutated: got %q, want %q", got2.Reason, "original")
+	}
+	if len(got2.Remediations) > 0 && got2.Remediations[0].Title != "original-title" {
+		t.Fatalf("cached remediation mutated: got %q, want %q", got2.Remediations[0].Title, "original-title")
+	}
+}
+
+func TestConcurrentCacheReads(t *testing.T) {
+	srv := &server{
+		cacheTTL:     5 * time.Minute,
+		cache:        map[string]cacheEntry{},
+		cacheMaxSize: 100,
+	}
+	key := "concurrent-key"
+	resp := &pb.PolicyCheckResponse{
+		Decision: pb.DecisionType_DECISION_TYPE_ALLOW,
+		Reason:   "concurrent-test",
+	}
+	srv.setCachedDecision(key, resp)
+
+	var wg sync.WaitGroup
+	errors := make(chan string, 50)
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got := srv.getCachedDecision(key)
+			if got == nil {
+				errors <- "expected cached decision"
+				return
+			}
+			if got.Decision != pb.DecisionType_DECISION_TYPE_ALLOW {
+				errors <- fmt.Sprintf("unexpected decision: %v", got.Decision)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
 	}
 }

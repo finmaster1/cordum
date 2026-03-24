@@ -54,6 +54,11 @@ const (
 	envNATSTLSKey        = "NATS_TLS_KEY"
 	envNATSTLSInsecure   = "NATS_TLS_INSECURE"
 	envNATSTLSServerName = "NATS_TLS_SERVER_NAME"
+	envNATSAllowPlain    = "CORDUM_NATS_ALLOW_PLAINTEXT"
+	envNATSUsername       = "NATS_USERNAME"
+	envNATSPassword       = "NATS_PASSWORD"
+	envNATSNKey           = "NATS_NKEY"
+	envNATSToken          = "NATS_TOKEN"
 
 	defaultAckWait = 10 * time.Minute
 	defaultMaxAge  = 7 * 24 * time.Hour
@@ -70,10 +75,17 @@ const (
 	maxJSRedeliveries = 100
 )
 
+const maxAckPendingHardLimit = 50000
+
 func natsMaxAckPending() int {
 	const defaultMaxAckPending = 2048
 	if raw := strings.TrimSpace(os.Getenv("NATS_MAX_ACK_PENDING")); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			if v > maxAckPendingHardLimit {
+				slog.Warn("bus: NATS_MAX_ACK_PENDING exceeds hard limit, clamping",
+					"requested", v, "clamped_to", maxAckPendingHardLimit)
+				return maxAckPendingHardLimit
+			}
 			return v
 		}
 	}
@@ -90,7 +102,22 @@ var (
 // TLS env vars (NATS_TLS_CA, etc.) are only applied when the URL uses the
 // tls:// scheme, so plain nats:// connections (e.g. embedded NATS in tests)
 // are not affected by ambient TLS environment variables.
+//
+// In production mode (CORDUM_ENV=production or CORDUM_PRODUCTION=true),
+// non-TLS URLs are rejected unless CORDUM_NATS_ALLOW_PLAINTEXT=true.
+// Authentication is configured via NATS_USERNAME/NATS_PASSWORD, NATS_TOKEN,
+// or NATS_NKEY env vars. A warning is logged if production has no auth.
 func NewNatsBus(url string) (*NatsBus, error) {
+	production := env.IsProduction()
+
+	// Enforce TLS in production: reject nats:// unless explicitly allowed.
+	if production && !strings.HasPrefix(url, "tls://") {
+		if !parseBoolEnv(envNATSAllowPlain) {
+			return nil, fmt.Errorf("nats TLS required in production: use tls:// scheme or set %s=true", envNATSAllowPlain)
+		}
+		slog.Warn("bus: plaintext NATS allowed in production via override", "url", url)
+	}
+
 	opts := []nats.Option{
 		nats.Name("cordum-bus"),
 		nats.MaxReconnects(-1),
@@ -113,6 +140,12 @@ func NewNatsBus(url string) (*NatsBus, error) {
 		}
 	}
 
+	// Authentication: try username/password, then token, then NKey.
+	authConfigured := natsApplyAuth(&opts)
+	if production && !authConfigured {
+		slog.Warn("bus: NATS authentication not configured in production — set NATS_USERNAME/NATS_PASSWORD, NATS_TOKEN, or NATS_NKEY")
+	}
+
 	nc, err := nats.Connect(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats %s: %w", url, err)
@@ -120,6 +153,36 @@ func NewNatsBus(url string) (*NatsBus, error) {
 	b := &NatsBus{nc: nc, ackWait: defaultAckWait}
 	b.initJetStreamFromEnv()
 	return b, nil
+}
+
+// natsApplyAuth reads auth env vars and appends the appropriate NATS option.
+// Returns true if any auth mechanism was configured.
+func natsApplyAuth(opts *[]nats.Option) bool {
+	username := strings.TrimSpace(os.Getenv(envNATSUsername))
+	password := strings.TrimSpace(os.Getenv(envNATSPassword))
+	if username != "" && password != "" {
+		*opts = append(*opts, nats.UserInfo(username, password))
+		return true
+	}
+
+	token := strings.TrimSpace(os.Getenv(envNATSToken))
+	if token != "" {
+		*opts = append(*opts, nats.Token(token))
+		return true
+	}
+
+	nkey := strings.TrimSpace(os.Getenv(envNATSNKey))
+	if nkey != "" {
+		opt, err := nats.NkeyOptionFromSeed(nkey)
+		if err != nil {
+			slog.Error("bus: invalid NATS_NKEY seed", "err", err)
+			return false
+		}
+		*opts = append(*opts, opt)
+		return true
+	}
+
+	return false
 }
 
 // WithRedis sets an optional Redis client for crash-safe message processing.

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,8 +31,40 @@ var wsPacketsDroppedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 	Help: "Total WebSocket bus packets dropped due to marshal failure",
 })
 
+var wsSlowClientEvictions = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "cordum_gateway_ws_slow_client_evictions_total",
+	Help: "Total WebSocket clients evicted because their send buffer was full",
+}, []string{"reason"})
+
 func init() {
 	prometheus.MustRegister(wsPacketsDroppedTotal)
+	prometheus.MustRegister(wsSlowClientEvictions)
+}
+
+const (
+	defaultWSClientBufSize = 256
+	minWSClientBufSize     = 1
+	maxWSClientBufSize     = 10000
+)
+
+// wsClientBufferSize reads CORDUM_WS_CLIENT_BUFFER_SIZE and clamps to [1, 10000].
+func wsClientBufferSize() int {
+	raw := strings.TrimSpace(os.Getenv("CORDUM_WS_CLIENT_BUFFER_SIZE"))
+	if raw == "" {
+		return defaultWSClientBufSize
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < minWSClientBufSize {
+		slog.Warn("invalid CORDUM_WS_CLIENT_BUFFER_SIZE, using default",
+			"value", raw, "default", defaultWSClientBufSize)
+		return defaultWSClientBufSize
+	}
+	if v > maxWSClientBufSize {
+		slog.Warn("CORDUM_WS_CLIENT_BUFFER_SIZE exceeds max, clamping",
+			"requested", v, "max", maxWSClientBufSize)
+		return maxWSClientBufSize
+	}
+	return v
 }
 
 // stopBusTaps shuts down the broadcast goroutine by closing eventsCh.
@@ -274,13 +308,15 @@ func (s *server) startBusTaps() error {
 				}
 				for _, conn := range slowClients {
 					if client := s.clients[conn]; client != nil {
-						// Signal handler goroutine to exit by closing its channel.
-						// The handler's defer will close the actual connection.
 						client.closeChannel()
 					}
 					delete(s.clients, conn)
 				}
 				s.clientsMu.Unlock()
+				if n := len(slowClients); n > 0 {
+					wsSlowClientEvictions.WithLabelValues("buffer_full").Add(float64(n))
+					slog.Warn("ws: evicted slow clients", "count", n)
+				}
 			case <-s.shutdownCh:
 				return
 			}
@@ -639,7 +675,7 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 	slog.Info("ws connected", "remote", r.RemoteAddr)
 
 	authCtx := authFromRequest(r)
-	client := &wsClient{ch: make(chan wsEvent, 100)}
+	client := &wsClient{ch: make(chan wsEvent, s.wsClientBufSz)}
 	if authCtx != nil {
 		client.tenant = strings.TrimSpace(authCtx.Tenant)
 		client.allowCrossTenant = authCtx.AllowCrossTenant
@@ -721,7 +757,7 @@ func (s *server) handleJobStream(w http.ResponseWriter, r *http.Request) {
 	slog.Info("job ws connected", "job_id", jobID, "remote", r.RemoteAddr)
 
 	authCtx := authFromRequest(r)
-	client := &wsClient{ch: make(chan wsEvent, 100), tenant: strings.TrimSpace(tenant), jobID: jobID}
+	client := &wsClient{ch: make(chan wsEvent, s.wsClientBufSz), tenant: strings.TrimSpace(tenant), jobID: jobID}
 	if authCtx != nil {
 		client.apiKey = authCtx.APIKey
 	}

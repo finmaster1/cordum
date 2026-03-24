@@ -98,9 +98,10 @@ type server struct {
 	workerSeen map[string]time.Time
 	workerMu   sync.RWMutex
 
-	clients   map[*websocket.Conn]*wsClient
-	clientsMu sync.RWMutex
-	eventsCh  chan wsEvent
+	clients       map[*websocket.Conn]*wsClient
+	clientsMu     sync.RWMutex
+	eventsCh      chan wsEvent
+	wsClientBufSz int
 
 	metrics infraMetrics.GatewayMetrics
 	tenant  string
@@ -436,6 +437,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 		workerSeen:     make(map[string]time.Time),
 		clients:        make(map[*websocket.Conn]*wsClient),
 		eventsCh:       make(chan wsEvent, 512),
+		wsClientBufSz:  wsClientBufferSize(),
 		metrics:        gwMetrics,
 		tenant:         tenantID,
 		auth:           provider,
@@ -533,7 +535,14 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	)
 	pb.RegisterCordumApiServer(grpcServer, s)
 	if env.Bool(env.EnvGRPCReflection) {
-		reflection.Register(grpcServer)
+		if env.IsProduction() && !env.Bool("CORDUM_GRPC_REFLECTION_FORCE") {
+			slog.Error("gRPC reflection blocked in production mode (exposes service definitions). Set CORDUM_GRPC_REFLECTION_FORCE=1 to override.")
+		} else {
+			if env.IsProduction() {
+				slog.Warn("gRPC reflection enabled in production via force override")
+			}
+			reflection.Register(grpcServer)
+		}
 	}
 
 	go func() {
@@ -725,11 +734,13 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 		registrar.RegisterRoutes(mux, s.instrumented)
 	}
 
-	// Middleware chain: logging → CORS → rate limit → auth → tenant → body limit → mux
+	// Middleware chain: logging → CORS → rate limit → auth → read audit → tenant → body limit → mux
 	// SECURITY: Rate limiter MUST run before auth so that invalid API key
 	// brute-force attempts are rate-limited by IP. When auth context is
 	// absent, rateLimitKey falls back to IP-based keying automatically.
-	handler := requestLoggingMiddleware(corsMiddleware(rateLimitMiddleware(s.auth, s.apiRL, s.publicRL, apiKeyMiddleware(s.auth, tenantMiddleware(s.auth, maxBodyMiddleware(mux))))))
+	readAuditRate := parseFloatEnv("CORDUM_AUDIT_READ_SAMPLE_RATE", 0.0)
+	inner := auditReadMiddleware(s.auditExporter, readAuditRate, tenantMiddleware(s.auth, maxBodyMiddleware(mux)))
+	handler := requestLoggingMiddleware(corsMiddleware(rateLimitMiddleware(s.auth, s.apiRL, s.publicRL, apiKeyMiddleware(s.auth, inner, s.auditExporter))))
 
 	httpTLSCert := strings.TrimSpace(os.Getenv(envGatewayHTTPTLSCert))
 	httpTLSKey := strings.TrimSpace(os.Getenv(envGatewayHTTPTLSKey))

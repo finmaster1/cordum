@@ -345,7 +345,7 @@ func TestHelperFunctions(t *testing.T) {
 
 	input := map[string]any{"k": map[string]any{"v": 1}}
 	clone := cloneMap(input)
-	if clone["k"].(map[string]any)["v"].(float64) != 1 {
+	if clone["k"].(map[string]any)["v"].(int) != 1 {
 		t.Fatalf("unexpected clone")
 	}
 }

@@ -1453,3 +1453,176 @@ func TestNewRedisJobStore_InvalidTTLWarns(t *testing.T) {
 		t.Fatalf("expected warning about invalid TTL, got: %s", logOutput)
 	}
 }
+
+// TestDeadlineSameSecondOrdering verifies that two jobs with deadlines in the
+// same second are ordered deterministically by their microsecond-precision scores.
+func TestDeadlineSameSecondOrdering(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis unavailable: %v", err)
+	}
+	store, err := NewRedisJobStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	base := time.Now().Add(-5 * time.Minute)
+	// Two deadlines 500ms apart — same Unix second, different microseconds.
+	d1 := base
+	d2 := base.Add(500 * time.Millisecond)
+
+	if err := store.SetDeadline(ctx, "job-early", d1); err != nil {
+		t.Fatalf("set deadline 1: %v", err)
+	}
+	if err := store.SetDeadline(ctx, "job-late", d2); err != nil {
+		t.Fatalf("set deadline 2: %v", err)
+	}
+
+	expired, err := store.ListExpiredDeadlines(ctx, time.Now().Unix(), 10)
+	if err != nil {
+		t.Fatalf("list expired: %v", err)
+	}
+	if len(expired) != 2 {
+		t.Fatalf("expected 2 expired jobs, got %d", len(expired))
+	}
+	// First result should be the earlier deadline.
+	if expired[0].ID != "job-early" {
+		t.Fatalf("expected job-early first (earlier deadline), got %s", expired[0].ID)
+	}
+	if expired[1].ID != "job-late" {
+		t.Fatalf("expected job-late second, got %s", expired[1].ID)
+	}
+}
+
+// TestPaginationNoGaps creates 100 jobs and paginates with limit=10,
+// verifying no gaps or duplicates across all pages.
+func TestPaginationNoGaps(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis unavailable: %v", err)
+	}
+	store, err := NewRedisJobStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	const total = 100
+	for i := 0; i < total; i++ {
+		jobID := fmt.Sprintf("job-page-%03d", i)
+		if err := store.SetState(ctx, jobID, model.JobStatePending); err != nil {
+			t.Fatalf("set state %s: %v", jobID, err)
+		}
+		// Small delay to ensure distinct microsecond scores.
+		time.Sleep(time.Microsecond)
+	}
+
+	seen := make(map[string]bool)
+	var cursor int64
+	pages := 0
+	for {
+		jobs, err := store.ListRecentJobsByScore(ctx, cursor, 10)
+		if err != nil {
+			t.Fatalf("list page %d: %v", pages, err)
+		}
+		if len(jobs) == 0 {
+			break
+		}
+		for _, job := range jobs {
+			if seen[job.ID] {
+				t.Fatalf("duplicate job ID %s on page %d", job.ID, pages)
+			}
+			seen[job.ID] = true
+		}
+		// Use the last job's UpdatedAt as cursor for next page.
+		cursor = jobs[len(jobs)-1].UpdatedAt - 1
+		pages++
+		if pages > 20 {
+			t.Fatal("too many pages, possible infinite loop")
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("expected %d unique jobs, got %d (pages=%d)", total, len(seen), pages)
+	}
+}
+
+// TestTenantActiveSetNoExpiry verifies that the tenant active set does not
+// expire, so long-running jobs remain in active counts.
+func TestTenantActiveSetNoExpiry(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis unavailable: %v", err)
+	}
+	store, err := NewRedisJobStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	if err := store.SetTenant(ctx, "job-long", "tenant-long"); err != nil {
+		t.Fatalf("set tenant: %v", err)
+	}
+	if err := store.SetState(ctx, "job-long", model.JobStateRunning); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+
+	count, err := store.CountActiveByTenant(ctx, "tenant-long")
+	if err != nil {
+		t.Fatalf("count active: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 active, got %d", count)
+	}
+
+	// Fast-forward past the default metaTTL (7 days + buffer).
+	srv.FastForward(8 * 24 * time.Hour)
+
+	count, err = store.CountActiveByTenant(ctx, "tenant-long")
+	if err != nil {
+		t.Fatalf("count active after 8 days: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 active after 8 days (no TTL expiry), got %d", count)
+	}
+}
+
+// TestBuildJobRecordsPipelineError verifies that a pipeline execution failure
+// in buildJobRecords surfaces as an error, not silently skipped.
+func TestBuildJobRecordsPipelineError(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Skipf("miniredis unavailable: %v", err)
+	}
+	store, err := NewRedisJobStore("redis://" + srv.Addr())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	// Create a job so there's something to list.
+	if err := store.SetState(ctx, "job-pipe", model.JobStatePending); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+
+	// Verify normal operation works.
+	jobs, err := store.ListRecentJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("list recent: %v", err)
+	}
+	if len(jobs) == 0 {
+		t.Fatal("expected at least 1 job")
+	}
+
+	// Close the miniredis server to simulate connection failure.
+	srv.Close()
+
+	_, err = store.ListRecentJobs(ctx, 10)
+	if err == nil {
+		t.Fatal("expected error when Redis is down, got nil")
+	}
+}

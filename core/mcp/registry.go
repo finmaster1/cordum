@@ -105,11 +105,13 @@ func (r *ToolRegistry) Call(ctx context.Context, name string, params json.RawMes
 		return nil, ErrToolDisabled
 	}
 	if len(entry.tool.InputSchema) > 0 {
-		payload := any(map[string]any{})
+		parsed := map[string]any{}
 		if len(params) > 0 {
-			payload = params
+			if err := json.Unmarshal(params, &parsed); err != nil {
+				return nil, fmt.Errorf("%w: invalid params JSON: %v", ErrInvalidParams, err)
+			}
 		}
-		if err := coreschema.ValidateMap(entry.tool.InputSchema, payload); err != nil {
+		if err := coreschema.ValidateMap(entry.tool.InputSchema, parsed); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidParams, err)
 		}
 	}

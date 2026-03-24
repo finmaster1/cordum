@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -790,6 +791,211 @@ func TestBroadcastWithJetStream(t *testing.T) {
 	}
 	if count2.Load() < 1 {
 		t.Fatal("bus2 did not receive JetStream broadcast DLQ message")
+	}
+}
+
+// --- TLS enforcement tests ---
+
+func TestNewNatsBus_PlaintextRejectedInProduction(t *testing.T) {
+	t.Setenv("CORDUM_ENV", "production")
+	t.Setenv("CORDUM_NATS_ALLOW_PLAINTEXT", "")
+
+	_, err := NewNatsBus("nats://localhost:14222")
+	if err == nil {
+		t.Fatal("expected error for plaintext NATS in production")
+	}
+	if !strings.Contains(err.Error(), "nats TLS required in production") {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !strings.Contains(err.Error(), "CORDUM_NATS_ALLOW_PLAINTEXT") {
+		t.Fatalf("error should mention override env var: %s", err)
+	}
+}
+
+func TestNewNatsBus_PlaintextAllowedWithOverride(t *testing.T) {
+	t.Setenv("CORDUM_ENV", "production")
+	t.Setenv("CORDUM_NATS_ALLOW_PLAINTEXT", "true")
+
+	// Connection will fail (no NATS), but the TLS check should pass.
+	_, err := NewNatsBus("nats://localhost:14222")
+	if err == nil {
+		t.Fatal("expected connection error (no NATS server)")
+	}
+	if strings.Contains(err.Error(), "TLS required") {
+		t.Fatalf("should not get TLS enforcement error with override: %s", err)
+	}
+}
+
+func TestNewNatsBus_PlaintextAllowedInDev(t *testing.T) {
+	t.Setenv("CORDUM_ENV", "development")
+	t.Setenv("CORDUM_PRODUCTION", "")
+	t.Setenv("CORDUM_NATS_ALLOW_PLAINTEXT", "")
+
+	_, err := NewNatsBus("nats://localhost:14222")
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+	if strings.Contains(err.Error(), "TLS required") {
+		t.Fatalf("dev mode should allow plaintext: %s", err)
+	}
+}
+
+func TestNewNatsBus_TLSURLNotBlockedByEnforcement(t *testing.T) {
+	t.Setenv("CORDUM_ENV", "production")
+	t.Setenv("CORDUM_NATS_ALLOW_PLAINTEXT", "")
+	t.Setenv(envNATSTLSCA, "")
+	t.Setenv(envNATSTLSCert, "")
+	t.Setenv(envNATSTLSKey, "")
+	t.Setenv(envNATSTLSInsecure, "")
+	t.Setenv(envNATSTLSServerName, "")
+
+	_, err := NewNatsBus("tls://localhost:14222")
+	if err == nil {
+		t.Fatal("expected error (no TLS certs)")
+	}
+	// Should be a TLS config error, not an enforcement error.
+	if strings.Contains(err.Error(), "CORDUM_NATS_ALLOW_PLAINTEXT") {
+		t.Fatalf("tls:// should not trigger plaintext enforcement: %s", err)
+	}
+}
+
+// --- Auth tests ---
+
+func TestNatsApplyAuth_UserInfo(t *testing.T) {
+	t.Setenv("NATS_USERNAME", "alice")
+	t.Setenv("NATS_PASSWORD", "secret123")
+	t.Setenv("NATS_TOKEN", "")
+	t.Setenv("NATS_NKEY", "")
+
+	var opts []nats.Option
+	configured := natsApplyAuth(&opts)
+	if !configured {
+		t.Fatal("expected auth configured with username/password")
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 auth option, got %d", len(opts))
+	}
+}
+
+func TestNatsApplyAuth_Token(t *testing.T) {
+	t.Setenv("NATS_USERNAME", "")
+	t.Setenv("NATS_PASSWORD", "")
+	t.Setenv("NATS_TOKEN", "my-token")
+	t.Setenv("NATS_NKEY", "")
+
+	var opts []nats.Option
+	configured := natsApplyAuth(&opts)
+	if !configured {
+		t.Fatal("expected auth configured with token")
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 auth option, got %d", len(opts))
+	}
+}
+
+func TestNatsApplyAuth_NKeyInvalidSeed(t *testing.T) {
+	t.Setenv("NATS_USERNAME", "")
+	t.Setenv("NATS_PASSWORD", "")
+	t.Setenv("NATS_TOKEN", "")
+	t.Setenv("NATS_NKEY", "/nonexistent/nkey.seed")
+
+	var opts []nats.Option
+	configured := natsApplyAuth(&opts)
+	if configured {
+		t.Fatal("expected auth NOT configured with invalid NKey")
+	}
+}
+
+func TestNatsApplyAuth_NoAuth(t *testing.T) {
+	t.Setenv("NATS_USERNAME", "")
+	t.Setenv("NATS_PASSWORD", "")
+	t.Setenv("NATS_TOKEN", "")
+	t.Setenv("NATS_NKEY", "")
+
+	var opts []nats.Option
+	configured := natsApplyAuth(&opts)
+	if configured {
+		t.Fatal("expected no auth when all env vars empty")
+	}
+	if len(opts) != 0 {
+		t.Fatalf("expected 0 options, got %d", len(opts))
+	}
+}
+
+func TestNatsApplyAuth_UsernameWithoutPassword(t *testing.T) {
+	t.Setenv("NATS_USERNAME", "alice")
+	t.Setenv("NATS_PASSWORD", "")
+	t.Setenv("NATS_TOKEN", "")
+	t.Setenv("NATS_NKEY", "")
+
+	var opts []nats.Option
+	configured := natsApplyAuth(&opts)
+	if configured {
+		t.Fatal("username without password should not configure auth")
+	}
+}
+
+func TestNatsApplyAuth_PriorityOrder(t *testing.T) {
+	// Username/password takes priority over token.
+	t.Setenv("NATS_USERNAME", "alice")
+	t.Setenv("NATS_PASSWORD", "secret")
+	t.Setenv("NATS_TOKEN", "also-set")
+	t.Setenv("NATS_NKEY", "")
+
+	var opts []nats.Option
+	configured := natsApplyAuth(&opts)
+	if !configured {
+		t.Fatal("expected auth configured")
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected 1 option (username/password wins), got %d", len(opts))
+	}
+}
+
+// --- MaxAckPending tests ---
+
+func TestNatsMaxAckPending_ClampedAtHardLimit(t *testing.T) {
+	t.Setenv("NATS_MAX_ACK_PENDING", "100000")
+	v := natsMaxAckPending()
+	if v != maxAckPendingHardLimit {
+		t.Fatalf("expected %d (clamped), got %d", maxAckPendingHardLimit, v)
+	}
+}
+
+func TestNatsMaxAckPending_ExactLimit(t *testing.T) {
+	t.Setenv("NATS_MAX_ACK_PENDING", "50000")
+	v := natsMaxAckPending()
+	if v != 50000 {
+		t.Fatalf("expected 50000 (exact limit), got %d", v)
+	}
+}
+
+func TestNatsMaxAckPending_BelowLimit(t *testing.T) {
+	t.Setenv("NATS_MAX_ACK_PENDING", "5000")
+	v := natsMaxAckPending()
+	if v != 5000 {
+		t.Fatalf("expected 5000, got %d", v)
+	}
+}
+
+// --- Production auth warning test ---
+
+func TestNewNatsBus_ProductionNoAuthProceedsWithWarning(t *testing.T) {
+	t.Setenv("CORDUM_ENV", "production")
+	t.Setenv("CORDUM_NATS_ALLOW_PLAINTEXT", "true")
+	t.Setenv("NATS_USERNAME", "")
+	t.Setenv("NATS_PASSWORD", "")
+	t.Setenv("NATS_TOKEN", "")
+	t.Setenv("NATS_NKEY", "")
+
+	// Should proceed to connection attempt (and fail due to no server),
+	// not reject due to missing auth.
+	_, err := NewNatsBus("nats://localhost:14222")
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+	if !strings.Contains(err.Error(), "connect nats") {
+		t.Fatalf("expected connection error, got: %s", err)
 	}
 }
 

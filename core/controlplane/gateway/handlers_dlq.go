@@ -23,13 +23,7 @@ func (s *server) handleListDLQ(w http.ResponseWriter, r *http.Request) {
 		writeForbidden(w, r, err)
 		return
 	}
-	limit := int64(100)
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	limit = clampListLimit(limit)
+	limit, _ := parsePagination(r, 100)
 	entries, err := s.dlqStore.List(r.Context(), limit)
 	if err != nil {
 		slog.Error("dlq list failed", "error", err)

@@ -466,7 +466,7 @@ func TestAsyncOutputCheckFailClosedQuarantinesOnError(t *testing.T) {
 	engine := NewEngine(bus, NewSafetyBasic(), newTestRegistry(t), NewNaiveStrategy(), store, nil).
 		WithOutputChecker(checker).
 		WithOutputSafetyEnabled(true)
-	// Default asyncFailMode is "" which means fail-closed (isAsyncFailClosed returns true)
+	// Default asyncFailMode is "" which means fail-closed (isAsyncFailOpen returns false)
 
 	err := engine.handleJobResult(&pb.JobResult{JobId: jobID, Status: pb.JobStatus_JOB_STATUS_SUCCEEDED, ResultPtr: "redis://res:job-async-failclosed"})
 	if err != nil {

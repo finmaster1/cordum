@@ -214,12 +214,9 @@ func (s *RedisJobStore) CancelJob(ctx context.Context, jobID string) (model.JobS
 		}
 
 		// Remove from tenant active set — CANCELLED is terminal.
+		// No TTL on active set — it self-manages via SAdd/SRem on state transitions.
 		if tenant != "" {
-			activeKey := tenantActiveKey(tenant)
-			pipe.SRem(ctx, activeKey, jobID)
-			if s.metaTTL > 0 {
-				pipe.Expire(ctx, activeKey, s.metaTTL)
-			}
+			pipe.SRem(ctx, tenantActiveKey(tenant), jobID)
 		}
 
 		pipe.ZAdd(ctx, "job:recent", redis.Z{Score: float64(now), Member: jobID})
@@ -402,15 +399,15 @@ func (s *RedisJobStore) SetState(ctx context.Context, jobID string, state model.
 			pipe.ZAdd(ctx, idx, redis.Z{Score: float64(now), Member: jobID})
 		}
 
+		// Tenant active set: no TTL — self-manages via SAdd/SRem.
+		// A TTL would expire the key for long-running jobs, making them
+		// vanish from active counts while still running.
 		if tenant != "" {
 			activeKey := tenantActiveKey(tenant)
 			if isActiveState(state) {
 				pipe.SAdd(ctx, activeKey, jobID)
 			} else if terminalStates[state] {
 				pipe.SRem(ctx, activeKey, jobID)
-			}
-			if s.metaTTL > 0 {
-				pipe.Expire(ctx, activeKey, s.metaTTL)
 			}
 		}
 
@@ -489,7 +486,7 @@ func (s *RedisJobStore) buildJobRecords(ctx context.Context, members []redis.Z) 
 		stateCmds[jobID] = pipe.Get(ctx, jobStateKey(jobID))
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		slog.Warn("redis pipeline exec", "op", "build_job_records", "error", err)
+		return nil, fmt.Errorf("job store build records pipeline: %w", err)
 	}
 
 	for _, m := range members {
@@ -681,8 +678,8 @@ func (s *RedisJobStore) SetJobMeta(ctx context.Context, req *pb.JobRequest) erro
 
 	if budget := req.GetBudget(); budget != nil && budget.GetDeadlineMs() > 0 {
 		deadline := time.Now().Add(time.Duration(budget.GetDeadlineMs()) * time.Millisecond)
-		pipe.HSet(ctx, metaKey, metaFieldDeadline, deadline.Unix())
-		pipe.ZAdd(ctx, deadlineIndexKey(), redis.Z{Score: float64(deadline.Unix()), Member: req.GetJobId()})
+		pipe.HSet(ctx, metaKey, metaFieldDeadline, deadline.UnixMicro())
+		pipe.ZAdd(ctx, deadlineIndexKey(), redis.Z{Score: float64(deadline.UnixMicro()), Member: req.GetJobId()})
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -733,8 +730,8 @@ func (s *RedisJobStore) SetDeadline(ctx context.Context, jobID string, deadline 
 		return fmt.Errorf("invalid job deadline")
 	}
 	pipe := s.client.TxPipeline()
-	pipe.HSet(ctx, jobMetaKey(jobID), metaFieldDeadline, deadline.Unix())
-	pipe.ZAdd(ctx, deadlineIndexKey(), redis.Z{Score: float64(deadline.Unix()), Member: jobID})
+	pipe.HSet(ctx, jobMetaKey(jobID), metaFieldDeadline, deadline.UnixMicro())
+	pipe.ZAdd(ctx, deadlineIndexKey(), redis.Z{Score: float64(deadline.UnixMicro()), Member: jobID})
 	_, err := pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("job store set deadline %s: %w", jobID, err)
@@ -743,13 +740,16 @@ func (s *RedisJobStore) SetDeadline(ctx context.Context, jobID string, deadline 
 }
 
 // ListExpiredDeadlines returns jobs whose deadline has passed.
+// The nowUnix parameter is normalized to microsecond precision for consistency
+// with deadline scores (which are stored as microseconds).
 func (s *RedisJobStore) ListExpiredDeadlines(ctx context.Context, nowUnix int64, limit int64) ([]model.JobRecord, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+	nowMicros := normalizeTimestampMicrosUpper(nowUnix)
 	members, err := s.client.ZRangeByScoreWithScores(ctx, deadlineIndexKey(), &redis.ZRangeBy{
 		Min:    "-inf",
-		Max:    fmt.Sprintf("%d", nowUnix),
+		Max:    fmt.Sprintf("%d", nowMicros),
 		Offset: 0,
 		Count:  limit,
 	}).Result()

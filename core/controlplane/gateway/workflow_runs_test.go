@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/configsvc"
+	"github.com/cordum/cordum/core/infra/maputil"
 	wf "github.com/cordum/cordum/core/workflow"
 )
 
@@ -78,27 +79,8 @@ func (f *fakeRunFailurePersistenceStore) AppendTimelineEvent(_ context.Context, 
 	return f.appendTimelineErr
 }
 
-func cloneAnyMap(in map[string]any) map[string]any {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
+var cloneAnyMap = maputil.CloneAnyMap
+var cloneStringMap = maputil.CloneStringMap
 
 func TestWorkflowRunHandlers(t *testing.T) {
 	s, bus, _ := newTestGateway(t)

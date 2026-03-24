@@ -849,13 +849,7 @@ func (s *server) handleGetRunTimeline(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
 		return
 	}
-	limit := int64(200)
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	limit = clampListLimit(limit)
+	limit, _ := parsePagination(r, 200)
 	events, err := s.workflowStore.ListTimelineEvents(r.Context(), id, limit)
 	if err != nil {
 		slog.Error("run timeline failed", "error", err, "run_id", id)

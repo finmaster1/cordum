@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -280,12 +279,7 @@ func (s *server) handleListSchemas(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "schema registry unavailable")
 		return
 	}
-	limit := int64(100)
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil && parsed > 0 {
-			limit = parsed
-		}
-	}
+	limit, _ := parsePagination(r, 100)
 	ids, err := s.schemaRegistry.List(r.Context(), limit)
 	if err != nil {
 		slog.Error("schema list failed", "error", err)

@@ -626,6 +626,105 @@ func TestProcessJobApprovalGatePublishFailureReturnsRetryableError(t *testing.T)
 	}
 }
 
+// TestApprovedWorkerJobNotAutoCompleted verifies that a regular worker job
+// (non-gate topic) that went through the approval flow is dispatched to its
+// worker handler, NOT auto-completed with a synthetic SUCCEEDED result.
+// This is the regression test for the bug where send_email/notify_slack jobs
+// were silently auto-completed after approval.
+func TestApprovedWorkerJobNotAutoCompleted(t *testing.T) {
+	bus := &fakeBus{}
+	registry := newTestRegistry(t)
+	jobStore := newFakeJobStore()
+	engine := NewEngine(bus, NewSafetyBasic(), registry, NewNaiveStrategy(), jobStore, nil)
+
+	// Simulate a worker job (send-email) that went through approval flow.
+	// It has the approval_granted label because the gateway set it after
+	// admin approved, but its topic is a regular worker topic, not an
+	// approval gate topic.
+	req := &pb.JobRequest{
+		JobId: "job-worker-approved",
+		Topic: "job.gtm-engine.send-email",
+		Labels: map[string]string{
+			"approval_granted": "true",
+			"workflow_id":      "gtm-engine.account-brief",
+			"run_id":           "run-123",
+			"step_id":          "send_email",
+		},
+	}
+	jobHash, err := HashJobRequest(req)
+	if err != nil {
+		t.Fatalf("hash job: %v", err)
+	}
+	// Store a previous safety decision that required approval (simulates
+	// the safety kernel marking send-email as needing approval).
+	jobStore.safety[req.JobId] = SafetyDecisionRecord{
+		Decision:         SafetyRequireApproval,
+		ApprovalRequired: true,
+		PolicySnapshot:   "snap-1",
+		JobHash:          jobHash,
+	}
+
+	if err := engine.processJob(context.Background(), req, "trace-worker-approved"); err != nil {
+		t.Fatalf("process job: %v", err)
+	}
+
+	// The job must NOT be auto-completed. It should be dispatched to the
+	// worker pool. With NaiveStrategy it gets dispatched normally.
+	if got := jobStore.states["job-worker-approved"]; got == JobStateSucceeded {
+		t.Fatalf("worker job was auto-completed (bug!); expected dispatch to worker, got state %s", got)
+	}
+	// Verify a result was NOT published with synthetic SUCCEEDED.
+	for _, msg := range bus.snapshotPublished() {
+		if msg.subject == capsdk.SubjectResult {
+			res := msg.packet.GetJobResult()
+			if res != nil && res.GetJobId() == "job-worker-approved" && res.GetStatus() == pb.JobStatus_JOB_STATUS_SUCCEEDED {
+				t.Fatalf("synthetic SUCCEEDED result published for worker job (bug!); worker should execute")
+			}
+		}
+	}
+}
+
+// TestApprovalGateTopicStillAutoCompletes verifies that actual approval gate
+// jobs are still auto-completed after the fix (regression safety).
+// The gate must have been approved (label set, previous decision stored).
+func TestApprovalGateTopicStillAutoCompletes(t *testing.T) {
+	bus := &fakeBus{}
+	registry := newTestRegistry(t)
+	jobStore := newFakeJobStore()
+	engine := NewEngine(bus, NewSafetyBasic(), registry, NewNaiveStrategy(), jobStore, nil)
+
+	for _, topic := range []string{capsdk.SubjectApprovalGate, capsdk.SubjectWorkflowApprovalGate} {
+		jobID := "gate-" + topic
+		req := &pb.JobRequest{
+			JobId: jobID,
+			Topic: topic,
+			Labels: map[string]string{
+				"approval_granted": "true",
+				"gate_type":        "workflow_approval",
+			},
+		}
+		jobHash, err := HashJobRequest(req)
+		if err != nil {
+			t.Fatalf("hash: %v", err)
+		}
+		jobStore.safety[jobID] = SafetyDecisionRecord{
+			Decision:         SafetyRequireApproval,
+			ApprovalRequired: true,
+			PolicySnapshot:   workflowGateSnapshot,
+			JobHash:          jobHash,
+		}
+		bus.published = nil
+		jobStore.states = map[string]JobState{}
+
+		if err := engine.processJob(context.Background(), req, "trace-"+jobID); err != nil {
+			t.Fatalf("process job %s: %v", topic, err)
+		}
+		if got := jobStore.states[jobID]; got != JobStateSucceeded {
+			t.Fatalf("approval gate %s not auto-completed; got state %s", topic, got)
+		}
+	}
+}
+
 func TestHandleJobRequestNoWorkersDefersRetry(t *testing.T) {
 	bus := &fakeBus{}
 	registry := newTestRegistry(t)

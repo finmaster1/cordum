@@ -14,7 +14,50 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/cordum/cordum/core/audit"
 )
+
+// ---------------------------------------------------------------------------
+// Auth failure audit
+// ---------------------------------------------------------------------------
+
+// redactUsername returns the first 3 chars of a username followed by ***.
+// If the username is shorter than 3 chars, it returns the full length + ***.
+// Empty usernames return "<unknown>".
+func redactUsername(username string) string {
+	if username == "" {
+		return "<unknown>"
+	}
+	if len(username) <= 3 {
+		return username + "***"
+	}
+	return username[:3] + "***"
+}
+
+// emitAuthFailure publishes an audit event for a failed authentication attempt.
+// The event never contains passwords, tokens, or API keys — only redacted identifiers.
+func (s *server) emitAuthFailure(r *http.Request, username, authMethod, reason string) {
+	if s.auditExporter == nil {
+		return
+	}
+	ip := clientIP(r)
+	s.auditExporter.Send(audit.SIEMEvent{
+		Timestamp: time.Now().UTC(),
+		EventType: audit.EventSystemAuth,
+		Severity:  audit.SeverityMedium,
+		TenantID:  s.tenant,
+		Action:    "auth.failure",
+		Reason:    reason,
+		Identity:  redactUsername(username),
+		Extra: map[string]string{
+			"source_ip":   ip,
+			"auth_method": authMethod,
+			"path":        r.URL.Path,
+		},
+	})
+	slog.Warn("auth failure audited", "ip", ip, "username", redactUsername(username), "method", authMethod, "reason", reason)
+}
 
 // ---------------------------------------------------------------------------
 // Server authorize helpers
@@ -192,6 +235,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	password := strings.TrimSpace(req.Password)
 	if password == "" {
+		s.emitAuthFailure(r, req.Username, "password", "empty_password")
 		writeErrorJSON(w, http.StatusUnauthorized, "password required")
 		return
 	}
@@ -214,6 +258,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 		if err == nil && user != nil {
 			if user.Disabled {
+				s.emitAuthFailure(r, username, "password", "user_disabled")
 				writeErrorJSON(w, http.StatusForbidden, "user is disabled")
 				return
 			}
@@ -221,6 +266,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// Brute-force protection: check throttle before password validation.
 			if redisStore, ok := userStore.(*RedisUserStore); ok {
 				if err := redisStore.CheckLoginThrottle(r.Context(), username, clientIP(r)); err != nil {
+					s.emitAuthFailure(r, username, "password", "rate_limited")
 					slog.Warn("rate limit exceeded", "method", r.Method, "path", r.URL.Path, "error", err)
 					writeErrorJSON(w, http.StatusTooManyRequests, "rate limit exceeded")
 					return
@@ -249,7 +295,8 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Password validation failed — record the attempt.
+			// Password validation failed — record the attempt and emit audit event.
+			s.emitAuthFailure(r, username, "password", "invalid_credentials")
 			if redisStore, ok := userStore.(*RedisUserStore); ok {
 				redisStore.RecordFailedLogin(r.Context(), username, clientIP(r))
 			}
@@ -276,11 +323,13 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Authenticate using existing provider
 	if s.auth == nil {
+		s.emitAuthFailure(r, req.Username, "apikey", "auth_not_configured")
 		writeErrorJSON(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	authCtx, err := s.auth.AuthenticateHTTP(authReq)
 	if err != nil {
+		s.emitAuthFailure(r, req.Username, "apikey", "invalid_credentials")
 		writeErrorJSON(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}

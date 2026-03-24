@@ -1654,3 +1654,39 @@ func TestHandleJobResultTransientRedisErrorIsNotErrRunNotFound(t *testing.T) {
 		t.Fatalf("transient Redis error must NOT be ErrRunNotFound, got: %v", resultErr)
 	}
 }
+
+func TestActivateOnErrorHandlerNilRun(t *testing.T) {
+	store := newWorkflowStore(t)
+	defer store.Close()
+	bus := &recordingBus{}
+	engine := NewEngine(store, bus)
+	now := time.Now().UTC()
+
+	// Calling with nil run should not panic.
+	engine.activateOnErrorHandler(context.Background(), nil, &Workflow{}, "step-1", &StepRun{}, now)
+	// Calling with nil wfDef should not panic.
+	engine.activateOnErrorHandler(context.Background(), &WorkflowRun{}, nil, "step-1", &StepRun{}, now)
+	// Calling with nil stepRun should not panic.
+	engine.activateOnErrorHandler(context.Background(), &WorkflowRun{}, &Workflow{}, "step-1", nil, now)
+}
+
+func TestSetContextPathErrorLogged(t *testing.T) {
+	// setContextPath with valid path should succeed.
+	ctx := map[string]any{}
+	if err := setContextPath(ctx, "steps.output", "value"); err != nil {
+		t.Fatalf("expected no error for valid path, got: %v", err)
+	}
+	if ctx["steps"] == nil {
+		t.Fatal("expected steps key to be set")
+	}
+
+	// setContextPath with empty segment should return error.
+	if err := setContextPath(ctx, "steps..invalid", "value"); err == nil {
+		t.Fatal("expected error for path with empty segment")
+	}
+
+	// setContextPath with nil ctx should be a no-op.
+	if err := setContextPath(nil, "key", "value"); err != nil {
+		t.Fatalf("expected no error for nil ctx, got: %v", err)
+	}
+}

@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/cordum/cordum/core/infra/maputil"
 )
 
 const (
@@ -493,27 +495,11 @@ func nonEmpty(primary, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
+// cloneStringMap delegates to the shared maputil implementation.
+var cloneStringMap = maputil.CloneStringMap
 
-func cloneAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
+// cloneAnyMap delegates to the shared maputil implementation.
+var cloneAnyMap = maputil.CloneAnyMap
 
 // jsonSchema generates a basic JSON schema map from struct tags.
 func jsonSchema(v any) map[string]any {

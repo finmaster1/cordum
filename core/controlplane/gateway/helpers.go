@@ -333,6 +333,25 @@ func parseBool(raw string) bool {
 	}
 }
 
+func parseFloatEnv(key string, defaultVal float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		slog.Warn("invalid float env var, using default", "key", key, "value", raw, "default", defaultVal)
+		return defaultVal
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
 func idempotencyKeyFromRequest(r *http.Request) string {
 	if r == nil {
 		return ""

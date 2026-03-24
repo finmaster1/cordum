@@ -388,7 +388,11 @@ func (s *server) contentForScan(ctx context.Context, req *pb.OutputCheckRequest)
 		return truncateOutputContent(content)
 	}
 	ptr := strings.TrimSpace(req.GetResultPtr())
-	if ptr != "" && s != nil && s.resultClient != nil {
+	if ptr != "" && s.resultClient == nil {
+		slog.Warn("output-safety: resultClient nil, cannot dereference pointer, falling back to error message",
+			"result_ptr", ptr)
+	}
+	if ptr != "" && s.resultClient != nil {
 		key, err := resultKeyFromPointer(ptr)
 		if err == nil {
 			if ctx == nil {

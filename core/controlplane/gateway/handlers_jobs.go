@@ -286,13 +286,7 @@ func (s *server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "job store unavailable")
 		return
 	}
-	limit := int64(50)
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	limit = clampListLimit(limit)
+	limit, _ := parsePagination(r, 50)
 	stateFilter := strings.ToUpper(r.URL.Query().Get("state"))
 	topicFilter := r.URL.Query().Get("topic")
 	tenantFilter := r.URL.Query().Get("tenant")
@@ -620,13 +614,7 @@ func (s *server) handleListJobDecisions(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	limit := int64(50)
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if v, err := strconv.ParseInt(q, 10, 64); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	limit = clampListLimit(limit)
+	limit, _ := parsePagination(r, 50)
 	decisions, err := s.jobStore.ListSafetyDecisions(r.Context(), id, limit)
 	if err != nil {
 		slog.Error("job decisions list failed", "error", err, "job_id", id)

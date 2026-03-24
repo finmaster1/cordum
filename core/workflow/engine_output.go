@@ -50,12 +50,18 @@ func recordStepOutput(ctx context.Context, mem store.Store, run *WorkflowRun, st
 		entry["output"] = effective
 		if applyOutputPath && stepDef != nil {
 			if path := strings.TrimSpace(stepDef.OutputPath); path != "" {
-				_ = setContextPath(run.Context, path, effective)
+				if pathErr := setContextPath(run.Context, path, effective); pathErr != nil {
+					slog.Warn("workflow: setContextPath failed for output",
+						"path", path, "error", pathErr)
+				}
 			}
 		}
 	} else if applyOutputPath && stepDef != nil {
 		if path := strings.TrimSpace(stepDef.OutputPath); path != "" {
-			_ = setContextPath(run.Context, path, resultPtr)
+			if pathErr := setContextPath(run.Context, path, resultPtr); pathErr != nil {
+				slog.Warn("workflow: setContextPath failed for result ptr",
+					"path", path, "error", pathErr)
+			}
 		}
 	}
 
@@ -77,7 +83,10 @@ func recordStepInlineOutput(run *WorkflowRun, stepID string, stepDef *Step, outp
 	entry := map[string]any{"output": output}
 	if stepDef != nil {
 		if path := strings.TrimSpace(stepDef.OutputPath); path != "" {
-			_ = setContextPath(run.Context, path, output)
+			if pathErr := setContextPath(run.Context, path, output); pathErr != nil {
+			slog.Warn("workflow: setContextPath failed for inline output",
+				"path", path, "error", pathErr)
+		}
 		}
 	}
 	steps[stepID] = entry

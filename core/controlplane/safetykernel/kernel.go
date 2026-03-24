@@ -443,7 +443,7 @@ func (s *server) getCachedDecision(key string) *pb.PolicyCheckResponse {
 		delete(s.cache, key)
 		return nil
 	}
-	return entry.resp
+	return clonePolicyResponse(entry.resp)
 }
 
 func (s *server) setCachedDecision(key string, resp *pb.PolicyCheckResponse) {

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/infra/env"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -461,9 +462,14 @@ func isAllowedPublicPath(auth AuthProvider, path string) bool {
 }
 
 // apiKeyMiddleware enforces API key auth and injects auth context.
-func apiKeyMiddleware(auth AuthProvider, next http.Handler) http.Handler {
+// An optional auditSender emits audit events on authentication failures.
+func apiKeyMiddleware(auth AuthProvider, next http.Handler, auditSender ...audit.AuditSender) http.Handler {
 	if auth == nil {
 		return next
+	}
+	var aSender audit.AuditSender
+	if len(auditSender) > 0 {
+		aSender = auditSender[0]
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" || !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -476,6 +482,20 @@ func apiKeyMiddleware(auth AuthProvider, next http.Handler) http.Handler {
 		}
 		authCtx, err := auth.AuthenticateHTTP(r)
 		if err != nil {
+			if aSender != nil {
+				aSender.Send(audit.SIEMEvent{
+					Timestamp: time.Now().UTC(),
+					EventType: audit.EventSystemAuth,
+					Severity:  audit.SeverityMedium,
+					Action:    "auth.failure",
+					Reason:    "request_auth_failed",
+					Extra: map[string]string{
+						"source_ip":   clientIP(r),
+						"auth_method": "middleware",
+						"path":        r.URL.Path,
+					},
+				})
+			}
 			writeErrorJSON(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -486,6 +506,82 @@ func apiKeyMiddleware(auth AuthProvider, next http.Handler) http.Handler {
 		)
 		ctx := context.WithValue(r.Context(), authContextKey{}, authCtx)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// sensitiveReadPaths are read endpoints that are always audited regardless of
+// sample rate. These are security-sensitive paths where access should be tracked.
+var sensitiveReadPaths = []string{
+	"/api/v1/policy",
+	"/api/v1/users",
+	"/api/v1/auth",
+	"/api/v1/approvals",
+}
+
+// isSensitiveRead returns true if the request is a GET to a security-sensitive path.
+func isSensitiveRead(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	for _, prefix := range sensitiveReadPaths {
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// auditReadMiddleware emits audit events for read access to API endpoints.
+// The sampleRate controls how often non-sensitive reads are audited (0.0 = off, 1.0 = all).
+// Sensitive reads (policy, users, approvals) are always audited regardless of rate.
+func auditReadMiddleware(sender audit.AuditSender, sampleRate float64, next http.Handler) http.Handler {
+	if sender == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only audit GET requests to API paths.
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		mandatory := isSensitiveRead(r)
+		shouldAudit := mandatory
+
+		if !shouldAudit && sampleRate > 0 {
+			// Use crypto/rand for unbiased sampling.
+			var b [1]byte
+			if _, err := crand.Read(b[:]); err == nil {
+				if float64(b[0])/256.0 < sampleRate {
+					shouldAudit = true
+				}
+			}
+		}
+
+		if shouldAudit {
+			authCtx, _ := r.Context().Value(authContextKey{}).(*AuthContext)
+			identity := ""
+			tenantID := ""
+			if authCtx != nil {
+				identity = authCtx.PrincipalID
+				tenantID = authCtx.Tenant
+			}
+			sender.Send(audit.SIEMEvent{
+				Timestamp: time.Now().UTC(),
+				EventType: audit.EventSystemAuth,
+				Severity:  audit.SeverityInfo,
+				TenantID:  tenantID,
+				Action:    "data.read",
+				Identity:  identity,
+				Extra: map[string]string{
+					"source_ip": clientIP(r),
+					"path":      r.URL.Path,
+					"mandatory": fmt.Sprintf("%t", mandatory),
+				},
+			})
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
 
