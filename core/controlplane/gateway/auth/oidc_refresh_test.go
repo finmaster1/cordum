@@ -10,11 +10,13 @@ import (
 )
 
 func TestRefreshIfUnknownKid_ConcurrentSingleRefresh(t *testing.T) {
-	// Create a provider with known keys and track refresh calls
+	// Create a provider with known keys and track refresh calls.
+	// Use a long cooldown to ensure all goroutines are rate-limited
+	// without needing a real httpClient for refreshJWKS.
 	p := &OIDCProvider{
 		rsaKeys:         make(map[string]*rsa.PublicKey),
 		ecKeys:          make(map[string]*ecdsa.PublicKey),
-		refreshCooldown: time.Millisecond, // fast cooldown for testing
+		refreshCooldown: time.Hour, // long cooldown ensures no actual refresh
 		stopCh:          make(chan struct{}),
 		done:            make(chan struct{}),
 	}

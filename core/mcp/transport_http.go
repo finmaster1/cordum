@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -324,30 +323,21 @@ func (t *HTTPTransport) removePending(key string) {
 	delete(t.pending, key)
 }
 
-func (t *HTTPTransport) writeSessionEvent(sessionID string, msg *JSONRPCMessage) (retErr error) {
-	// Defense-in-depth: recover from send on closed channel in case the
-	// closed flag check races with removeSession in another goroutine.
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Debug("writeSessionEvent recovered from panic", "session_id", sessionID, "panic", r)
-			retErr = errors.New("session closed during write")
-		}
-	}()
-
-	t.mu.RLock()
-	session, ok := t.sessions[sessionID]
-	t.mu.RUnlock()
-	if !ok || session == nil {
-		return nil
-	}
-	// Check closed flag before sending — set by removeSession before
-	// channel close to prevent send-on-closed-channel panic.
-	if session.closed.Load() {
-		return nil
-	}
+func (t *HTTPTransport) writeSessionEvent(sessionID string, msg *JSONRPCMessage) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
+	}
+
+	// Hold RLock for the entire lookup+send to prevent removeSession from
+	// closing the channel between our lookup and send. removeSession acquires
+	// a write lock, so it will block until all readers release.
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	session, ok := t.sessions[sessionID]
+	if !ok || session == nil || session.closed.Load() {
+		return nil
 	}
 	select {
 	case <-t.done:
