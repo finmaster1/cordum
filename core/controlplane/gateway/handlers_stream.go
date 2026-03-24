@@ -572,22 +572,35 @@ func (s *server) handleWorkflowJobResult(ctx context.Context, jr *pb.JobResult) 
 
 	if s.jobStore != nil {
 		lockKey := "cordum:wf:run:lock:" + runID
-		token, err := s.jobStore.TryAcquireLock(ctx, lockKey, 30*time.Second)
-		if err != nil {
-			slog.Warn("workflow result: lock acquire error",
-				"run_id", runID, "step_id", stepID, "job_id", jr.JobId, "error", err)
-			return bus.RetryAfter(err, 1*time.Second)
-		}
-		if token == "" {
-			// Before retrying, check if this message is stale (run terminal or missing).
-			// This breaks the infinite retry storm for orphan messages from completed runs.
-			if s.isStaleJobResult(ctx, runID, stepID, jr.JobId) {
-				return nil // ACK — proven stale, retrying won't help
+		// Spin-wait up to 3 seconds for the run lock. The reconciler or
+		// cancel handler may hold it briefly. Giving up too quickly causes
+		// the message to bounce through NATS redelivery which is slower.
+		lockDeadline := time.Now().Add(3 * time.Second)
+		var token string
+		for {
+			var err error
+			lockCtx, lockCancel := context.WithTimeout(ctx, 2*time.Second)
+			token, err = s.jobStore.TryAcquireLock(lockCtx, lockKey, 30*time.Second)
+			lockCancel()
+			if err != nil {
+				slog.Warn("workflow result: lock acquire error",
+					"run_id", runID, "step_id", stepID, "job_id", jr.JobId, "error", err)
+				return bus.RetryAfter(err, 1*time.Second)
 			}
-			slog.Warn("workflow result: run lock contended, will retry",
-				"run_id", runID, "step_id", stepID, "job_id", jr.JobId,
-				"lock_key", lockKey)
-			return bus.RetryAfter(fmt.Errorf("run lock busy: %s", runID), 500*time.Millisecond)
+			if token != "" {
+				break // acquired
+			}
+			if time.Now().After(lockDeadline) {
+				// Couldn't acquire after 3s — check if stale before NATS retry
+				if s.isStaleJobResult(ctx, runID, stepID, jr.JobId) {
+					return nil // ACK — proven stale
+				}
+				slog.Warn("workflow result: run lock contended, deferring to NATS retry",
+					"run_id", runID, "step_id", stepID, "job_id", jr.JobId,
+					"lock_key", lockKey)
+				return bus.RetryAfter(fmt.Errorf("run lock busy: %s", runID), 500*time.Millisecond)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 		defer func() {
 			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
