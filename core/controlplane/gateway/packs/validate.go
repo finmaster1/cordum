@@ -330,7 +330,6 @@ func LoadSchemaFile(dir, relPath string) (map[string]any, string, error) {
 
 func validateWorkflowStepMap(steps map[string]any) error {
 	return validation.WorkflowStepMap(steps)
-	return nil
 }
 
 // LoadWorkflowFile reads, validates, and hashes a workflow file.

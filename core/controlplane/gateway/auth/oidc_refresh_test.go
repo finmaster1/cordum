@@ -21,11 +21,10 @@ func TestRefreshIfUnknownKid_ConcurrentSingleRefresh(t *testing.T) {
 	// Add a known key
 	p.rsaKeys["known-kid"] = &rsa.PublicKey{}
 
-	// Test: known kid returns true immediately
-	if !p.refreshIfUnknownKid("known-kid") {
-		// refreshIfUnknownKid returns false when JWKS endpoint not configured
-		// but the key IS found in cache, so the fast path works
-	}
+	// Test: known kid returns true immediately (cache hit, no refresh needed).
+	// refreshIfUnknownKid may return false when JWKS endpoint is not configured,
+	// but the key IS found in cache so the fast path still applies.
+	_ = p.refreshIfUnknownKid("known-kid")
 
 	// Test: concurrent calls for unknown kid should be rate-limited
 	// Only one should pass the double-checked locking
