@@ -574,6 +574,8 @@ func (s *server) handleWorkflowJobResult(ctx context.Context, jr *pb.JobResult) 
 		lockKey := "cordum:wf:run:lock:" + runID
 		token, err := s.jobStore.TryAcquireLock(ctx, lockKey, 30*time.Second)
 		if err != nil {
+			slog.Warn("workflow result: lock acquire error",
+				"run_id", runID, "step_id", stepID, "job_id", jr.JobId, "error", err)
 			return bus.RetryAfter(err, 1*time.Second)
 		}
 		if token == "" {
@@ -582,9 +584,19 @@ func (s *server) handleWorkflowJobResult(ctx context.Context, jr *pb.JobResult) 
 			if s.isStaleJobResult(ctx, runID, stepID, jr.JobId) {
 				return nil // ACK — proven stale, retrying won't help
 			}
+			slog.Warn("workflow result: run lock contended, will retry",
+				"run_id", runID, "step_id", stepID, "job_id", jr.JobId,
+				"lock_key", lockKey)
 			return bus.RetryAfter(fmt.Errorf("run lock busy: %s", runID), 500*time.Millisecond)
 		}
-		defer func() { _ = s.jobStore.ReleaseLock(context.Background(), lockKey, token) }()
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if rErr := s.jobStore.ReleaseLock(releaseCtx, lockKey, token); rErr != nil {
+				slog.Warn("workflow result: lock release failed, will expire via TTL",
+					"run_id", runID, "lock_key", lockKey, "error", rErr)
+			}
+		}()
 	}
 
 	if err := s.workflowEng.HandleJobResult(ctx, jr); err != nil {
