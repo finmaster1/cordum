@@ -433,6 +433,11 @@ export default function JobsPage() {
                     <StatusBadge variant={jobStatusVariant(job.status)} dot pulse={job.status === "running"}>
                       {job.status}
                     </StatusBadge>
+                    {job.labels?.safety_bypassed === "true" && (
+                      <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-mono font-medium bg-[var(--color-warning)]/15 text-[var(--color-warning)] border border-[var(--color-warning)]/20" title="Safety bypassed via fail-open">
+                        Bypassed
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-2.5 font-mono text-sm text-cordum group-hover:underline">{job.id.slice(0, 16)}</td>
                   <td className="px-5 py-2.5 text-sm text-foreground">{job.topic || "—"}</td>

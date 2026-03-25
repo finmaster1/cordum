@@ -46,6 +46,7 @@ export default function HomePage() {
       return { items, total: res.total ?? items.length };
     },
     refetchInterval: 10_000,
+
   });
 
   const { data: workers, isLoading: workersLoading, isError: workersError, error: workersErr, refetch: refetchWorkers } = useQuery({
@@ -55,6 +56,7 @@ export default function HomePage() {
       return (res.items ?? []).map(mapHeartbeatToWorker).filter((w): w is Worker => !!w);
     },
     refetchInterval: 15_000,
+
   });
 
   const { data: approvalsData, isLoading: approvalsLoading, isError: approvalsError, error: approvalsErr, refetch: refetchApprovals } = useQuery({
@@ -64,6 +66,7 @@ export default function HomePage() {
       return (res.items ?? []).map(mapApprovalItem).filter((a): a is Approval => !!a);
     },
     refetchInterval: 5_000,
+
   });
 
   const { data: statusData, isLoading: statusLoading } = useStatus();

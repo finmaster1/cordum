@@ -432,7 +432,7 @@ func main() {
 	pendingReplayer := scheduler.NewPendingReplayer(engine, jobStore, dispatchTimeout, scanInterval)
 	go pendingReplayer.Start(ctx)
 
-	go watchConfigChanges(ctx, configSvc, poolCfg, timeoutsCfg, strategy, reconciler, natsBus)
+	go watchConfigChanges(ctx, configSvc, poolCfg, timeoutsCfg, strategy, reconciler, natsBus, engine)
 
 	slog.Info("scheduler running, waiting for signals...")
 	sigCh := make(chan os.Signal, 1)

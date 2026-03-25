@@ -11,7 +11,7 @@ services:
       - ./certs:/etc/cordum/tls:ro
       - nats_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 4222"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 3

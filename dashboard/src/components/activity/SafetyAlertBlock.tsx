@@ -1,4 +1,5 @@
 import { ShieldAlert } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { formatRelative } from "../../lib/format";
@@ -25,7 +26,12 @@ export function SafetyAlertBlock({ activity, onApprove, onReject }: Props) {
   const requiresAction = activity.payload?.requires_action && decision === "REQUIRE_APPROVAL";
 
   return (
-    <div className="rounded-2xl border border-border bg-card/70 p-4">
+    <div className={cn(
+      "rounded-2xl border-l-4 p-4",
+      decision === "DENY" ? "border-l-destructive bg-destructive/5" :
+      decision === "REQUIRE_APPROVAL" ? "border-l-[var(--color-warning)] bg-[var(--color-warning)]/5" :
+      "border-l-[var(--color-success)] bg-[var(--color-success)]/5"
+    )}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-warning/10 text-warning">

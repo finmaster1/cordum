@@ -421,8 +421,9 @@ func TestDLQStoreAddTrimMaintainsLimit(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Add more than dlqMaxEntries entries
-	total := dlqMaxEntries + 50
+	// Add more than dlqMaxEntries() entries
+	maxEntries := dlqMaxEntries()
+	total := int(maxEntries) + 50
 	for i := 0; i < total; i++ {
 		entry := DLQEntry{
 			JobID:     fmt.Sprintf("trim-job-%04d", i),
@@ -433,10 +434,10 @@ func TestDLQStoreAddTrimMaintainsLimit(t *testing.T) {
 		require.NoError(t, err, "add %d", i)
 	}
 
-	// Index should be trimmed to dlqMaxEntries
+	// Index should be trimmed to dlqMaxEntries()
 	indexCount, err := store.client.ZCard(ctx, dlqIndexKey()).Result()
 	require.NoError(t, err)
-	assert.LessOrEqual(t, indexCount, int64(dlqMaxEntries),
+	assert.LessOrEqual(t, indexCount, maxEntries,
 		"index should be trimmed to max entries")
 }
 

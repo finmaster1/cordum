@@ -34,7 +34,7 @@ type BasicAuthProvider struct {
 	keysPath             string
 	keysModTime          time.Time
 	keysMu               sync.RWMutex
-	jwt                  *jwtValidator
+	jwt                  *ReloadableJWTValidator
 	jwtRequired          bool
 	userStore            UserStore
 	keyStore             KeyStore
@@ -49,12 +49,16 @@ func NewBasicAuthProvider(defaultTenant string) (*BasicAuthProvider, error) {
 		return nil, err
 	}
 	allowAnonymous := env.Bool("CORDUM_ALLOW_INSECURE_NO_AUTH")
-	jwtValidator, jwtRequired, err := newJWTValidatorFromEnv()
+	jwtValidator, jwtRequired, err := NewReloadableJWTValidator()
 	if err != nil {
 		return nil, err
 	}
 	if env.IsProduction() && jwtValidator != nil && !jwtRequired {
 		jwtRequired = true
+	}
+	// Start key file watcher for automatic reload
+	if jwtValidator != nil {
+		go jwtValidator.WatchLoop(context.Background(), 30*time.Second)
 	}
 	if env.IsProduction() && allowAnonymous {
 		return nil, errors.New("insecure auth disabled in production")

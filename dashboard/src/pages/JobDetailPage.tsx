@@ -82,6 +82,25 @@ function StateMachine({ currentState }: { currentState: string }) {
 // BlobViewer — shows Redis pointer + expandable "Read" button for data
 // ---------------------------------------------------------------------------
 
+const MAX_RESULT_DISPLAY = 100 * 1024; // 100KB
+
+function formatBlobData(data: unknown): string | null {
+  if (data == null) return null;
+  if (typeof data === "string") {
+    // Auto-parse JSON strings for pretty-printing
+    try {
+      const parsed = JSON.parse(data);
+      if (typeof parsed === "object" && parsed !== null) {
+        return JSON.stringify(parsed, null, 2);
+      }
+    } catch {
+      // Not JSON — display as-is
+    }
+    return data;
+  }
+  return JSON.stringify(data, null, 2);
+}
+
 function BlobViewer({ label, pointer, data, emptyText }: {
   label: string;
   pointer?: string;
@@ -89,6 +108,7 @@ function BlobViewer({ label, pointer, data, emptyText }: {
   emptyText: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showFull, setShowFull] = useState(false);
 
   if (!pointer && data == null) {
     return (
@@ -98,9 +118,9 @@ function BlobViewer({ label, pointer, data, emptyText }: {
     );
   }
 
-  const formatted = data != null
-    ? (typeof data === "string" ? data : JSON.stringify(data, null, 2))
-    : null;
+  const formatted = formatBlobData(data);
+  const isTruncated = formatted != null && formatted.length > MAX_RESULT_DISPLAY && !showFull;
+  const displayText = isTruncated ? formatted.slice(0, MAX_RESULT_DISPLAY) : formatted;
 
   return (
     <div className="space-y-3">
@@ -123,9 +143,18 @@ function BlobViewer({ label, pointer, data, emptyText }: {
           )}
         </div>
       )}
-      {(expanded || !pointer) && formatted && (
+      {(expanded || !pointer) && displayText && (
         <div className="surface-inset p-4 font-mono text-xs text-foreground overflow-auto max-h-[500px]">
-          <pre className="whitespace-pre-wrap break-all">{formatted}</pre>
+          <pre className="whitespace-pre-wrap break-all">{displayText}</pre>
+          {isTruncated && (
+            <button
+              type="button"
+              onClick={() => setShowFull(true)}
+              className="mt-2 text-cordum hover:underline text-xs"
+            >
+              Show full result ({Math.round((formatted?.length ?? 0) / 1024)}KB)
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -246,8 +275,8 @@ function JobTimeline({ job }: { job: Job }) {
     }
 
     // Error
-    if (job.errorMessage) {
-      items.push({ time: job.updatedAt, label: "Error", detail: job.errorMessage, variant: "danger" });
+    if (job.errorMessage || job.status === "failed") {
+      items.push({ time: job.updatedAt, label: "Error", detail: job.errorMessage || `Job failed (no error message provided). Status code: ${job.errorCode || "unknown"}`, variant: "danger" });
     }
 
     // Final state
@@ -419,6 +448,22 @@ export default function JobDetailPage() {
         </Button>
       </div>
 
+      {/* Safety Bypass Warning */}
+      {job.labels?.safety_bypassed === "true" && (
+        <div className={cn("flex items-center gap-3 px-4 py-3 rounded-xl border", "bg-[var(--color-warning)]/10 border-[var(--color-warning)]/30 text-[var(--color-warning)]")}>
+          <Shield className="w-5 h-5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold">Safety Bypassed</p>
+            <p className="text-xs opacity-80">
+              This job was allowed via fail-open because the Safety Kernel was unavailable.
+              {job.labels.safety_bypass_reason && (
+                <> Reason: {job.labels.safety_bypass_reason}</>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* State Machine — showcase instrument card */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -550,14 +595,14 @@ export default function JobDetailPage() {
           )}
 
           {/* Error section */}
-          {job.errorMessage && (
+          {(job.errorMessage || job.status === "failed") && (
             <div className="instrument-card status-danger p-5 lg:col-span-2">
               <div className="flex items-center gap-2 mb-4">
                 <AlertTriangle className="w-4 h-4 text-destructive" />
                 <h3 className="font-display font-semibold text-sm text-foreground">Error</h3>
               </div>
               <div className="rounded-2xl bg-destructive/5 border border-destructive/15 p-4">
-                <p className="text-sm font-mono text-destructive whitespace-pre-wrap">{job.errorMessage}</p>
+                <p className="text-sm font-mono text-destructive whitespace-pre-wrap">{job.errorMessage || `Job failed (no error message provided). Status code: ${job.errorCode || "unknown"}`}</p>
                 {job.errorCode && (
                   <p className="text-xs text-muted-foreground mt-2 font-mono">
                     Code: {job.errorCode} {job.errorCodeEnum ? `(${job.errorCodeEnum})` : ""}

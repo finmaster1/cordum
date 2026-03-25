@@ -307,7 +307,7 @@ func TestWatchConfigChangesUpdatesRouting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go watchConfigChanges(ctx, svc, nil, nil, strategy, reconciler, nil)
+	go watchConfigChanges(ctx, svc, nil, nil, strategy, reconciler, nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	routing := strategy.CurrentRouting()
@@ -384,7 +384,7 @@ func TestWatchConfigChangesNotificationTriggersReload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go watchConfigChanges(ctx, svc, nil, nil, strategy, reconciler, natsBus)
+	go watchConfigChanges(ctx, svc, nil, nil, strategy, reconciler, natsBus, nil)
 
 	// Give the subscriber time to establish.
 	time.Sleep(100 * time.Millisecond)
@@ -465,7 +465,7 @@ func TestWatchConfigChangesFallbackPoll(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go watchConfigChanges(ctx, svc, nil, nil, strategy, reconciler, nil)
+	go watchConfigChanges(ctx, svc, nil, nil, strategy, reconciler, nil, nil)
 	time.Sleep(50 * time.Millisecond)
 
 	routing := strategy.CurrentRouting()

@@ -28,6 +28,9 @@ topics:
   job.gtm-engine.send-email: gtm-engine-think
   job.gtm-engine.notify-slack: gtm-engine-act
   job.gtm-engine.create-issues: gtm-engine-act
+  # Visa Agentic Ready Demo
+  job.visa-governance.evaluate: visa-governance
+  job.visa-payment.process: visa-payment
 pools:
   default:
     requires: []
@@ -64,4 +67,8 @@ pools:
   gtm-engine-think:
     requires: []
   gtm-engine-act:
+    requires: []
+  visa-governance:
+    requires: []
+  visa-payment:
     requires: []

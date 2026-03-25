@@ -2,15 +2,15 @@
  * DESIGN: "Control Surface" — Audit Log
  * Matches cordumds-gj5mw4zm.manus.space showcase patterns
  */
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { get } from "@/api/client";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/Skeleton";
-import { Search, RefreshCw, FileText, Download } from "lucide-react";
+import { Search, RefreshCw, FileText, Download, Calendar } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -26,6 +26,27 @@ interface AuditEvent {
   ip?: string;
 }
 
+interface AuditResponse {
+  items: Record<string, unknown>[];
+  total?: number;
+  has_more?: boolean;
+  offset?: number;
+}
+
+const PAGE_SIZE = 50;
+
+function mapEvent(e: Record<string, unknown>): AuditEvent {
+  return {
+    id: (e.id as string) ?? "",
+    action: (e.action as string) ?? "",
+    actor: (e.actor_id as string) || (e.role as string) || (e.actor as string) || "unknown",
+    resource: (e.resource_type as string) || (e.resource as string) || "",
+    resourceId: (e.resource_id as string) || (e.resourceId as string) || undefined,
+    detail: (e.message as string) || (e.detail as string) || undefined,
+    timestamp: (e.created_at as string) || (e.timestamp as string) || "",
+  };
+}
+
 function actionColor(action: string) {
   if (action.includes("created") || action.includes("registered")) return "text-[var(--color-success)] bg-[var(--color-success)]/10 border-[var(--color-success)]/20";
   if (action.includes("failed") || action.includes("deleted")) return "text-destructive bg-destructive/10 border-destructive/20";
@@ -36,30 +57,75 @@ function actionColor(action: string) {
 export default function AuditLogPage() {
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["audit", actionFilter],
-    queryFn: async () => {
-      const params = new URLSearchParams({ limit: "200" });
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["audit", actionFilter, dateFrom, dateTo, search],
+    queryFn: async ({ pageParam = 0 }) => {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(pageParam) });
       if (actionFilter) params.set("action", actionFilter);
-      const res = await get<{ items: Record<string, unknown>[] }>(`/policy/audit?${params}`);
-      return (res.items ?? []).map((e): AuditEvent => ({
-        id: (e.id as string) ?? "",
-        action: (e.action as string) ?? "",
-        actor: (e.actor_id as string) || (e.role as string) || (e.actor as string) || "unknown",
-        resource: (e.resource_type as string) || (e.resource as string) || "",
-        resourceId: (e.resource_id as string) || (e.resourceId as string) || undefined,
-        detail: (e.message as string) || (e.detail as string) || undefined,
-        timestamp: (e.created_at as string) || (e.timestamp as string) || "",
-      }));
+      if (dateFrom) params.set("after", new Date(dateFrom).toISOString());
+      if (dateTo) params.set("before", new Date(dateTo + "T23:59:59").toISOString());
+      if (search) params.set("search", search);
+      return get<AuditResponse>(`/policy/audit?${params}`);
     },
+    getNextPageParam: (lastPage, allPages) => {
+      if (!lastPage.has_more) return undefined;
+      return allPages.reduce((sum, p) => sum + (p.items?.length ?? 0), 0);
+    },
+    initialPageParam: 0,
   });
 
-  const events = (data ?? []).filter((e) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return e.action.toLowerCase().includes(q) || e.actor.toLowerCase().includes(q) || e.resource.toLowerCase().includes(q) || (e.detail ?? "").toLowerCase().includes(q);
-  });
+  const events: AuditEvent[] = (data?.pages ?? []).flatMap((p) => (p.items ?? []).map(mapEvent));
+  const total = data?.pages?.[0]?.total;
+
+  // Intersection observer for infinite scroll
+  const handleObserver = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+        void fetchNextPage();
+      }
+    },
+    [fetchNextPage, hasNextPage, isFetchingNextPage],
+  );
+
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(handleObserver, { threshold: 0.1 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleObserver]);
+
+  const filtersActive = !!actionFilter || !!dateFrom || !!dateTo || !!search;
+
+  const exportCSV = () => {
+    if (filtersActive) {
+      toast.info(`Exporting ${events.length} filtered events. Clear filters to export all.`);
+    }
+    const rows = events.map((e) => [e.timestamp, e.action, e.actor, e.resource, e.resourceId ?? "", (e.detail ?? "").replace(/,/g, ";")].join(","));
+    const csv = ["timestamp,action,actor,resource,resourceId,detail", ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const dateSuffix = dateFrom || dateTo ? `-${dateFrom || "start"}-${dateTo || "now"}` : "";
+    a.download = `audit-export-${new Date().toISOString().slice(0, 10)}${dateSuffix}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${events.length} events`);
+  };
 
   if (isError) {
     return <ErrorBanner message={error instanceof Error ? error.message : "Failed to load audit log"} onRetry={() => void refetch()} />;
@@ -77,18 +143,7 @@ export default function AuditLogPage() {
               <RefreshCw className="w-3 h-3 mr-1" />
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => {
-              const rows = events.map((e) => [e.timestamp, e.action, e.actor, e.resource, e.resourceId ?? "", e.detail ?? ""].join(","));
-              const csv = ["timestamp,action,actor,resource,resourceId,detail", ...rows].join("\n");
-              const blob = new Blob([csv], { type: "text/csv" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `audit-export-${new Date().toISOString().slice(0, 10)}.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
-              toast.success(`Exported ${events.length} events`);
-            }}>
+            <Button variant="outline" size="sm" onClick={exportCSV}>
               <Download className="w-3 h-3 mr-1" />
               Export CSV
             </Button>
@@ -96,7 +151,7 @@ export default function AuditLogPage() {
         }
       />
 
-      {/* Filters — showcase style */}
+      {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -106,12 +161,14 @@ export default function AuditLogPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 w-full pl-8 pr-3 text-xs bg-surface-1 border border-border rounded-2xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+            aria-label="Search audit events"
           />
         </div>
         <select
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
           className="h-8 px-3 text-xs bg-surface-1 border border-border rounded-2xl text-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+          aria-label="Filter by action"
         >
           <option value="">All Actions</option>
           <option value="job.created">Job Created</option>
@@ -121,15 +178,49 @@ export default function AuditLogPage() {
           <option value="policy.updated">Policy Updated</option>
           <option value="worker.registered">Worker Registered</option>
         </select>
+        <div className="flex items-center gap-1.5">
+          <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-8 px-2 text-xs bg-surface-1 border border-border rounded-2xl text-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+            aria-label="From date"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-8 px-2 text-xs bg-surface-1 border border-border rounded-2xl text-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+            aria-label="To date"
+          />
+        </div>
+        {filtersActive && (
+          <button
+            onClick={() => { setSearch(""); setActionFilter(""); setDateFrom(""); setDateTo(""); }}
+            className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {/* Table — showcase style */}
+      {/* Total count */}
+      {total != null && (
+        <p className="text-xs text-muted-foreground">
+          Showing {events.length} of {total} events
+          {filtersActive && " (filtered)"}
+        </p>
+      )}
+
+      {/* Table */}
       {isLoading ? (
         <div className="instrument-card">
           <SkeletonTable rows={10} />
         </div>
       ) : events.length === 0 ? (
-        <EmptyState icon={<FileText className="w-5 h-5" />} title="No audit events" description="Events will appear as actions occur in the system" />
+        <EmptyState icon={<FileText className="w-5 h-5" />} title="No audit events" description={filtersActive ? "No events match your filters" : "Events will appear as actions occur in the system"} />
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -162,11 +253,24 @@ export default function AuditLogPage() {
                     <span className="text-sm text-foreground">{e.resource}</span>
                     {e.resourceId && <span className="text-xs text-muted-foreground font-mono ml-1">({e.resourceId.slice(0, 12)})</span>}
                   </td>
-                  <td className="px-5 py-3 text-xs text-muted-foreground truncate max-w-[200px]">{e.detail ?? "—"}</td>
+                  <td className="px-5 py-3 text-xs text-muted-foreground truncate max-w-[200px]">{e.detail ?? "\u2014"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
+
+          {/* Load More / Infinite scroll trigger */}
+          <div ref={loadMoreRef} className="px-5 py-3 text-center">
+            {isFetchingNextPage ? (
+              <span className="text-xs text-muted-foreground">Loading more...</span>
+            ) : hasNextPage ? (
+              <Button variant="ghost" size="sm" onClick={() => void fetchNextPage()}>
+                Load more{total != null ? ` (${events.length} of ${total})` : ""}
+              </Button>
+            ) : events.length > PAGE_SIZE ? (
+              <span className="text-xs text-muted-foreground">All events loaded</span>
+            ) : null}
           </div>
         </motion.div>
       )}

@@ -72,6 +72,8 @@ type WorkerRegistry interface {
 	UpdateHeartbeat(hb *pb.Heartbeat)
 	UpdateHandshake(hs *pb.Handshake)
 	Snapshot() map[string]*pb.Heartbeat
+	// IsAlive reports whether the worker has been seen within the TTL window.
+	IsAlive(workerID string) bool
 }
 
 // SchedulingStrategy selects the target subject for a job.

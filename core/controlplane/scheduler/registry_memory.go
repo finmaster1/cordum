@@ -104,6 +104,17 @@ func (r *MemoryRegistry) Snapshot() map[string]*pb.Heartbeat {
 	return snapshot
 }
 
+// IsAlive reports whether the given worker has been seen within the TTL window.
+func (r *MemoryRegistry) IsAlive(workerID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.workers[workerID]
+	if !ok {
+		return false
+	}
+	return time.Since(entry.lastSeen) <= r.ttl
+}
+
 func (r *MemoryRegistry) expireLoop() {
 	ticker := time.NewTicker(r.ttl / 2)
 	defer ticker.Stop()

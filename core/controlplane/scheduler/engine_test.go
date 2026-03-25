@@ -1399,3 +1399,113 @@ func TestInvalidJobResultRejected(t *testing.T) {
 		t.Fatalf("expected nil error for invalid result, got: %v", err)
 	}
 }
+
+func TestExtractWorkerFromSubject(t *testing.T) {
+	tests := []struct {
+		subject string
+		want    string
+	}{
+		{"worker.abc-123.jobs", "abc-123"},
+		{"worker.visa-governance-evaluator.jobs", "visa-governance-evaluator"},
+		{"job.demo-mock-bank.transfer", ""},
+		{"worker..jobs", ""},
+		{"", ""},
+		{"worker.foo", ""},
+	}
+	for _, tt := range tests {
+		got := extractWorkerFromSubject(tt.subject)
+		if got != tt.want {
+			t.Errorf("extractWorkerFromSubject(%q) = %q, want %q", tt.subject, got, tt.want)
+		}
+	}
+}
+
+func TestMemoryRegistry_IsAlive(t *testing.T) {
+	reg := NewMemoryRegistryWithTTL(2 * time.Second)
+	t.Cleanup(reg.Close)
+
+	// Worker not registered
+	if reg.IsAlive("nonexistent") {
+		t.Error("expected false for nonexistent worker")
+	}
+
+	// Register worker
+	reg.UpdateHeartbeat(&pb.Heartbeat{WorkerId: "w1", Pool: "pool1"})
+	if !reg.IsAlive("w1") {
+		t.Error("expected true for just-registered worker")
+	}
+
+	// Wait for TTL to expire
+	time.Sleep(3 * time.Second)
+	if reg.IsAlive("w1") {
+		t.Error("expected false after TTL expired")
+	}
+}
+
+func TestFailModeAtomicSwitch(t *testing.T) {
+	reg := newTestRegistry(t)
+	store := newFakeJobStore()
+	e := NewEngine(&fakeBus{}, nil, reg, NewNaiveStrategy(), store, nil)
+
+	// Default is closed (fail-closed)
+	if e.isInputFailOpen() {
+		t.Error("expected input fail mode to default to closed")
+	}
+
+	// Switch to open
+	e.WithInputFailMode("open")
+	if !e.isInputFailOpen() {
+		t.Error("expected input fail mode to be open after switch")
+	}
+
+	// Switch back to closed
+	e.WithInputFailMode("closed")
+	if e.isInputFailOpen() {
+		t.Error("expected input fail mode to be closed after switch back")
+	}
+
+	// Invalid value keeps current
+	e.WithInputFailMode("open")
+	e.WithInputFailMode("invalid")
+	// "invalid" != "open", so Store(false)
+	if e.isInputFailOpen() {
+		t.Error("expected invalid mode to set closed")
+	}
+}
+
+func TestOutputPolicyAtomicToggle(t *testing.T) {
+	reg := newTestRegistry(t)
+	store := newFakeJobStore()
+	e := NewEngine(&fakeBus{}, nil, reg, NewNaiveStrategy(), store, nil)
+
+	// Default is disabled
+	e.WithOutputSafetyEnabled(true)
+	if !e.outputSafetyEnabled.Load() {
+		t.Error("expected output safety enabled after toggle on")
+	}
+
+	e.WithOutputSafetyEnabled(false)
+	if e.outputSafetyEnabled.Load() {
+		t.Error("expected output safety disabled after toggle off")
+	}
+}
+
+func TestAsyncFailModeAtomicSwitch(t *testing.T) {
+	reg := newTestRegistry(t)
+	store := newFakeJobStore()
+	e := NewEngine(&fakeBus{}, nil, reg, NewNaiveStrategy(), store, nil)
+
+	if e.isAsyncFailOpen() {
+		t.Error("expected async fail mode to default to closed")
+	}
+
+	e.WithAsyncFailMode("open")
+	if !e.isAsyncFailOpen() {
+		t.Error("expected async fail mode to be open")
+	}
+
+	e.WithAsyncFailMode("closed")
+	if e.isAsyncFailOpen() {
+		t.Error("expected async fail mode to be closed")
+	}
+}

@@ -58,18 +58,44 @@ func bootstrapConfig(ctx context.Context, svc *configsvc.Service, pools *config.
 		if err != nil {
 			return fmt.Errorf("bootstrap config: %w", err)
 		}
-		if _, ok := doc.Data["pools"]; !ok {
+		existingPools := doc.Data["pools"]
+		storedFileHash, _ := doc.Data["_poolsFileHash"].(string)
+		if existingPools == nil {
+			// First-time bootstrap: write file config
 			doc.Data["pools"] = encoded
 			doc.Data["_poolsFileHash"] = fileHash
 			changed = true
+			slog.Info("pool config bootstrapped from file")
+		} else if storedFileHash == "" {
+			// Legacy data without hash tracking: record hash but don't overwrite
+			doc.Data["_poolsFileHash"] = fileHash
+			changed = true
+		} else if storedFileHash == fileHash {
+			// File unchanged — pack overlays may have been applied, don't touch
 		} else {
-			storedHash, _ := doc.Data["_poolsFileHash"].(string)
-			if storedHash != fileHash {
+			// File itself changed on disk — merge file base with existing overlays
+			// by deep-merging file pools into existing (file is base, overlays on top)
+			if existingMap, ok := existingPools.(map[string]any); ok {
+				for k, v := range encoded {
+					if _, exists := existingMap[k]; !exists {
+						existingMap[k] = v
+					} else if fileMap, ok := v.(map[string]any); ok {
+						if existMap, ok := existingMap[k].(map[string]any); ok {
+							for fk, fv := range fileMap {
+								if _, has := existMap[fk]; !has {
+									existMap[fk] = fv
+								}
+							}
+						}
+					}
+				}
+				doc.Data["pools"] = existingMap
+			} else {
 				doc.Data["pools"] = encoded
-				doc.Data["_poolsFileHash"] = fileHash
-				changed = true
-				slog.Info("pool config updated in Redis (hash changed)")
 			}
+			doc.Data["_poolsFileHash"] = fileHash
+			changed = true
+			slog.Info("pool config file changed — merged with existing overlays")
 		}
 	}
 	if timeouts != nil {
@@ -98,7 +124,12 @@ func bootstrapConfig(ctx context.Context, svc *configsvc.Service, pools *config.
 	if !changed {
 		return nil
 	}
-	return svc.Set(ctx, doc)
+	err = svc.Set(ctx, doc)
+	if errors.Is(err, configsvc.ErrRevisionConflict) {
+		slog.Warn("bootstrap config: revision conflict, will retry on next cycle")
+		return nil
+	}
+	return err
 }
 
 func loadConfigSnapshot(ctx context.Context, svc *configsvc.Service, fallbackPools *config.PoolsConfig, fallbackTimeouts *config.TimeoutsConfig) (configSnapshot, error) {
@@ -141,7 +172,7 @@ func loadConfigSnapshot(ctx context.Context, svc *configsvc.Service, fallbackPoo
 	return snap, nil
 }
 
-func watchConfigChanges(ctx context.Context, svc *configsvc.Service, fallbackPools *config.PoolsConfig, fallbackTimeouts *config.TimeoutsConfig, strategy *scheduler.LeastLoadedStrategy, reconciler *scheduler.Reconciler, natsBus *bus.NatsBus) {
+func watchConfigChanges(ctx context.Context, svc *configsvc.Service, fallbackPools *config.PoolsConfig, fallbackTimeouts *config.TimeoutsConfig, strategy *scheduler.LeastLoadedStrategy, reconciler *scheduler.Reconciler, natsBus *bus.NatsBus, engine *scheduler.Engine) {
 	if svc == nil || strategy == nil || reconciler == nil {
 		return
 	}
@@ -195,6 +226,10 @@ func watchConfigChanges(ctx context.Context, svc *configsvc.Service, fallbackPoo
 			lastTimeoutsHash = snap.TimeoutsHash
 			slog.Info("reconciler timeouts updated", "dispatch", dispatch, "running", running, "trigger", trigger)
 		}
+		// Reload fail modes from config if present
+		if engine != nil {
+			reloadFailModes(ctx, svc, engine, trigger)
+		}
 	}
 
 	for {
@@ -207,6 +242,35 @@ func watchConfigChanges(ctx context.Context, svc *configsvc.Service, fallbackPoo
 			slog.Info("scheduler: config change notification received, reloading")
 			reload("notification")
 		}
+	}
+}
+
+// reloadFailModes reads scheduler settings from the system config and updates
+// the engine's atomic flags. Called on every config reload cycle. Uses the
+// Engine's With* methods which do atomic stores — safe for concurrent access.
+func reloadFailModes(ctx context.Context, svc *configsvc.Service, engine *scheduler.Engine, trigger string) {
+	if svc == nil {
+		return
+	}
+	doc, err := svc.Get(ctx, configsvc.ScopeSystem, "default")
+	if err != nil {
+		return
+	}
+	schedulerCfg, ok := doc.Data["scheduler"].(map[string]any)
+	if !ok {
+		return
+	}
+	if mode, ok := schedulerCfg["input_fail_mode"].(string); ok {
+		engine.WithInputFailMode(mode)
+		slog.Info("scheduler input fail mode updated", "mode", mode, "trigger", trigger)
+	}
+	if mode, ok := schedulerCfg["output_fail_mode"].(string); ok {
+		engine.WithAsyncFailMode(mode)
+		slog.Info("scheduler output fail mode updated", "mode", mode, "trigger", trigger)
+	}
+	if enabled, ok := schedulerCfg["output_policy_enabled"].(bool); ok {
+		engine.WithOutputSafetyEnabled(enabled)
+		slog.Info("scheduler output policy enabled updated", "enabled", enabled, "trigger", trigger)
 	}
 }
 

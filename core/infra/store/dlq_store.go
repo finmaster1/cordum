@@ -29,12 +29,23 @@ type DLQEntry struct {
 }
 
 const (
-	defaultDLQEntryTTL = 30 * 24 * time.Hour
-	dlqEntryTTLDaysEnv = "CORDUM_DLQ_ENTRY_TTL_DAYS"
-	dlqMaxEntries      = 1000
+	defaultDLQEntryTTL    = 30 * 24 * time.Hour
+	dlqEntryTTLDaysEnv    = "CORDUM_DLQ_ENTRY_TTL_DAYS"
+	defaultDLQMaxEntries  = 10000
+	dlqMaxEntriesEnv      = "SCHEDULER_DLQ_MAX_SIZE"
 
 	dlqCleanupLockKey = "cordum:dlq:cleanup"
 )
+
+// dlqMaxEntries returns the configured max DLQ entries from env or default.
+func dlqMaxEntries() int64 {
+	if raw := strings.TrimSpace(os.Getenv(dlqMaxEntriesEnv)); raw != "" {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			return v
+		}
+	}
+	return defaultDLQMaxEntries
+}
 
 // releaseLockScript is declared in job_store.go — reused here for DLQ cleanup lock release.
 
@@ -82,10 +93,11 @@ func (s *DLQStore) Add(ctx context.Context, entry DLQEntry) error {
 		return fmt.Errorf("marshal dlq entry: %w", err)
 	}
 	pipe := s.client.TxPipeline()
+	maxEntries := dlqMaxEntries()
 	pipe.Set(ctx, dlqEntryKey(entry.JobID), data, s.entryTTL)
 	pipe.ZAdd(ctx, dlqIndexKey(), redis.Z{Score: float64(entry.CreatedAt.Unix()), Member: entry.JobID})
-	trimCmd := pipe.ZRange(ctx, dlqIndexKey(), 0, -(dlqMaxEntries + 1))
-	remCmd := pipe.ZRemRangeByRank(ctx, dlqIndexKey(), 0, -(dlqMaxEntries + 1)) // keep last ~1000
+	trimCmd := pipe.ZRange(ctx, dlqIndexKey(), 0, -(maxEntries + 1))
+	remCmd := pipe.ZRemRangeByRank(ctx, dlqIndexKey(), 0, -(maxEntries + 1))
 	if _, err = pipe.Exec(ctx); err != nil {
 		return err
 	}

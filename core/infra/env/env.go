@@ -3,7 +3,9 @@ package env
 import (
 	"crypto/tls"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -51,4 +53,37 @@ func TLSMinVersion() uint16 {
 		return tls.VersionTLS13
 	}
 	return tls.VersionTLS12
+}
+
+// DurationOr reads a duration from an environment variable, falling back to
+// the given default. Negative or zero values are rejected.
+func DurationOr(key string, fallback time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return fallback
+}
+
+// IntOr reads an int from an environment variable, falling back to the given
+// default. Non-positive values are rejected.
+func IntOr(key string, fallback int) int {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
+	}
+	return fallback
+}
+
+// Int64Or reads an int64 from an environment variable, falling back to the
+// given default.
+func Int64Or(key string, fallback int64) int64 {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			return v
+		}
+	}
+	return fallback
 }

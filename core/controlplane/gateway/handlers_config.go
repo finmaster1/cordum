@@ -73,15 +73,25 @@ func (s *server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		scopeID = tenant
 	}
-	doc := &configsvc.Document{
-		Scope:   scope,
-		ScopeID: scopeID,
-		Data:    data,
-		Meta:    meta,
-	}
-	if err := s.configSvc.Set(r.Context(), doc); err != nil {
-		slog.Error("config set failed", "error", err, "scope", scopeStr, "scope_id", scopeID) // #nosec -- values are validated and used for diagnostics.
-		writeErrorJSON(w, http.StatusBadRequest, "config update failed")
+	err := s.configSvc.SetWithRetry(r.Context(), scope, scopeID, 3, func(doc *configsvc.Document) error {
+		for k, v := range data {
+			doc.Data[k] = v
+		}
+		for k, v := range meta {
+			if doc.Meta == nil {
+				doc.Meta = map[string]string{}
+			}
+			doc.Meta[k] = v
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, configsvc.ErrRevisionConflict) {
+			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+		} else {
+			slog.Error("config set failed", "error", err, "scope", scopeStr, "scope_id", scopeID)
+			writeErrorJSON(w, http.StatusBadRequest, "config update failed")
+		}
 		return
 	}
 

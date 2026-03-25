@@ -609,3 +609,73 @@ func TestRecordStepOutputWithResultDataPath(t *testing.T) {
 		t.Fatal("expected ctx.outreach to contain extracted drafts")
 	}
 }
+
+func TestSkipDependentSteps_Direct(t *testing.T) {
+	wfDef := &Workflow{
+		Steps: map[string]*Step{
+			"A": {ID: "A"},
+			"B": {ID: "B", DependsOn: []string{"A"}},
+		},
+	}
+	run := &WorkflowRun{
+		Steps: map[string]*StepRun{
+			"A": {StepID: "A", Status: StepStatusFailed},
+			"B": {StepID: "B", Status: StepStatusPending},
+		},
+	}
+	skipDependentSteps(wfDef, run, "A")
+	if run.Steps["B"].Status != StepStatusSkipped {
+		t.Errorf("expected B skipped, got %s", run.Steps["B"].Status)
+	}
+	if run.Steps["B"].SkipReason != "dependency A failed" {
+		t.Errorf("expected skip reason, got %q", run.Steps["B"].SkipReason)
+	}
+}
+
+func TestSkipDependentSteps_Transitive(t *testing.T) {
+	wfDef := &Workflow{
+		Steps: map[string]*Step{
+			"A": {ID: "A"},
+			"B": {ID: "B", DependsOn: []string{"A"}},
+			"C": {ID: "C", DependsOn: []string{"B"}},
+		},
+	}
+	run := &WorkflowRun{
+		Steps: map[string]*StepRun{
+			"A": {StepID: "A", Status: StepStatusFailed},
+			"B": {StepID: "B", Status: StepStatusPending},
+			"C": {StepID: "C", Status: StepStatusPending},
+		},
+	}
+	skipDependentSteps(wfDef, run, "A")
+	if run.Steps["B"].Status != StepStatusSkipped {
+		t.Errorf("expected B skipped, got %s", run.Steps["B"].Status)
+	}
+	if run.Steps["C"].Status != StepStatusSkipped {
+		t.Errorf("expected C transitively skipped, got %s", run.Steps["C"].Status)
+	}
+}
+
+func TestSkipDependentSteps_IndependentUnaffected(t *testing.T) {
+	wfDef := &Workflow{
+		Steps: map[string]*Step{
+			"A": {ID: "A"},
+			"B": {ID: "B", DependsOn: []string{"A"}},
+			"C": {ID: "C"}, // no deps
+		},
+	}
+	run := &WorkflowRun{
+		Steps: map[string]*StepRun{
+			"A": {StepID: "A", Status: StepStatusFailed},
+			"B": {StepID: "B", Status: StepStatusPending},
+			"C": {StepID: "C", Status: StepStatusPending},
+		},
+	}
+	skipDependentSteps(wfDef, run, "A")
+	if run.Steps["B"].Status != StepStatusSkipped {
+		t.Errorf("expected B skipped, got %s", run.Steps["B"].Status)
+	}
+	if run.Steps["C"].Status != StepStatusPending {
+		t.Errorf("expected C still pending (independent), got %s", run.Steps["C"].Status)
+	}
+}

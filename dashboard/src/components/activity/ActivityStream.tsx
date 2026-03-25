@@ -1,11 +1,31 @@
-import { useEffect, useRef, useState } from "react";
-import { Activity, Loader2, Send } from "lucide-react";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { Activity, Loader2, Send, CheckCircle2, XCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "../ui/Button";
 import { Textarea } from "../ui/Textarea";
 import { ActivityBlock } from "./ActivityBlock";
 import type { ActivityItem } from "../../types/activity";
 
 const ACTIVE_RUN_STATUSES = ["running", "pending", "waiting", "blocked"];
+const MAX_ACTIVITY_ITEMS = 100;
+const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"];
+
+type FilterTab = "all" | "errors" | "safety" | "progress";
+
+function matchesFilter(item: ActivityItem, filter: FilterTab): boolean {
+  if (filter === "all") return true;
+  const t = (item.type ?? "").toLowerCase();
+  switch (filter) {
+    case "errors":
+      return t.includes("error") || t.includes("fail") || t.includes("denied") || t.includes("timeout");
+    case "safety":
+      return t.includes("safety") || t.includes("policy") || t.includes("decision");
+    case "progress":
+      return t.includes("progress") || t.includes("step") || t.includes("started") || t.includes("completed");
+    default:
+      return true;
+  }
+}
 
 type Props = {
   items: ActivityItem[];
@@ -27,9 +47,18 @@ export function ActivityStream({
   onReject,
 }: Props) {
   const [input, setInput] = useState("");
+  const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isRunActive = ACTIVE_RUN_STATUSES.includes(runStatus);
+  const isTerminal = TERMINAL_STATUSES.includes(runStatus);
+
+  const filteredItems = useMemo(
+    () => items.filter((item) => matchesFilter(item, activeFilter)),
+    [items, activeFilter],
+  );
+  const hiddenCount = filteredItems.length > MAX_ACTIVITY_ITEMS ? filteredItems.length - MAX_ACTIVITY_ITEMS : 0;
+  const displayItems = filteredItems.slice(-MAX_ACTIVITY_ITEMS);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -74,12 +103,31 @@ export function ActivityStream({
         </div>
       </div>
 
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-1 px-4 pt-2 border-b border-border">
+        {(["all", "errors", "safety", "progress"] as FilterTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveFilter(tab)}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium capitalize transition-colors",
+              activeFilter === tab
+                ? "text-accent border-b-2 border-accent"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
           </div>
-        ) : items.length === 0 ? (
+        ) : displayItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 mb-4">
               <Activity className="h-8 w-8 text-accent" />
@@ -92,14 +140,36 @@ export function ActivityStream({
             </div>
           </div>
         ) : (
-          items.map((item) => (
-            <ActivityBlock
-              key={item.id}
-              activity={item}
-              onApprove={onApprove}
-              onReject={onReject}
-            />
-          ))
+          <>
+            {hiddenCount > 0 && (
+              <div className="text-center text-xs text-muted-foreground py-1">
+                {hiddenCount} older messages hidden
+              </div>
+            )}
+            {displayItems.map((item) => (
+              <ActivityBlock
+                key={item.id}
+                activity={item}
+                onApprove={onApprove}
+                onReject={onReject}
+              />
+            ))}
+            {isTerminal && (
+              <div className={cn(
+                "flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium",
+                runStatus === "succeeded"
+                  ? "bg-[var(--color-success)]/10 text-[var(--color-success)]"
+                  : "bg-destructive/10 text-destructive",
+              )}>
+                {runStatus === "succeeded" ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  <XCircle className="w-4 h-4" />
+                )}
+                Run {runStatus}
+              </div>
+            )}
+          </>
         )}
       </div>
 

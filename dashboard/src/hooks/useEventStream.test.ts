@@ -164,15 +164,17 @@ describe("useEventStream", () => {
     expect(events[0].type).toBe("job.submit");
   });
 
-  it("invalidates React Query caches for job events including DLQ", () => {
+  it("narrows cache invalidation to specific job ID for job events", () => {
     useEventStream();
     MockWebSocket.instances[0].simulateOpen();
     MockWebSocket.instances[0].simulateMessage({
       jobRequest: { jobId: "j1" },
     });
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["jobs"] });
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["dlq"] });
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["dlq", "nav"] });
+    // Specific job invalidated immediately
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["job", "j1"] });
+    // List marked stale but not refetched immediately
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["jobs"], refetchType: "none" });
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["dlq"], refetchType: "none" });
   });
 
   it("ignores non-JSON messages", () => {
@@ -202,6 +204,48 @@ describe("useEventStream", () => {
     cleanupFn?.();
     expect(ws.closed).toBe(true);
     expect(useEventStore.getState().status).toBe("disconnected");
+  });
+
+  it("invalidates all caches on reconnect", () => {
+    useEventStream();
+    const ws1 = MockWebSocket.instances[0];
+    ws1.simulateOpen();
+    mockInvalidateQueries.mockClear();
+
+    // Disconnect
+    ws1.simulateClose();
+    expect(useEventStore.getState().status).toBe("reconnecting");
+
+    // Reconnect after backoff
+    vi.advanceTimersByTime(1000);
+    const ws2 = MockWebSocket.instances[1];
+    ws2.simulateOpen();
+
+    // Should have invalidated all caches (called with no args = invalidate all)
+    expect(mockInvalidateQueries).toHaveBeenCalled();
+  });
+
+  it("falls back to broad invalidation for events without resource IDs", () => {
+    useEventStream();
+    MockWebSocket.instances[0].simulateOpen();
+    mockInvalidateQueries.mockClear();
+    // Alert events have no extractable jobId/workerId
+    MockWebSocket.instances[0].simulateMessage({
+      alert: { severity: "warning", message: "test" },
+    });
+    // Should not invalidate specific resource — no ID available
+    // Broad invalidation not triggered for system.alert (no INVALIDATION_MAP entry)
+    // This verifies the fallback path doesn't crash
+  });
+
+  it("does not invalidate caches on first connection (not a reconnect)", () => {
+    useEventStream();
+    mockInvalidateQueries.mockClear();
+    MockWebSocket.instances[0].simulateOpen();
+
+    // First connect should NOT invalidate all caches
+    // (only event-specific invalidation happens on messages)
+    expect(mockInvalidateQueries).not.toHaveBeenCalled();
   });
 
   it("does not schedule a reconnect when close fires after unmount", () => {

@@ -376,3 +376,66 @@ func signHS256(t *testing.T, secret string, payload map[string]any) string {
 	signature := segment(mac.Sum(nil))
 	return signingInput + "." + signature
 }
+
+func TestReloadableJWTValidator(t *testing.T) {
+	// Create with key A
+	t.Setenv("CORDUM_JWT_HMAC_SECRET", "key-A")
+	t.Setenv("CORDUM_JWT_ISSUER", "test-issuer")
+	t.Setenv("CORDUM_JWT_AUDIENCE", "test-aud")
+
+	rv, _, err := NewReloadableJWTValidator()
+	if err != nil {
+		t.Fatalf("new reloadable: %v", err)
+	}
+	if rv == nil {
+		t.Fatal("expected reloadable validator")
+	}
+
+	// Token signed with key A should pass
+	tokenA := signHS256(t, "key-A", map[string]any{
+		"sub": "user1", "iss": "test-issuer", "aud": "test-aud",
+		"exp": float64(time.Now().Add(time.Hour).Unix()),
+	})
+	if _, err := rv.Validate(tokenA); err != nil {
+		t.Fatalf("expected valid with key A: %v", err)
+	}
+
+	// Token signed with key B should fail
+	tokenB := signHS256(t, "key-B", map[string]any{
+		"sub": "user1", "iss": "test-issuer", "aud": "test-aud",
+		"exp": float64(time.Now().Add(time.Hour).Unix()),
+	})
+	if _, err := rv.Validate(tokenB); err == nil {
+		t.Fatal("expected invalid with key B before reload")
+	}
+
+	// Reload with key B
+	t.Setenv("CORDUM_JWT_HMAC_SECRET", "key-B")
+	if err := rv.Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	// Now token B should pass
+	if _, err := rv.Validate(tokenB); err != nil {
+		t.Fatalf("expected valid with key B after reload: %v", err)
+	}
+
+	// Token A should now fail
+	if _, err := rv.Validate(tokenA); err == nil {
+		t.Fatal("expected invalid with key A after reload to key B")
+	}
+}
+
+func TestReloadableJWTValidator_NilWhenNoConfig(t *testing.T) {
+	t.Setenv("CORDUM_JWT_HMAC_SECRET", "")
+	t.Setenv("CORDUM_JWT_PUBLIC_KEY", "")
+	t.Setenv("CORDUM_JWT_PUBLIC_KEY_PATH", "")
+
+	rv, _, err := NewReloadableJWTValidator()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rv != nil {
+		t.Fatal("expected nil when no JWT config")
+	}
+}

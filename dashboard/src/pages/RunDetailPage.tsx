@@ -308,6 +308,20 @@ export default function WorkflowRunDetailPage() {
                 {run?.status ?? "unknown"}
               </StatusBadge>
               <span className="text-xs font-mono text-muted-foreground">{completedCount}/{totalSteps} steps</span>
+              {isRunning ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-[var(--color-success)]/15 text-[var(--color-success)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" />
+                  LIVE
+                </span>
+              ) : run?.status && ["succeeded", "failed", "cancelled", "timed_out"].includes(run.status) ? (
+                <span className={cn(
+                  "text-[10px] font-mono",
+                  run.status === "succeeded" ? "text-[var(--color-success)]" : "text-destructive",
+                )}>
+                  {run.status === "succeeded" ? "Completed" : run.status === "failed" ? "Failed" : run.status === "cancelled" ? "Cancelled" : "Timed out"}
+                  {run.updatedAt ? ` ${formatRelativeTime(run.updatedAt)}` : ""}
+                </span>
+              ) : null}
             </div>
             <p className="text-xs text-muted-foreground font-mono">Workflow: {run?.workflowId ?? workflowId}</p>
           </div>
@@ -387,9 +401,16 @@ export default function WorkflowRunDetailPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <p className={cn("text-xs font-medium", step.status === "pending" ? "text-muted-foreground" : "text-foreground")}>{step.label}</p>
+                            <p className={cn(
+                              "text-xs font-medium",
+                              step.status === "pending" ? "text-muted-foreground" : "text-foreground",
+                              step.status === "skipped" && "text-muted-foreground line-through opacity-50",
+                            )}>{step.label}</p>
                             <Icon className="w-3 h-3 text-muted-foreground" />
                           </div>
+                          {step.status === "skipped" && (
+                            <p className="text-[10px] text-muted-foreground italic mt-0.5">Skipped: dependency failed</p>
+                          )}
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[10px] text-muted-foreground capitalize">{step.type}</span>
                             {step.duration && (

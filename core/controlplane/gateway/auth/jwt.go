@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto"
 	"crypto/hmac"
 	"crypto/rsa"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cordum/cordum/core/infra/env"
@@ -357,4 +359,111 @@ func audienceMatches(raw any, expected string) bool {
 		}
 	}
 	return false
+}
+
+// ===========================================================================
+// Reloadable JWT Validator — supports key rotation without restart
+// ===========================================================================
+
+// ReloadableJWTValidator wraps a jwtValidator with atomic swap for hot-reload.
+// Use Reload() to re-read env vars and swap the inner validator atomically.
+// Call WatchLoop to poll for key file changes every interval.
+type ReloadableJWTValidator struct {
+	inner    atomic.Pointer[jwtValidator]
+	required atomic.Bool
+	keyPath  string // CORDUM_JWT_PUBLIC_KEY_PATH, empty if not file-based
+}
+
+// NewReloadableJWTValidator creates a reloadable JWT validator from env vars.
+// Returns (nil, false, nil) if no JWT config is present.
+func NewReloadableJWTValidator() (*ReloadableJWTValidator, bool, error) {
+	v, required, err := newJWTValidatorFromEnv()
+	if err != nil {
+		return nil, false, err
+	}
+	if v == nil {
+		return nil, false, nil
+	}
+	r := &ReloadableJWTValidator{
+		keyPath: strings.TrimSpace(os.Getenv("CORDUM_JWT_PUBLIC_KEY_PATH")),
+	}
+	r.inner.Store(v)
+	r.required.Store(required)
+	return r, required, nil
+}
+
+// Validate delegates to the current inner validator.
+func (r *ReloadableJWTValidator) Validate(token string) (*AuthContext, error) {
+	v := r.inner.Load()
+	if v == nil {
+		return nil, errors.New("jwt validator not configured")
+	}
+	return v.Validate(token)
+}
+
+// IsRequired reports whether JWT auth is required.
+func (r *ReloadableJWTValidator) IsRequired() bool {
+	return r.required.Load()
+}
+
+// Reload re-reads JWT config from environment variables and atomically
+// swaps the inner validator. Existing in-flight validations continue
+// with the old validator; new validations use the new one.
+func (r *ReloadableJWTValidator) Reload() error {
+	v, required, err := newJWTValidatorFromEnv()
+	if err != nil {
+		return fmt.Errorf("jwt reload: %w", err)
+	}
+	if v == nil {
+		slog.Warn("jwt reload: no JWT config found in env — keeping existing validator")
+		return nil
+	}
+	r.inner.Store(v)
+	r.required.Store(required)
+	slog.Info("jwt config reloaded",
+		"has_hmac", len(v.hmacSecret) > 0,
+		"has_rsa", v.rsaPublic != nil,
+		"issuer", v.issuer,
+		"required", required,
+	)
+	return nil
+}
+
+// WatchLoop polls the JWT public key file (if configured via
+// CORDUM_JWT_PUBLIC_KEY_PATH) for changes and reloads automatically.
+// For HMAC-only configs without a key file, this is a no-op.
+// Blocks until ctx is cancelled.
+func (r *ReloadableJWTValidator) WatchLoop(ctx context.Context, interval time.Duration) {
+	if r.keyPath == "" {
+		// No file to watch — HMAC secret from env only, use SIGHUP to reload.
+		return
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	var lastMod time.Time
+	if info, err := os.Stat(r.keyPath); err == nil {
+		lastMod = info.ModTime()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			info, err := os.Stat(r.keyPath)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Equal(lastMod) {
+				continue
+			}
+			if err := r.Reload(); err != nil {
+				slog.Error("jwt key file reload failed", "path", r.keyPath, "error", err)
+				continue
+			}
+			lastMod = info.ModTime()
+		}
+	}
 }

@@ -711,6 +711,17 @@ func (s *server) handleListPolicyAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	action := strings.TrimSpace(r.URL.Query().Get("action"))
+	after := strings.TrimSpace(r.URL.Query().Get("after"))
+	before := strings.TrimSpace(r.URL.Query().Get("before"))
+	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	offset := int64(0)
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			offset = parsed
+		}
+	}
+
 	entries, err := s.loadPolicyAudit(r.Context())
 	if err != nil {
 		writeInternalError(w, r, "policy operation", err)
@@ -724,13 +735,37 @@ func (s *server) handleListPolicyAudit(w http.ResponseWriter, r *http.Request) {
 		if auditType != "" && !strings.EqualFold(strings.TrimSpace(entry.ResourceType), auditType) {
 			continue
 		}
-		filtered = append(filtered, entry)
-		if int64(len(filtered)) >= limit {
-			break
+		if action != "" && !strings.EqualFold(strings.TrimSpace(entry.Action), action) {
+			continue
 		}
+		if after != "" && entry.CreatedAt < after {
+			continue
+		}
+		if before != "" && entry.CreatedAt > before {
+			continue
+		}
+		if search != "" {
+			combined := strings.ToLower(entry.Action + " " + entry.ActorID + " " + entry.ResourceType + " " + entry.ResourceID + " " + entry.Message)
+			if !strings.Contains(combined, search) {
+				continue
+			}
+		}
+		filtered = append(filtered, entry)
 	}
+	total := int64(len(filtered))
+	// Apply offset
+	if offset > 0 && offset < int64(len(filtered)) {
+		filtered = filtered[offset:]
+	} else if offset >= int64(len(filtered)) {
+		filtered = nil
+	}
+	// Apply limit
+	if int64(len(filtered)) > limit {
+		filtered = filtered[:limit]
+	}
+	hasMore := offset+int64(len(filtered)) < total
 	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, map[string]any{"items": filtered})
+	writeJSON(w, map[string]any{"items": filtered, "total": total, "has_more": hasMore, "offset": offset})
 }
 
 func parseAuditLimit(raw string) int64 {

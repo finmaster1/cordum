@@ -644,9 +644,11 @@ func updateRunStatus(run *WorkflowRun, wfDef *Workflow, now time.Time) {
 					completed++
 				case chainExhausted:
 					hasFailed = true
+					skipDependentSteps(wfDef, run, stepID)
 				}
 			} else {
 				hasFailed = true
+				skipDependentSteps(wfDef, run, stepID)
 			}
 		case StepStatusCancelled:
 			if isSwitchBranchNotTaken(sr) {

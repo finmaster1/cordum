@@ -42,6 +42,7 @@ const (
 	// a job is moved to FAILED + DLQ. With exponential backoff (1s→30s max)
 	// this allows ~25 minutes of retries before giving up.
 	maxSchedulingRetries = 50
+	maxDispatchRetries   = 3
 	outputPolicyReason   = "output_quarantined"
 	outputPolicyAsync    = "output_quarantined_async"
 	outputPolicyAudit    = "sys.audit.output_policy"
@@ -53,8 +54,8 @@ type Engine struct {
 	safety              SafetyChecker
 	outputSafety        OutputSafetyChecker
 	outputSafetyEnabled atomic.Bool
-	asyncFailMode       string // "closed" (default, quarantine on error) or "open" (allow on error)
-	inputFailMode       string // "closed" (default, requeue when kernel down) or "open" (allow through)
+	asyncFailOpen       atomic.Bool // true = allow on output policy error, false = quarantine
+	inputFailOpen       atomic.Bool // true = allow when kernel down, false = requeue
 	registry            WorkerRegistry
 	strategy            SchedulingStrategy
 	jobStore            JobStore
@@ -268,31 +269,25 @@ func (e *Engine) WithCounterClient(c redis.UniversalClient) *Engine {
 // WithAsyncFailMode sets the behavior when async output checks fail/timeout.
 // "closed" (default) quarantines on error; "open" allows on error with a warning.
 func (e *Engine) WithAsyncFailMode(mode string) *Engine {
-	if mode == "open" || mode == "closed" {
-		e.asyncFailMode = mode
-	}
+	e.asyncFailOpen.Store(mode == "open")
 	return e
 }
 
 // isAsyncFailOpen reports whether the engine allows output through when the
-// async output safety check fails or times out. Returns true only when
-// explicitly set to "open" via WithAsyncFailMode("open"). The default mode
-// (empty string or "closed") quarantines on error (fail-closed).
+// async output safety check fails or times out.
 func (e *Engine) isAsyncFailOpen() bool {
-	return e.asyncFailMode == "open"
+	return e.asyncFailOpen.Load()
 }
 
 // WithInputFailMode sets the behavior when the safety kernel is unreachable.
 // "closed" (default) requeues the job; "open" allows the job through with a warning.
 func (e *Engine) WithInputFailMode(mode string) *Engine {
-	if mode == "open" || mode == "closed" {
-		e.inputFailMode = mode
-	}
+	e.inputFailOpen.Store(mode == "open")
 	return e
 }
 
 func (e *Engine) isInputFailOpen() bool {
-	return e.inputFailMode == "open"
+	return e.inputFailOpen.Load()
 }
 
 // isApprovalGateTopic returns true if the topic is a synthetic approval gate
@@ -708,6 +703,12 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			}
 			record.Decision = SafetyAllow
 			record.Reason = "fail-open: safety unavailable — " + record.Reason
+			// Tag job so dashboard can show bypass warning
+			if req.Labels == nil {
+				req.Labels = map[string]string{}
+			}
+			req.Labels["safety_bypassed"] = "true"
+			req.Labels["safety_bypass_reason"] = record.Reason
 			// Fall through to allow
 		} else {
 			slog.Warn("safety kernel unavailable, requeueing job",
@@ -812,7 +813,28 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			"job_id", jobID,
 		)
 	}
-	subject, err := e.strategy.PickSubject(req, workers)
+	var subject string
+	for dispatchAttempt := range maxDispatchRetries {
+		if dispatchAttempt > 0 {
+			workers = e.registry.Snapshot()
+		}
+		subject, err = e.strategy.PickSubject(req, workers)
+		if err != nil {
+			break
+		}
+		workerID := extractWorkerFromSubject(subject)
+		if workerID == "" || e.registry.IsAlive(workerID) {
+			break
+		}
+		slog.Warn("stale worker detected, retrying dispatch",
+			"job_id", jobID,
+			"worker", workerID,
+			"attempt", dispatchAttempt+1,
+			"topic", topic,
+		)
+		subject = ""
+		err = fmt.Errorf("%w: pool %q (stale worker %s)", ErrNoWorkers, topic, workerID)
+	}
 	if err != nil {
 		if errors.Is(err, ErrNoPoolMapping) {
 			slog.Warn("no pool mapping for topic, will retry",
@@ -1798,4 +1820,13 @@ func (e *Engine) emitOutputAuditEvent(jobID, topic, code, reason string, decisio
 	if err := e.bus.Publish(outputPolicyAudit, packet); err != nil {
 		slog.Error("output audit event publish failed", "job_id", jobID, "code", code, "error", err)
 	}
+}
+
+// extractWorkerFromSubject parses a NATS direct subject "worker.{id}.jobs"
+// and returns the worker ID. Returns empty string for non-direct subjects.
+func extractWorkerFromSubject(subject string) string {
+	if !strings.HasPrefix(subject, "worker.") || !strings.HasSuffix(subject, ".jobs") {
+		return ""
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(subject, "worker."), ".jobs")
 }

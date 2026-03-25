@@ -57,6 +57,7 @@ const (
 	StepStatusFailed    StepStatus = "failed"
 	StepStatusCancelled StepStatus = "cancelled"
 	StepStatusTimedOut  StepStatus = "timed_out"
+	StepStatusSkipped   StepStatus = "skipped"
 )
 
 // RetryConfig configures retry behavior for a step.
@@ -168,7 +169,8 @@ type StepRun struct {
 	// ResolvedItems holds the evaluated for_each items list. Populated once
 	// when the for_each step first becomes ready, to prevent re-evaluation
 	// from shifting indexes on subsequent scheduleReady calls.
-	ResolvedItems []any `json:"resolved_items,omitempty"`
+	ResolvedItems []any  `json:"resolved_items,omitempty"`
+	SkipReason    string `json:"skip_reason,omitempty"`
 }
 
 // TimelineEvent captures append-only run events for audit/replay.

@@ -272,14 +272,21 @@ default_decision: maybe
 		configKey:   "bundles",
 	}
 	policy, snapshot, err := loader.loadFragments(context.Background())
-	if err == nil {
-		t.Fatalf("expected parse error for invalid fragment")
+	// Malformed fragments are now skipped instead of failing all
+	if err != nil {
+		t.Fatalf("expected no error (malformed fragments should be skipped): %v", err)
 	}
-	if policy != nil {
-		t.Fatalf("expected nil policy on invalid fragment")
+	// The valid fragment should still be loaded
+	if policy == nil {
+		t.Fatalf("expected policy from valid fragment to be loaded")
 	}
-	if snapshot != "" {
-		t.Fatalf("expected empty snapshot on invalid fragment")
+	if snapshot == "" {
+		t.Fatalf("expected snapshot hash from valid fragment")
+	}
+	// Verify the valid fragment's rule is present
+	resp := policy.Evaluate(config.PolicyInput{Tenant: "default", Topic: "job.ops.deploy"})
+	if resp.Decision != "require_approval" {
+		t.Fatalf("expected require_approval from valid fragment, got %q", resp.Decision)
 	}
 }
 
@@ -1074,5 +1081,74 @@ func TestWatchPolicyReloadFailureKeepsOldPolicy(t *testing.T) {
 	}
 	if currentPolicy.DefaultTenant != "prod" {
 		t.Fatalf("expected DefaultTenant to remain 'prod', got %q", currentPolicy.DefaultTenant)
+	}
+}
+
+func TestMergePolicies_DuplicateRuleID(t *testing.T) {
+	base := &config.SafetyPolicy{
+		Rules: []config.PolicyRule{
+			{ID: "r1", Decision: "allow", Reason: "base"},
+			{ID: "r2", Decision: "deny", Reason: "base"},
+		},
+	}
+	extra := &config.SafetyPolicy{
+		Rules: []config.PolicyRule{
+			{ID: "r1", Decision: "deny", Reason: "extra"},
+			{ID: "r3", Decision: "allow", Reason: "extra"},
+		},
+	}
+	merged := mergePolicies(base, extra)
+
+	// Should have 3 rules: r1 (replaced), r2, r3
+	if len(merged.Rules) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(merged.Rules))
+	}
+	// r1 should have been replaced with extra's version
+	for _, r := range merged.Rules {
+		if r.ID == "r1" {
+			if r.Decision != "deny" || r.Reason != "extra" {
+				t.Errorf("expected r1 to be replaced by extra (deny/extra), got %s/%s", r.Decision, r.Reason)
+			}
+		}
+	}
+}
+
+func TestMergePolicies_NoDuplicates(t *testing.T) {
+	base := &config.SafetyPolicy{
+		Rules: []config.PolicyRule{
+			{ID: "r1", Decision: "allow"},
+		},
+	}
+	extra := &config.SafetyPolicy{
+		Rules: []config.PolicyRule{
+			{ID: "r2", Decision: "deny"},
+		},
+	}
+	merged := mergePolicies(base, extra)
+	if len(merged.Rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(merged.Rules))
+	}
+}
+
+func TestMergePolicies_DuplicateOutputRule(t *testing.T) {
+	base := &config.SafetyPolicy{
+		OutputRules: []config.OutputPolicyRule{
+			{ID: "o1", Severity: "low"},
+		},
+	}
+	extra := &config.SafetyPolicy{
+		OutputRules: []config.OutputPolicyRule{
+			{ID: "o1", Severity: "critical"},
+			{ID: "o2", Severity: "medium"},
+		},
+	}
+	merged := mergePolicies(base, extra)
+	if len(merged.OutputRules) != 2 {
+		t.Fatalf("expected 2 output rules, got %d", len(merged.OutputRules))
+	}
+	for _, r := range merged.OutputRules {
+		if r.ID == "o1" && r.Severity != "critical" {
+			t.Errorf("expected o1 severity=critical (replaced), got %s", r.Severity)
+		}
 	}
 }

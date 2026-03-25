@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/redis/go-redis/v9"
 )
+
+// ErrRevisionConflict is returned when a concurrent writer modified the
+// document between Get and Set. Callers should re-read and retry.
+var ErrRevisionConflict = errors.New("config revision conflict: document was modified by another writer")
 
 // Scope levels for configuration inheritance.
 type Scope string
@@ -68,7 +73,9 @@ func (s *Service) Close() error {
 	return s.client.Close()
 }
 
-// Set stores/overwrites a config document.
+// Set stores a config document with optimistic locking. If another writer
+// modified the document since it was read, ErrRevisionConflict is returned.
+// The caller should re-read with Get and retry.
 func (s *Service) Set(ctx context.Context, doc *Document) error {
 	if doc == nil || doc.Scope == "" {
 		return fmt.Errorf("scope required")
@@ -76,13 +83,62 @@ func (s *Service) Set(ctx context.Context, doc *Document) error {
 	if doc.Scope != ScopeSystem && doc.ScopeID == "" {
 		return fmt.Errorf("scope_id required for non-system scope")
 	}
-	doc.Revision++
-	doc.Updated = time.Now().UTC()
-	payload, err := json.Marshal(doc)
-	if err != nil {
-		return fmt.Errorf("marshal doc: %w", err)
+	key := cfgKey(doc.Scope, doc.ScopeID)
+	expectedRevision := doc.Revision
+
+	txFn := func(tx *redis.Tx) error {
+		// Read current revision under WATCH
+		stored, err := tx.Get(ctx, key).Bytes()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return fmt.Errorf("read config for lock: %w", err)
+		}
+		if stored != nil {
+			var existing Document
+			if err := json.Unmarshal(stored, &existing); err != nil {
+				return fmt.Errorf("unmarshal existing config: %w", err)
+			}
+			if existing.Revision != expectedRevision {
+				return ErrRevisionConflict
+			}
+		}
+
+		// Prepare new document — increment revision only inside transaction
+		newRevision := expectedRevision + 1
+		doc.Revision = newRevision
+		doc.Updated = time.Now().UTC()
+		payload, err := json.Marshal(doc)
+		if err != nil {
+			doc.Revision = expectedRevision // roll back on marshal error
+			return fmt.Errorf("marshal doc: %w", err)
+		}
+
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, key, payload, 0)
+			return nil
+		})
+		if err != nil {
+			doc.Revision = expectedRevision // roll back revision on tx failure
+			return err
+		}
+		return nil
 	}
-	return s.client.Set(ctx, cfgKey(doc.Scope, doc.ScopeID), payload, 0).Err()
+
+	err := s.client.Watch(ctx, txFn, key)
+	if err != nil {
+		if errors.Is(err, redis.TxFailedErr) {
+			doc.Revision = expectedRevision // roll back revision
+			slog.Warn("config set: optimistic lock failed (key changed during tx)",
+				"scope", doc.Scope, "scope_id", doc.ScopeID)
+			return ErrRevisionConflict
+		}
+		if errors.Is(err, ErrRevisionConflict) {
+			doc.Revision = expectedRevision // roll back revision
+			return err
+		}
+		doc.Revision = expectedRevision // roll back on any failure
+		return err
+	}
+	return nil
 }
 
 // Get fetches a config document at a given scope/id.
@@ -140,7 +196,7 @@ func (s *Service) EffectiveSnapshot(ctx context.Context, orgID, teamID, workflow
 			return nil, fmt.Errorf("config %s/%s: %w", item.scope, item.id, err)
 		}
 		revisions[item.scope] = doc.Revision
-		mergeShallow(result, doc.Data)
+		mergeDeep(result, doc.Data)
 	}
 	version := snapshotVersion(revisions)
 	hash, err := snapshotHash(result)
@@ -154,13 +210,17 @@ func (s *Service) EffectiveSnapshot(ctx context.Context, orgID, teamID, workflow
 	}, nil
 }
 
-// mergeShallow overwrites keys in dst with src values.
-func mergeShallow(dst, src map[string]any) {
-	if len(src) == 0 {
-		return
-	}
-	for k, v := range src {
-		dst[k] = v
+// mergeDeep recursively merges src into dst. Nested maps are merged
+// recursively; non-map values use last-write-wins semantics.
+func mergeDeep(dst, src map[string]any) {
+	for k, srcVal := range src {
+		if srcMap, ok := srcVal.(map[string]any); ok {
+			if dstMap, ok := dst[k].(map[string]any); ok {
+				mergeDeep(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[k] = srcVal
 	}
 }
 
@@ -185,6 +245,38 @@ func (s *Service) EnsureDefault(ctx context.Context) error {
 		},
 		Meta: map[string]string{"source": "auto-bootstrap"},
 	})
+}
+
+// SetWithRetry wraps Set with automatic retry on ErrRevisionConflict.
+// On conflict, it re-reads the document, calls applyFn to re-apply the
+// caller's changes to the fresh document, and retries up to maxAttempts times.
+func (s *Service) SetWithRetry(ctx context.Context, scope Scope, scopeID string, maxAttempts int, applyFn func(doc *Document) error) error {
+	for attempt := range maxAttempts {
+		doc, err := s.Get(ctx, scope, scopeID)
+		if err != nil {
+			if !errors.Is(err, redis.Nil) {
+				return fmt.Errorf("config get for retry: %w", err)
+			}
+			doc = &Document{
+				Scope:   scope,
+				ScopeID: scopeID,
+				Data:    map[string]any{},
+			}
+		}
+		if err := applyFn(doc); err != nil {
+			return fmt.Errorf("apply config changes: %w", err)
+		}
+		if err := s.Set(ctx, doc); err != nil {
+			if errors.Is(err, ErrRevisionConflict) && attempt < maxAttempts-1 {
+				slog.Warn("config set conflict, retrying",
+					"scope", scope, "scope_id", scopeID, "attempt", attempt+1)
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+	return ErrRevisionConflict
 }
 
 func cfgKey(scope Scope, id string) string {

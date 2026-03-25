@@ -176,7 +176,27 @@ const INVALIDATION_MAP: Record<string, string[][]> = {
 function invalidateForEvent(
   queryClient: ReturnType<typeof useQueryClient>,
   eventType: string,
+  event?: StreamEvent | null,
 ): void {
+  // Extract specific resource ID from the event payload
+  const payload = event?.payload as Record<string, unknown> | undefined;
+  const jobId = payload?.jobId as string | undefined;
+  const workerId = payload?.workerId as string | undefined;
+
+  // Narrow invalidation: target specific resource + mark list stale
+  if (eventType.startsWith("job.") && jobId) {
+    queryClient.invalidateQueries({ queryKey: ["job", jobId] });
+    queryClient.invalidateQueries({ queryKey: ["jobs"], refetchType: "none" });
+    queryClient.invalidateQueries({ queryKey: ["dlq"], refetchType: "none" });
+    return;
+  }
+  if (eventType.startsWith("worker.") && workerId) {
+    queryClient.invalidateQueries({ queryKey: ["worker", workerId] });
+    queryClient.invalidateQueries({ queryKey: ["workers"], refetchType: "none" });
+    return;
+  }
+
+  // Fallback: broad invalidation for events without extractable IDs
   for (const [prefix, keys] of Object.entries(INVALIDATION_MAP)) {
     if (eventType.startsWith(prefix)) {
       for (const key of keys) {
@@ -237,9 +257,22 @@ export function useEventStream(): void {
           ws.close();
           return;
         }
+        const wasReconnect = backoffRef.current > MIN_BACKOFF_MS;
         backoffRef.current = MIN_BACKOFF_MS;
         setStatus("connected");
         logger.info("ws", "Connected");
+
+        // On reconnect, invalidate all caches to recover missed events
+        if (wasReconnect) {
+          logger.info("ws", "Reconnected — invalidating all caches");
+          queryClient.invalidateQueries();
+          useToastStore.getState().addToast({
+            type: "info",
+            title: "Connection restored",
+            description: "Data refreshed automatically.",
+            duration: 5000,
+          });
+        }
       };
 
       ws.onmessage = (msg) => {
@@ -308,7 +341,7 @@ export function useEventStream(): void {
         }
 
         // Invalidate React Query caches
-        invalidateForEvent(queryClient, event.type);
+        invalidateForEvent(queryClient, event.type, event);
       };
 
       ws.onerror = () => {

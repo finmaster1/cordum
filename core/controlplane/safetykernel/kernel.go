@@ -29,6 +29,7 @@ import (
 	"github.com/cordum/cordum/core/configsvc"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
+	"github.com/cordum/cordum/core/infra/tlsreload"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -119,18 +120,19 @@ func Run(cfg *config.Config) error {
 		if cert == "" || key == "" {
 			return fmt.Errorf("safety kernel tls requires both SAFETY_KERNEL_TLS_CERT and SAFETY_KERNEL_TLS_KEY")
 		}
-		pair, err := tls.LoadX509KeyPair(cert, key)
+		reloader, err := tlsreload.NewCertReloader(cert, key, "safety-kernel")
 		if err != nil {
 			return fmt.Errorf("safety kernel tls keypair: %w", err)
 		}
-		cfg := &tls.Config{
-			Certificates: []tls.Certificate{pair},
-			MinVersion:   tls.VersionTLS12,
+		go reloader.WatchLoop(context.Background(), 30*time.Second)
+		tlsCfg := &tls.Config{
+			GetCertificate: reloader.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
 		}
 		if env.TLSMinVersion() == tls.VersionTLS13 {
-			cfg.MinVersion = tls.VersionTLS13
+			tlsCfg.MinVersion = tls.VersionTLS13
 		}
-		serverCreds = grpc.Creds(credentials.NewTLS(cfg))
+		serverCreds = grpc.Creds(credentials.NewTLS(tlsCfg))
 	}
 	if env.IsProduction() && cert == "" {
 		return fmt.Errorf("safety kernel tls required in production")
@@ -837,6 +839,7 @@ func (l *policyLoader) loadFragments(ctx context.Context) (*config.SafetyPolicy,
 	sort.Strings(keys)
 	hasher := sha256.New()
 	var merged *config.SafetyPolicy
+	var skippedCount int
 	for _, key := range keys {
 		content, ok := extractPolicyFragment(rawBundles[key])
 		if !ok || strings.TrimSpace(content) == "" {
@@ -844,12 +847,23 @@ func (l *policyLoader) loadFragments(ctx context.Context) (*config.SafetyPolicy,
 		}
 		policy, err := config.ParseSafetyPolicy([]byte(content))
 		if err != nil {
-			return nil, "", fmt.Errorf("parse policy fragment %q: %w", key, err)
+			slog.Error("skipping malformed policy fragment",
+				"key", key,
+				"error", err,
+			)
+			skippedCount++
+			continue
 		}
 		hasher.Write([]byte(key))
 		hasher.Write([]byte{0})
 		hasher.Write([]byte(content))
 		merged = mergePolicies(merged, policy)
+	}
+	if skippedCount > 0 {
+		slog.Warn("policy fragments skipped due to errors",
+			"skipped", skippedCount,
+			"loaded", len(keys)-skippedCount,
+		)
 	}
 	if merged == nil {
 		return nil, "", nil
@@ -930,8 +944,45 @@ func mergePolicies(base, extra *config.SafetyPolicy) *config.SafetyPolicy {
 	if out.DefaultTenant == "" {
 		out.DefaultTenant = extra.DefaultTenant
 	}
-	out.Rules = append(out.Rules, extra.Rules...)
-	out.OutputRules = append(out.OutputRules, extra.OutputRules...)
+	// Merge input rules with duplicate detection (last-seen wins)
+	seenInput := make(map[string]int, len(out.Rules))
+	for i, r := range out.Rules {
+		if r.ID != "" {
+			seenInput[r.ID] = i
+		}
+	}
+	for _, r := range extra.Rules {
+		if r.ID != "" {
+			if idx, dup := seenInput[r.ID]; dup {
+				slog.Warn("duplicate policy rule ID in merge — replacing with latest",
+					"rule_id", r.ID, "decision", r.Decision)
+				out.Rules[idx] = r
+				continue
+			}
+			seenInput[r.ID] = len(out.Rules)
+		}
+		out.Rules = append(out.Rules, r)
+	}
+
+	// Merge output rules with duplicate detection
+	seenOutput := make(map[string]int, len(out.OutputRules))
+	for i, r := range out.OutputRules {
+		if r.ID != "" {
+			seenOutput[r.ID] = i
+		}
+	}
+	for _, r := range extra.OutputRules {
+		if r.ID != "" {
+			if idx, dup := seenOutput[r.ID]; dup {
+				slog.Warn("duplicate output policy rule ID in merge — replacing with latest",
+					"rule_id", r.ID)
+				out.OutputRules[idx] = r
+				continue
+			}
+			seenOutput[r.ID] = len(out.OutputRules)
+		}
+		out.OutputRules = append(out.OutputRules, r)
+	}
 	out.Tenants = mergeTenantPolicies(out.Tenants, extra.Tenants)
 	return out
 }

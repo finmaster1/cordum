@@ -18,6 +18,7 @@ import (
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
+	"github.com/cordum/cordum/core/infra/tlsreload"
 	"github.com/cordum/cordum/core/infra/logging"
 	infraMetrics "github.com/cordum/cordum/core/infra/metrics"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -89,14 +90,15 @@ func main() {
 			slog.Error("context engine tls requires both CONTEXT_ENGINE_TLS_CERT and CONTEXT_ENGINE_TLS_KEY")
 			os.Exit(1)
 		}
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		reloader, err := tlsreload.NewCertReloader(certFile, keyFile, "context-engine")
 		if err != nil {
 			slog.Error("context engine tls keypair failed", "error", err)
 			os.Exit(1)
 		}
+		go reloader.WatchLoop(context.Background(), 30*time.Second)
 		tlsCfg := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
+			GetCertificate: reloader.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
 		}
 		if env.TLSMinVersion() == tls.VersionTLS13 {
 			tlsCfg.MinVersion = tls.VersionTLS13

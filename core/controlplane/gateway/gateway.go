@@ -26,12 +26,14 @@ import (
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
+	// env helpers imported above for IntOr/DurationOr
 	"github.com/cordum/cordum/core/infra/locks"
 	infraMetrics "github.com/cordum/cordum/core/infra/metrics"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/cordum/cordum/core/infra/registry"
 	"github.com/cordum/cordum/core/infra/schema"
 	"github.com/cordum/cordum/core/infra/store"
+	"github.com/cordum/cordum/core/infra/tlsreload"
 	"github.com/cordum/cordum/core/model"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/gorilla/websocket"
@@ -43,18 +45,22 @@ import (
 	wf "github.com/cordum/cordum/core/workflow"
 )
 
+var (
+	maxJobPayloadBytes  = int64(env.IntOr("GATEWAY_MAX_JOB_PAYLOAD_BYTES", 2<<20))
+	defaultMaxBodyLimit = env.IntOr("GATEWAY_MAX_BODY_BYTES", 1<<20)
+)
+
 const (
 	defaultGrpcAddr             = ":8080"
 	defaultHttpAddr             = ":8081"
 	defaultMetricsAddr          = ":9092"
-	maxJobPayloadBytes          = 2 << 20  // 2 MiB limit for incoming job payloads
 	defaultArtifactMaxBytes     = 10 << 20 // 10 MiB default artifact size limit
 	maxPromptChars              = 100000
 	defaultRateLimitRPS         = 2000
 	defaultRateLimitBurst       = 4000
 	defaultPublicRateLimitRPS   = 20
 	defaultPublicRateLimitBurst = 40
-	defaultMaxHeaderBytes       = 1 << 20
+	defaultMaxHeaderBytes  = 1 << 20
 	maxLabelKeyLen              = 256              // Max length for label keys
 	maxLabelValueLen            = 4096             // Max length for label values (4KB)
 	wsAuthSubprotocol           = "cordum-api-key" // #nosec G101 -- subprotocol identifier, not a credential
@@ -508,13 +514,14 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 		if certFile == "" || keyFile == "" {
 			return fmt.Errorf("grpc tls requires both GRPC_TLS_CERT and GRPC_TLS_KEY")
 		}
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		grpcReloader, err := tlsreload.NewCertReloader(certFile, keyFile, "gateway-grpc")
 		if err != nil {
 			return fmt.Errorf("grpc tls keypair: %w", err)
 		}
+		go grpcReloader.WatchLoop(context.Background(), 30*time.Second)
 		cfg := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
+			GetCertificate: grpcReloader.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
 		}
 		if env.TLSMinVersion() == tls.VersionTLS13 {
 			cfg.MinVersion = tls.VersionTLS13
@@ -763,8 +770,18 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 		IdleTimeout:       durationFromEnv(envHTTPIdleTimeout, 60*time.Second),
 		MaxHeaderBytes:    defaultMaxHeaderBytes,
 	}
+	var httpReloader *tlsreload.CertReloader
 	if httpTLSCert != "" {
-		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		var err error
+		httpReloader, err = tlsreload.NewCertReloader(httpTLSCert, httpTLSKey, "gateway-http")
+		if err != nil {
+			return fmt.Errorf("http tls keypair: %w", err)
+		}
+		go httpReloader.WatchLoop(context.Background(), 30*time.Second)
+		srv.TLSConfig = &tls.Config{
+			GetCertificate: httpReloader.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
+		}
 		if env.TLSMinVersion() == tls.VersionTLS13 {
 			srv.TLSConfig.MinVersion = tls.VersionTLS13
 		}
@@ -824,9 +841,8 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 	}()
 
 	if err := func() error {
-		if httpTLSCert != "" {
-			// #nosec G304 -- TLS cert path is configured by the operator.
-			return srv.ListenAndServeTLS(httpTLSCert, httpTLSKey)
+		if httpReloader != nil {
+			return srv.ListenAndServeTLS("", "")
 		}
 		return srv.ListenAndServe()
 	}(); err != nil {
