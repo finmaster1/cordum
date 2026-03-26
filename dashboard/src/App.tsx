@@ -35,6 +35,7 @@ const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
 const WorkflowsPage = lazy(() => import("./pages/WorkflowsPage"));
 const WorkflowDetailPage = lazy(() => import("./pages/WorkflowDetailPage"));
 const WorkflowCreatePage = lazy(() => import("./pages/WorkflowCreatePage"));
+const WorkflowStudioPage = lazy(() => import("./pages/WorkflowStudioPage"));
 const RunDetailPage = lazy(() => import("./pages/RunDetailPage"));
 const PacksPage = lazy(() => import("./pages/PacksPage"));
 const SchemasPage = lazy(() => import("./pages/SchemasPage"));
@@ -117,6 +118,8 @@ function ProtectedRoutes() {
           <Route path="/workflows/new" element={<WorkflowCreatePage />} />
           <Route path="/workflows/:id/edit" element={<WorkflowCreatePage />} />
           <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
+          <Route path="/workflows/:id/studio" element={<WorkflowStudioPage />} />
+          <Route path="/workflows/studio/new" element={<WorkflowStudioPage />} />
           <Route path="/workflows/:id/runs/:runId" element={<RunDetailPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
 

@@ -16,6 +16,7 @@ const WorkflowsPage = lazy(() => import("../pages/WorkflowsPage"));
 const WorkflowCreatePage = lazy(() => import("../pages/WorkflowCreatePage"));
 const WorkflowBuilderPage = lazy(() => import("../components/workflow/WorkflowBuilder").then(m => ({ default: m.WorkflowBuilder })));
 const WorkflowDetailPage = lazy(() => import("../pages/WorkflowDetailPage"));
+const WorkflowStudioPage = lazy(() => import("../pages/WorkflowStudioPage"));
 const PacksPage = lazy(() => import("../pages/PacksPage"));
 const PoolsPage = lazy(() => import("../pages/PoolsPage"));
 const PolicyPage = lazy(() => import("../pages/PolicyPage"));
@@ -104,6 +105,8 @@ function MainApp() {
           <Route path="/workflows/new" element={<WorkflowCreatePage />} />
           <Route path="/workflows/:id/edit" element={<WorkflowBuilderPage />} />
           <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
+          <Route path="/workflows/:id/studio" element={<WorkflowStudioPage />} />
+          <Route path="/workflows/studio/new" element={<WorkflowStudioPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:agentId" element={<AgentDetailPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
