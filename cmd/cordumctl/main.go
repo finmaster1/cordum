@@ -45,6 +45,8 @@ func main() {
 		runDLQCmd(args)
 	case "pack":
 		runPackCmd(args)
+	case "pool":
+		runPoolCmd(args)
 	case "job":
 		runJobCmd(args)
 	default:

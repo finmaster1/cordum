@@ -15,6 +15,7 @@ Policy management lives under the **Govern** section (`/govern/*`). Each page ha
 
 | Route | Page | Purpose |
 |-------|------|---------|
+| `/govern/overview` | Policy Overview | Cross-bundle policy posture summary, rule browser, scope filtering |
 | `/govern/input-rules` | Input Rules | Ordered input policy rules with first-match-wins semantics |
 | `/govern/output-rules` | Output Rules | Output scanners, detectors, content pattern rules |
 | `/govern/tenants` | Tenants | Multi-tenant policy hierarchy and per-tenant overrides |

@@ -129,6 +129,16 @@ cordumctl pack list
 cordumctl pack install <pack-name>
 cordumctl pack uninstall <pack-name>
 
+# Pool management
+cordumctl pool list
+cordumctl pool get <pool-name>
+cordumctl pool create <pool-name> --requires gpu,docker --description "GPU pool"
+cordumctl pool update <pool-name> --description "Updated"
+cordumctl pool delete <pool-name> --force
+cordumctl pool drain <pool-name> --timeout 300
+cordumctl pool topic add <pool-name> job.my-service.process
+cordumctl pool topic remove <pool-name> job.my-service.process
+
 # Health & status
 cordumctl status
 cordumctl health

@@ -14,6 +14,7 @@ type SafetyPolicy struct {
 	Version         string                  `yaml:"version"`
 	Rules           []PolicyRule            `yaml:"rules"`
 	InputPolicy     InputPolicyConfig       `yaml:"input_policy"`
+	InputRules      []InputPolicyRule       `yaml:"input_rules"`
 	OutputPolicy    OutputPolicyConfig      `yaml:"output_policy"`
 	OutputRules     []OutputPolicyRule      `yaml:"output_rules"`
 	DefaultTenant   string                  `yaml:"default_tenant,omitempty"`
@@ -23,7 +24,37 @@ type SafetyPolicy struct {
 
 // InputPolicyConfig controls input-policy evaluation behavior.
 type InputPolicyConfig struct {
-	FailMode string `yaml:"fail_mode,omitempty"` // open|closed (default: closed = requeue when kernel down)
+	Enabled      bool   `yaml:"enabled"`
+	FailMode     string `yaml:"fail_mode,omitempty"`     // open|closed (default: closed = requeue when kernel down)
+	MaxScanBytes int    `yaml:"max_scan_bytes,omitempty"` // default 2 MiB
+}
+
+// InputPolicyRule defines policy checks on job input content.
+// Mirrors OutputPolicyRule — same scanner/pattern infrastructure applied pre-execution.
+type InputPolicyRule struct {
+	ID       string           `yaml:"id"`
+	Enabled  *bool            `yaml:"enabled,omitempty"`
+	Severity string           `yaml:"severity"` // low|medium|high|critical
+	Desc     string           `yaml:"description"`
+	Match    InputPolicyMatch `yaml:"match"`
+	Decision string           `yaml:"decision"` // deny|require_approval
+	Reason   string           `yaml:"reason"`
+}
+
+// InputPolicyMatch captures matching criteria for input content checks.
+// Mirrors OutputPolicyMatch with input-specific field names.
+type InputPolicyMatch struct {
+	Tenants         []string `yaml:"tenants"`
+	Topics          []string `yaml:"topics"`
+	Capabilities    []string `yaml:"capabilities"`
+	RiskTags        []string `yaml:"risk_tags"`
+	Scanners        []string `yaml:"scanners"`
+	ContentPatterns []string `yaml:"content_patterns"`
+	Keywords        []string `yaml:"keywords"`
+	ContentTypes    []string `yaml:"content_types"`
+	Detectors       []string `yaml:"detectors"`
+	InputSizeGt     int64    `yaml:"input_size_gt"`
+	MaxInputBytes   int64    `yaml:"max_input_bytes"`
 }
 
 // OutputPolicyConfig controls output-policy evaluation behavior.

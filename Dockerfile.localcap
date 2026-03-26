@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# Dockerfile for building cordum services with local cap repo.
+# Build context must be the parent directory (D:\Cordum).
+# Usage: docker build -f cordum/Dockerfile.localcap --build-arg SERVICE=cordum-safety-kernel -t cordum-safety-kernel ..
+ARG GO_VERSION=1.24
+
+FROM golang:${GO_VERSION}-alpine AS builder
+WORKDIR /src
+
+RUN apk add --no-cache ca-certificates git
+
+# Copy module files for dependency resolution
+COPY cordum/go.mod cordum/go.sum ./cordum/
+COPY cordum/sdk/go.mod ./cordum/sdk/go.mod
+COPY cap/go.mod cap/go.sum ./cap/
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    cd /src/cordum && GOFLAGS=-mod=mod go mod download
+
+# Copy full source
+COPY cordum/ ./cordum/
+COPY cap/ ./cap/
+
+ARG SERVICE
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+RUN test -n "${SERVICE}" || (echo "SERVICE build arg required" && false)
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    cd /src/cordum && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+      -ldflags "-s -w -X github.com/cordum/cordum/core/infra/buildinfo.Version=${VERSION} -X github.com/cordum/cordum/core/infra/buildinfo.Commit=${COMMIT} -X github.com/cordum/cordum/core/infra/buildinfo.Date=${BUILD_DATE}" \
+      -o /out/${SERVICE} ./cmd/${SERVICE}
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+RUN adduser -D -u 65532 cordum
+USER cordum
+WORKDIR /home/cordum
+
+ARG SERVICE
+COPY --from=builder /out/${SERVICE} /usr/local/bin/app
+
+ENV NATS_URL=nats://nats:4222 \
+    REDIS_URL= \
+    SAFETY_KERNEL_ADDR=cordum-safety-kernel:50051
+
+ENTRYPOINT ["/usr/local/bin/app"]

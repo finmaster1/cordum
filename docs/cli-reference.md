@@ -497,6 +497,95 @@ These are used by `cordumctl up` and `cordumctl dev`:
 
 ---
 
+## Pool Management
+
+Manage worker pools dynamically without restarting services.
+
+### `cordumctl pool list`
+
+List all pools with worker counts and utilization.
+
+```bash
+cordumctl pool list
+```
+
+### `cordumctl pool get <name>`
+
+Get detailed pool information as JSON.
+
+```bash
+cordumctl pool get gpu-batch
+```
+
+### `cordumctl pool create <name>`
+
+Create a new worker pool.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--requires` | | Comma-separated capability requirements |
+| `--description` | | Pool description |
+
+```bash
+cordumctl pool create gpu-batch --requires gpu,docker --description "GPU batch pool"
+```
+
+### `cordumctl pool update <name>`
+
+Update pool configuration. Only provided flags are changed.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--requires` | | Comma-separated capability requirements |
+| `--description` | | Pool description |
+
+```bash
+cordumctl pool update gpu-batch --description "Updated GPU pool"
+```
+
+### `cordumctl pool delete <name>`
+
+Delete a pool. Fails if the pool has active topic mappings unless `--force`.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--force` | false | Force delete even with active topic mappings |
+
+```bash
+cordumctl pool delete gpu-batch --force
+```
+
+### `cordumctl pool drain <name>`
+
+Start draining a pool. New jobs stop routing to this pool; in-flight jobs
+complete normally. The pool auto-transitions to inactive when done.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--timeout` | 300 | Drain timeout in seconds |
+
+```bash
+cordumctl pool drain gpu-batch --timeout 600
+```
+
+### `cordumctl pool topic add <pool> <topic>`
+
+Add a topic-to-pool mapping.
+
+```bash
+cordumctl pool topic add gpu-batch job.ml.train
+```
+
+### `cordumctl pool topic remove <pool> <topic>`
+
+Remove a topic-to-pool mapping.
+
+```bash
+cordumctl pool topic remove gpu-batch job.ml.train
+```
+
+---
+
 ## Service Ports (Default Stack)
 
 | Service | Port | Protocol |

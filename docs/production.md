@@ -83,6 +83,76 @@ kubectl create secret generic cordum-nats-server-tls \
   -n cordum
 ```
 
+### TLS Certificate Hot-Reload
+
+Cordum services that serve TLS use a `CertReloader` that watches certificate
+and key files on disk and atomically swaps them without restart or downtime.
+Existing connections continue with the previously loaded certificate; new
+connections use the updated one.
+
+| Service | Env Vars | Label |
+|---------|----------|-------|
+| Gateway (gRPC) | `GRPC_TLS_CERT`, `GRPC_TLS_KEY` | `gateway-grpc` |
+| Gateway (HTTP) | `GATEWAY_HTTP_TLS_CERT`, `GATEWAY_HTTP_TLS_KEY` | `gateway-http` |
+| Safety Kernel | `SAFETY_KERNEL_TLS_CERT`, `SAFETY_KERNEL_TLS_KEY` | `safety-kernel` |
+| Context Engine | `CONTEXT_ENGINE_TLS_CERT`, `CONTEXT_ENGINE_TLS_KEY` | `context-engine` |
+
+How it works:
+
+- On startup, the service loads the cert/key pair from the paths in the env vars.
+- A background goroutine polls the files every **30 seconds**, comparing modification times.
+- When a change is detected, the new cert/key pair is loaded and stored via an atomic pointer swap.
+- If the new files fail to parse (corrupted, incomplete write), the old certificate is kept and an error is logged. The service does not crash.
+
+**Operational notes:**
+
+- Write the new cert and key atomically (e.g., write to a temp file then `mv`) to avoid the reloader seeing a half-written file.
+- In Kubernetes, cert-manager volume mounts update atomically via symlinks — the reloader picks up changes on the next 30-second poll.
+- The label in the log messages (e.g., `"label": "gateway-grpc"`) identifies which service reloaded.
+
+### JWT Authentication
+
+The gateway supports JWT bearer tokens for authenticating API requests. Two
+signing algorithms are supported: **HS256** (HMAC-SHA256) and **RS256**
+(RSA-SHA256). Both can be configured simultaneously — the gateway selects the
+algorithm based on the `alg` header in each token.
+
+**Configuration:**
+
+| Env Var | Description |
+|---------|-------------|
+| `CORDUM_JWT_HMAC_SECRET` | HMAC secret for HS256. Prefix with `base64:` for explicit base64 decoding; raw string bytes used otherwise. |
+| `CORDUM_JWT_PUBLIC_KEY` | Inline RSA public key (PEM or DER) for RS256 |
+| `CORDUM_JWT_PUBLIC_KEY_PATH` | Path to RSA public key file for RS256 (enables file-based key rotation) |
+| `CORDUM_JWT_ISSUER` | Expected `iss` claim. **Required in production** — requests fail without it. |
+| `CORDUM_JWT_AUDIENCE` | Expected `aud` claim. **Required in production** — requests fail without it. |
+| `CORDUM_JWT_CLOCK_SKEW` | Allowed clock drift (e.g., `30s`). Hard cap: **5 minutes**. |
+| `CORDUM_JWT_DEFAULT_ROLE` | Role assigned when token has no `role` claim (default: `viewer`) |
+| `CORDUM_JWT_REQUIRED` | Set to `true` to reject all requests without a valid JWT |
+
+**Production enforcement:**
+
+When `CORDUM_ENV=production` (or `CORDUM_PRODUCTION=true`):
+- `CORDUM_JWT_ISSUER` must be set — tokens without a matching `iss` are rejected.
+- `CORDUM_JWT_AUDIENCE` must be set — tokens without a matching `aud` are rejected.
+- In non-production mode, missing issuer/audience logs a warning but allows the request.
+
+**Key rotation (RS256):**
+
+When `CORDUM_JWT_PUBLIC_KEY_PATH` is set, the gateway watches the key file for
+changes, polling every **30 seconds**. On detecting a new modification time,
+it re-reads the file and atomically swaps the validator. Existing in-flight
+validations complete with the old key; new requests use the updated key.
+
+For HMAC-only configurations (no key file), the watch loop is a no-op — restart
+the gateway or send SIGHUP to pick up a new secret.
+
+**HMAC secret format:**
+
+- Plain string: `CORDUM_JWT_HMAC_SECRET=my-secret-key` — uses raw bytes.
+- Base64-encoded: `CORDUM_JWT_HMAC_SECRET=base64:dGhpcyBpcyBhIHNlY3JldA==` — decodes after the prefix.
+- If the value looks like base64 but is missing the `base64:` prefix, a warning is logged to help operators migrate from older configurations.
+
 ## 4) Observability
 
 ### Metrics Endpoints

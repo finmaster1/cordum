@@ -35,6 +35,8 @@ require (
 
 replace github.com/cordum/cordum/sdk => ./sdk
 
+replace github.com/cordum-io/cap/v2 => ../cap
+
 // Use published CAP module
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

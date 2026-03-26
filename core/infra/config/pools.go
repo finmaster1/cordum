@@ -8,9 +8,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PoolConfig describes a worker pool's declared capabilities.
+// PoolConfig describes a worker pool's declared capabilities and lifecycle state.
 type PoolConfig struct {
-	Requires []string `yaml:"requires,omitempty"`
+	Requires            []string `yaml:"requires,omitempty" json:"requires,omitempty"`
+	Status              string   `yaml:"status,omitempty" json:"status,omitempty"`
+	Description         string   `yaml:"description,omitempty" json:"description,omitempty"`
+	DrainStartedAt      string   `yaml:"drain_started_at,omitempty" json:"drain_started_at,omitempty"`
+	DrainTimeoutSeconds int      `yaml:"drain_timeout_seconds,omitempty" json:"drain_timeout_seconds,omitempty"`
+}
+
+const (
+	PoolStatusActive   = "active"
+	PoolStatusDraining = "draining"
+	PoolStatusInactive = "inactive"
+)
+
+// EffectiveStatus returns the pool's status, defaulting to "active" when unset.
+func (c PoolConfig) EffectiveStatus() string {
+	if c.Status == "" {
+		return PoolStatusActive
+	}
+	return c.Status
 }
 
 // PoolsConfig describes topic routing and pool capabilities.

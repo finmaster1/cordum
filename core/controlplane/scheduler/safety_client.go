@@ -20,13 +20,16 @@ import (
 
 // SafetyClient implements SafetyChecker by calling the SafetyKernel gRPC service.
 type SafetyClient struct {
-	client pb.SafetyKernelClient
-	conn   *grpc.ClientConn
-	cb     *RedisCircuitBreaker
+	client        pb.SafetyKernelClient
+	conn          *grpc.ClientConn
+	cb            *RedisCircuitBreaker
+	contextClient redis.UniversalClient // for dereferencing context_ptr (input content scanning)
 }
 
 const (
 	safetyTimeout            = 2 * time.Second
+	inputContentMaxBytes     = 2 * 1024 * 1024 // 2 MiB, same as output
+	inputPointerPrefix       = "redis://"
 	safetyCircuitOpenFor     = 30 * time.Second
 	safetyCircuitFailBudget  = 3
 	safetyCircuitHalfOpenMax = 3
@@ -77,8 +80,43 @@ func (c *SafetyClient) WithRedis(rdb redis.UniversalClient) *SafetyClient {
 	return c
 }
 
+// WithContextClient enables input content loading for pre-execution content scanning.
+// The Redis client is used to dereference context_ptr payloads.
+func (c *SafetyClient) WithContextClient(rdb redis.UniversalClient) *SafetyClient {
+	c.contextClient = rdb
+	return c
+}
+
+// loadInputContent dereferences context_ptr from Redis.
+// Returns nil content on failure — metadata-only check proceeds.
+func (c *SafetyClient) loadInputContent(ctx context.Context, contextPtr string) ([]byte, int64, error) {
+	contextPtr = strings.TrimSpace(contextPtr)
+	if contextPtr == "" || c.contextClient == nil {
+		return nil, 0, nil
+	}
+	key := contextPtr
+	if strings.HasPrefix(key, inputPointerPrefix) {
+		key = strings.TrimPrefix(key, inputPointerPrefix)
+	}
+	if key == "" {
+		return nil, 0, nil
+	}
+	raw, err := c.contextClient.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, 0, err
+	}
+	originalSize := int64(len(raw))
+	if len(raw) > inputContentMaxBytes {
+		raw = raw[:inputContentMaxBytes]
+	}
+	return raw, originalSize, nil
+}
+
 // Close releases the underlying connection.
 func (c *SafetyClient) Close() error {
+	if c.contextClient != nil {
+		_ = c.contextClient.Close()
+	}
 	if c.conn != nil {
 		return c.conn.Close()
 	}
@@ -108,6 +146,21 @@ func (c *SafetyClient) Check(ctx context.Context, req *pb.JobRequest) (SafetyDec
 	if env := req.GetEnv(); env != nil {
 		if eff := env[config.EffectiveConfigEnvVar]; eff != "" {
 			checkReq.EffectiveConfig = []byte(eff)
+		}
+	}
+
+	// Dereference context_ptr and attach input content for content-level policy scanning.
+	// Failure is non-fatal: metadata-only check proceeds.
+	if ptr := req.GetContextPtr(); ptr != "" {
+		content, originalSize, loadErr := c.loadInputContent(ctx, ptr)
+		if loadErr != nil {
+			// Log but do not fail. Content inspection is additive, not blocking.
+		} else if len(content) > 0 {
+			checkReq.InputContent = content
+			checkReq.InputSizeBytes = originalSize
+			if ct := req.GetLabels()["content_type"]; ct != "" {
+				checkReq.InputContentType = ct
+			}
 		}
 	}
 

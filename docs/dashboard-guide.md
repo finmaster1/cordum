@@ -226,6 +226,34 @@ See [docs/pack.md](pack.md) for the pack format specification and CLI commands.
 
 ---
 
+### Worker Pools (`/pools`)
+
+Manage worker pools, topic routing, and pool lifecycle.
+
+**Summary cards**: Pool count, worker count, topic count, health status.
+
+**Pool cards**: Each pool shows name, status badge (active/draining/inactive), worker and topic counts, CPU/memory utilization bars, and topic chips.
+
+**Actions** (on each pool card):
+- **Edit** (gear icon): Update requires and description
+- **Topics** (link icon): Add/remove topic-to-pool mappings
+- **Drain** (timer icon, active pools only): Start draining with configurable timeout
+- **Delete** (trash icon): Delete pool, with force option for pools with topic mappings
+
+**Create Pool** button in header opens a dialog with:
+- Pool name (validated: lowercase alphanumeric + hyphens, 3-63 characters)
+- Requires (comma-separated capability list)
+- Description
+
+**Status badges**:
+- **Active** (green): Pool is accepting new jobs
+- **Draining** (yellow, pulsing): Pool is completing in-flight jobs, no new routing
+- **Inactive** (gray): Pool is fully drained, not in use
+
+**Topic assignment dialog**: Lists current topics with remove buttons. Add new topics with `job.*` format validation.
+
+All mutations auto-refresh the pool list via React Query invalidation.
+
 ### Dead Letters (`/dlq`)
 
 Recover or debug failed, denied, and quarantined jobs.

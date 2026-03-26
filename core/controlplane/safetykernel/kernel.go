@@ -49,6 +49,7 @@ type server struct {
 	mu            sync.RWMutex
 	policy        *config.SafetyPolicy
 	outputRules   []compiledOutputRule
+	inputRules    []compiledInputRule
 	scanners      map[string]OutputScanner
 	snapshot      string
 	snapshots     []string
@@ -381,6 +382,44 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 		}
 	}
 
+	// Input content rule evaluation — runs scanners/patterns against job input payload.
+	// Always active when input_rules are configured and content is present.
+	// Input rules can only escalate (allow→deny or allow→require_approval), never downgrade.
+	ruleID := policyDecision.RuleID
+	if len(s.inputRules) > 0 && len(req.GetInputContent()) > 0 {
+		if decision == pb.DecisionType_DECISION_TYPE_ALLOW || decision == pb.DecisionType_DECISION_TYPE_ALLOW_WITH_CONSTRAINTS {
+			evalReq := inputEvaluateRequest{
+				tenant:      tenant,
+				topic:       topic,
+				contentType: req.GetInputContentType(),
+				content:     req.GetInputContent(),
+				inputSize:   req.GetInputSizeBytes(),
+			}
+			if meta != nil {
+				evalReq.capabilities = append(evalReq.capabilities, meta.GetCapability())
+				evalReq.riskTags = append(evalReq.riskTags, meta.GetRiskTags()...)
+			}
+			for _, rule := range s.inputRules {
+				matched, findings := evaluateInputRule(rule, evalReq, s.scanners)
+				if !matched {
+					continue
+				}
+				switch rule.decision {
+				case "deny":
+					decision = pb.DecisionType_DECISION_TYPE_DENY
+					reason = inputRuleReason(rule, findings)
+					ruleID = rule.id
+				case "require_approval", "require-approval", "require_human":
+					decision = pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN
+					reason = inputRuleReason(rule, findings)
+					ruleID = rule.id
+				}
+				slog.Info("input rule matched", "component", "safety", "rule", rule.id, "decision", rule.decision, "findings", len(findings))
+				break // first matching input rule wins
+			}
+		}
+	}
+
 	approvalRequired := policyDecision.ApprovalRequired || decision == pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN
 	approvalRef := ""
 	if approvalRequired {
@@ -391,7 +430,7 @@ func (s *server) evaluate(_ context.Context, req *pb.PolicyCheckRequest, _ strin
 		Decision:         decision,
 		Reason:           reason,
 		PolicySnapshot:   snapshot,
-		RuleId:           policyDecision.RuleID,
+		RuleId:           ruleID,
 		Constraints:      constraints,
 		ApprovalRequired: approvalRequired,
 		ApprovalRef:      approvalRef,
@@ -719,6 +758,7 @@ func (s *server) setPolicy(policy *config.SafetyPolicy, snapshot string) {
 	s.mu.Lock()
 	s.policy = policy
 	s.outputRules = compileOutputRules(policy)
+	s.inputRules = compileInputRules(policy)
 	s.snapshot = snapshot
 	if snapshot != "" {
 		s.snapshots = append([]string{snapshot}, s.snapshots...)
@@ -983,6 +1023,25 @@ func mergePolicies(base, extra *config.SafetyPolicy) *config.SafetyPolicy {
 		}
 		out.OutputRules = append(out.OutputRules, r)
 	}
+	// Merge input rules with duplicate detection
+	seenInputRules := make(map[string]int, len(out.InputRules))
+	for i, r := range out.InputRules {
+		if r.ID != "" {
+			seenInputRules[r.ID] = i
+		}
+	}
+	for _, r := range extra.InputRules {
+		if r.ID != "" {
+			if idx, dup := seenInputRules[r.ID]; dup {
+				slog.Warn("duplicate input policy rule ID in merge — replacing with latest",
+					"rule_id", r.ID)
+				out.InputRules[idx] = r
+				continue
+			}
+			seenInputRules[r.ID] = len(out.InputRules)
+		}
+		out.InputRules = append(out.InputRules, r)
+	}
 	out.Tenants = mergeTenantPolicies(out.Tenants, extra.Tenants)
 	return out
 }
@@ -999,6 +1058,7 @@ func clonePolicy(policy *config.SafetyPolicy) *config.SafetyPolicy {
 		OutputPolicy:    policy.OutputPolicy,
 		Rules:           append([]config.PolicyRule{}, policy.Rules...),
 		OutputRules:     append([]config.OutputPolicyRule{}, policy.OutputRules...),
+		InputRules:      append([]config.InputPolicyRule{}, policy.InputRules...),
 		Tenants:         map[string]config.TenantPolicy{},
 	}
 	if policy.Tenants != nil {

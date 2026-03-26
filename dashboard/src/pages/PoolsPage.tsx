@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { Activity, AlertTriangle, CheckCircle2, Server, Layers } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Server, Layers, Plus, Settings, Trash2, Timer, Link2 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatPercent, formatRelative } from "../lib/format";
 import { Card, CardHeader, CardTitle } from "../components/ui/Card";
@@ -10,6 +10,13 @@ import { Badge } from "../components/ui/Badge";
 import { ProgressBar } from "../components/ProgressBar";
 import type { Heartbeat } from "../types/api";
 import { ErrorBanner } from "../components/ui/ErrorBanner";
+import { PoolStatusBadge } from "../components/pools/PoolStatusBadge";
+import { CreatePoolDialog } from "../components/pools/CreatePoolDialog";
+import { EditPoolDialog } from "../components/pools/EditPoolDialog";
+import { DeletePoolDialog } from "../components/pools/DeletePoolDialog";
+import { DrainPoolDialog } from "../components/pools/DrainPoolDialog";
+import { TopicAssignmentDialog } from "../components/pools/TopicAssignmentDialog";
+import { useCreatePool, useUpdatePool, useDeletePool, useDrainPool, useAddTopicToPool, useRemoveTopicFromPool } from "../hooks/usePoolMutations";
 
 const STALE_WORKER_MINUTES = 2;
 
@@ -18,6 +25,8 @@ type PoolSummary = {
   workers: Heartbeat[];
   topics: string[];
   requires: string[];
+  status: string;
+  description: string;
   avgCpu: number;
   avgMem: number;
   staleCount: number;
@@ -26,6 +35,18 @@ type PoolSummary = {
 export default function PoolsPage() {
   const [searchParams] = useSearchParams();
   const [selectedPool, setSelectedPool] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editPool, setEditPool] = useState<PoolSummary | null>(null);
+  const [deletePool, setDeletePool] = useState<PoolSummary | null>(null);
+  const [drainPool, setDrainPool] = useState<PoolSummary | null>(null);
+  const [topicsPool, setTopicsPool] = useState<PoolSummary | null>(null);
+
+  const createMut = useCreatePool();
+  const updateMut = useUpdatePool();
+  const deleteMut = useDeletePool();
+  const drainMut = useDrainPool();
+  const addTopicMut = useAddTopicToPool();
+  const removeTopicMut = useRemoveTopicFromPool();
 
   const workersQuery = useQuery({
     queryKey: ["workers"],
@@ -50,7 +71,7 @@ export default function PoolsPage() {
 
   const pools = useMemo<PoolSummary[]>(() => {
     const poolsConfig = (systemConfigQuery.data?.data?.pools || {}) as Record<string, unknown>;
-    const poolDefs = (poolsConfig as { pools?: Record<string, { requires?: string[] }> }).pools || {};
+    const poolDefs = (poolsConfig as { pools?: Record<string, { requires?: string[]; status?: string; description?: string }> }).pools || {};
     const topicsConfig = (poolsConfig as { topics?: Record<string, string | string[]> }).topics || {};
 
     // Build topic -> pool mapping
@@ -87,6 +108,8 @@ export default function PoolsPage() {
           workers: poolWorkers,
           topics: topicsByPool[poolName] || [],
           requires: poolDefs[poolName]?.requires || [],
+          status: poolDefs[poolName]?.status || "active",
+          description: poolDefs[poolName]?.description || "",
           avgCpu,
           avgMem,
           staleCount: poolStale.length,
@@ -180,8 +203,16 @@ export default function PoolsPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Pool Overview</CardTitle>
-            <div className="text-xs text-muted-foreground">Click a pool to see workers</div>
+            <div className="flex items-center justify-between w-full">
+              <div>
+                <CardTitle>Pool Overview</CardTitle>
+                <div className="text-xs text-muted-foreground">Click a pool to see workers</div>
+              </div>
+              <Button variant="default" size="sm" onClick={() => setCreateOpen(true)}>
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                Create Pool
+              </Button>
+            </div>
           </CardHeader>
           {pools.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
@@ -208,6 +239,7 @@ export default function PoolsPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-ink">{pool.name}</span>
+                          <PoolStatusBadge status={pool.status} />
                           {isOverloaded ? (
                             <span className="rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                               high load
@@ -223,12 +255,21 @@ export default function PoolsPage() {
                           {pool.workers.length} workers · {pool.topics.length} topics
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {pool.requires.length > 0 ? (
-                          <Badge variant="info">{pool.requires.join(", ")}</Badge>
-                        ) : (
-                          <Badge variant="default">general</Badge>
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" title="Edit" onClick={() => setEditPool(pool)} className="p-1.5 rounded-lg hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors">
+                          <Settings className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" title="Topics" onClick={() => setTopicsPool(pool)} className="p-1.5 rounded-lg hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors">
+                          <Link2 className="w-3.5 h-3.5" />
+                        </button>
+                        {pool.status === "active" && (
+                          <button type="button" title="Drain" onClick={() => setDrainPool(pool)} className="p-1.5 rounded-lg hover:bg-warning/10 text-muted-foreground hover:text-warning transition-colors">
+                            <Timer className="w-3.5 h-3.5" />
+                          </button>
                         )}
+                        <button type="button" title="Delete" onClick={() => setDeletePool(pool)} className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2 lg:grid-cols-2">
@@ -433,6 +474,60 @@ export default function PoolsPage() {
           </div>
         )}
       </Card>
+      <CreatePoolDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={(data) => createMut.mutate(data, { onSuccess: () => setCreateOpen(false) })}
+        isPending={createMut.isPending}
+      />
+
+      {editPool && (
+        <EditPoolDialog
+          open={!!editPool}
+          onClose={() => setEditPool(null)}
+          onSubmit={(data) => updateMut.mutate({ name: editPool.name, ...data }, { onSuccess: () => setEditPool(null) })}
+          isPending={updateMut.isPending}
+          poolName={editPool.name}
+          currentRequires={editPool.requires}
+          currentDescription={editPool.description}
+        />
+      )}
+
+      {deletePool && (
+        <DeletePoolDialog
+          open={!!deletePool}
+          onClose={() => setDeletePool(null)}
+          onConfirm={(force) => deleteMut.mutate({ name: deletePool.name, force }, { onSuccess: () => setDeletePool(null) })}
+          isPending={deleteMut.isPending}
+          poolName={deletePool.name}
+          topicCount={deletePool.topics.length}
+          workerCount={deletePool.workers.length}
+        />
+      )}
+
+      {drainPool && (
+        <DrainPoolDialog
+          open={!!drainPool}
+          onClose={() => setDrainPool(null)}
+          onConfirm={(timeout) => drainMut.mutate({ name: drainPool.name, timeout_seconds: timeout }, { onSuccess: () => setDrainPool(null) })}
+          isPending={drainMut.isPending}
+          poolName={drainPool.name}
+          workerCount={drainPool.workers.length}
+        />
+      )}
+
+      {topicsPool && (
+        <TopicAssignmentDialog
+          open={!!topicsPool}
+          onClose={() => setTopicsPool(null)}
+          onAddTopic={(topic) => addTopicMut.mutate({ pool: topicsPool.name, topic })}
+          onRemoveTopic={(topic) => removeTopicMut.mutate({ pool: topicsPool.name, topic })}
+          poolName={topicsPool.name}
+          topics={topicsPool.topics}
+          isAdding={addTopicMut.isPending}
+          isRemoving={removeTopicMut.isPending}
+        />
+      )}
     </div>
   );
 }

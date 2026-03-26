@@ -19,6 +19,10 @@
       "type": "array",
       "items": {"$ref": "#/definitions/outputRule"}
     },
+    "input_rules": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/inputRule"}
+    },
     "input_policy": {
       "$ref": "#/definitions/inputPolicy"
     },
@@ -66,6 +70,42 @@
           "enum": ["allow", "deny", "quarantine", "redact"]
         },
         "reason": {"type": "string"}
+      }
+    },
+    "inputRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "enabled": {"type": "boolean"},
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "description": {"type": "string"},
+        "match": {"$ref": "#/definitions/inputMatch"},
+        "decision": {
+          "type": "string",
+          "enum": ["deny", "require_approval", "require-approval", "require_human"]
+        },
+        "reason": {"type": "string"}
+      }
+    },
+    "inputMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tenants": {"type": "array", "items": {"type": "string"}},
+        "topics": {"type": "array", "items": {"type": "string"}},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "risk_tags": {"type": "array", "items": {"type": "string"}},
+        "scanners": {"type": "array", "items": {"type": "string"}},
+        "content_patterns": {"type": "array", "items": {"type": "string"}},
+        "keywords": {"type": "array", "items": {"type": "string"}},
+        "content_types": {"type": "array", "items": {"type": "string"}},
+        "detectors": {"type": "array", "items": {"type": "string"}},
+        "input_size_gt": {"type": "integer", "minimum": 0},
+        "max_input_bytes": {"type": "integer", "minimum": 0}
       }
     },
     "inputPolicy": {

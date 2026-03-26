@@ -516,3 +516,86 @@ func (c *Client) GetArtifact(ctx context.Context, ptr string) (*Artifact, error)
 		Metadata: resp.Metadata,
 	}, nil
 }
+
+// ---------------------------------------------------------------------------
+// Pool management
+// ---------------------------------------------------------------------------
+
+type PoolItem struct {
+	Name        string  `json:"name"`
+	Workers     int     `json:"workers"`
+	ActiveJobs  int32   `json:"active_jobs"`
+	Capacity    int32   `json:"capacity"`
+	Utilization float64 `json:"utilization"`
+}
+
+type PoolDetail struct {
+	PoolItem
+	Status      string         `json:"status"`
+	Description string         `json:"description"`
+	Requires    []string       `json:"requires"`
+	Topics      []string       `json:"topics"`
+	WorkerList  []any          `json:"worker_list"`
+	CapturedAt  string         `json:"captured_at"`
+}
+
+type PoolCreateRequest struct {
+	Requires    []string `json:"requires,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
+type PoolUpdateRequest struct {
+	Requires    *[]string `json:"requires,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Status      *string   `json:"status,omitempty"`
+}
+
+type PoolDrainRequest struct {
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+func (c *Client) ListPools(ctx context.Context) ([]PoolItem, error) {
+	var resp struct {
+		Items []PoolItem `json:"items"`
+	}
+	if err := c.doJSON(ctx, "GET", "/pools", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
+}
+
+func (c *Client) GetPool(ctx context.Context, name string) (*PoolDetail, error) {
+	var pool PoolDetail
+	if err := c.doJSON(ctx, "GET", "/pools/"+name, nil, &pool); err != nil {
+		return nil, err
+	}
+	return &pool, nil
+}
+
+func (c *Client) CreatePool(ctx context.Context, name string, req *PoolCreateRequest) error {
+	return c.doJSON(ctx, "PUT", "/pools/"+name, req, nil)
+}
+
+func (c *Client) UpdatePool(ctx context.Context, name string, req *PoolUpdateRequest) error {
+	return c.doJSON(ctx, "PATCH", "/pools/"+name, req, nil)
+}
+
+func (c *Client) DeletePool(ctx context.Context, name string, force bool) error {
+	path := "/pools/" + name
+	if force {
+		path += "?force=true"
+	}
+	return c.doJSON(ctx, "DELETE", path, nil, nil)
+}
+
+func (c *Client) DrainPool(ctx context.Context, name string, req *PoolDrainRequest) error {
+	return c.doJSON(ctx, "POST", "/pools/"+name+"/drain", req, nil)
+}
+
+func (c *Client) AddTopicToPool(ctx context.Context, pool, topic string) error {
+	return c.doJSON(ctx, "PUT", "/pools/"+pool+"/topics/"+topic, nil, nil)
+}
+
+func (c *Client) RemoveTopicFromPool(ctx context.Context, pool, topic string) error {
+	return c.doJSON(ctx, "DELETE", "/pools/"+pool+"/topics/"+topic, nil, nil)
+}

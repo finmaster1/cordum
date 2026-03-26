@@ -36,6 +36,20 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "draining", "inactive"]
+          },
+          "description": {
+            "type": "string"
+          },
+          "drain_started_at": {
+            "type": "string"
+          },
+          "drain_timeout_seconds": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

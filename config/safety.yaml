@@ -73,6 +73,72 @@ rules:
     decision: allow
     reason: "Bank transfer jobs are auto-approved unless explicitly blocked."
 
+  # TX4: B2B Multi-Agent Onboarding — allow all B2B topics.
+  - id: b2b-orchestrate-allow
+    match:
+      topics:
+        - job.b2b.orchestrate
+    decision: allow
+    reason: "B2B orchestrator dispatches onboarding sub-tasks."
+
+  - id: b2b-hr-setup-allow
+    match:
+      topics:
+        - job.b2b.hr-setup
+    decision: allow
+    reason: "HR agent provisions employee records."
+
+  - id: b2b-it-inventory-allow
+    match:
+      topics:
+        - job.b2b.it-inventory
+    decision: allow
+    reason: "IT inventory agent checks equipment availability."
+
+  - id: b2b-procurement-source-allow
+    match:
+      topics:
+        - job.b2b.procurement-source
+    decision: allow
+    reason: "Procurement agent sources vendor quotes."
+
+  - id: b2b-governance-evaluate-allow
+    match:
+      topics:
+        - job.b2b.governance-evaluate
+    decision: allow_with_constraints
+    reason: "B2B governance evaluator checks spend thresholds."
+    constraints:
+      budgets:
+        max_runtime_ms: 30000
+
+  - id: b2b-procurement-pay-allow
+    match:
+      topics:
+        - job.b2b.procurement-pay
+    decision: allow_with_constraints
+    reason: "Payment processor issues purchase order."
+    constraints:
+      budgets:
+        max_runtime_ms: 30000
+
+  - id: b2b-vendor-email-allow
+    match:
+      topics:
+        - job.b2b.vendor-email
+    decision: allow
+    reason: "Vendor email sends confirmation."
+
+  # Visa governance — allow synthetic topics used by the governance-evaluator
+  # worker for direct Safety Kernel content scanning via gRPC.
+  - id: visa-governance-content-scan
+    match:
+      topics:
+        - job.visa-governance.scope-check
+        - job.visa-governance.pii-check
+    decision: allow
+    reason: "Synthetic topics for governance worker kernel evaluation."
+
   # Workflow approval gate — dispatched by the workflow engine for steps of
   # type "approval". The scheduler auto-completes these once approved via
   # the unified /approvals/{job_id}/approve endpoint.
@@ -85,6 +151,57 @@ rules:
 
 input_policy:
   fail_mode: closed  # "closed" = requeue when kernel down, "open" = allow through
+
+input_rules:
+  # Visa governance — scope enforcement via Safety Kernel content scanning.
+  # Called by the governance-evaluator worker via direct gRPC with synthetic topic.
+  - id: visa-scope-blocklist
+    description: "Block Visa payment payloads containing prohibited item categories."
+    severity: high
+    match:
+      topics:
+        - "job.visa-governance.scope-check"
+      keywords:
+        - "gift_card"
+        - "cryptocurrency"
+        - "financial_instrument"
+        - "gambling"
+        - "adult"
+        - "weapons"
+    decision: deny
+    reason: "Scope violation — prohibited item category detected in payment payload."
+
+  # Visa governance — PII detection via Safety Kernel content scanning.
+  # Called by the governance-evaluator worker via direct gRPC with synthetic topic.
+  - id: visa-pii-quarantine
+    description: "Scan Visa payment payloads for PII (Israeli phone, email, national ID, credit cards)."
+    severity: high
+    match:
+      topics:
+        - "job.visa-governance.pii-check"
+      scanners:
+        - "pii"
+      content_patterns:
+        - "05\\d-?\\d{3}-?\\d{4}"
+        - "\\b\\d{9}\\b"
+    decision: deny
+    reason: "PII detected in payment payload."
+
+  # Real pre-dispatch protection for payment processing step.
+  # Evaluated by the scheduler before dispatching to payment-processor worker.
+  - id: visa-payment-pii-guard
+    description: "Block payment processing if PII leaks past governance step."
+    severity: critical
+    match:
+      topics:
+        - "job.visa-payment.process"
+      scanners:
+        - "pii"
+      content_patterns:
+        - "05\\d-?\\d{3}-?\\d{4}"
+        - "\\b\\d{9}\\b"
+    decision: deny
+    reason: "PII detected — payment blocked before processing."
 
 output_policy:
   enabled: true
@@ -110,6 +227,7 @@ output_rules:
         - "job.mkt-authority.*"
         - "job.mkt-pipeline.*"
         - "job.demo-*"
+        - "job.b2b.*"
       scanners:
         - "pii"
     decision: quarantine

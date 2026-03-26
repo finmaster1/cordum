@@ -1723,6 +1723,103 @@ Returns all active distributed locks held in Redis. This is a read-only diagnost
 
 ---
 
+## 17. Pool Management
+
+All pool management endpoints require **admin** role.
+
+### PUT `/api/v1/pools/{name}`
+
+Create a new worker pool.
+
+**Request body:**
+```json
+{ "requires": ["docker", "gpu"], "description": "GPU-enabled pool" }
+```
+
+**Response (201):**
+```json
+{ "name": "gpu-pool", "status": "active", "requires": ["docker", "gpu"], "description": "GPU-enabled pool" }
+```
+
+**Errors:** 400 (invalid name), 409 (already exists)
+
+### PATCH `/api/v1/pools/{name}`
+
+Update pool configuration. Only provided fields are changed.
+
+**Request body:**
+```json
+{ "requires": ["docker"], "description": "updated description" }
+```
+
+**Response (200):** Updated pool object.
+
+**Errors:** 400 (invalid config), 404 (not found)
+
+### DELETE `/api/v1/pools/{name}`
+
+Delete a pool. Fails if the pool has active topic mappings unless `?force=true`.
+
+**Query params:** `force=true` — remove topic mappings and delete.
+
+**Response:** 204 No Content
+
+**Errors:** 400 (active topic mappings), 404 (not found)
+
+### POST `/api/v1/pools/{name}/drain`
+
+Start draining a pool. Stops new job routing; in-flight jobs complete normally.
+The pool auto-transitions to `inactive` when all jobs finish or timeout expires.
+
+**Request body:**
+```json
+{ "timeout_seconds": 300 }
+```
+
+**Response (200):**
+```json
+{ "name": "my-pool", "status": "draining", "drain_started_at": "2026-03-26T10:00:00Z", "drain_timeout_seconds": 300 }
+```
+
+**Errors:** 400 (not active / already draining), 404 (not found)
+
+### PUT `/api/v1/pools/{name}/topics/{topic}`
+
+Add a topic-to-pool mapping. Idempotent — succeeds if already mapped.
+
+**Response:** 204 No Content
+
+**Errors:** 400 (invalid topic format), 404 (pool not found)
+
+### DELETE `/api/v1/pools/{name}/topics/{topic}`
+
+Remove a topic-to-pool mapping. If the topic has no remaining pools, the topic
+entry is removed entirely.
+
+**Response:** 204 No Content
+
+**Errors:** 404 (pool or topic not found)
+
+### Example: create pool and assign topic
+
+```bash
+# Create pool
+curl -X PUT https://gateway:8081/api/v1/pools/gpu-batch \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"requires": ["gpu"], "description": "GPU batch processing"}'
+
+# Assign topic
+curl -X PUT https://gateway:8081/api/v1/pools/gpu-batch/topics/job.ml.train \
+  -H "Authorization: Bearer $API_KEY"
+
+# Drain pool
+curl -X POST https://gateway:8081/api/v1/pools/gpu-batch/drain \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"timeout_seconds": 600}'
+```
+
 ## Endpoint Index (Registered Routes)
 
 The following routes are registered in gateway route setup.

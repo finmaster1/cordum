@@ -282,15 +282,29 @@ func buildRouting(pools *config.PoolsConfig) scheduler.PoolRouting {
 	if pools == nil {
 		return routing
 	}
-	for topic, poolList := range pools.Topics {
-		clone := make([]string, len(poolList))
-		copy(clone, poolList)
-		routing.Topics[topic] = clone
-	}
+	// Build set of inactive pools to exclude from routing.
+	inactivePools := make(map[string]bool)
 	for name, pool := range pools.Pools {
+		s := pool.EffectiveStatus()
+		if s == config.PoolStatusDraining || s == config.PoolStatusInactive {
+			slog.Debug("buildRouting: skipping pool", "pool", name, "status", s)
+			inactivePools[name] = true
+			continue
+		}
 		reqs := make([]string, len(pool.Requires))
 		copy(reqs, pool.Requires)
 		routing.Pools[name] = scheduler.PoolProfile{Requires: reqs}
+	}
+	for topic, poolList := range pools.Topics {
+		var active []string
+		for _, p := range poolList {
+			if !inactivePools[p] {
+				active = append(active, p)
+			}
+		}
+		if len(active) > 0 {
+			routing.Topics[topic] = active
+		}
 	}
 	return routing
 }

@@ -1152,3 +1152,85 @@ func TestMergePolicies_DuplicateOutputRule(t *testing.T) {
 		}
 	}
 }
+
+func TestClonePolicy_PreservesInputRules(t *testing.T) {
+	policy := &config.SafetyPolicy{
+		Rules: []config.PolicyRule{
+			{ID: "r1", Decision: "allow"},
+		},
+		InputRules: []config.InputPolicyRule{
+			{ID: "ir1", Severity: "high", Decision: "deny", Reason: "pii detected"},
+			{ID: "ir2", Severity: "medium", Decision: "require_approval", Reason: "keyword match"},
+		},
+		OutputRules: []config.OutputPolicyRule{
+			{ID: "o1", Severity: "low"},
+		},
+	}
+	cloned := clonePolicy(policy)
+	if len(cloned.InputRules) != 2 {
+		t.Fatalf("expected 2 input rules after clone, got %d", len(cloned.InputRules))
+	}
+	if cloned.InputRules[0].ID != "ir1" || cloned.InputRules[1].ID != "ir2" {
+		t.Errorf("input rule IDs mismatch: got %s, %s", cloned.InputRules[0].ID, cloned.InputRules[1].ID)
+	}
+	// Verify it's a copy, not a shared slice
+	cloned.InputRules[0].Severity = "changed"
+	if policy.InputRules[0].Severity == "changed" {
+		t.Error("clonePolicy shares InputRules slice with original")
+	}
+}
+
+func TestMergePolicies_InputRules(t *testing.T) {
+	base := &config.SafetyPolicy{
+		InputRules: []config.InputPolicyRule{
+			{ID: "ir1", Severity: "high", Decision: "deny"},
+		},
+	}
+	extra := &config.SafetyPolicy{
+		InputRules: []config.InputPolicyRule{
+			{ID: "ir2", Severity: "medium", Decision: "require_approval"},
+		},
+	}
+	merged := mergePolicies(base, extra)
+	if len(merged.InputRules) != 2 {
+		t.Fatalf("expected 2 input rules, got %d", len(merged.InputRules))
+	}
+}
+
+func TestMergePolicies_DuplicateInputRuleID(t *testing.T) {
+	base := &config.SafetyPolicy{
+		InputRules: []config.InputPolicyRule{
+			{ID: "ir1", Severity: "low", Decision: "deny", Reason: "base"},
+		},
+	}
+	extra := &config.SafetyPolicy{
+		InputRules: []config.InputPolicyRule{
+			{ID: "ir1", Severity: "critical", Decision: "deny", Reason: "extra"},
+			{ID: "ir2", Severity: "medium", Decision: "require_approval"},
+		},
+	}
+	merged := mergePolicies(base, extra)
+	if len(merged.InputRules) != 2 {
+		t.Fatalf("expected 2 input rules (ir1 replaced, ir2 added), got %d", len(merged.InputRules))
+	}
+	for _, r := range merged.InputRules {
+		if r.ID == "ir1" {
+			if r.Severity != "critical" || r.Reason != "extra" {
+				t.Errorf("expected ir1 replaced by extra (critical/extra), got %s/%s", r.Severity, r.Reason)
+			}
+		}
+	}
+}
+
+func TestMergePolicies_NilBaseInputRules(t *testing.T) {
+	extra := &config.SafetyPolicy{
+		InputRules: []config.InputPolicyRule{
+			{ID: "ir1", Severity: "high", Decision: "deny"},
+			{ID: "ir2", Severity: "medium", Decision: "require_approval"},
+		},
+	}
+	merged := mergePolicies(nil, extra)
+	if len(merged.InputRules) != 2 {
+		t.Fatalf("expected 2 input rules from extra when base is nil, got %d", len(merged.InputRules))
+	}
+}

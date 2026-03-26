@@ -1,4 +1,4 @@
-import { get, post, put, del } from "../api/client";
+import { get, post, put, del, patch } from "../api/client";
 import type { User, Approval, DLQEntry } from "../api/types";
 import { mapDLQEntry, mapApprovalItem, type BackendDLQEntry, type BackendApprovalItem } from "../api/transform";
 import type {
@@ -301,6 +301,40 @@ export const api = {
 
   getPool(name: string): Promise<PoolSummary> {
     return get<PoolSummary>(`/pools/${encodeURIComponent(name)}`);
+  },
+
+  createPool(name: string, data: { requires?: string[]; description?: string }) {
+    return put<{ name: string; status: string; requires: string[]; description: string }>(
+      `/pools/${encodeURIComponent(name)}`,
+      data,
+    );
+  },
+
+  updatePool(name: string, data: { requires?: string[]; description?: string; status?: string }) {
+    return patch<{ name: string; status: string; requires: string[]; description: string }>(
+      `/pools/${encodeURIComponent(name)}`,
+      data,
+    );
+  },
+
+  deletePool(name: string, force = false) {
+    const qs = force ? "?force=true" : "";
+    return del<void>(`/pools/${encodeURIComponent(name)}${qs}`);
+  },
+
+  drainPool(name: string, opts?: { timeout_seconds?: number }) {
+    return post<{ name: string; status: string; drain_started_at: string; drain_timeout_seconds: number }>(
+      `/pools/${encodeURIComponent(name)}/drain`,
+      opts || {},
+    );
+  },
+
+  addTopicToPool(poolName: string, topic: string) {
+    return put<void>(`/pools/${encodeURIComponent(poolName)}/topics/${encodeURIComponent(topic)}`, {});
+  },
+
+  removeTopicFromPool(poolName: string, topic: string) {
+    return del<void>(`/pools/${encodeURIComponent(poolName)}/topics/${encodeURIComponent(topic)}`);
   },
 
   getStatus(): Promise<StatusResponse> {

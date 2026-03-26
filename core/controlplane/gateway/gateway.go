@@ -622,6 +622,12 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 	mux.HandleFunc("GET /api/v1/workers/{id}/jobs", s.instrumented("/api/v1/workers/{id}/jobs", s.handleGetWorkerJobs))
 	mux.HandleFunc("GET /api/v1/pools", s.instrumented("/api/v1/pools", s.handleListPools))
 	mux.HandleFunc("GET /api/v1/pools/{name}", s.instrumented("/api/v1/pools/{name}", s.handleGetPool))
+	mux.HandleFunc("PUT /api/v1/pools/{name}", s.instrumented("/api/v1/pools/{name}", s.handleCreatePool))
+	mux.HandleFunc("PATCH /api/v1/pools/{name}", s.instrumented("/api/v1/pools/{name}", s.handleUpdatePool))
+	mux.HandleFunc("DELETE /api/v1/pools/{name}", s.instrumented("/api/v1/pools/{name}", s.handleDeletePool))
+	mux.HandleFunc("POST /api/v1/pools/{name}/drain", s.instrumented("/api/v1/pools/{name}/drain", s.handleDrainPool))
+	mux.HandleFunc("PUT /api/v1/pools/{name}/topics/{topic}", s.instrumented("/api/v1/pools/{name}/topics/{topic}", s.handleAddTopicToPool))
+	mux.HandleFunc("DELETE /api/v1/pools/{name}/topics/{topic}", s.instrumented("/api/v1/pools/{name}/topics/{topic}", s.handleRemoveTopicFromPool))
 
 	// 2.5 Status snapshot (Redis/NATS/workers/uptime)
 	mux.HandleFunc("GET /api/v1/status", s.instrumented("/api/v1/status", s.handleStatus))
@@ -793,6 +799,10 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 	if basic := basicAuthProvider(s.auth); basic != nil {
 		basic.SetUsageContext(sigCtx)
 	}
+
+	// Start pool drain lifecycle checker.
+	drainChecker := newPoolDrainChecker(s)
+	go drainChecker.Run(sigCtx)
 
 	shutdownDone := make(chan struct{})
 	go func() {
