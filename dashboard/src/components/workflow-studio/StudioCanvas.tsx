@@ -11,13 +11,14 @@ import ReactFlow, {
   Controls,
   MiniMap,
   Panel,
+  ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type Node,
   type NodeTypes,
-  type ReactFlowInstance,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Info, X, Maximize2, Minimize2 } from "lucide-react";
@@ -154,10 +155,10 @@ function nextNodeId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// StudioCanvas
+// Inner canvas (must be inside ReactFlowProvider)
 // ---------------------------------------------------------------------------
 
-export function StudioCanvas({
+function StudioCanvasInner({
   initialGraph,
   mode,
   onNodeSelect,
@@ -166,7 +167,8 @@ export function StudioCanvas({
 }: StudioCanvasProps) {
   const [nodes, setNodes, handleNodesChange] = useNodesState(initialGraph.nodes);
   const [edges, setEdges, handleEdgesChange] = useEdgesState(initialGraph.edges);
-  const rfInstance = useRef<ReactFlowInstance | null>(null);
+  const reactFlowInstance = useReactFlow();
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Dependency highlighting (view mode)
   const [highlightedNode, setHighlightedNode] = useState<string | null>(null);
@@ -191,7 +193,6 @@ export function StudioCanvas({
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node<UnifiedNodeData>) => {
       if (!isEdit) {
-        // Toggle dependency highlighting in view mode
         setHighlightedNode((prev) => (prev === node.id ? null : node.id));
       }
       onNodeSelect?.(node);
@@ -215,34 +216,47 @@ export function StudioCanvas({
   const handleNodesDelete = useCallback(
     (deleted: Node[]) => {
       if (!isEdit) return;
-      // Prevent deleting start nodes
       const deletable = deleted.filter((n) => n.id !== "start" && n.type !== "start");
       if (deletable.length === 0) return;
-      // Also clean up edges connected to deleted nodes
       const deletedIds = new Set(deletable.map((n) => n.id));
       setEdges((eds) => eds.filter((e) => !deletedIds.has(e.source) && !deletedIds.has(e.target)));
     },
     [isEdit, setEdges],
   );
 
-  // Drag-and-drop from sidebar palette (edit mode)
-  const handleDragOver = useCallback((event: DragEvent) => {
+  // --- Drag-and-drop from sidebar palette (edit mode) ---
+  // Handlers are on the wrapper div, NOT on ReactFlow props, for reliable event capture.
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
   }, []);
 
   const handleDrop = useCallback(
-    (event: DragEvent) => {
+    (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      if (!isEdit || !rfInstance.current) return;
+      if (!isEdit) return;
 
       const stepType = event.dataTransfer.getData("application/workflow-studio");
       if (!stepType) return;
 
-      const position = rfInstance.current.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
+      // Convert screen coordinates to flow coordinates
+      let position = { x: 250, y: 100 };
+      try {
+        position = reactFlowInstance.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+      } catch {
+        // Fallback: place relative to wrapper bounds
+        const bounds = wrapperRef.current?.getBoundingClientRect();
+        if (bounds) {
+          position = {
+            x: event.clientX - bounds.left,
+            y: event.clientY - bounds.top,
+          };
+        }
+      }
 
       const id = nextNodeId();
       const newNode: Node<UnifiedNodeData> = {
@@ -262,13 +276,18 @@ export function StudioCanvas({
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [isEdit, mode, setNodes],
+    [isEdit, mode, setNodes, reactFlowInstance],
   );
 
   // --- Render ---
 
   const canvasContent = (
-    <div className={cn("h-full w-full", !fullscreen && className)}>
+    <div
+      ref={wrapperRef}
+      className={cn("h-full w-full", !fullscreen && className)}
+      onDragOver={isEdit ? handleDragOver : undefined}
+      onDrop={isEdit ? handleDrop : undefined}
+    >
       <ReactFlow
         nodes={displayNodes}
         edges={displayEdges}
@@ -278,9 +297,6 @@ export function StudioCanvas({
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         onNodesDelete={handleNodesDelete}
-        onDragOver={isEdit ? handleDragOver : undefined}
-        onDrop={isEdit ? handleDrop : undefined}
-        onInit={(instance) => { rfInstance.current = instance; }}
         nodeTypes={nodeTypes}
         nodesDraggable={isEdit}
         nodesConnectable={isEdit}
@@ -339,4 +355,16 @@ export function StudioCanvas({
   }
 
   return canvasContent;
+}
+
+// ---------------------------------------------------------------------------
+// StudioCanvas (public — wraps inner with ReactFlowProvider)
+// ---------------------------------------------------------------------------
+
+export function StudioCanvas(props: StudioCanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <StudioCanvasInner {...props} />
+    </ReactFlowProvider>
+  );
 }
