@@ -27,13 +27,13 @@ import type { Job } from "@/api/types";
 function SafetyBadge({ decision }: { decision: string }) {
   const config: Record<string, { color: string; bg: string; label: string }> = {
     allow: { color: "text-[var(--color-success)]", bg: "bg-[var(--color-success)]/10", label: "ALLOW" },
-    deny: { color: "text-destructive", bg: "bg-destructive/10", label: "DENY" },
+    deny: { color: "text-[var(--color-governance)]", bg: "bg-[var(--color-governance)]/10", label: "DENY" },
     require_approval: { color: "text-[var(--color-warning)]", bg: "bg-[var(--color-warning)]/10", label: "APPROVAL" },
     allow_with_constraints: { color: "text-[var(--color-info)]", bg: "bg-[var(--color-info)]/10", label: "CONSTRAINED" },
     throttle: { color: "text-[var(--color-warning)]", bg: "bg-[var(--color-warning)]/10", label: "THROTTLE" },
   };
   const c = config[decision] ?? { color: "text-muted-foreground", bg: "bg-surface-2", label: decision.toUpperCase() };
-  return <span className={cn("px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold", c.color, c.bg)}>{c.label}</span>;
+  return <span className={cn("px-1.5 py-0.5 rounded font-mono text-xs font-semibold", c.color, c.bg)}>{c.label}</span>;
 }
 
 function deriveSafetyBreakdown(jobs: Job[]) {
@@ -69,11 +69,11 @@ function deriveHourlyActivity(jobs: Job[]) {
   }));
 }
 
-function jobStatusVariant(status: string): "healthy" | "danger" | "warning" | "muted" {
+function jobStatusVariant(status: string): "healthy" | "danger" | "warning" | "muted" | "governance" {
   switch (status) {
     case "succeeded": return "healthy";
+    case "denied": return "governance";
     case "failed":
-    case "denied":
     case "timeout":
     case "output_quarantined": return "danger";
     case "running":
@@ -217,11 +217,11 @@ export default function AgentDetailPage() {
 
             <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
               <div>
-                <p className="text-[10px] text-muted-foreground">Version</p>
+                <p className="text-xs text-muted-foreground">Version</p>
                 <p className="font-mono text-xs text-foreground">{agent?.version ?? "N/A"}</p>
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground">Last Heartbeat</p>
+                <p className="text-xs text-muted-foreground">Last Heartbeat</p>
                 <p className="font-mono text-xs text-foreground">
                   {agent?.lastHeartbeat ? formatRelativeTime(agent.lastHeartbeat) : "N/A"}
                 </p>
@@ -230,7 +230,7 @@ export default function AgentDetailPage() {
 
             {/* Metadata */}
             <div className="pt-2 border-t border-border space-y-1">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Info</p>
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Info</p>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Pool</span>
                 <span className="font-mono text-foreground">{agent?.pool ?? "N/A"}</span>
@@ -271,7 +271,7 @@ export default function AgentDetailPage() {
                 const pct = totalDecisions > 0 ? (value / totalDecisions) * 100 : 0;
                 const colors: Record<string, string> = {
                   allow: "bg-[var(--color-success)]",
-                  deny: "bg-destructive",
+                  deny: "bg-[var(--color-governance)]",
                   require_approval: "bg-[var(--color-warning)]",
                   allow_with_constraints: "bg-[var(--color-info)]",
                   throttle: "bg-[var(--color-warning)]",
@@ -308,7 +308,7 @@ export default function AgentDetailPage() {
                     <span className="text-sm font-medium text-foreground">{b.name || b.id}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-muted-foreground">{b.rule_count ?? b.rules?.length ?? 0} rules</span>
+                    <span className="text-xs font-mono text-muted-foreground">{b.rule_count ?? b.rules?.length ?? 0} rules</span>
                     <StatusBadge variant={b.status === "published" ? "healthy" : "muted"}>{b.status ?? "published"}</StatusBadge>
                   </div>
                 </div>
@@ -318,16 +318,16 @@ export default function AgentDetailPage() {
 
           {/* Capabilities */}
           <div className="mt-4 pt-3 border-t border-border">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Capabilities</p>
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2">Capabilities</p>
             <div className="flex flex-wrap gap-1.5">
               {agent?.capabilities && agent.capabilities.length > 0 ? (
                 agent.capabilities.map((cap) => (
-                  <span key={cap} className="px-2 py-0.5 rounded bg-surface-2 text-[10px] font-mono text-muted-foreground">
+                  <span key={cap} className="px-2 py-0.5 rounded bg-surface-2 text-xs font-mono text-muted-foreground">
                     {cap}
                   </span>
                 ))
               ) : (
-                <span className="text-[10px] text-muted-foreground">None</span>
+                <span className="text-xs text-muted-foreground">None</span>
               )}
             </div>
           </div>
@@ -354,7 +354,7 @@ export default function AgentDetailPage() {
               <YAxis tick={{ fontSize: 9, fill: "#5a6a70" }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--surface-2)" }} />
               <Bar dataKey="jobs" fill="#0f7f7a" radius={[2, 2, 0, 0]} name="Jobs" />
-              <Bar dataKey="denied" fill="#b83a3a" radius={[2, 2, 0, 0]} name="Denied" />
+              <Bar dataKey="denied" fill="#7c3aed" radius={[2, 2, 0, 0]} name="Denied" />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -380,12 +380,12 @@ export default function AgentDetailPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-surface-0">
-                <th className="text-left px-5 py-2 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Job ID</th>
-                <th className="text-left px-5 py-2 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Topic</th>
-                <th className="text-left px-5 py-2 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
-                <th className="text-left px-5 py-2 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Safety</th>
-                <th className="text-left px-5 py-2 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Duration</th>
-                <th className="text-left px-5 py-2 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Time</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Job ID</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Topic</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Safety</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Duration</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Time</th>
               </tr>
             </thead>
             <tbody>
@@ -395,20 +395,20 @@ export default function AgentDetailPage() {
                   onClick={() => navigate(`/jobs/${job.id}`)}
                   className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer"
                 >
-                  <td className="px-5 py-2.5 font-mono text-sm text-cordum">{job.id}</td>
-                  <td className="px-5 py-2.5 text-sm text-foreground">{job.topic}</td>
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3 font-mono text-sm text-cordum">{job.id}</td>
+                  <td className="px-5 py-3 text-sm text-foreground">{job.topic}</td>
+                  <td className="px-5 py-3">
                     <StatusBadge variant={jobStatusVariant(job.status)}>
                       {job.status}
                     </StatusBadge>
                   </td>
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3">
                     <SafetyBadge decision={job.safetyDecision?.type ?? "unknown"} />
                   </td>
-                  <td className="px-5 py-2.5 text-sm text-muted-foreground font-mono">
+                  <td className="px-5 py-3 text-sm text-muted-foreground font-mono">
                     {job.duration != null ? formatDuration(job.duration) : "—"}
                   </td>
-                  <td className="px-5 py-2.5 text-sm text-muted-foreground">
+                  <td className="px-5 py-3 text-sm text-muted-foreground">
                     {job.createdAt ? formatRelativeTime(job.createdAt) : "—"}
                   </td>
                 </tr>

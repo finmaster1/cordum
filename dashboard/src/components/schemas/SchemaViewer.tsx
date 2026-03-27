@@ -13,13 +13,13 @@ function FieldRow({ field, depth = 0 }: { field: SchemaField; depth?: number }) 
         {field.name}
       </td>
       <td className="px-4 py-2.5">
-        <Badge variant="info" className="text-[10px]">
+        <Badge variant="info" className="text-xs">
           {field.type}
         </Badge>
       </td>
       <td className="px-4 py-2.5 text-center">
         {field.required ? (
-          <Badge variant="danger" className="text-[10px]">required</Badge>
+          <Badge variant="danger" className="text-xs">required</Badge>
         ) : (
           <span className="text-xs text-muted-foreground">optional</span>
         )}

@@ -42,7 +42,7 @@ function ReadOnlyRuleSummary({ rule }: { rule: GlobalPolicyInputRule }) {
         )}
       </div>
       <div>
-        <p className="mb-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <p className="mb-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Match summary
         </p>
         <div className="flex flex-wrap gap-1.5">
@@ -52,7 +52,7 @@ function ReadOnlyRuleSummary({ rule }: { rule: GlobalPolicyInputRule }) {
           {matchSummary.map((entry) => (
             <span
               key={`${rule.id}-${entry}`}
-              className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground"
+              className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground"
             >
               {entry}
             </span>

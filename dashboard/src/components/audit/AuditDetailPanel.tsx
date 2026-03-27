@@ -169,14 +169,14 @@ export function AuditDetailPanel({ entry, onClose }: AuditDetailPanelProps) {
               </p>
               {/* Badges */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", categoryColors[category])}>
+                <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", categoryColors[category])}>
                   {categoryLabels[category]}
                 </span>
                 <Badge variant="info">{entry.action || entry.eventType}</Badge>
                 {severity !== "low" && (
                   <div className="flex items-center gap-1">
                     <span className={cn("h-2 w-2 rounded-full", severityDot[severity])} />
-                    <span className="text-[10px] text-muted-foreground">{severityLabels[severity]}</span>
+                    <span className="text-xs text-muted-foreground">{severityLabels[severity]}</span>
                   </div>
                 )}
               </div>

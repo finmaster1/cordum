@@ -114,17 +114,17 @@ export default function SettingsHealthPage() {
       {/* Services Table */}
       {isLoading ? <SkeletonTable rows={4} /> : (
         <div className="instrument-card overflow-hidden">
-          <div className="px-4 py-3 border-b border-border bg-surface-0">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Service Status</p>
+          <div className="px-5 py-3 border-b border-border bg-surface-0">
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Service Status</p>
           </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface-0">
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Service</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Status</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Latency</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Uptime</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Last Check</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Service</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Latency</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Uptime</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Check</th>
               </tr>
             </thead>
             <tbody>
@@ -133,16 +133,16 @@ export default function SettingsHealthPage() {
                 return (
                   <motion.tr key={svc.name} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                     className="border-b border-border last:border-0 hover:bg-surface-1 transition-colors">
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3">
                       <div className="flex items-center gap-2">
                         <Icon className="w-3.5 h-3.5 text-muted-foreground" />
                         <span className="font-medium text-foreground">{svc.name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3"><StatusBadge variant={svc.status === "healthy" ? "healthy" : svc.status === "degraded" ? "warning" : "danger"} dot>{svc.status}</StatusBadge></td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{svc.latency}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{svc.uptime}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{svc.lastCheck}</td>
+                    <td className="px-5 py-3"><StatusBadge variant={svc.status === "healthy" ? "healthy" : svc.status === "degraded" ? "warning" : "danger"} dot>{svc.status}</StatusBadge></td>
+                    <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{svc.latency}</td>
+                    <td className="px-5 py-3 text-xs text-muted-foreground">{svc.uptime}</td>
+                    <td className="px-5 py-3 text-xs text-muted-foreground">{svc.lastCheck}</td>
                   </motion.tr>
                 );
               })}

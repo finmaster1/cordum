@@ -35,17 +35,17 @@ function ReadOnlyOutputRuleSummary({ rule }: { rule: GlobalPolicyOutputRule }) {
         </p>
       )}
       <div>
-        <p className="mb-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <p className="mb-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Match summary
         </p>
         <div className="flex flex-wrap gap-1.5">
           {rule.match.detectors.map((detector) => (
-            <span key={`d-${detector}`} className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+            <span key={`d-${detector}`} className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground">
               detector:{detector}
             </span>
           ))}
           {rule.match.contentPatterns.map((pattern) => (
-            <span key={`p-${pattern}`} className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+            <span key={`p-${pattern}`} className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground">
               pattern:{pattern}
             </span>
           ))}

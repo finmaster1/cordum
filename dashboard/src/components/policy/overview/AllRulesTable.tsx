@@ -107,7 +107,7 @@ export function AllRulesTable({ bundles, filterText }: AllRulesTableProps) {
   }) => (
     <th
       className={cn(
-        "px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2 cursor-pointer hover:text-foreground transition-colors select-none",
+        "px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2 cursor-pointer hover:text-foreground transition-colors select-none",
         className,
       )}
       onClick={() => handleSort(sortId)}
@@ -127,7 +127,7 @@ export function AllRulesTable({ bundles, filterText }: AllRulesTableProps) {
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[12px]">
+        <table className="w-full border-collapse text-xs">
           <thead>
             <tr>
               <SortHeader label="Rule" sortId="name" className="rounded-tl-2xl" />
@@ -135,7 +135,7 @@ export function AllRulesTable({ bundles, filterText }: AllRulesTableProps) {
               <SortHeader label="Topics" sortId="topics" />
               <SortHeader label="Decision" sortId="decision" />
               <SortHeader label="Priority" sortId="priority" />
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2 rounded-tr-2xl">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2 rounded-tr-2xl">
                 Risk Tags
               </th>
             </tr>
@@ -162,11 +162,11 @@ export function AllRulesTable({ bundles, filterText }: AllRulesTableProps) {
                   <div className="flex items-center gap-2">
                     <span className="text-foreground font-medium">{fr.rule.name}</span>
                     {!fr.rule.enabled && (
-                      <StatusBadge variant="muted" className="text-[9px]">Off</StatusBadge>
+                      <StatusBadge variant="muted" className="text-xs">Off</StatusBadge>
                     )}
                   </div>
                   {fr.rule.reason && (
-                    <p className="text-[10px] text-muted-foreground/60 italic mt-0.5 truncate max-w-[200px]">
+                    <p className="text-xs text-muted-foreground/60 italic mt-0.5 truncate max-w-[200px]">
                       {fr.rule.reason}
                     </p>
                   )}

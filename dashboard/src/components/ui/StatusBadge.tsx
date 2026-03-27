@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-export type BadgeVariant = "healthy" | "warning" | "danger" | "info" | "muted" | "cordum";
+export type BadgeVariant = "healthy" | "warning" | "danger" | "info" | "muted" | "cordum" | "governance";
 
 /* Uses CSS variable-based semantic colors */
 const variants: Record<BadgeVariant, string> = {
@@ -10,6 +10,7 @@ const variants: Record<BadgeVariant, string> = {
   info: "bg-[var(--color-info)]/15 text-[var(--color-info)] border-[var(--color-info)]/20",
   muted: "bg-muted-foreground/15 text-muted-foreground border-muted-foreground/20",
   cordum: "bg-cordum/12 text-cordum border-cordum/20",
+  governance: "bg-[var(--color-governance)]/15 text-[var(--color-governance)] border-[var(--color-governance)]/20",
 };
 
 const dotColors: Record<BadgeVariant, string> = {
@@ -19,6 +20,7 @@ const dotColors: Record<BadgeVariant, string> = {
   info: "bg-[var(--color-info)]",
   muted: "bg-muted-foreground",
   cordum: "bg-cordum",
+  governance: "bg-[var(--color-governance)]",
 };
 
 interface StatusBadgeProps {
@@ -39,7 +41,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border",
+        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border",
         variants[variant],
         className,
       )}

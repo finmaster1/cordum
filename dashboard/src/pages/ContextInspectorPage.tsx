@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Database, ClipboardList, Layers } from "lucide-react";
+import { Database, ClipboardList, Layers, ListChecks, Briefcase } from "lucide-react";
+import { EmptyState } from "../components/ui/EmptyState";
 import { api } from "../lib/api";
 import { formatDateTime, formatDuration } from "../lib/format";
 import { Card, CardHeader, CardTitle } from "../components/ui/Card";
@@ -158,9 +159,7 @@ export default function ContextInspectorPage() {
               <div className="text-xs text-muted-foreground">Steps and state transitions</div>
             </CardHeader>
             {steps.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                No steps recorded yet.
-              </div>
+              <EmptyState icon={<ListChecks className="h-5 w-5" />} title="No steps recorded yet." className="py-6" />
             ) : (
               <div className="space-y-2">
                 {steps.map((step) => (
@@ -168,13 +167,13 @@ export default function ContextInspectorPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-sm font-semibold text-ink">{step.step_id}</div>
-                        <div className="text-[11px] text-muted-foreground">
+                        <div className="text-xs text-muted-foreground">
                           {step.started_at ? `Started ${formatDateTime(step.started_at)}` : "Pending"}
                         </div>
                       </div>
                       <Badge variant={statusVariant(step.status)}>{step.status}</Badge>
                     </div>
-                    {step.job_id ? <div className="mt-2 text-[10px] text-muted-foreground">Job {step.job_id}</div> : null}
+                    {step.job_id ? <div className="mt-2 text-xs text-muted-foreground">Job {step.job_id}</div> : null}
                   </div>
                 ))}
               </div>
@@ -193,25 +192,25 @@ export default function ContextInspectorPage() {
                 <div className="rounded-2xl border border-border bg-card/70 p-3">
                   <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Job</div>
                   <div className="mt-1 text-sm font-semibold text-ink">{job.id}</div>
-                  <div className="text-[11px] text-muted-foreground">{job.topic || "-"}</div>
+                  <div className="text-xs text-muted-foreground">{job.topic || "-"}</div>
                 </div>
                 <div className="rounded-2xl border border-border bg-card/70 p-3">
                   <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Context Pointer</div>
-                  <div className="mt-1 text-[11px] text-ink break-all">{job.context_ptr || "-"}</div>
+                  <div className="mt-1 text-xs text-ink break-all">{job.context_ptr || "-"}</div>
                 </div>
                 <div className="rounded-2xl border border-border bg-card/70 p-3">
                   <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Result Pointer</div>
-                  <div className="mt-1 text-[11px] text-ink break-all">{job.result_ptr || "-"}</div>
+                  <div className="mt-1 text-xs text-ink break-all">{job.result_ptr || "-"}</div>
                 </div>
                 <div className="rounded-2xl border border-border bg-card/70 p-3 text-xs text-muted-foreground">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.2em]">
+                  <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em]">
                     <Database className="h-3 w-3" />
                     Context Payload
                   </div>
                   <pre>{JSON.stringify(job.context || {}, null, 2)}</pre>
                 </div>
                 <div className="rounded-2xl border border-border bg-card/70 p-3 text-xs text-muted-foreground">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.2em]">
+                  <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.2em]">
                     <ClipboardList className="h-3 w-3" />
                     Result Payload
                   </div>
@@ -219,9 +218,7 @@ export default function ContextInspectorPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                Provide a job ID to inspect job context.
-              </div>
+              <EmptyState icon={<Briefcase className="h-5 w-5" />} title="Provide a job ID to inspect job context." className="py-6" />
             )}
           </Card>
         </div>

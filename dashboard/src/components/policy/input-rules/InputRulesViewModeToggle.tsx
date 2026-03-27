@@ -17,7 +17,7 @@ export function InputRulesViewModeToggle({
         <button
           key={candidate}
           type="button"
-          className={`rounded px-2 py-1 text-[10px] font-mono uppercase tracking-wide ${
+          className={`rounded px-2 py-1 text-xs font-mono uppercase tracking-wide ${
             mode === candidate
               ? "bg-cordum/15 text-cordum"
               : "text-muted-foreground hover:text-foreground"

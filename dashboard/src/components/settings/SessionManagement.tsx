@@ -92,7 +92,7 @@ export function SessionManagement() {
                   <p className="text-sm text-muted-foreground">
                     Session listing requires backend v2.x
                   </p>
-                  <p className="mt-1 text-[10px] text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Active session management will be available when the sessions API endpoint is deployed.
                   </p>
                 </td>

@@ -128,7 +128,7 @@ export function SamlConfigPanel() {
             readOnly
             className="bg-surface2/50"
           />
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Use this as the Service Provider Entity ID in your IdP.
           </p>
         </div>

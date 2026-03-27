@@ -26,9 +26,9 @@ function truncate(str: string, max: number): string {
   return str.length > max ? str.slice(0, max) + "\u2026" : str;
 }
 
-const DECISION_BADGE: Record<string, { variant: "success" | "danger" | "warning" | "default"; label: string }> = {
+const DECISION_BADGE: Record<string, { variant: "success" | "governance" | "warning" | "default"; label: string }> = {
   allow: { variant: "success", label: "Allow" },
-  deny: { variant: "danger", label: "Deny" },
+  deny: { variant: "governance", label: "Deny" },
   require_approval: { variant: "warning", label: "Require Approval" },
   throttle: { variant: "default", label: "Throttle" },
 };

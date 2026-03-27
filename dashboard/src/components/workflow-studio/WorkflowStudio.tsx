@@ -14,6 +14,8 @@ import {
   useDeleteWorkflow,
   useStartRun,
 } from "@/hooks/useWorkflows";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { logger } from "@/lib/logger";
 
 import type { UnifiedNodeData, StudioMode, StudioGraphData } from "./types";
 import { definitionToGraph, graphToDefinition } from "./graphBridge";
@@ -44,7 +46,13 @@ export function WorkflowStudio() {
   const [mode, setMode] = useState<StudioMode>(initialMode);
 
   // --- Workflow data ---
-  const { data: workflow, isLoading: isLoadingWorkflow } = useWorkflow(isNew ? null : workflowId);
+  const {
+    data: workflow,
+    isLoading: isLoadingWorkflow,
+    isError: isWorkflowError,
+    error: workflowError,
+    refetch: refetchWorkflow,
+  } = useWorkflow(isNew ? null : workflowId);
   const { data: runs = [] } = useRuns(isNew ? null : workflowId, { limit: 20 });
 
   // --- Selected run ---
@@ -68,6 +76,16 @@ export function WorkflowStudio() {
       setName(workflow.name);
     }
   }, [workflow?.name, isNew]);
+
+  // Log workflow load errors
+  useEffect(() => {
+    if (isWorkflowError && workflowError) {
+      logger.error("workflow-studio", "Failed to load workflow", {
+        workflowId,
+        error: workflowError instanceof Error ? workflowError.message : String(workflowError),
+      });
+    }
+  }, [isWorkflowError, workflowError, workflowId]);
 
   // --- Graph computation ---
   const graph = useMemo<StudioGraphData>(() => {
@@ -148,7 +166,7 @@ export function WorkflowStudio() {
       createWorkflow.mutate(payload as Partial<Workflow> & { id?: string }, {
         onSuccess: (data) => {
           if (data?.id) {
-            navigate(`/workflows/${data.id}?mode=edit`, { replace: true });
+            navigate(`/workflows/${data.id}/studio?mode=edit`, { replace: true });
           }
         },
       });
@@ -168,7 +186,7 @@ export function WorkflowStudio() {
     const onSuccess = (data?: { id?: string }) => {
       const id = data?.id ?? workflowId;
       if (id) {
-        navigate(`/workflows/${id}`, { replace: true });
+        navigate(`/workflows/${id}/studio`, { replace: true });
         setMode("view");
       }
     };
@@ -262,6 +280,19 @@ export function WorkflowStudio() {
     return (
       <div className="flex h-full w-full items-center justify-center bg-surface-0">
         <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      </div>
+    );
+  }
+
+  // --- Error state ---
+  if (!isNew && isWorkflowError) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-surface-0">
+        <ErrorBanner
+          title="Failed to load workflow"
+          message={workflowError instanceof Error ? workflowError.message : "An unexpected error occurred"}
+          onRetry={() => void refetchWorkflow()}
+        />
       </div>
     );
   }

@@ -136,7 +136,7 @@ export function BundleOverviewCard({
             <h3 className="text-base font-display font-semibold text-foreground tracking-tight">
               {bundle.name}
             </h3>
-            <span className="text-[11px] font-mono text-muted-foreground mt-0.5 block">
+            <span className="text-xs font-mono text-muted-foreground mt-0.5 block">
               {bundle.id}
               {bundle.version !== undefined && ` v${bundle.version}`}
             </span>
@@ -154,7 +154,7 @@ export function BundleOverviewCard({
         </div>
 
         {/* Impact strip */}
-        <div className="mt-3 flex flex-wrap items-center gap-2 px-3 py-2.5 bg-surface-2/50 border border-border/40 rounded-xl text-[12px]">
+        <div className="mt-3 flex flex-wrap items-center gap-2 px-3 py-2.5 bg-surface-2/50 border border-border/40 rounded-xl text-xs">
           <span className="font-mono text-muted-foreground">
             <strong className="text-foreground">{enabledRules.length}</strong>{" "}
             rule{enabledRules.length !== 1 ? "s" : ""}
@@ -201,7 +201,7 @@ export function BundleOverviewCard({
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground hover:text-cordum transition-colors"
+          className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-cordum transition-colors"
         >
           <ChevronDown
             className={cn(
@@ -221,7 +221,7 @@ export function BundleOverviewCard({
                 setShowBundleYaml(!showBundleYaml);
                 if (!expanded) setExpanded(true);
               }}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-mono border border-border text-muted-foreground hover:border-cordum hover:text-foreground transition-all"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono border border-border text-muted-foreground hover:border-cordum hover:text-foreground transition-all"
             >
               <Code2 className="w-3 h-3" />
               {showBundleYaml ? "Hide" : "YAML"}
@@ -233,7 +233,7 @@ export function BundleOverviewCard({
               e.stopPropagation();
               navigate(`/govern/simulator`);
             }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-mono border border-border text-muted-foreground hover:border-cordum hover:text-foreground transition-all"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono border border-border text-muted-foreground hover:border-cordum hover:text-foreground transition-all"
           >
             <Zap className="w-3 h-3" />
             Simulate
@@ -244,7 +244,7 @@ export function BundleOverviewCard({
               e.stopPropagation();
               navigate(`/govern/bundles/${encodePolicyBundleId(bundle.id)}`);
             }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-sans font-medium bg-cordum text-[var(--primary-foreground)] hover:opacity-85 transition-all"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-sans font-medium bg-cordum text-[var(--primary-foreground)] hover:opacity-85 transition-all"
           >
             <Settings className="w-3 h-3" />
             Manage
@@ -259,14 +259,14 @@ export function BundleOverviewCard({
           {showBundleYaml && bundle.content && (
             <div className="px-5 pt-4 pb-2">
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                <h4 className="text-xs font-mono text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
                   <FileText className="w-3 h-3" />
                   Bundle YAML
                 </h4>
                 <button
                   type="button"
                   onClick={handleCopyYaml}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-3/80 hover:bg-surface-3 border border-border/40 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-all"
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-3/80 hover:bg-surface-3 border border-border/40 text-xs font-mono text-muted-foreground hover:text-foreground transition-all"
                 >
                   {copied ? (
                     <>
@@ -281,7 +281,7 @@ export function BundleOverviewCard({
                   )}
                 </button>
               </div>
-              <pre className="bg-surface-2 border border-border/40 rounded-xl p-4 text-[12px] font-mono text-foreground leading-relaxed overflow-x-auto max-h-[500px] overflow-y-auto">
+              <pre className="bg-surface-2 border border-border/40 rounded-xl p-4 text-xs font-mono text-foreground leading-relaxed overflow-x-auto max-h-[500px] overflow-y-auto">
                 <code>{bundle.content}</code>
               </pre>
             </div>

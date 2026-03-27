@@ -16,7 +16,7 @@ export function InputRulesDefaultDecision({
     return (
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">default_decision</span>
-        <StatusBadge variant={value === "deny" ? "danger" : "warning"}>{value}</StatusBadge>
+        <StatusBadge variant={value === "deny" ? "governance" : "warning"}>{value}</StatusBadge>
       </div>
     );
   }

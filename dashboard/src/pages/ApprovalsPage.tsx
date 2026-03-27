@@ -22,7 +22,7 @@ function approvalStatusVariant(status: string) {
   switch (status) {
     case "pending": return "warning" as const;
     case "approved": return "healthy" as const;
-    case "denied": return "danger" as const;
+    case "denied": return "governance" as const;
     case "expired": return "muted" as const;
     default: return "muted" as const;
   }
@@ -144,11 +144,11 @@ export default function ApprovalsPage() {
               />
             </InstrumentCard>
 
-            <InstrumentCard accent={denied.length > 0 ? "danger" : "muted"}>
+            <InstrumentCard accent={denied.length > 0 ? "governance" : "muted"}>
               <MetricValue
                 label="Denied"
                 value={denied.length}
-                icon={<XCircle className={cn("w-4 h-4", denied.length > 0 ? "text-destructive" : "text-muted-foreground")} />}
+                icon={<XCircle className={cn("w-4 h-4", denied.length > 0 ? "text-[var(--color-governance)]" : "text-muted-foreground")} />}
               />
             </InstrumentCard>
           </>
@@ -186,7 +186,7 @@ export default function ApprovalsPage() {
             >
               {tab.label}
               {tab.count > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-surface-2">{tab.count}</span>
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs font-mono bg-surface-2">{tab.count}</span>
               )}
             </button>
           ))}
@@ -216,7 +216,7 @@ export default function ApprovalsPage() {
               className={cn(
                 "instrument-card cursor-pointer",
                 approval.status === "pending" && "border-[var(--color-warning)]/30",
-                approval.status === "denied" && "status-danger",
+                approval.status === "denied" && "border-[var(--color-governance)]/30",
               )}
               onClick={() => setSelectedApproval(approval)}
             >
@@ -228,11 +228,11 @@ export default function ApprovalsPage() {
                       {approval.status}
                     </StatusBadge>
                     {approval.workflowContext && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-mono bg-cordum/10 text-cordum rounded">
+                      <span className="px-1.5 py-0.5 text-xs font-mono bg-cordum/10 text-cordum rounded">
                         Workflow Gate
                       </span>
                     )}
-                    <span className="text-[10px] text-muted-foreground font-mono">
+                    <span className="text-xs text-muted-foreground font-mono">
                       {approval.requestedAt ? formatRelativeTime(approval.requestedAt) : "—"}
                     </span>
                   </div>
@@ -292,7 +292,7 @@ export default function ApprovalsPage() {
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Are you sure you want to deny this approval request?</p>
             <div>
-              <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Reason</label>
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider block mb-1">Reason</label>
               <textarea
                 value={denyReason}
                 onChange={(e) => setDenyReason(e.target.value)}
@@ -338,7 +338,7 @@ export default function ApprovalsPage() {
                   {selectedApproval.status}
                 </StatusBadge>
                 {selectedApproval.workflowContext && (
-                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-cordum/10 text-cordum rounded">
+                  <span className="px-1.5 py-0.5 text-xs font-mono bg-cordum/10 text-cordum rounded">
                     Workflow Gate
                   </span>
                 )}
@@ -357,14 +357,14 @@ export default function ApprovalsPage() {
                   ["Reason", selectedApproval.reason],
                 ].map(([label, value]) => (
                   <div key={label as string}>
-                    <dt className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-0.5">{label}</dt>
+                    <dt className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-0.5">{label}</dt>
                     <dd className="text-sm text-foreground">{(value as string) || "—"}</dd>
                   </div>
                 ))}
               </dl>
               {selectedApproval.jobInput && Object.keys(selectedApproval.jobInput).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Job Input</p>
+                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">Job Input</p>
                   <div className="rounded-2xl bg-surface-2/50 border border-border p-3 font-mono text-xs text-foreground overflow-auto max-h-[200px]">
                     <pre>{JSON.stringify(selectedApproval.jobInput, null, 2)}</pre>
                   </div>
@@ -372,7 +372,7 @@ export default function ApprovalsPage() {
               )}
               {selectedApproval.jobContext && (
                 <div>
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Context</p>
+                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">Context</p>
                   <div className="rounded-2xl bg-surface-2/50 border border-border p-3 font-mono text-xs text-foreground overflow-auto max-h-[200px]">
                     <pre>{JSON.stringify(selectedApproval.jobContext, null, 2)}</pre>
                   </div>

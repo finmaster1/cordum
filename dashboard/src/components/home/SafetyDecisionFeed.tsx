@@ -14,9 +14,9 @@ import { cn } from "@/lib/utils";
 
 const FEED_LIMIT = 40;
 
-const decisionVariant: Record<string, "healthy" | "danger" | "warning" | "info" | "muted"> = {
+const decisionVariant: Record<string, "healthy" | "danger" | "warning" | "info" | "muted" | "governance"> = {
   allow: "healthy",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   allow_with_constraints: "info",
   throttle: "info",
@@ -130,14 +130,14 @@ export function SafetyDecisionFeed() {
           <ShieldCheck className="mt-0.5 w-4 h-4 text-cordum shrink-0" />
           <div className="flex-1 min-w-0">
             <h3 className="font-display text-sm font-semibold text-foreground">Live Safety Decisions</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Recent decisions from stream and history (latest {FEED_LIMIT})
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
                 wsStatus === "connected"
                   ? "border-[var(--color-success)]/30 bg-[var(--color-success)]/10 text-[var(--color-success)]"
                   : wsStatus === "connecting" || wsStatus === "reconnecting"
@@ -148,7 +148,7 @@ export function SafetyDecisionFeed() {
               {wsStatus === "connected" ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
               {statusLabel(wsStatus)}
             </span>
-            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground">
               {decisions.length}
             </span>
           </div>
@@ -159,7 +159,7 @@ export function SafetyDecisionFeed() {
           <div className="grid grid-cols-4 gap-2">
             {(["allow", "deny", "require_approval", "throttle"] as const).map((key) => (
               <div key={key} className="rounded-md border border-border/50 bg-surface-2/30 px-2.5 py-1.5 text-center">
-                <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
                   {decisionLabel[key]}
                 </p>
                 <p className="text-xs font-semibold font-mono text-foreground">{counts[key]}</p>
@@ -204,12 +204,12 @@ export function SafetyDecisionFeed() {
             <FeedRow key={event.id} event={event} onClick={() => handleRowClick(event)} />
           ))}
           {isFetching && !isError && (
-            <div className="px-5 py-2 text-[11px] text-muted-foreground font-mono">
+            <div className="px-5 py-2 text-xs text-muted-foreground font-mono">
               Refreshing safety decisions...
             </div>
           )}
           {isError && decisions.length > 0 && (
-            <div className="px-5 py-2 flex items-center gap-2 text-[11px] text-[var(--color-warning)]">
+            <div className="px-5 py-2 flex items-center gap-2 text-xs text-[var(--color-warning)]">
               <AlertTriangleIcon />
               Refresh failed — showing cached data
               <button type="button" onClick={() => refetch()} className="underline hover:no-underline ml-1">

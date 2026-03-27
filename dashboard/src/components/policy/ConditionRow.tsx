@@ -131,7 +131,7 @@ export function ConditionRow({ condition, onChange, onRemove }: ConditionRowProp
                   key={v}
                   type="button"
                   onClick={() => removeTag(v)}
-                  className="inline-flex items-center gap-0.5 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-ink transition hover:border-danger hover:text-danger"
+                  className="inline-flex items-center gap-0.5 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-ink transition hover:border-danger hover:text-danger"
                 >
                   {v}
                   <X className="h-2.5 w-2.5" />

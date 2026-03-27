@@ -55,7 +55,7 @@ function StateDiagram({ current }: { current: string }) {
           <div key={s} className="flex items-center gap-1">
             <span
               className={cn(
-                "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                "rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
                 active
                   ? s === "CLOSED"
                     ? "bg-success/15 text-success ring-1 ring-success/30"
@@ -68,7 +68,7 @@ function StateDiagram({ current }: { current: string }) {
               {DIAGRAM_LABELS[s]}
             </span>
             {i < DIAGRAM_STATES.length - 1 && (
-              <span className="text-[10px] text-muted-foreground">&rarr;</span>
+              <span className="text-xs text-muted-foreground">&rarr;</span>
             )}
           </div>
         );

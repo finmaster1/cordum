@@ -262,7 +262,7 @@ export default function LoginPage() {
                       <span className={cn("text-muted-foreground", authMode === mode.id && "text-cordum")}>{mode.icon}</span>
                       <div>
                         <p className={cn("text-sm font-medium", authMode === mode.id ? "text-cordum" : "text-foreground")}>{mode.label}</p>
-                        <p className="text-[10px] text-muted-foreground">{mode.description}</p>
+                        <p className="text-xs text-muted-foreground">{mode.description}</p>
                       </div>
                     </button>
                   ))}
@@ -273,7 +273,7 @@ export default function LoginPage() {
 
           {/* API Endpoint — always shown */}
           <div className="space-y-2">
-            <label className="text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
+            <label className="text-xs font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
               API Endpoint
             </label>
             <input
@@ -294,7 +294,7 @@ export default function LoginPage() {
               exit={{ opacity: 0, height: 0 }}
               className="space-y-2"
             >
-              <label className="text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
+              <label className="text-xs font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
                 API Key
               </label>
               <div className="relative">
@@ -321,7 +321,7 @@ export default function LoginPage() {
               className="space-y-4"
             >
               <div className="space-y-2">
-                <label className="text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
+                <label className="text-xs font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
                   Username
                 </label>
                 <input
@@ -333,7 +333,7 @@ export default function LoginPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
+                <label className="text-xs font-mono font-semibold text-muted-foreground uppercase tracking-[0.08em]">
                   Password
                 </label>
                 <div className="relative">

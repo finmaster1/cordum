@@ -14,7 +14,7 @@ import {
 describe("chartColors", () => {
   it("contains all 5 safety decision colors", () => {
     expect(chartColors.allow).toBe("#1f7a57");
-    expect(chartColors.deny).toBe("#b83a3a");
+    expect(chartColors.deny).toBe("#7c3aed");
     expect(chartColors.require_approval).toBe("#c58a1c");
     expect(chartColors.allow_with_constraints).toBe("#0f7f7a");
     expect(chartColors.throttle).toBe("#d4833a");
@@ -29,7 +29,7 @@ describe("chartColors", () => {
 describe("resolveChartColor", () => {
   it("resolves a semantic key to hex color", () => {
     expect(resolveChartColor("allow")).toBe("#1f7a57");
-    expect(resolveChartColor("deny")).toBe("#b83a3a");
+    expect(resolveChartColor("deny")).toBe("#7c3aed");
   });
 
   it("passes through a raw hex color unchanged", () => {

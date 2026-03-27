@@ -134,7 +134,7 @@ function SchemaCreateForm() {
               <div key={field.id} className="grid grid-cols-[1fr_auto_auto_1fr_auto] items-start gap-2 p-3 rounded-xl bg-surface-1">
                 <div>
                   <input {...register(`fields.${index}.name`)} placeholder="Field name" className="w-full rounded-lg border border-border bg-surface-0 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30" />
-                  {errors.fields?.[index]?.name && <p className="mt-0.5 text-[10px] text-destructive">{errors.fields[index].name?.message}</p>}
+                  {errors.fields?.[index]?.name && <p className="mt-0.5 text-xs text-destructive">{errors.fields[index].name?.message}</p>}
                 </div>
                 <select {...register(`fields.${index}.type`)} className="rounded-lg border border-border bg-surface-0 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-cordum/30">
                   {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -215,7 +215,7 @@ export default function SchemaDetailPage() {
             <h1 className="text-lg font-display font-bold text-foreground">{schema?.name || id}</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <StatusBadge variant="info">{schema?.type}</StatusBadge>
-              <span className="text-xs font-mono text-muted-foreground">v{schema?.currentVersion}</span>
+              <span className="text-xs font-mono font-medium text-muted-foreground">v{schema?.currentVersion}</span>
             </div>
           </div>
         </div>
@@ -246,19 +246,19 @@ export default function SchemaDetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface-0">
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Field</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Type</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Required</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Description</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Field</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Type</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Required</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Description</th>
               </tr>
             </thead>
             <tbody>
               {(currentVersion.fields || []).map((field, i) => (
                 <tr key={field.name} className="border-b border-border last:border-0 hover:bg-surface-1 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-foreground">{field.name}</td>
-                  <td className="px-4 py-3"><StatusBadge variant="info">{field.type}</StatusBadge></td>
-                  <td className="px-4 py-3">{field.required ? <StatusBadge variant="warning">required</StatusBadge> : <span className="text-xs text-muted-foreground">optional</span>}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{field.description || "—"}</td>
+                  <td className="px-5 py-3 font-mono text-xs text-foreground">{field.name}</td>
+                  <td className="px-5 py-3"><StatusBadge variant="info">{field.type}</StatusBadge></td>
+                  <td className="px-5 py-3">{field.required ? <StatusBadge variant="warning">required</StatusBadge> : <span className="text-xs text-muted-foreground">optional</span>}</td>
+                  <td className="px-5 py-3 text-xs text-muted-foreground">{field.description || "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -288,7 +288,7 @@ export default function SchemaDetailPage() {
                 </span>
               </div>
               {v.changelog && <p className="text-xs text-muted-foreground mt-2">{v.changelog}</p>}
-              <p className="text-[10px] text-muted-foreground mt-1">{v.fields.length} fields</p>
+              <p className="text-xs text-muted-foreground mt-1">{v.fields.length} fields</p>
             </motion.div>
           ))}
         </div>
@@ -298,7 +298,7 @@ export default function SchemaDetailPage() {
       {activeTab === "json" && currentVersion && (
         <div className="instrument-card p-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 bg-surface-0 border-b border-border">
-            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">JSON Schema</span>
+            <span className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">JSON Schema</span>
             <button type="button"
               onClick={() => { navigator.clipboard.writeText(JSON.stringify(currentVersion, null, 2)); toast.success("Copied"); }}
               className="p-1 rounded hover:bg-surface-2 transition-colors"

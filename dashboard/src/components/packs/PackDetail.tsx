@@ -123,7 +123,7 @@ function VerificationCheckItem({ check }: { check: PackVerifyCheck }) {
         <div className="ml-6 mt-1 text-xs text-muted-foreground">
           {check.message && <p>{check.message}</p>}
           {check.details && (
-            <pre className="mt-1 whitespace-pre-wrap rounded bg-surface2 p-2 font-mono text-[11px]">
+            <pre className="mt-1 whitespace-pre-wrap rounded bg-surface2 p-2 font-mono text-xs">
               {check.details}
             </pre>
           )}

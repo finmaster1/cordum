@@ -77,7 +77,7 @@ export function WorkflowBuilder() {
     if (isEdit && workflowId) {
       updateWorkflow.mutate(
         { ...definition, id: workflowId } as Parameters<typeof updateWorkflow.mutate>[0],
-        { onSuccess: () => navigate(`/workflows/${workflowId}`) },
+        { onSuccess: () => navigate(`/workflows/${workflowId}/studio`) },
       );
     } else {
       createWorkflow.mutate(definition, {

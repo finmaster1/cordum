@@ -32,6 +32,7 @@ function jobStatusVariant(status: string) {
     case "running": return "healthy" as const;
     case "succeeded": return "healthy" as const;
     case "failed": case "failed_fatal": return "danger" as const;
+    case "denied": return "governance" as const;
     case "failed_retryable": return "warning" as const;
     case "pending": case "scheduled": return "warning" as const;
     case "dispatched": return "info" as const;
@@ -93,11 +94,11 @@ function SubmitJobDialog({ open, onClose }: { open: boolean; onClose: () => void
             </div>
             <div className="px-6 py-5 space-y-4">
               <div>
-                <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Topic *</label>
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider block mb-1">Topic *</label>
                 <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. job.code-review" />
               </div>
               <div>
-                <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Prompt *</label>
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider block mb-1">Prompt *</label>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -107,7 +108,7 @@ function SubmitJobDialog({ open, onClose }: { open: boolean; onClose: () => void
                 />
               </div>
               <div>
-                <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Priority</label>
+                <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider block mb-1">Priority</label>
                 <Select
                   value={priority}
                   onChange={(e) => setPriority(e.target.value)}
@@ -280,7 +281,7 @@ export default function JobsPage() {
         actions={
           <div className="flex items-center gap-2">
             {lastUpdated && (
-              <span className="text-[10px] font-mono text-muted-foreground hidden md:inline">
+              <span className="text-xs font-mono text-muted-foreground hidden md:inline">
                 Updated {formatRelativeTime(lastUpdated.toISOString())}
               </span>
             )}
@@ -326,7 +327,7 @@ export default function JobsPage() {
             >
               {tab.label}
               {tab.count > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-surface-2">{tab.count}</span>
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs font-mono bg-surface-2">{tab.count}</span>
               )}
             </button>
           ))}
@@ -336,14 +337,14 @@ export default function JobsPage() {
       {/* Safety Decision Filter */}
       <div className="flex items-center gap-2">
         <Shield className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Safety:</span>
+        <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Safety:</span>
         <div className="flex items-center gap-1">
           {safetyTabs.map((tab) => (
             <button type="button"
               key={tab.id}
               onClick={() => setSafetyFilter(tab.id)}
               className={cn(
-                "px-2.5 py-1 text-[11px] font-medium rounded transition-colors",
+                "px-2.5 py-1 text-xs font-medium rounded transition-colors",
                 safetyFilter === tab.id
                   ? "bg-surface-2 text-foreground border border-border"
                   : "text-muted-foreground hover:text-foreground",
@@ -384,42 +385,42 @@ export default function JobsPage() {
             <thead>
               <tr className="border-b border-border bg-surface-0">
                 <th
-                  className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                  className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                   onClick={() => toggleSort("status")}
                 >
                   <span className="inline-flex items-center">Status <SortIcon col="status" /></span>
                 </th>
                 <th
-                  className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                  className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                   onClick={() => toggleSort("id")}
                 >
                   <span className="inline-flex items-center">Job ID <SortIcon col="id" /></span>
                 </th>
                 <th
-                  className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                  className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                   onClick={() => toggleSort("topic")}
                 >
                   <span className="inline-flex items-center">Topic <SortIcon col="topic" /></span>
                 </th>
                 <th
-                  className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                  className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                   onClick={() => toggleSort("safety")}
                 >
                   <span className="inline-flex items-center">Safety Decision <SortIcon col="safety" /></span>
                 </th>
                 <th
-                  className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                  className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                   onClick={() => toggleSort("attempts")}
                 >
                   <span className="inline-flex items-center justify-center">Attempts <SortIcon col="attempts" /></span>
                 </th>
                 <th
-                  className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                  className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                   onClick={() => toggleSort("updatedAt")}
                 >
                   <span className="inline-flex items-center justify-end">Updated <SortIcon col="updatedAt" /></span>
                 </th>
-                <th className="px-5 py-2.5"></th>
+                <th className="px-5 py-3"></th>
               </tr>
             </thead>
             <tbody>
@@ -429,26 +430,26 @@ export default function JobsPage() {
                   {...clickableRowProps(() => navigate(`/jobs/${job.id}`))}
                   className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer group"
                 >
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3">
                     <StatusBadge variant={jobStatusVariant(job.status)} dot pulse={job.status === "running"}>
                       {job.status}
                     </StatusBadge>
                     {job.labels?.safety_bypassed === "true" && (
-                      <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-mono font-medium bg-[var(--color-warning)]/15 text-[var(--color-warning)] border border-[var(--color-warning)]/20" title="Safety bypassed via fail-open">
+                      <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-mono font-medium bg-[var(--color-warning)]/15 text-[var(--color-warning)] border border-[var(--color-warning)]/20" title="Safety bypassed via fail-open">
                         Bypassed
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-2.5 font-mono text-sm text-cordum group-hover:underline">{job.id.slice(0, 16)}</td>
-                  <td className="px-5 py-2.5 text-sm text-foreground">{job.topic || "—"}</td>
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3 font-mono text-sm text-cordum group-hover:underline">{job.id.slice(0, 16)}</td>
+                  <td className="px-5 py-3 text-sm text-foreground">{job.topic || "—"}</td>
+                  <td className="px-5 py-3">
                     <SafetyDecisionBadge decision={job._safetyDecision} matchedRules={job._matchedRules} />
                   </td>
-                  <td className="px-5 py-2.5 text-center font-mono text-xs text-muted-foreground">{job.attempts ?? 0}</td>
-                  <td className="px-5 py-2.5 text-right text-xs text-muted-foreground font-mono">
+                  <td className="px-5 py-3 text-center font-mono text-xs text-muted-foreground">{job.attempts ?? 0}</td>
+                  <td className="px-5 py-3 text-right text-xs text-muted-foreground font-mono">
                     {job.updatedAt ? formatRelativeTime(new Date(job.updatedAt).toISOString()) : "—"}
                   </td>
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3">
                     <button type="button" className="p-1 rounded hover:bg-surface-2 transition-colors" aria-label="View details">
                       <Eye className="w-3.5 h-3.5 text-muted-foreground" />
                     </button>
@@ -458,11 +459,11 @@ export default function JobsPage() {
             </tbody>
           </table>
           </div>
-          <div className="flex items-center justify-between px-5 py-2.5 border-t border-border bg-surface-0">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-surface-0">
             <span className="text-xs font-mono text-muted-foreground">
               Showing {filtered.length} of {enrichedJobs.length} jobs
             </span>
-            <span className="text-[10px] font-mono text-muted-foreground">
+            <span className="text-xs font-mono text-muted-foreground">
               Sorted by {sortKey} ({sortDir})
             </span>
           </div>

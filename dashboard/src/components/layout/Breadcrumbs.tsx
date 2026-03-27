@@ -112,7 +112,7 @@ export function Breadcrumbs() {
               <span
                 className={cn(
                   "font-semibold text-ink",
-                  crumb.isId && "font-mono text-[10px]",
+                  crumb.isId && "font-mono text-xs",
                 )}
               >
                 {crumb.label}
@@ -122,7 +122,7 @@ export function Breadcrumbs() {
                 to={crumb.path}
                 className={cn(
                   "text-muted-foreground transition-colors hover:text-accent",
-                  crumb.isId && "font-mono text-[10px]",
+                  crumb.isId && "font-mono text-xs",
                 )}
               >
                 {crumb.label}

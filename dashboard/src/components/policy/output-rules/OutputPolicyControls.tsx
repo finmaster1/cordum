@@ -49,7 +49,7 @@ export function OutputPolicyControls({
         </select>
       </label>
 
-      <div className="rounded border border-border bg-surface-1 p-2 text-[11px] text-muted-foreground">
+      <div className="rounded border border-border bg-surface-1 p-2 text-xs text-muted-foreground">
         <p>
           <span className="font-medium text-foreground">fail-closed:</span> on scanner failure, block or quarantine output by default.
         </p>

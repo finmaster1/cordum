@@ -21,7 +21,7 @@ interface ImpactPreviewProps {
 
 const DECISION_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   allow: { bg: "bg-success/10", text: "text-success", label: "Allow" },
-  deny: { bg: "bg-danger/10", text: "text-danger", label: "Deny" },
+  deny: { bg: "bg-[var(--color-governance)]/10", text: "text-[var(--color-governance)]", label: "Deny" },
   require_approval: { bg: "bg-warning/10", text: "text-warning", label: "Require Approval" },
   throttle: { bg: "bg-accent/10", text: "text-accent", label: "Throttle" },
 };
@@ -116,12 +116,12 @@ export function ImpactPreview({
           </h4>
           <span className="group relative">
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-[11px] text-primary-foreground opacity-0 shadow-lg transition group-hover:opacity-100">
+            <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-xs text-primary-foreground opacity-0 shadow-lg transition group-hover:opacity-100">
               Shows how this rule would affect recent jobs
             </span>
           </span>
           {isAnalyzing && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Analyzing...
             </span>
@@ -161,7 +161,7 @@ export function ImpactPreview({
                     <p className={`text-lg font-bold ${colors.text}`}>
                       {count}
                     </p>
-                    <p className="text-[11px] font-medium text-muted-foreground">
+                    <p className="text-xs font-medium text-muted-foreground">
                       {colors.label}
                     </p>
                   </div>
@@ -193,7 +193,7 @@ function AffectedJobsList({ jobs }: { jobs: Job[] }) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="text-[11px] font-semibold text-accent hover:underline"
+        className="text-xs font-semibold text-accent hover:underline"
       >
         {expanded ? "Hide" : "Show"} affected jobs ({jobs.length})
       </button>
@@ -202,7 +202,7 @@ function AffectedJobsList({ jobs }: { jobs: Job[] }) {
           {shown.map((j) => (
             <div
               key={j.id}
-              className="flex items-center justify-between rounded-lg border border-border px-2.5 py-1.5 text-[11px]"
+              className="flex items-center justify-between rounded-lg border border-border px-2.5 py-1.5 text-xs"
             >
               <span className="font-mono text-muted-foreground">
                 {j.id.slice(0, 12)}...

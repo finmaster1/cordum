@@ -7,8 +7,9 @@ import type { StreamEvent } from "../../api/types";
 // Event type badge variant
 // ---------------------------------------------------------------------------
 
-function eventVariant(type: string): "success" | "danger" | "warning" | "info" | "default" {
-  if (type.includes("fail") || type.includes("error") || type.includes("deny")) return "danger";
+function eventVariant(type: string): "success" | "danger" | "warning" | "info" | "default" | "governance" {
+  if (type.includes("deny")) return "governance";
+  if (type.includes("fail") || type.includes("error")) return "danger";
   if (type.includes("success") || type.includes("complete") || type.includes("approve")) return "success";
   if (type.includes("warn") || type.includes("throttle") || type.includes("timeout")) return "warning";
   if (type.includes("start") || type.includes("dispatch") || type.includes("submit")) return "info";
@@ -64,7 +65,7 @@ export function EventTimeline() {
                 <span className="shrink-0 font-mono text-muted-foreground w-16">
                   {formatTime(event.timestamp)}
                 </span>
-                <Badge variant={eventVariant(event.type)} className="shrink-0 text-[10px]">
+                <Badge variant={eventVariant(event.type)} className="shrink-0 text-xs">
                   {event.type}
                 </Badge>
                 <span className="text-ink truncate">{describeEvent(event)}</span>

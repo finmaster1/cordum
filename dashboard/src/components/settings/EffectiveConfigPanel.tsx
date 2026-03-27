@@ -113,7 +113,7 @@ function ScopeBadge({ scope }: { scope: string }) {
   return (
     <span
       className={cn(
-        "ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+        "ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-semibold",
         SCOPE_COLORS[scope] ?? SCOPE_COLORS.global,
       )}
       title={`Set at ${scope} level`}
@@ -234,7 +234,7 @@ export default function EffectiveConfigPanel() {
             </h3>
             <p className="text-xs text-muted-foreground">
               Merged configuration that applies at the{" "}
-              <Badge className="text-[10px] px-1.5 py-0">{scope}</Badge> level.
+              <Badge className="text-xs px-1.5 py-0">{scope}</Badge> level.
               Values cascade: global → org → team → workflow → step.
             </p>
           </div>

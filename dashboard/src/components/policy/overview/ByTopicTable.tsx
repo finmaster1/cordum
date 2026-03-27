@@ -70,25 +70,25 @@ export function ByTopicTable({ bundles, filterText }: ByTopicTableProps) {
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[12px]">
+        <table className="w-full border-collapse text-xs">
           <thead>
             <tr>
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2 rounded-tl-2xl">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2 rounded-tl-2xl">
                 Topic Pattern
               </th>
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2">
                 Bundle
               </th>
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2">
                 Rule
               </th>
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2">
                 Decision
               </th>
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2">
                 Risk Tags
               </th>
-              <th className="px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground bg-surface-2 rounded-tr-2xl">
+              <th className="px-3 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-muted-foreground bg-surface-2 rounded-tr-2xl">
                 Capabilities
               </th>
             </tr>

@@ -14,6 +14,7 @@ import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
 import type { PolicyBundle } from "../api/types";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { EmptyState } from "../components/ui/EmptyState";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -176,7 +177,7 @@ function GovernanceScoreCard({
 
 const DECISION_COLORS: Record<string, string> = {
   allow: "#1f7a57",
-  deny: "#b83a3a",
+  deny: "#7c3aed",
   require_approval: "#c58a1c",
   throttle: "#0f7f7a",
 };
@@ -257,8 +258,8 @@ function DecisionDistributionChart({
 // Recent Violations List
 // ---------------------------------------------------------------------------
 
-const ACTION_BADGE_VARIANT: Record<string, "danger" | "info" | "warning"> = {
-  deny: "danger",
+const ACTION_BADGE_VARIANT: Record<string, "governance" | "info" | "warning"> = {
+  deny: "governance",
   throttle: "info",
   require_approval: "warning",
 };
@@ -407,7 +408,7 @@ function BundleCard({
             />
           </button>
           {!canToggle && (
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               Managed by pack — edit via YAML only.
             </p>
           )}
@@ -600,9 +601,7 @@ export default function PoliciesOverviewPage() {
 
   if (bundles.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-        No policy bundles configured
-      </div>
+      <EmptyState icon={<Shield className="h-5 w-5" />} title="No policy bundles configured" />
     );
   }
 

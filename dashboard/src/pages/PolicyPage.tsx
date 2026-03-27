@@ -4,7 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Link, useSearchParams } from "react-router-dom";
-import { Info } from "lucide-react";
+import { Info, Inbox, Shield, FileText, Camera, GitCompare, ScrollText } from "lucide-react";
+import { EmptyState } from "../components/ui/EmptyState";
 import { api } from "../lib/api";
 import { formatRelative } from "../lib/format";
 import { decisionTypeMeta } from "../lib/status";
@@ -678,7 +679,7 @@ export default function PolicyPage() {
                       Only safe
                       <span className="relative group">
                         <Info className="h-3 w-3 text-muted-foreground cursor-help" />
-                        <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block w-48 p-2 text-[10px] normal-case tracking-normal font-normal bg-ink text-primary-foreground rounded-2xl shadow-lg z-10">
+                        <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block w-48 p-2 text-xs normal-case tracking-normal font-normal bg-ink text-primary-foreground rounded-2xl shadow-lg z-10">
                           Safe items have no risk_tags, no requires constraints, and no policy constraints applied.
                         </span>
                       </span>
@@ -780,7 +781,7 @@ export default function PolicyPage() {
                                 {riskTags.map((tag) => (
                                   <span
                                     key={tag}
-                                    className="inline-flex items-center rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-medium text-danger"
+                                    className="inline-flex items-center rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger"
                                   >
                                     {tag}
                                   </span>
@@ -881,9 +882,11 @@ export default function PolicyPage() {
             ) : approvalsQuery.isLoading ? (
               <div className="text-sm text-muted-foreground">Loading approvals...</div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                {showSafeOnly ? "No approvals match the safe filter." : "No approvals waiting."}
-              </div>
+              <EmptyState
+                icon={<Inbox className="h-5 w-5" />}
+                title={showSafeOnly ? "No approvals match the safe filter." : "No approvals waiting."}
+                className="py-6"
+              />
             )}
           </Card>
         </>
@@ -1012,9 +1015,7 @@ export default function PolicyPage() {
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                    No bundles in this filter.
-                  </div>
+                  <EmptyState title="No bundles in this filter." className="py-6" />
                 )}
               </div>
               <div className="space-y-4">
@@ -1133,9 +1134,7 @@ export default function PolicyPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                    Select a bundle to inspect or edit.
-                  </div>
+                  <EmptyState icon={<FileText className="h-5 w-5" />} title="Select a bundle to inspect or edit." className="py-6" />
                 )}
               </div>
             </div>
@@ -1180,9 +1179,7 @@ export default function PolicyPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                    No admin bundles available yet.
-                  </div>
+                  <EmptyState title="No admin bundles available yet." className="py-6" />
                 )}
                 <div className="space-y-2">
                   <Input
@@ -1238,7 +1235,7 @@ export default function PolicyPage() {
                   </div>
                 </div>
                 {publishResult ? (
-                  <pre className="rounded-2xl border border-border bg-card/70 p-3 text-[11px] text-ink">
+                  <pre className="rounded-2xl border border-border bg-card/70 p-3 text-xs text-ink">
                     {JSON.stringify(publishResult, null, 2)}
                   </pre>
                 ) : null}
@@ -1273,7 +1270,7 @@ export default function PolicyPage() {
                   {rollbackMutation.isPending ? "Rolling back..." : "Rollback"}
                 </Button>
                 {rollbackResult ? (
-                  <pre className="rounded-2xl border border-border bg-card/70 p-3 text-[11px] text-ink">
+                  <pre className="rounded-2xl border border-border bg-card/70 p-3 text-xs text-ink">
                     {JSON.stringify(rollbackResult, null, 2)}
                   </pre>
                 ) : null}
@@ -1355,9 +1352,7 @@ export default function PolicyPage() {
                 </div>
               </>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                Select a bundle to simulate against its rules.
-              </div>
+              <EmptyState title="Select a bundle to simulate against its rules." className="py-6" />
             )}
           </Card>
           ) : null}
@@ -1371,9 +1366,7 @@ export default function PolicyPage() {
             {policyRulesQuery.isLoading ? (
               <div className="text-sm text-muted-foreground">Loading policy rules...</div>
             ) : policyRules.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                No policy rules found. Add rules to policy bundles to populate this list.
-              </div>
+              <EmptyState icon={<Shield className="h-5 w-5" />} title="No policy rules found." description="Add rules to policy bundles to populate this list." className="py-6" />
             ) : (
               <div className="space-y-3">
                 {policyRules.map((rule, index) => {
@@ -1391,18 +1384,18 @@ export default function PolicyPage() {
                         </div>
                         <Badge variant={decision.variant}>{decision.label}</Badge>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                         <span>Source {sourceLabel}</span>
                         {source?.version ? <span>Version {source.version}</span> : null}
                         {source?.installed_at ? <span>Installed {formatRelative(source.installed_at)}</span> : null}
                       </div>
                       {rule.match ? (
-                        <pre className="mt-3 rounded-2xl border border-border bg-card/70 p-3 text-[11px] text-ink">
+                        <pre className="mt-3 rounded-2xl border border-border bg-card/70 p-3 text-xs text-ink">
                           {JSON.stringify(rule.match, null, 2)}
                         </pre>
                       ) : null}
                       {rule.constraints ? (
-                        <pre className="mt-3 rounded-2xl border border-border bg-card/70 p-3 text-[11px] text-ink">
+                        <pre className="mt-3 rounded-2xl border border-border bg-card/70 p-3 text-xs text-ink">
                           {JSON.stringify(rule.constraints, null, 2)}
                         </pre>
                       ) : null}
@@ -1412,11 +1405,11 @@ export default function PolicyPage() {
               </div>
             )}
             {policyRuleErrors.length ? (
-              <div className="mt-3 rounded-2xl border border-dashed border-border p-4 text-xs text-muted-foreground">
-                {policyRuleErrors.map((err) => (
-                  <div key={err.fragment_id}>Fragment {err.fragment_id}: {err.error}</div>
-                ))}
-              </div>
+              <EmptyState
+                title="Policy rule errors"
+                description={policyRuleErrors.map((err) => `Fragment ${err.fragment_id}: ${err.error}`).join("; ")}
+                className="mt-3 py-6"
+              />
             ) : null}
           </Card>
           ) : null}
@@ -1472,9 +1465,7 @@ export default function PolicyPage() {
                 ))}
               </div>
             ) : (
-              <div className="mt-4 rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                No saved policy bundle snapshots yet.
-              </div>
+              <EmptyState icon={<Camera className="h-5 w-5" />} title="No saved policy bundle snapshots yet." className="mt-4 py-6" />
             )}
             <div className="grid gap-4 lg:grid-cols-2">
               <div>
@@ -1494,7 +1485,7 @@ export default function PolicyPage() {
             {compareText.trim() ? (
               <div className="mt-4 rounded-2xl border border-border bg-card/70 p-4">
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="space-y-1 text-[11px] font-mono">
+                  <div className="space-y-1 text-xs font-mono">
                     {diffLines.map((line, index) => (
                       <div
                         key={`left-${index}`}
@@ -1506,7 +1497,7 @@ export default function PolicyPage() {
                       </div>
                     ))}
                   </div>
-                  <div className="space-y-1 text-[11px] font-mono">
+                  <div className="space-y-1 text-xs font-mono">
                     {diffLines.map((line, index) => (
                       <div
                         key={`right-${index}`}
@@ -1521,9 +1512,7 @@ export default function PolicyPage() {
                 </div>
               </div>
             ) : (
-              <div className="mt-4 rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                Paste a previous policy bundle JSON to view a line-by-line diff.
-              </div>
+              <EmptyState icon={<GitCompare className="h-5 w-5" />} title="Paste a previous policy bundle JSON to view a line-by-line diff." className="mt-4 py-6" />
             )}
           </Card>
           ) : null}
@@ -1544,7 +1533,7 @@ export default function PolicyPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">No snapshots recorded.</div>
+              <EmptyState icon={<Camera className="h-5 w-5" />} title="No snapshots recorded." className="py-6" />
             )}
           </Card>
           ) : null}
@@ -1585,9 +1574,7 @@ export default function PolicyPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                No audit entries recorded yet.
-              </div>
+              <EmptyState icon={<ScrollText className="h-5 w-5" />} title="No audit entries recorded yet." className="py-6" />
             )}
           </Card>
           ) : null}
@@ -1697,13 +1684,13 @@ export default function PolicyPage() {
                       {riskTags.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {riskTags.map((tag) => (
-                            <span key={tag} className="rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-medium text-danger">
+                            <span key={tag} className="rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">
                               {tag}
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">safe</span>
+                        <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">safe</span>
                       )}
                     </div>
                   );
@@ -1765,7 +1752,7 @@ export default function PolicyPage() {
             {selectedApproval.constraints ? (
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Constraints</div>
-                <pre className="mt-2 rounded-2xl border border-border bg-card/70 p-3 text-[11px] text-ink">
+                <pre className="mt-2 rounded-2xl border border-border bg-card/70 p-3 text-xs text-ink">
                   {JSON.stringify(selectedApproval.constraints, null, 2)}
                 </pre>
               </div>

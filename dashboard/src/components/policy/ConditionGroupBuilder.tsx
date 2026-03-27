@@ -89,7 +89,7 @@ export function ConditionGroupBuilder({
         >
           {group.logic}
         </button>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {group.logic === "AND"
             ? "All conditions must match"
             : "Any condition can match"}

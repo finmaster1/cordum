@@ -12,13 +12,13 @@ export function ContextUpdateBlock({ activity }: Props) {
           <Database className="h-3 w-3" />
           Context update
         </div>
-        <span className="text-[10px] text-muted-foreground">{formatRelative(activity.timestamp)}</span>
+        <span className="text-xs text-muted-foreground">{formatRelative(activity.timestamp)}</span>
       </div>
       <div className="mt-2 text-sm text-ink">
         {activity.content}
       </div>
       {activity.payload?.memory_key ? (
-        <div className="mt-2 text-[10px] text-muted-foreground">
+        <div className="mt-2 text-xs text-muted-foreground">
           {activity.payload.memory_operation || "update"} · {activity.payload.memory_key}
         </div>
       ) : null}

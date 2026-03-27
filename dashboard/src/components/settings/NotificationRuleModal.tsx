@@ -98,7 +98,7 @@ export function NotificationRuleModal({
                 {errors.eventPattern.message}
               </p>
             )}
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               Use glob patterns: * matches any segment, e.g. policy.* matches
               policy.created, policy.updated.
             </p>
@@ -174,7 +174,7 @@ export function NotificationRuleModal({
                 />
               )}
             />
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               Minimum interval between notifications for this rule. 0 = no
               throttling.
             </p>
@@ -189,7 +189,7 @@ export function NotificationRuleModal({
               type="datetime-local"
               {...register("muteUntil")}
             />
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               Suppress notifications until this time. Leave empty for no mute.
             </p>
           </div>

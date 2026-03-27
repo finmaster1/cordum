@@ -128,7 +128,7 @@ export function PromotionDrawer({ source, target, onConfirm, onClose, isPending 
                     </td>
                     <td className="px-3 py-2 text-right">
                       {entry.kind !== "same" && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase">
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase">
                           <Icon className="h-3 w-3" />
                           {style.label}
                         </span>

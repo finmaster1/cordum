@@ -307,7 +307,7 @@ export default function TenantDetailPage() {
                   );
                 }}
               />
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Leave empty to inherit system defaults.
               </p>
             </label>

@@ -21,7 +21,7 @@ export function PageHeader({
     <div className={cn("flex items-start justify-between", className)}>
       <div>
         {label && (
-          <span className="text-[10px] font-mono text-cordum uppercase tracking-widest block mb-1">
+          <span className="text-xs font-mono text-cordum uppercase tracking-widest block mb-1">
             {label}
           </span>
         )}

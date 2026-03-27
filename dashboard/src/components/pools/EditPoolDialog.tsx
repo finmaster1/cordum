@@ -38,7 +38,7 @@ export function EditPoolDialog({ open, onClose, onSubmit, isPending, poolName, c
       description={
         <div className="space-y-3 mt-2">
           <div>
-            <label className="text-[11px] font-medium text-foreground">Requires (comma-separated)</label>
+            <label className="text-xs font-medium text-foreground">Requires (comma-separated)</label>
             <input
               type="text"
               value={requires}
@@ -48,7 +48,7 @@ export function EditPoolDialog({ open, onClose, onSubmit, isPending, poolName, c
             />
           </div>
           <div>
-            <label className="text-[11px] font-medium text-foreground">Description</label>
+            <label className="text-xs font-medium text-foreground">Description</label>
             <input
               type="text"
               value={description}

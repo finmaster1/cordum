@@ -218,7 +218,7 @@ function DotShape(props: { cx?: number; cy?: number; payload?: TimelinePoint }) 
           y={cy}
           textAnchor="middle"
           dominantBaseline="central"
-          className="fill-white text-[9px] font-bold"
+          className="fill-white text-xs font-bold"
         >
           {payload.clusterCount}
         </text>
@@ -237,7 +237,7 @@ function DotShape(props: { cx?: number; cy?: number; payload?: TimelinePoint }) 
 
 function TimelineLegend() {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       <span className="flex items-center gap-1">
         <span className="h-2.5 w-2.5 rounded-full bg-destructive" /> Deny/Fail
       </span>
@@ -364,7 +364,7 @@ export function AuditTimeline({ events, onEventClick }: AuditTimelineProps) {
       <div className="flex items-center justify-between">
         <TimelineLegend />
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {visiblePoints.length} points
           </span>
           {isZoomed && (
@@ -422,7 +422,7 @@ export function AuditTimeline({ events, onEventClick }: AuditTimelineProps) {
         </ResponsiveContainer>
       </div>
 
-      <p className="text-[10px] text-muted-foreground text-center">
+      <p className="text-xs text-muted-foreground text-center">
         {events.length} total events{isZoomed && " (zoomed) · scroll to zoom · click clusters to expand"}
       </p>
     </div>

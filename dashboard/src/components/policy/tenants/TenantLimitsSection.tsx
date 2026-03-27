@@ -15,8 +15,8 @@ function HostTag({
     <span
       className={
         tone === "allow"
-          ? "rounded bg-[var(--color-success)]/20 px-2 py-0.5 text-[10px] font-mono text-[var(--color-success)]"
-          : "rounded bg-destructive/20 px-2 py-0.5 text-[10px] font-mono text-destructive"
+          ? "rounded bg-[var(--color-success)]/20 px-2 py-0.5 text-xs font-mono text-[var(--color-success)]"
+          : "rounded bg-destructive/20 px-2 py-0.5 text-xs font-mono text-destructive"
       }
     >
       {value}
@@ -40,7 +40,7 @@ export function TenantLimitsSection({
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div className="rounded border border-border/70 bg-surface-1 p-3">
-          <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             max_concurrent_jobs
           </p>
           <p className="mt-2 text-xl font-mono font-semibold text-foreground">
@@ -49,12 +49,12 @@ export function TenantLimitsSection({
         </div>
 
         <div className="rounded border border-border/70 bg-surface-1 p-3 md:col-span-2">
-          <p className="mb-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <p className="mb-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
             repo host boundaries
           </p>
           <div className="space-y-2">
             <div>
-              <p className="mb-1 text-[10px] text-muted-foreground">allowed_repo_hosts</p>
+              <p className="mb-1 text-xs text-muted-foreground">allowed_repo_hosts</p>
               <div className="flex flex-wrap gap-1.5">
                 {allowedRepoHosts.length === 0 && (
                   <span className="text-xs text-muted-foreground">No allow host overrides configured.</span>
@@ -65,7 +65,7 @@ export function TenantLimitsSection({
               </div>
             </div>
             <div>
-              <p className="mb-1 text-[10px] text-muted-foreground">denied_repo_hosts</p>
+              <p className="mb-1 text-xs text-muted-foreground">denied_repo_hosts</p>
               <div className="flex flex-wrap gap-1.5">
                 {deniedRepoHosts.length === 0 && (
                   <span className="text-xs text-muted-foreground">No deny host overrides configured.</span>

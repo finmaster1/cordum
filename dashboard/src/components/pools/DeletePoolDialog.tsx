@@ -31,12 +31,12 @@ export function DeletePoolDialog({ open, onClose, onConfirm, isPending, poolName
         <div className="space-y-2">
           <p>This will permanently remove the pool and its configuration.</p>
           {workerCount > 0 && (
-            <p className="text-warning text-[11px]">{workerCount} worker(s) are currently assigned to this pool.</p>
+            <p className="text-warning text-xs">{workerCount} worker(s) are currently assigned to this pool.</p>
           )}
           {hasTopics && (
             <div className="mt-2">
-              <p className="text-destructive text-[11px]">{topicCount} topic(s) are mapped to this pool.</p>
-              <label className="mt-2 flex items-center gap-2 text-[11px] text-foreground">
+              <p className="text-destructive text-xs">{topicCount} topic(s) are mapped to this pool.</p>
+              <label className="mt-2 flex items-center gap-2 text-xs text-foreground">
                 <input
                   type="checkbox"
                   checked={force}

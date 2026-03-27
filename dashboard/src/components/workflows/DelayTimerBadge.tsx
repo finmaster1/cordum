@@ -78,7 +78,7 @@ export function DelayTimerBadge({ timer, runId }: DelayTimerBadgeProps) {
     <Badge variant="info" className="gap-1">
       <Timer className="h-3 w-3" />
       Resumes in {formatCountdown(remainingMs)}
-      <span className="text-[10px] opacity-70">
+      <span className="text-xs opacity-70">
         ({formatAbsoluteTime(timer.fires_at)})
       </span>
     </Badge>

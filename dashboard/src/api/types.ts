@@ -349,6 +349,7 @@ export type RunStatus =
   | "waiting"
   | "succeeded"
   | "failed"
+  | "denied"
   | "timed_out"
   | "cancelled";
 

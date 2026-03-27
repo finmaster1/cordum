@@ -25,7 +25,7 @@ function StepDot({
         )}
       />
       {label && (
-        <span className="text-[9px] text-muted-foreground max-w-[60px] text-center truncate">
+        <span className="text-xs text-muted-foreground max-w-[60px] text-center truncate">
           {label}
         </span>
       )}
@@ -71,7 +71,7 @@ export function WorkflowContext({ workflowContext }: WorkflowContextProps) {
         <p className="flex items-center gap-1.5">
           <span className="text-muted-foreground">Workflow:</span>
           <Link
-            to={`/workflows/${workflowId}`}
+            to={`/workflows/${workflowId}/studio`}
             className="font-medium text-accent hover:underline inline-flex items-center gap-1"
           >
             {workflowId.slice(0, 16)}
@@ -81,7 +81,7 @@ export function WorkflowContext({ workflowContext }: WorkflowContextProps) {
         <p>
           <span className="text-muted-foreground">Run: </span>
           <Link
-            to={`/workflows/${workflowId}?run=${runId}`}
+            to={`/workflows/${workflowId}/studio?run=${runId}`}
             className="font-mono text-accent hover:underline"
           >
             {runId.slice(0, 16)}

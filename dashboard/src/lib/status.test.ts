@@ -52,8 +52,8 @@ describe("jobStatusMeta", () => {
     expect(meta.shape).toBe("shield");
   });
 
-  it("maps denied to danger tone", () => {
-    expect(jobStatusMeta("denied").tone).toBe("danger");
+  it("maps denied to governance tone", () => {
+    expect(jobStatusMeta("denied").tone).toBe("governance");
   });
 
   it("returns muted for unknown state", () => {

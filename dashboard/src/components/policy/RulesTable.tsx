@@ -8,9 +8,9 @@ import type { PolicyRule } from "../../api/types";
 // Constants
 // ---------------------------------------------------------------------------
 
-const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "default"> = {
+const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "default" | "governance"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -42,7 +42,7 @@ function MatchCriteria({ criteria }: { criteria: Record<string, unknown> }) {
   return (
     <div className="flex flex-wrap gap-1">
       {items.map((item, idx) => (
-        <Badge key={idx} variant={item.variant} className="text-[10px] px-2 py-0.5">
+        <Badge key={idx} variant={item.variant} className="text-xs px-2 py-0.5">
           {item.label}
         </Badge>
       ))}

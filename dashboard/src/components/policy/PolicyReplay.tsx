@@ -39,9 +39,9 @@ const TIME_RANGES: { value: TimeRange; label: string }[] = [
 // Decision badge
 // ---------------------------------------------------------------------------
 
-const decisionBadge: Record<string, "success" | "danger" | "warning" | "info" | "default"> = {
+const decisionBadge: Record<string, "success" | "governance" | "warning" | "info" | "default"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };

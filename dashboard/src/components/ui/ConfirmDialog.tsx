@@ -109,8 +109,8 @@ export function ConfirmDialog({
               {/* Confirm text input */}
               {confirmText && (
                 <div className="px-5 pb-3">
-                  <p className="text-[11px] text-muted-foreground mb-1.5">
-                    Type <code className="font-mono text-foreground bg-surface-2 px-1 py-0.5 rounded text-[10px]">{confirmText}</code> to confirm
+                  <p className="text-xs text-muted-foreground mb-1.5">
+                    Type <code className="font-mono text-foreground bg-surface-2 px-1 py-0.5 rounded text-xs">{confirmText}</code> to confirm
                   </p>
                   <input
                     type="text"

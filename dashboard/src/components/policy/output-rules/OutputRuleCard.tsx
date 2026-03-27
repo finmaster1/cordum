@@ -62,16 +62,16 @@ export function OutputRuleCard({
     >
       <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground border border-border">
+          <span className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground border border-border">
             #{index + 1}
           </span>
           <h3 className="text-sm font-semibold font-display text-foreground">{rule.id}</h3>
           <SafetyDecisionBadge decision={rule.decision} />
-          <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border", severityClass(rule.severity))}>
+          <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-bold uppercase border", severityClass(rule.severity))}>
             {rule.severity}
           </span>
           {!rule.enabled && (
-            <span className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground border border-border">
+            <span className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground border border-border">
               DISABLED
             </span>
           )}
@@ -137,26 +137,26 @@ export function OutputRuleCard({
       </header>
 
       {rule.description && <p className="mb-3 text-xs text-muted-foreground leading-relaxed">{rule.description}</p>}
-      {rule.reason && <p className="mb-3 text-[11px] font-mono text-muted-foreground/80 italic">reason: {rule.reason}</p>}
+      {rule.reason && <p className="mb-3 text-xs font-mono text-muted-foreground/80 italic">reason: {rule.reason}</p>}
 
       <div className="surface-inset p-3 flex flex-wrap gap-2">
         {rule.match.detectors.map((value) => (
-          <span key={`detector-${value}`} className="rounded bg-[var(--color-warning)]/15 border border-[var(--color-warning)]/20 px-2 py-0.5 text-[10px] font-mono text-[var(--color-warning)]">
+          <span key={`detector-${value}`} className="rounded bg-[var(--color-warning)]/15 border border-[var(--color-warning)]/20 px-2 py-0.5 text-xs font-mono text-[var(--color-warning)]">
             detector:{value}
           </span>
         ))}
         {rule.match.contentPatterns.map((value) => (
-          <span key={`pattern-${value}`} className="rounded bg-primary/15 border border-primary/20 px-2 py-0.5 text-[10px] font-mono text-primary">
+          <span key={`pattern-${value}`} className="rounded bg-primary/15 border border-primary/20 px-2 py-0.5 text-xs font-mono text-primary">
             pattern:{value}
           </span>
         ))}
         {rule.match.topics.map((value) => (
-          <span key={`topic-${value}`} className="rounded bg-[var(--color-info)]/15 border border-[var(--color-info)]/20 px-2 py-0.5 text-[10px] font-mono text-[var(--color-info)]">
+          <span key={`topic-${value}`} className="rounded bg-[var(--color-info)]/15 border border-[var(--color-info)]/20 px-2 py-0.5 text-xs font-mono text-[var(--color-info)]">
             topic:{value}
           </span>
         ))}
         {rule.match.detectors.length === 0 && rule.match.contentPatterns.length === 0 && rule.match.topics.length === 0 && (
-          <span className="text-[10px] font-mono text-muted-foreground italic uppercase tracking-wider">No match criteria defined</span>
+          <span className="text-xs font-mono text-muted-foreground italic uppercase tracking-wider">No match criteria defined</span>
         )}
       </div>
     </article>

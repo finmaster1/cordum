@@ -7,6 +7,7 @@ import { PolicyReplay } from "../components/policy/PolicyReplay";
 import { BatchSimulator } from "../components/policy/BatchSimulator";
 import { cn } from "../lib/utils";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { EmptyState } from "../components/ui/EmptyState";
 
 type SimTab = "single" | "explain" | "batch";
 
@@ -28,9 +29,7 @@ export default function PoliciesSimulatorPage() {
 
   if (!bundleId) {
     return (
-      <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-        No policy bundles found. Create one to simulate policy checks.
-      </div>
+      <EmptyState title="No policy bundles found." description="Create one to simulate policy checks." />
     );
   }
 

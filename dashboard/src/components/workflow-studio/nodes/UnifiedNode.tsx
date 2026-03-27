@@ -1,6 +1,6 @@
 import { memo, useState, useCallback } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import { CheckCircle, Loader2, XCircle, Clock, Slash, UserCheck } from "lucide-react";
+import { CheckCircle, Loader2, XCircle, Clock, Slash, UserCheck, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/utils";
 import type { UnifiedNodeData } from "../types";
@@ -24,6 +24,8 @@ function StatusIcon({ status }: { status?: string }) {
       return <Loader2 className="h-3.5 w-3.5 text-[var(--color-info)] animate-spin" />;
     case "failed":
       return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+    case "denied":
+      return <ShieldAlert className="h-3.5 w-3.5 text-[var(--color-governance)]" />;
     case "waiting":
       return <UserCheck className="h-3.5 w-3.5 text-[var(--color-warning)]" />;
     case "cancelled":
@@ -46,7 +48,7 @@ function NodeTooltip({ data }: { data: UnifiedNodeData }) {
 
   return (
     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
-      <div className="min-w-[200px] max-w-[280px] space-y-1.5 whitespace-nowrap rounded-2xl border border-border bg-surface-1 px-3 py-2.5 text-[11px] shadow-soft">
+      <div className="min-w-[200px] max-w-[280px] space-y-1.5 whitespace-nowrap rounded-2xl border border-border bg-surface-1 px-3 py-2.5 text-xs shadow-soft">
         <div className="flex items-center gap-1.5 font-semibold text-ink">
           <Icon className={cn("h-3.5 w-3.5", meta.iconColor)} />
           {truncate(data.label, 40)}
@@ -163,7 +165,7 @@ function UnifiedNodeInner({ data, selected }: NodeProps<UnifiedNodeData>) {
       {safetyBadge && (
         <span
           className={cn(
-            "absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold shadow-sm z-10",
+            "absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold shadow-sm z-10",
             safetyBadge.className,
           )}
           title={safetyBadge.label}
@@ -194,7 +196,7 @@ function UnifiedNodeInner({ data, selected }: NodeProps<UnifiedNodeData>) {
             >
               {truncate(data.label, 24)}
             </span>
-            <span className="block text-[10px] text-muted-foreground capitalize">
+            <span className="block text-xs text-muted-foreground capitalize">
               {meta.label}
             </span>
           </div>
@@ -205,7 +207,7 @@ function UnifiedNodeInner({ data, selected }: NodeProps<UnifiedNodeData>) {
         {/* Subtitle */}
         {subtitle && (
           <p
-            className="mt-1.5 truncate text-[10px] text-muted-foreground font-mono"
+            className="mt-1.5 truncate text-xs text-muted-foreground font-mono"
             title={subtitle}
           >
             {truncate(subtitle, 30)}
@@ -214,7 +216,7 @@ function UnifiedNodeInner({ data, selected }: NodeProps<UnifiedNodeData>) {
 
         {/* Footer: duration + error indicator (run mode) */}
         {(data.duration != null || data.error) && (
-          <div className="mt-1.5 flex items-center justify-between text-[10px]">
+          <div className="mt-1.5 flex items-center justify-between text-xs">
             {data.duration != null ? (
               <span className="text-muted-foreground">{formatDuration(data.duration)}</span>
             ) : (
@@ -239,10 +241,14 @@ function UnifiedNodeInner({ data, selected }: NodeProps<UnifiedNodeData>) {
             position={Position.Right}
             className={cn(
               "!w-3 !h-3 !border-2 !border-card !rounded-full",
-              data.conditionResult === false ? "!bg-muted !opacity-30" : "!bg-[var(--color-success)]",
+              data.conditionResult === false
+                ? "!bg-muted !opacity-30"
+                : data.conditionResult === true
+                  ? "!bg-[var(--color-success)]"
+                  : "!bg-muted-foreground/50",
             )}
           />
-          <span className="absolute right-0 translate-x-full pl-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none whitespace-nowrap font-mono">
+          <span className="absolute right-0 translate-x-full pl-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none whitespace-nowrap font-mono">
             true
           </span>
           <Handle
@@ -251,10 +257,14 @@ function UnifiedNodeInner({ data, selected }: NodeProps<UnifiedNodeData>) {
             position={Position.Left}
             className={cn(
               "!w-3 !h-3 !border-2 !border-card !rounded-full",
-              data.conditionResult === true ? "!bg-muted !opacity-30" : "!bg-destructive",
+              data.conditionResult === true
+                ? "!bg-muted !opacity-30"
+                : data.conditionResult === false
+                  ? "!bg-destructive"
+                  : "!bg-muted-foreground/50",
             )}
           />
-          <span className="absolute left-0 -translate-x-full pr-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none whitespace-nowrap font-mono">
+          <span className="absolute left-0 -translate-x-full pr-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none whitespace-nowrap font-mono">
             false
           </span>
         </>

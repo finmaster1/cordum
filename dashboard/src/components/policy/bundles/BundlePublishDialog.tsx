@@ -43,7 +43,7 @@ export function BundlePublishDialog({
             This will make the current draft the live policy evaluated against all requests.
           </p>
           <label className="block">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
               Publish note (optional)
             </span>
             <input

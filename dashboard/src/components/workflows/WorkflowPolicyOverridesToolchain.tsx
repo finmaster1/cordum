@@ -38,13 +38,13 @@ export function WorkflowPolicyOverridesToolchain({ toolchain, readOnly, onChange
         <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-xs font-semibold text-foreground">Toolchain Constraints</span>
         {!hasValues && (
-          <span className="text-[10px] font-mono text-muted-foreground ml-auto">global defaults</span>
+          <span className="text-xs font-mono text-muted-foreground ml-auto">global defaults</span>
         )}
       </div>
       <div className="space-y-2">
         {TOOLCHAIN_FIELDS.map(({ key, label }) => (
           <div key={key} className="flex flex-col gap-0.5">
-            <label className="text-[10px] text-muted-foreground" htmlFor={`toolchain-${key}`}>
+            <label className="text-xs text-muted-foreground" htmlFor={`toolchain-${key}`}>
               {label} <span className="font-mono">(comma-separated)</span>
             </label>
             {readOnly ? (

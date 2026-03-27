@@ -76,7 +76,7 @@ export default function SettingsLayout() {
               <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent animate-pulse" />
             </span>
             Setup Guide
-            <span className="ml-auto rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold">
+            <span className="ml-auto rounded-full bg-accent/15 px-1.5 py-0.5 text-xs font-bold">
               {setup.completedCount}/{setup.totalRequired}
             </span>
           </button>

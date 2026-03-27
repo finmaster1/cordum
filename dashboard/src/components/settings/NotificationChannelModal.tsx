@@ -62,7 +62,7 @@ function EmailConfigFields({
           value={recipients}
           onChange={(e) => onChange({ ...config, recipients: e.target.value })}
         />
-        <p className="mt-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Separate multiple addresses with commas.
         </p>
       </div>

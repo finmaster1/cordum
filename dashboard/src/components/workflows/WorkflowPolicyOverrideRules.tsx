@@ -14,12 +14,12 @@ export interface WorkflowPolicyOverrideRulesProps {
   rules: WorkflowScopedRule[];
 }
 
-function decisionVariant(d: SafetyDecisionType): "healthy" | "danger" | "warning" | "info" | "muted" {
+function decisionVariant(d: SafetyDecisionType): "healthy" | "governance" | "warning" | "info" | "muted" {
   switch (d) {
     case "allow":
       return "healthy";
     case "deny":
-      return "danger";
+      return "governance";
     case "require_approval":
       return "info";
     case "allow_with_constraints":
@@ -78,7 +78,7 @@ export function WorkflowPolicyOverrideRules({ rules }: WorkflowPolicyOverrideRul
       <div className="flex items-center gap-2 mb-4">
         <Shield className="w-4 h-4 text-cordum" />
         <h3 className="font-display font-semibold text-sm text-foreground">Workflow-Scoped Rules</h3>
-        <span className="text-[10px] font-mono text-muted-foreground ml-auto">
+        <span className="text-xs font-mono text-muted-foreground ml-auto">
           {rules.length} rule{rules.length !== 1 ? "s" : ""}
         </span>
       </div>
@@ -93,21 +93,21 @@ export function WorkflowPolicyOverrideRules({ rules }: WorkflowPolicyOverrideRul
               <StatusBadge variant={decisionVariant(rule.decision)}>{rule.decision}</StatusBadge>
             </div>
             {rule.description && (
-              <p className="text-[11px] text-muted-foreground">{rule.description}</p>
+              <p className="text-xs text-muted-foreground">{rule.description}</p>
             )}
             {rule.topics && rule.topics.length > 0 && (
               <div className="flex items-center gap-1 mt-1">
-                <span className="text-[10px] text-muted-foreground">topics:</span>
+                <span className="text-xs text-muted-foreground">topics:</span>
                 {rule.topics.map((t) => (
-                  <span key={t} className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-surface-2 border border-border text-muted-foreground">{t}</span>
+                  <span key={t} className="text-xs font-mono px-1.5 py-0.5 rounded-full bg-surface-2 border border-border text-muted-foreground">{t}</span>
                 ))}
               </div>
             )}
             {rule.capabilities && rule.capabilities.length > 0 && (
               <div className="flex items-center gap-1 mt-1">
-                <span className="text-[10px] text-muted-foreground">capabilities:</span>
+                <span className="text-xs text-muted-foreground">capabilities:</span>
                 {rule.capabilities.map((c) => (
-                  <span key={c} className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-surface-2 border border-border text-muted-foreground">{c}</span>
+                  <span key={c} className="text-xs font-mono px-1.5 py-0.5 rounded-full bg-surface-2 border border-border text-muted-foreground">{c}</span>
                 ))}
               </div>
             )}

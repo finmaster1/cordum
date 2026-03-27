@@ -8,6 +8,7 @@ const variants: Record<string, string> = {
   danger: "bg-[color:rgba(184,58,58,0.14)] text-danger",
   info: "bg-[color:rgba(15,127,122,0.12)] text-accent",
   enterprise: "bg-gradient-to-r from-primary/10 to-primary/5 text-primary border border-primary/20",
+  governance: "bg-[color:rgba(124,58,237,0.14)] text-[var(--color-governance)]",
 };
 
 export function Badge({

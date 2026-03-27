@@ -34,7 +34,7 @@ function EnvField({
     <div className="flex items-center justify-between py-2">
       <div className="space-y-0.5">
         <p className="text-sm text-ink">{label}</p>
-        <code className="text-[11px] text-muted-foreground">{envVar}</code>
+        <code className="text-xs text-muted-foreground">{envVar}</code>
       </div>
       <div className="flex items-center gap-2">
         <span className="font-mono text-sm text-ink">{display}</span>
@@ -81,7 +81,7 @@ export function HAConfigSection({ status }: HAConfigSectionProps) {
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">HA Configuration</CardTitle>
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Info className="h-3.5 w-3.5" />
             Requires restart to change
           </div>
@@ -146,7 +146,7 @@ export function HAConfigSection({ status }: HAConfigSectionProps) {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <p className="text-sm text-ink">MCP Transport &amp; Address</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 MCP_TRANSPORT, MCP_HTTP_ADDR
               </p>
             </div>

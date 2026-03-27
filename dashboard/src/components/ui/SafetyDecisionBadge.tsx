@@ -4,7 +4,7 @@ type SafetyDecisionType = "allow" | "deny" | "require_approval" | "allow_with_co
 
 const decisionConfig: Record<string, { color: string; bg: string; label: string }> = {
   allow: { color: "text-[var(--color-success)]", bg: "bg-[var(--color-success)]/10", label: "ALLOW" },
-  deny: { color: "text-destructive", bg: "bg-destructive/10", label: "DENY" },
+  deny: { color: "text-[var(--color-governance)]", bg: "bg-[var(--color-governance)]/10", label: "DENY" },
   require_approval: { color: "text-[var(--color-warning)]", bg: "bg-[var(--color-warning)]/10", label: "APPROVAL" },
   allow_with_constraints: { color: "text-[var(--color-info)]", bg: "bg-[var(--color-info)]/10", label: "CONSTRAINED" },
   throttle: { color: "text-[var(--color-warning)]", bg: "bg-[var(--color-warning)]/10", label: "THROTTLE" },
@@ -28,7 +28,7 @@ export function SafetyDecisionBadge({ decision, matchedRules }: SafetyDecisionBa
   return (
     <span
       className={cn(
-        "group relative inline-flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[10px] font-semibold tracking-wider cursor-default",
+        "group relative inline-flex items-center gap-1 px-2 py-0.5 rounded font-mono text-xs font-semibold tracking-wider cursor-default",
         c.color,
         c.bg,
       )}
@@ -36,7 +36,7 @@ export function SafetyDecisionBadge({ decision, matchedRules }: SafetyDecisionBa
       {c.label}
       {matchedRules && matchedRules.length > 0 && (
         <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 min-w-[180px]">
-          <span className="block bg-surface-3 border border-border rounded-lg p-2 shadow-xl text-[10px] text-muted-foreground font-normal tracking-normal">
+          <span className="block bg-surface-3 border border-border rounded-lg p-2 shadow-xl text-xs text-muted-foreground font-normal tracking-normal">
             <span className="block text-foreground font-semibold mb-1">
               {matchedRules.length} matched rule{matchedRules.length > 1 ? "s" : ""}
             </span>

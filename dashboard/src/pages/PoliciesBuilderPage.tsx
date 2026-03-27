@@ -5,6 +5,7 @@ import { VisualRuleBuilder } from "../components/policy/VisualRuleBuilder";
 import { cn } from "../lib/utils";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { usePolicyBundle } from "../hooks/usePolicies";
+import { EmptyState } from "../components/ui/EmptyState";
 
 type BuilderTab = "visual" | "yaml";
 
@@ -16,9 +17,7 @@ export default function PoliciesBuilderPage() {
 
   if (!bundleId) {
     return (
-      <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-        No policy bundles found. Create one to get started.
-      </div>
+      <EmptyState title="No policy bundles found." description="Create one to get started." />
     );
   }
 

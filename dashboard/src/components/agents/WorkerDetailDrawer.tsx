@@ -24,7 +24,7 @@ function statusVariant(status: string): "success" | "warning" | "danger" | "defa
   }
 }
 
-function jobStatusVariant(status: string): "success" | "warning" | "danger" | "info" | "default" {
+function jobStatusVariant(status: string): "success" | "warning" | "danger" | "info" | "default" | "governance" {
   switch (status) {
     case "succeeded":
       return "success";
@@ -33,6 +33,8 @@ function jobStatusVariant(status: string): "success" | "warning" | "danger" | "i
       return "info";
     case "failed":
       return "danger";
+    case "denied":
+      return "governance";
     case "pending":
       return "warning";
     default:
@@ -201,7 +203,7 @@ export function WorkerDetailDrawer({
                     <p className="text-sm font-semibold text-ink">
                       Last seen {hbAge.label}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {worker.lastHeartbeat}
                     </p>
                   </div>

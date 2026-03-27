@@ -7,10 +7,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDuration, formatRelativeTime } from "@/lib/utils";
-import { StatusBadge, type BadgeVariant } from "@/components/ui/StatusBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { Workflow, WorkflowRun } from "@/api/types";
 import type { StudioMode } from "./types";
-import { getGroupedStepTypes, getStepMeta } from "./nodeRegistry";
+import { getGroupedStepTypes, getStepMeta, statusToBadgeVariant } from "./nodeRegistry";
 
 // ---------------------------------------------------------------------------
 // Drag handler factory (shared for all palette items)
@@ -19,20 +19,6 @@ import { getGroupedStepTypes, getStepMeta } from "./nodeRegistry";
 function handleDragStart(event: DragEvent, stepType: string) {
   event.dataTransfer.setData("application/workflow-studio", stepType);
   event.dataTransfer.effectAllowed = "move";
-}
-
-// ---------------------------------------------------------------------------
-// Run status → badge variant
-// ---------------------------------------------------------------------------
-
-function runBadgeVariant(status?: string): BadgeVariant {
-  switch (status) {
-    case "succeeded": return "healthy";
-    case "running": return "info";
-    case "failed": return "danger";
-    case "waiting": return "warning";
-    default: return "muted";
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +40,7 @@ function PaletteItem({ type, label, iconColor }: { type: string; label: string; 
       </div>
       <div className="min-w-0">
         <span className="block text-xs font-medium text-ink truncate">{label}</span>
-        <span className="block text-[10px] text-muted-foreground truncate">{meta.description}</span>
+        <span className="block text-xs text-muted-foreground truncate">{meta.description}</span>
       </div>
     </div>
   );
@@ -88,11 +74,11 @@ function RunListItem({
         <span className="text-xs font-medium text-ink truncate">
           {run.id.slice(0, 8)}
         </span>
-        <StatusBadge variant={runBadgeVariant(run.status)}>
+        <StatusBadge variant={statusToBadgeVariant(run.status)}>
           {run.status}
         </StatusBadge>
       </div>
-      <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
         {run.startedAt && (
           <span>{formatRelativeTime(run.startedAt)}</span>
         )}
@@ -200,7 +186,7 @@ export function StudioSidebar({
             {/* Node palette groups */}
             {filteredGroups.map((group) => (
               <section key={group.category}>
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">
                   {group.label}
                 </h4>
                 <div className="space-y-1.5">
@@ -228,23 +214,23 @@ export function StudioSidebar({
             {workflow && (
               <section className="space-y-2">
                 <div>
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Name</span>
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Name</span>
                   <p className="text-xs text-ink font-medium">{workflow.name}</p>
                 </div>
                 {workflow.description && (
                   <div>
-                    <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Description</span>
+                    <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Description</span>
                     <p className="text-xs text-muted-foreground">{workflow.description}</p>
                   </div>
                 )}
                 <div className="flex gap-3">
                   <div>
-                    <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Steps</span>
+                    <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Steps</span>
                     <p className="text-xs text-ink font-medium">{workflow.steps?.length ?? 0}</p>
                   </div>
                   {workflow.version && (
                     <div>
-                      <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Version</span>
+                      <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Version</span>
                       <p className="text-xs text-ink font-medium">{workflow.version}</p>
                     </div>
                   )}
@@ -255,14 +241,14 @@ export function StudioSidebar({
             {/* Run selector */}
             <section>
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Runs
                 </h4>
                 {selectedRunId && (
                   <button
                     type="button"
                     onClick={() => onSelectRun(null)}
-                    className="text-[10px] text-accent hover:underline"
+                    className="text-xs text-accent hover:underline"
                   >
                     Clear
                   </button>
@@ -271,7 +257,7 @@ export function StudioSidebar({
 
               {/* Blueprint mode hint */}
               {!selectedRunId && runs.length > 0 && (
-                <p className="text-[10px] text-muted-foreground mb-2">
+                <p className="text-xs text-muted-foreground mb-2">
                   Select a run to overlay status on the diagram
                 </p>
               )}

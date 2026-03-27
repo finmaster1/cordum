@@ -101,7 +101,7 @@ export function MemoryPanel({ memoryPtr, jobId }: MemoryPanelProps) {
         <div>
           <CardTitle>Memory</CardTitle>
           {memoryPtr ? (
-            <p className="mt-1 max-w-[32rem] truncate font-mono text-[10px] text-muted-foreground" title={memoryPtr}>
+            <p className="mt-1 max-w-[32rem] truncate font-mono text-xs text-muted-foreground" title={memoryPtr}>
               {memoryPtr}
             </p>
           ) : (
@@ -205,7 +205,7 @@ export function MemoryPanel({ memoryPtr, jobId }: MemoryPanelProps) {
                     {entry.role}
                   </Badge>
                   {timestamp && (
-                    <span className="text-[11px] text-muted-foreground">{timestamp}</span>
+                    <span className="text-xs text-muted-foreground">{timestamp}</span>
                   )}
                 </div>
                 <div className="rounded-xl bg-surface2/35 p-3">

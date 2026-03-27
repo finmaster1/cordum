@@ -174,7 +174,7 @@ export default function SettingsConfigPage() {
                   <div key={field.key} className="flex items-start justify-between gap-8">
                     <div className="flex-1">
                       <label className="text-xs font-medium text-foreground block">{field.label}</label>
-                      {field.description && <p className="text-[10px] text-muted-foreground mt-0.5">{field.description}</p>}
+                      {field.description && <p className="text-xs text-muted-foreground mt-0.5">{field.description}</p>}
                     </div>
                     <div className="w-48 shrink-0">
                       {field.type === "text" && (

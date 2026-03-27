@@ -288,7 +288,17 @@ function buildStepPayload(step: Workflow["steps"][number]): Record<string, unkno
   if (step.retry?.max_retries) {
     payload.retry = step.retry;
   } else if (typeof config.retryMax === "number" && config.retryMax > 0) {
-    payload.retry = { max_retries: Math.floor(config.retryMax) };
+    const retry: Record<string, unknown> = { max_retries: Math.floor(config.retryMax) };
+    if (typeof config.backoffSec === "number" && config.backoffSec > 0) {
+      retry.initial_backoff_sec = config.backoffSec;
+    }
+    if (typeof config.maxBackoffSec === "number" && config.maxBackoffSec > 0) {
+      retry.max_backoff_sec = config.maxBackoffSec;
+    }
+    if (typeof config.backoffMultiplier === "number" && config.backoffMultiplier > 0) {
+      retry.multiplier = config.backoffMultiplier;
+    }
+    payload.retry = retry;
   }
 
   // Schemas
@@ -306,6 +316,10 @@ function buildStepPayload(step: Workflow["steps"][number]): Record<string, unkno
   // Route labels
   const routeLabels = step.route_labels ?? (config.routeLabels as Record<string, string> | undefined);
   if (routeLabels && typeof routeLabels === "object") payload.route_labels = routeLabels;
+
+  // On-error handler
+  const onError = step.on_error ?? (typeof config.onError === "string" ? config.onError : undefined);
+  if (onError?.trim()) payload.on_error = onError.trim();
 
   // Input: prefer direct field, merge with legacy config fields
   const input: Record<string, unknown> = {};

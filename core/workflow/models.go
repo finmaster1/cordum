@@ -55,6 +55,7 @@ const (
 	StepStatusWaiting   StepStatus = "waiting"
 	StepStatusSucceeded StepStatus = "succeeded"
 	StepStatusFailed    StepStatus = "failed"
+	StepStatusDenied    StepStatus = "denied"
 	StepStatusCancelled StepStatus = "cancelled"
 	StepStatusTimedOut  StepStatus = "timed_out"
 	StepStatusSkipped   StepStatus = "skipped"

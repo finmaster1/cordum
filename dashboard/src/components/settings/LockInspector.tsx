@@ -122,7 +122,7 @@ function LockRow({ lock }: { lock: AdminLock }) {
         <span className="text-xs font-mono text-ink">{shortenKey(lock.key)}</span>
       </td>
       <td className="px-4 py-2">
-        <Badge variant="info" className="text-[10px]">{lock.type}</Badge>
+        <Badge variant="info" className="text-xs">{lock.type}</Badge>
       </td>
       <td className="px-4 py-2">
         <span className="text-xs font-mono text-muted-foreground">{lock.holder}</span>
@@ -224,7 +224,7 @@ export function LockInspector() {
         <div className="flex items-center gap-2">
           <Lock className="h-4 w-4 text-muted-foreground" />
           <CardTitle className="text-sm">Distributed Locks</CardTitle>
-          <Badge variant="default" className="text-[10px]">{locks.length}</Badge>
+          <Badge variant="default" className="text-xs">{locks.length}</Badge>
         </div>
         <button
           type="button"
@@ -260,7 +260,7 @@ export function LockInspector() {
         </table>
       </div>
 
-      <p className="mt-2 text-[10px] text-muted-foreground">
+      <p className="mt-2 text-xs text-muted-foreground">
         Auto-refreshes every 5 seconds. Read-only.
       </p>
     </Card>

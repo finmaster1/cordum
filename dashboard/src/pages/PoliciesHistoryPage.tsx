@@ -31,6 +31,7 @@ import { exportPdf, type PdfSection } from "../lib/pdfExport";
 import { useAuth } from "../hooks/useAuth";
 import type { PolicyRule } from "../api/types";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { EmptyState } from "../components/ui/EmptyState";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,9 +101,9 @@ function matchesDateRange(createdAt: string, range: DateRange): boolean {
 // Inline diff viewer (rule summary cards)
 // ---------------------------------------------------------------------------
 
-const decisionVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "governance"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -128,10 +129,10 @@ function RuleSummary({ rule, highlight }: { rule: PolicyRule; highlight?: string
       {(capabilities.length > 0 || riskTags.length > 0) && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {capabilities.map((c) => (
-            <Badge key={c} variant="info" className="text-[10px]">{c}</Badge>
+            <Badge key={c} variant="info" className="text-xs">{c}</Badge>
           ))}
           {riskTags.map((t) => (
-            <Badge key={t} variant="danger" className="text-[10px]">{t}</Badge>
+            <Badge key={t} variant="danger" className="text-xs">{t}</Badge>
           ))}
         </div>
       )}
@@ -195,9 +196,7 @@ function ExpandedDiff({ snapshotId, prevSnapshotId }: { snapshotId: string; prev
                     highlight={diff.kind === "removed" ? "red" : diff.kind === "changed" ? "yellow" : undefined}
                   />
                 ) : (
-                  <div className="rounded-xl border border-dashed border-success/40 bg-success/5 px-3 py-4 text-center text-[10px] text-muted-foreground">
-                    Not present in previous
-                  </div>
+                  <EmptyState title="Not present in previous" className="py-6" />
                 )}
               </div>
               <div>
@@ -207,9 +206,7 @@ function ExpandedDiff({ snapshotId, prevSnapshotId }: { snapshotId: string; prev
                     highlight={diff.kind === "added" ? "green" : diff.kind === "changed" ? "yellow" : undefined}
                   />
                 ) : (
-                  <div className="rounded-xl border border-dashed border-danger/40 bg-danger/5 px-3 py-4 text-center text-[10px] text-muted-foreground">
-                    Not present in this version
-                  </div>
+                  <EmptyState title="Not present in this version" className="py-6" />
                 )}
               </div>
             </div>
@@ -546,11 +543,10 @@ export default function PoliciesHistoryPage() {
           Loading snapshots...
         </div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-          {snapshots.length === 0
-            ? "No snapshots yet. Publish a policy to create the first snapshot."
-            : "No snapshots match the current filters."}
-        </div>
+        <EmptyState
+          title={snapshots.length === 0 ? "No snapshots yet." : "No snapshots match the current filters."}
+          description={snapshots.length === 0 ? "Publish a policy to create the first snapshot." : undefined}
+        />
       ) : (
         <div className="divide-y divide-border rounded-2xl border border-border">
           {filtered.map((snap, i) => {

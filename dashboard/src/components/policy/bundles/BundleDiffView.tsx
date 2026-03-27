@@ -75,7 +75,7 @@ export function BundleDiffView({ bundleId, draftYaml }: BundleDiffViewProps) {
 
   return (
     <div className="space-y-3">
-      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
         draft vs published
       </p>
       <div className="instrument-card overflow-auto max-h-[520px] p-0">

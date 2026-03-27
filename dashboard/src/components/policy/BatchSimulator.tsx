@@ -19,9 +19,9 @@ interface BatchResult {
   error?: string;
 }
 
-const decisionBadge: Record<string, "success" | "danger" | "warning" | "info" | "default"> = {
+const decisionBadge: Record<string, "success" | "governance" | "warning" | "info" | "default"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -215,7 +215,7 @@ export function BatchSimulator({ bundleId }: BatchSimulatorProps) {
             return (
               <div key={key} className={`rounded-xl px-3 py-2.5 text-center ${colors[key]}`}>
                 <p className="text-lg font-bold">{summary[key] ?? 0}</p>
-                <p className="text-[11px] font-medium">{labels[key]}</p>
+                <p className="text-xs font-medium">{labels[key]}</p>
               </div>
             );
           })}

@@ -10,7 +10,7 @@ function decisionTone(decision: GlobalPolicyInputRule["decision"]): string {
     case "allow":
       return "bg-[var(--color-success)]/20 text-[var(--color-success)]";
     case "deny":
-      return "bg-destructive/20 text-destructive";
+      return "bg-[var(--color-governance)]/20 text-[var(--color-governance)]";
     case "allow_with_constraints":
       return "bg-[var(--color-info)]/20 text-[var(--color-info)]";
     case "throttle":
@@ -45,10 +45,10 @@ export function TenantScopedRulesSection({
           {rules.map((rule, index) => (
             <article key={`${rule.id}-${index}`} className="rounded border border-border/70 bg-surface-1 p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+                <span className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground">
                   {rule.id}
                 </span>
-                <span className={`rounded px-2 py-0.5 text-[10px] font-mono uppercase ${decisionTone(rule.decision)}`}>
+                <span className={`rounded px-2 py-0.5 text-xs font-mono uppercase ${decisionTone(rule.decision)}`}>
                   {rule.decision}
                 </span>
               </div>

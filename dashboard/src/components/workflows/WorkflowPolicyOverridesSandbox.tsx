@@ -41,13 +41,13 @@ export function WorkflowPolicyOverridesSandbox({ sandbox, readOnly, onChange }: 
         <Lock className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-xs font-semibold text-foreground">Sandbox Constraints</span>
         {!hasValues && (
-          <span className="text-[10px] font-mono text-muted-foreground ml-auto">global defaults</span>
+          <span className="text-xs font-mono text-muted-foreground ml-auto">global defaults</span>
         )}
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <label className="text-[10px] text-muted-foreground" htmlFor="sandbox-isolated">
+          <label className="text-xs text-muted-foreground" htmlFor="sandbox-isolated">
             Isolated execution
           </label>
           {readOnly ? (
@@ -76,7 +76,7 @@ export function WorkflowPolicyOverridesSandbox({ sandbox, readOnly, onChange }: 
 
         {LIST_FIELDS.map(({ key, label }) => (
           <div key={key} className="flex flex-col gap-0.5">
-            <label className="text-[10px] text-muted-foreground" htmlFor={`sandbox-${key}`}>
+            <label className="text-xs text-muted-foreground" htmlFor={`sandbox-${key}`}>
               {label} <span className="font-mono">(comma-separated)</span>
             </label>
             {readOnly ? (

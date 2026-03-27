@@ -101,13 +101,13 @@ export function FieldHelp({
         </div>
       </div>
       {hint && (
-        <p id={hintId} className="text-[11px] text-muted-foreground/90">
+        <p id={hintId} className="text-xs text-muted-foreground/90">
           {hint}
         </p>
       )}
       {control}
       {error && (
-        <p id={errorId} className="text-[11px] text-destructive" role="alert">
+        <p id={errorId} className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}

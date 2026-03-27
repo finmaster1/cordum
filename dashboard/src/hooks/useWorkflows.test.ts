@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowRun, WorkflowStep } from "@/api/types";
 import { __workflowsInternal } from "./useWorkflows";
-import {
-  resolveNodeMeta,
-  normalizeStepType,
-} from "@/pages/WorkflowCreatePage";
 import { __runStreamInternal } from "./useRunStream";
 
 function makeRun(overrides: Partial<WorkflowRun>): WorkflowRun {
@@ -179,59 +175,6 @@ describe("useWorkflows internals", () => {
 
 // ---------------------------------------------------------------------------
 // Crash resilience: builder node type resolution
-// ---------------------------------------------------------------------------
-
-describe("resolveNodeMeta — crash resilience", () => {
-  it("returns valid meta for all known node types", () => {
-    const known = ["worker", "approval", "condition", "delay", "loop", "parallel", "subworkflow"];
-    for (const type of known) {
-      const meta = resolveNodeMeta(type);
-      expect(meta.type).toBe(type);
-      expect(meta.label).toBeTruthy();
-      expect(meta.icon).toBeDefined();
-    }
-  });
-
-  it("returns UNKNOWN_NODE_META for unrecognized step types (no crash)", () => {
-    const unknown = resolveNodeMeta("custom-step-type-xyz");
-    expect(unknown.type).toBe("unknown");
-    expect(unknown.label).toBe("Unknown");
-    expect(unknown.icon).toBeDefined();
-    expect(unknown.desc).toContain("Unsupported");
-  });
-
-  it("handles empty string type without crash", () => {
-    const meta = resolveNodeMeta("");
-    expect(meta.type).toBe("unknown");
-  });
-});
-
-describe("normalizeStepType — backend type preservation", () => {
-  it("maps 'job' to 'worker' and preserves original", () => {
-    const result = normalizeStepType("job");
-    expect(result.nodeType).toBe("worker");
-    expect(result.originalType).toBe("job");
-  });
-
-  it("maps 'sub-workflow' to 'subworkflow' and preserves original", () => {
-    const result = normalizeStepType("sub-workflow");
-    expect(result.nodeType).toBe("subworkflow");
-    expect(result.originalType).toBe("sub-workflow");
-  });
-
-  it("maps unknown backend type to 'unknown' while preserving the original", () => {
-    const result = normalizeStepType("custom-backend-type");
-    expect(result.nodeType).toBe("unknown");
-    expect(result.originalType).toBe("custom-backend-type");
-  });
-
-  it("preserves known types directly", () => {
-    const result = normalizeStepType("approval");
-    expect(result.nodeType).toBe("approval");
-    expect(result.originalType).toBe("approval");
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Crash resilience: useRunStream cache patcher
 // ---------------------------------------------------------------------------

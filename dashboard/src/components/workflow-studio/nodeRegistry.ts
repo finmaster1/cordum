@@ -20,6 +20,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import type { RunStatus } from "@/api/types";
+import type { BadgeVariant } from "@/components/ui/StatusBadge";
 
 // ---------------------------------------------------------------------------
 // Step type metadata
@@ -294,6 +295,14 @@ const STATUS_VISUALS: Record<string, StatusVisual> = {
     strikethrough: true,
     label: "Cancelled",
   },
+  denied: {
+    bg: "bg-[var(--color-governance)]/5",
+    border: "border-[var(--color-governance)]/40",
+    pulse: false,
+    dimmed: false,
+    strikethrough: false,
+    label: "Denied",
+  },
   timed_out: {
     bg: "bg-destructive/5",
     border: "border-destructive/30",
@@ -330,7 +339,7 @@ export interface SafetyBadgeConfig {
 
 const SAFETY_BADGES: Record<string, SafetyBadgeConfig> = {
   allow: { label: "Allowed", className: "bg-[var(--color-success)] text-primary-foreground", glyph: "\u2713" },
-  deny: { label: "Denied", className: "bg-destructive text-primary-foreground", glyph: "\u2717" },
+  deny: { label: "Denied", className: "bg-[var(--color-governance)] text-primary-foreground", glyph: "\u2717" },
   require_approval: { label: "Approval required", className: "bg-[var(--color-warning)] text-primary-foreground", glyph: "\u270B" },
   throttle: { label: "Throttled", className: "bg-[var(--color-info)] text-primary-foreground", glyph: "\u23F3" },
 };
@@ -356,4 +365,29 @@ const JOB_TYPES = new Set(["job", "agent-task", "pack-action", "tool-call"]);
 
 export function isJobType(stepType: string): boolean {
   return JOB_TYPES.has(stepType);
+}
+
+// ---------------------------------------------------------------------------
+// Run status → StatusBadge variant (shared by toolbar + sidebar)
+// ---------------------------------------------------------------------------
+
+const STATUS_TO_BADGE: Record<string, BadgeVariant> = {
+  succeeded: "healthy",
+  running: "info",
+  failed: "danger",
+  denied: "governance",
+  pending: "muted",
+  waiting: "warning",
+  cancelled: "muted",
+  timed_out: "danger",
+};
+
+export function statusToBadgeVariant(status?: string): BadgeVariant {
+  if (!status) return "muted";
+  return STATUS_TO_BADGE[status] ?? "muted";
+}
+
+export function statusToBadgeLabel(status?: string): string {
+  const visual = getStatusVisual(status);
+  return visual.label || "Draft";
 }

@@ -147,7 +147,7 @@ export default function BundleDetailPage() {
             Bundles
           </Button>
           {isDirty && (
-            <span className="text-[10px] font-mono text-[var(--color-warning)]">unsaved changes</span>
+            <span className="text-xs font-mono text-[var(--color-warning)]">unsaved changes</span>
           )}
         </div>
 
@@ -270,19 +270,19 @@ export default function BundleDetailPage() {
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div className="instrument-card p-4">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">rules</p>
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-2">rules</p>
               <p className="text-sm font-mono text-foreground">{bundle.rule_count ?? bundle.rules?.length ?? 0}</p>
             </div>
             <div className="instrument-card p-4">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">source</p>
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-2">source</p>
               <p className="text-sm font-mono text-foreground truncate">{bundle.source ?? "—"}</p>
             </div>
             <div className="instrument-card p-4">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">author</p>
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-2">author</p>
               <p className="text-sm font-mono text-foreground truncate">{bundle.author ?? "—"}</p>
             </div>
             <div className="instrument-card p-4">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">sha256</p>
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-2">sha256</p>
               <p className="text-sm font-mono text-foreground truncate">
                 {bundle.sha256 ? `${bundle.sha256.slice(0, 16)}...` : "—"}
               </p>

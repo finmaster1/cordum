@@ -235,12 +235,12 @@ export default function AgentsPage() {
           <table className="w-full min-w-[750px]">
             <thead>
               <tr className="border-b border-border bg-surface-0">
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Worker</th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Pool</th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Capabilities</th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Jobs</th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Seen</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Worker</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Pool</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Capabilities</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Jobs</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Seen</th>
               </tr>
             </thead>
             <tbody>
@@ -268,12 +268,12 @@ export default function AgentsPage() {
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap gap-1">
                       {(w.capabilities ?? []).slice(0, 3).map((t: string) => (
-                        <span key={t} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground">
+                        <span key={t} className="text-xs font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground">
                           {t}
                         </span>
                       ))}
                       {(w.capabilities?.length ?? 0) > 3 && (
-                        <span className="text-[10px] text-muted-foreground">+{(w.capabilities?.length ?? 0) - 3}</span>
+                        <span className="text-xs text-muted-foreground">+{(w.capabilities?.length ?? 0) - 3}</span>
                       )}
                     </div>
                   </td>
@@ -333,13 +333,13 @@ function AgentRegistryTab() {
         <table className="w-full min-w-[800px]">
           <thead>
             <tr className="border-b border-border bg-surface-0">
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Agent</th>
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Pool</th>
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Active Jobs</th>
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Capacity</th>
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Capabilities</th>
-              <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Active</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Agent</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Pool</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Active Jobs</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Capacity</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Capabilities</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Active</th>
             </tr>
           </thead>
           <tbody>
@@ -354,7 +354,7 @@ function AgentRegistryTab() {
                     <Shield className="w-3.5 h-3.5 text-cordum" />
                     <div>
                       <p className="text-sm font-medium text-foreground">{w.name || w.id}</p>
-                      <p className="text-[10px] font-mono text-muted-foreground">{w.id}</p>
+                      <p className="text-xs font-mono text-muted-foreground">{w.id}</p>
                     </div>
                   </div>
                 </td>
@@ -367,10 +367,10 @@ function AgentRegistryTab() {
                 <td className="px-5 py-3">
                   <div className="flex flex-wrap gap-1">
                     {w.capabilities?.slice(0, 3).map((c) => (
-                      <span key={c} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cordum/10 text-cordum">{c}</span>
+                      <span key={c} className="text-xs font-mono px-1.5 py-0.5 rounded bg-cordum/10 text-cordum">{c}</span>
                     ))}
                     {(w.capabilities?.length ?? 0) > 3 && (
-                      <span className="text-[10px] font-mono text-muted-foreground">+{(w.capabilities?.length ?? 0) - 3}</span>
+                      <span className="text-xs font-mono text-muted-foreground">+{(w.capabilities?.length ?? 0) - 3}</span>
                     )}
                   </div>
                 </td>

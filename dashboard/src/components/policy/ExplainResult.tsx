@@ -10,9 +10,9 @@ import type { ExplainResult, ExplainRuleStep, ExplainCondition } from "../../hoo
 // Variant helpers
 // ---------------------------------------------------------------------------
 
-const decisionBadge: Record<string, "success" | "danger" | "warning" | "info" | "default"> = {
+const decisionBadge: Record<string, "success" | "governance" | "warning" | "info" | "default"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -73,7 +73,7 @@ function RuleStepCard({ step, index }: { step: ExplainRuleStep; index: number })
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="font-mono text-[10px] text-muted-foreground">#{index + 1}</span>
+          <span className="font-mono text-xs text-muted-foreground">#{index + 1}</span>
           <span className="text-sm font-medium text-ink">{step.ruleId}</span>
           {step.ruleName && (
             <span className="text-xs text-muted-foreground">({step.ruleName})</span>

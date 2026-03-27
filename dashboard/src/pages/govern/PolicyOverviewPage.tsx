@@ -250,7 +250,7 @@ export default function PolicyOverviewPage() {
                 </div>
               ) : (
                 <>
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block">
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest block">
                     Installed Bundles ({filteredBundles.length})
                   </span>
                   {filteredBundles.map((bundle) => (

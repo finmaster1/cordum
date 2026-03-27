@@ -17,7 +17,7 @@ export function getConditionIcon(passed: boolean) {
 
 function ConditionRow({ condition }: { condition: ExplainCondition }) {
   return (
-    <div className="flex items-start gap-2 text-[11px] py-0.5">
+    <div className="flex items-start gap-2 text-xs py-0.5">
       {getConditionIcon(condition.passed)}
       <span className="font-mono text-muted-foreground min-w-[80px]">
         {condition.field}
@@ -56,7 +56,7 @@ function ChainStep({
 
       <div className={`pb-5 ${isLast ? "pb-0" : ""}`}>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-mono text-muted-foreground/50">
+          <span className="text-xs font-mono text-muted-foreground/50">
             #{index + 1}
           </span>
           <span className="text-xs font-mono font-medium text-foreground">
@@ -68,7 +68,7 @@ function ChainStep({
         </div>
 
         {step.reason && (
-          <p className="text-[11px] text-muted-foreground mt-1.5 italic leading-relaxed">{step.reason}</p>
+          <p className="text-xs text-muted-foreground mt-1.5 italic leading-relaxed">{step.reason}</p>
         )}
 
         {step.conditions.length > 0 && (

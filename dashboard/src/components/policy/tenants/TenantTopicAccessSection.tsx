@@ -14,8 +14,8 @@ function TopicTag({
     <span
       className={
         tone === "allow"
-          ? "rounded bg-[var(--color-success)]/20 px-2 py-0.5 text-[10px] font-mono text-[var(--color-success)]"
-          : "rounded bg-destructive/20 px-2 py-0.5 text-[10px] font-mono text-destructive"
+          ? "rounded bg-[var(--color-success)]/20 px-2 py-0.5 text-xs font-mono text-[var(--color-success)]"
+          : "rounded bg-destructive/20 px-2 py-0.5 text-xs font-mono text-destructive"
       }
     >
       {value}
@@ -38,14 +38,14 @@ export function TenantTopicAccessSection({
           <span className="font-medium text-foreground">deny overrides allow</span>.
           Keep deny patterns specific to avoid unintended broad blocks.
         </p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Patterns are treated as case-insensitive globs by policy evaluators.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="rounded border border-border/70 bg-surface-1 p-3">
-          <p className="mb-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <p className="mb-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
             allow_topics
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -59,7 +59,7 @@ export function TenantTopicAccessSection({
         </div>
 
         <div className="rounded border border-border/70 bg-surface-1 p-3">
-          <p className="mb-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <p className="mb-2 text-xs font-mono uppercase tracking-wider text-muted-foreground">
             deny_topics
           </p>
           <div className="flex flex-wrap gap-1.5">

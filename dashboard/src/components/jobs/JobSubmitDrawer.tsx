@@ -158,7 +158,7 @@ function Field({
     <div className="space-y-1.5">
       <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
         {label}
-        {hint && <span className="text-[11px] font-normal text-muted/80">{hint}</span>}
+        {hint && <span className="text-xs font-normal text-muted/80">{hint}</span>}
       </label>
       {children}
       {error && <p className="text-xs text-danger">{error}</p>}

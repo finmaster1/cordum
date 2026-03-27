@@ -66,9 +66,9 @@ function diffRules(rulesA: PolicyRule[], rulesB: PolicyRule[]): RuleDiff[] {
 // Decision badge
 // ---------------------------------------------------------------------------
 
-const decisionVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "governance"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -103,12 +103,12 @@ function RuleSummary({ rule, highlight }: { rule: PolicyRule; highlight?: string
       {(capabilities.length > 0 || riskTags.length > 0) && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {capabilities.map((c) => (
-            <Badge key={c} variant="info" className="text-[10px]">
+            <Badge key={c} variant="info" className="text-xs">
               {c}
             </Badge>
           ))}
           {riskTags.map((t) => (
-            <Badge key={t} variant="danger" className="text-[10px]">
+            <Badge key={t} variant="danger" className="text-xs">
               {t}
             </Badge>
           ))}
@@ -262,7 +262,7 @@ export function SnapshotComparison() {
                       }
                     />
                   ) : (
-                    <div className="rounded-xl border border-dashed border-success/40 bg-success/5 px-3 py-4 text-center text-[10px] text-muted-foreground">
+                    <div className="rounded-xl border border-dashed border-success/40 bg-success/5 px-3 py-4 text-center text-xs text-muted-foreground">
                       Not present in A
                     </div>
                   )}
@@ -282,7 +282,7 @@ export function SnapshotComparison() {
                       }
                     />
                   ) : (
-                    <div className="rounded-xl border border-dashed border-danger/40 bg-danger/5 px-3 py-4 text-center text-[10px] text-muted-foreground">
+                    <div className="rounded-xl border border-dashed border-danger/40 bg-danger/5 px-3 py-4 text-center text-xs text-muted-foreground">
                       Not present in B
                     </div>
                   )}

@@ -455,9 +455,12 @@ func applyResult(sr *StepRun, res *pb.JobResult, step *Step) (retry bool, delay 
 			sr.Error = map[string]any{"message": res.ErrorMessage}
 			return true, delay
 		}
-		if res.Status == pb.JobStatus_JOB_STATUS_TIMEOUT {
+		switch res.Status {
+		case pb.JobStatus_JOB_STATUS_TIMEOUT:
 			sr.Status = StepStatusTimedOut
-		} else {
+		case pb.JobStatus_JOB_STATUS_DENIED:
+			sr.Status = StepStatusDenied
+		default:
 			sr.Status = StepStatusFailed
 		}
 		sr.CompletedAt = &now
@@ -517,7 +520,7 @@ func shouldIgnoreProcessedResult(sr *StepRun) bool {
 		return false
 	}
 	switch sr.Status {
-	case StepStatusSucceeded, StepStatusFailed, StepStatusCancelled, StepStatusTimedOut:
+	case StepStatusSucceeded, StepStatusFailed, StepStatusDenied, StepStatusCancelled, StepStatusTimedOut:
 		return true
 	case StepStatusPending:
 		return sr.NextAttemptAt != nil
@@ -534,7 +537,7 @@ func aggregateChildren(parent *StepRun) StepStatus {
 	hasFailed := false
 	for _, child := range parent.Children {
 		switch child.Status {
-		case StepStatusFailed, StepStatusCancelled, StepStatusTimedOut:
+		case StepStatusFailed, StepStatusDenied, StepStatusCancelled, StepStatusTimedOut:
 			hasFailed = true
 		case StepStatusSucceeded:
 		default:

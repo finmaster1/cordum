@@ -73,7 +73,7 @@ function PoolCard({ group }: { group: PoolGroup }) {
 
       {group.workers.length > 0 && (
         <div className="mt-4 space-y-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Workers
           </p>
           {group.workers.map((w) => (

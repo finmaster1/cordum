@@ -132,7 +132,7 @@ export default function DLQPage() {
           <>
             <div className={cn("instrument-card", items.length > 0 ? "status-danger" : "")}>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Dead Letters</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Dead Letters</span>
                 <AlertTriangle className={cn("w-4 h-4", items.length > 0 ? "text-destructive" : "text-[var(--color-success)]")} />
               </div>
               <span className={cn("font-mono text-2xl font-bold", items.length > 0 ? "text-destructive" : "text-[var(--color-success)]")}>{data?.items?.length ?? 0}</span>
@@ -140,14 +140,14 @@ export default function DLQPage() {
             </div>
             <div className="instrument-card">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Avg Attempts</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Avg Attempts</span>
               </div>
               <span className="font-mono text-2xl font-bold text-foreground">{avgAttempts}</span>
               <p className="text-xs text-muted-foreground mt-1">Before dead-lettering</p>
             </div>
             <div className="instrument-card">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Status</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Status</span>
                 <span className={cn("w-1.5 h-1.5 rounded-full status-pulse", items.length > 0 ? "bg-destructive" : "bg-[var(--color-success)]")} />
               </div>
               <span className={cn("font-mono text-sm font-bold", items.length > 0 ? "text-[var(--color-warning)]" : "text-[var(--color-success)]")}>
@@ -200,12 +200,12 @@ export default function DLQPage() {
                     className="w-3.5 h-3.5 rounded border-border bg-surface-0 text-cordum focus:ring-cordum accent-[oklch(0.82_0.18_165)]"
                   />
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Job ID</th>
-                <th className="text-left px-4 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Topic</th>
-                <th className="text-left px-4 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Error</th>
-                <th className="text-center px-4 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Attempts</th>
-                <th className="text-right px-4 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-wider">Failed</th>
-                <th className="px-4 py-3"></th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Job ID</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Topic</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Error</th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Attempts</th>
+                <th className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Failed</th>
+                <th className="px-5 py-3"></th>
               </tr>
             </thead>
             <tbody>
@@ -227,14 +227,14 @@ export default function DLQPage() {
                         className="w-3.5 h-3.5 rounded border-border bg-surface-0 text-cordum focus:ring-cordum accent-[oklch(0.82_0.18_165)]"
                       />
                     </td>
-                    <td className="px-4 py-3 font-mono text-sm text-foreground">{(d.jobId ?? d.id ?? "").slice(0, 16)}</td>
-                    <td className="px-4 py-3 text-sm text-foreground">{d.originalTopic ?? "—"}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3 font-mono text-sm text-foreground">{(d.jobId ?? d.id ?? "").slice(0, 16)}</td>
+                    <td className="px-5 py-3 text-sm text-foreground">{d.originalTopic ?? "—"}</td>
+                    <td className="px-5 py-3">
                       <span className="text-xs text-destructive truncate max-w-[250px] block font-mono">{d.error ?? "—"}</span>
                     </td>
-                    <td className="px-4 py-3 text-center font-mono text-xs text-muted-foreground">{d.attempts ?? d.retryCount ?? 0}</td>
-                    <td className="px-4 py-3 text-right text-xs text-muted-foreground font-mono">{formatRelativeTime(d.failedAt ?? d.createdAt ?? "")}</td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-5 py-3 text-center font-mono text-xs text-muted-foreground">{d.attempts ?? d.retryCount ?? 0}</td>
+                    <td className="px-5 py-3 text-right text-xs text-muted-foreground font-mono">{formatRelativeTime(d.failedAt ?? d.createdAt ?? "")}</td>
+                    <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-1 justify-end">
                         <button type="button"
                           onClick={() => retryMutation.mutate({ id: d.id })}
@@ -269,13 +269,13 @@ export default function DLQPage() {
                           >
                             <div className="px-12 py-4 bg-surface-0/50 border-b border-border space-y-3">
                               <div>
-                                <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">Entry Details</p>
+                                <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2">Entry Details</p>
                                 <pre className="text-xs font-mono text-foreground bg-surface-0 border border-border rounded-2xl p-3 max-h-40 overflow-auto">
                                   {JSON.stringify(buildDLQEntryDetails(d), null, 2)}
                                 </pre>
                               </div>
                               <div>
-                                <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-1">Full Error</p>
+                                <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-1">Full Error</p>
                                 <p className="text-xs font-mono text-destructive">{resolveDLQError(d)}</p>
                               </div>
                             </div>

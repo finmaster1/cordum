@@ -68,7 +68,7 @@ function MiniProgressBar({ steps }: { steps: WorkflowStep[] }) {
           />
         ))}
       </div>
-      <span className="flex-shrink-0 text-[10px] text-muted-foreground">
+      <span className="flex-shrink-0 text-xs text-muted-foreground">
         {done}/{total}
       </span>
     </div>

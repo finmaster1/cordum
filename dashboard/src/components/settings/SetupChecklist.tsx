@@ -96,7 +96,7 @@ export function SetupChecklist({
           >
             Dismiss forever
           </Button>
-          <p className="mt-1 text-center text-[10px] text-muted-foreground">
+          <p className="mt-1 text-center text-xs text-muted-foreground">
             You can re-open this guide from the Settings sidebar.
           </p>
         </div>
@@ -137,7 +137,7 @@ function ChecklistRow({
         {item.label}
       </span>
       {item.optional && (
-        <Badge variant="default" className="ml-auto text-[10px]">
+        <Badge variant="default" className="ml-auto text-xs">
           Optional
         </Badge>
       )}

@@ -58,9 +58,9 @@ function diffRules(rulesA: PolicyRule[], rulesB: PolicyRule[]): RuleDiff[] {
 // Decision badge mapping
 // ---------------------------------------------------------------------------
 
-const decisionVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "governance"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -93,10 +93,10 @@ function RuleCard({ rule, highlight }: { rule: PolicyRule; highlight?: string })
       {(capabilities.length > 0 || riskTags.length > 0) && (
         <div className="mt-1 flex flex-wrap gap-1">
           {capabilities.map((c) => (
-            <Badge key={c} variant="info" className="text-[10px]">{c}</Badge>
+            <Badge key={c} variant="info" className="text-xs">{c}</Badge>
           ))}
           {riskTags.map((t) => (
-            <Badge key={t} variant="danger" className="text-[10px]">{t}</Badge>
+            <Badge key={t} variant="danger" className="text-xs">{t}</Badge>
           ))}
         </div>
       )}
@@ -233,7 +233,7 @@ export function PolicyReviewModal({ bundle, onClose, onApproved }: PolicyReviewM
                           diff.kind === "added" ? "success" :
                           diff.kind === "removed" ? "danger" : "warning"
                         }
-                        className="mt-1 text-[10px] shrink-0"
+                        className="mt-1 text-xs shrink-0"
                       >
                         {diff.kind}
                       </Badge>

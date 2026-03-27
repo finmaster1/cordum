@@ -5,9 +5,9 @@ import { Button } from "../ui/Button";
 import { formatRelative } from "../../lib/format";
 import type { ActivityItem } from "../../types/activity";
 
-const decisionVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "governance"> = {
   ALLOW: "success",
-  DENY: "danger",
+  DENY: "governance",
   REQUIRE_APPROVAL: "warning",
   CONSTRAIN: "info",
   PENDING: "info",
@@ -28,7 +28,7 @@ export function SafetyAlertBlock({ activity, onApprove, onReject }: Props) {
   return (
     <div className={cn(
       "rounded-2xl border-l-4 p-4",
-      decision === "DENY" ? "border-l-destructive bg-destructive/5" :
+      decision === "DENY" ? "border-l-[var(--color-governance)] bg-[var(--color-governance)]/5" :
       decision === "REQUIRE_APPROVAL" ? "border-l-[var(--color-warning)] bg-[var(--color-warning)]/5" :
       "border-l-[var(--color-success)] bg-[var(--color-success)]/5"
     )}>
@@ -47,7 +47,7 @@ export function SafetyAlertBlock({ activity, onApprove, onReject }: Props) {
             <div className="mt-1 text-xs text-muted-foreground">{activity.content}</div>
           </div>
         </div>
-        <span className="text-[10px] text-muted-foreground">{formatRelative(activity.timestamp)}</span>
+        <span className="text-xs text-muted-foreground">{formatRelative(activity.timestamp)}</span>
       </div>
       {requiresAction && jobId ? (
         <div className="mt-3 flex flex-wrap gap-2">

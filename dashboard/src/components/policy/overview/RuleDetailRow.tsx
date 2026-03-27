@@ -132,14 +132,14 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
         className="w-full text-left px-4 py-3 flex items-start gap-3"
       >
         {/* Order badge */}
-        <span className="shrink-0 mt-0.5 font-mono text-[10px] text-muted-foreground bg-surface-2 rounded-lg px-2 py-1 min-w-[28px] text-center">
+        <span className="shrink-0 mt-0.5 font-mono text-xs text-muted-foreground bg-surface-2 rounded-lg px-2 py-1 min-w-[28px] text-center">
           #{index + 1}
         </span>
 
         {/* Main info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[13px] font-semibold text-foreground truncate">
+            <span className="text-sm font-semibold text-foreground truncate">
               {rule.name}
             </span>
             <SafetyDecisionBadge decision={rule.decision} />
@@ -154,25 +154,25 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
           {/* Quick match summary */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
             {rule.match?.topics && rule.match.topics.length > 0 && (
-              <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
                 <Tag className="w-3 h-3 text-cordum/50" />
                 {rule.match.topics.join(", ")}
               </span>
             )}
             {rule.match?.risk_tags && rule.match.risk_tags.length > 0 && (
-              <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
                 <AlertTriangle className="w-3 h-3 text-warning/50" />
                 {rule.match.risk_tags.join(", ")}
               </span>
             )}
             {rule.match?.capabilities && rule.match.capabilities.length > 0 && (
-              <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
                 <Shield className="w-3 h-3 text-info/50" />
                 {rule.match.capabilities.join(", ")}
               </span>
             )}
             {rule.match?.tenants && rule.match.tenants.length > 0 && (
-              <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1 font-mono text-xs text-muted-foreground">
                 <Layers className="w-3 h-3 text-cordum/50" />
                 {rule.match.tenants.join(", ")}
               </span>
@@ -180,7 +180,7 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
           </div>
 
           {rule.reason && (
-            <p className="text-[11px] text-muted-foreground/70 italic mt-1 truncate">
+            <p className="text-xs text-muted-foreground/70 italic mt-1 truncate">
               "{rule.reason}"
             </p>
           )}
@@ -208,12 +208,12 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
           {/* Match criteria table */}
           {matchEntries.length > 0 && (
             <div>
-              <h4 className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
                 <Shield className="w-3 h-3" />
                 Match Criteria
               </h4>
               <div className="bg-surface-2/50 border border-border/40 rounded-xl overflow-hidden">
-                <table className="w-full text-[12px]">
+                <table className="w-full text-xs">
                   <tbody>
                     {matchEntries.map(([key, value]) => (
                       <tr key={key} className="border-b border-border/30 last:border-b-0">
@@ -234,16 +234,16 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
           {/* Constraints */}
           {constraintEntries.length > 0 && (
             <div>
-              <h4 className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <h4 className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
                 <Network className="w-3 h-3" />
                 Constraints
               </h4>
               <div className="bg-surface-2/50 border border-border/40 rounded-xl overflow-hidden">
-                <table className="w-full text-[12px]">
+                <table className="w-full text-xs">
                   <tbody>
                     {constraintEntries.map((entry, i) => (
                       <tr key={i} className="border-b border-border/30 last:border-b-0">
-                        <td className="px-3 py-2 font-mono text-muted-foreground/60 w-[80px] align-top text-[10px] uppercase">
+                        <td className="px-3 py-2 font-mono text-muted-foreground/60 w-[80px] align-top text-xs uppercase">
                           {entry.section}
                         </td>
                         <td className="px-3 py-2 font-mono text-muted-foreground w-[140px] align-top">
@@ -261,7 +261,7 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
           )}
 
           {/* Metadata row */}
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] font-mono text-muted-foreground">
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs font-mono text-muted-foreground">
             <span className="flex items-center gap-1">
               <Hash className="w-3 h-3" />
               Priority: {rule.priority}
@@ -291,7 +291,7 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
             <button
               type="button"
               onClick={() => setShowYaml(!showYaml)}
-              className="flex items-center gap-1.5 text-[11px] font-mono text-cordum hover:text-cordum-bright transition-colors"
+              className="flex items-center gap-1.5 text-xs font-mono text-cordum hover:text-cordum-bright transition-colors"
             >
               <Code2 className="w-3.5 h-3.5" />
               {showYaml ? "Hide YAML" : "View YAML"}
@@ -308,7 +308,7 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
                   <button
                     type="button"
                     onClick={handleCopy}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-3/80 hover:bg-surface-3 border border-border/40 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-all"
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-3/80 hover:bg-surface-3 border border-border/40 text-xs font-mono text-muted-foreground hover:text-foreground transition-all"
                   >
                     {copied ? (
                       <>
@@ -323,7 +323,7 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
                     )}
                   </button>
                 </div>
-                <pre className="bg-surface-2 border border-border/40 rounded-xl p-4 pr-20 text-[12px] font-mono text-foreground leading-relaxed overflow-x-auto max-h-[400px] overflow-y-auto">
+                <pre className="bg-surface-2 border border-border/40 rounded-xl p-4 pr-20 text-xs font-mono text-foreground leading-relaxed overflow-x-auto max-h-[400px] overflow-y-auto">
                   <code>{yamlStr}</code>
                 </pre>
               </div>

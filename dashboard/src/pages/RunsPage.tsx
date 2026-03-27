@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, Filter, Play, Sparkles } from "lucide-react";
+import { ArrowUpRight, Filter, Play, Sparkles, Inbox } from "lucide-react";
+import { EmptyState } from "../components/ui/EmptyState";
 import { api } from "../lib/api";
 import { formatDuration, formatRelative } from "../lib/format";
 import { useWorkflows } from "../hooks/useWorkflows";
@@ -221,14 +222,14 @@ export default function RunsPage() {
         <div className="pointer-events-none absolute -left-20 bottom-0 h-56 w-56 rounded-full bg-[color:rgba(212,131,58,0.18)] blur-3xl" />
         <div className="relative grid gap-6 lg:grid-cols-[2fr,1fr]">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               <Sparkles className="h-3 w-3 text-accent" />
               Runs
             </div>
             <h2 className="mt-4 font-display text-3xl font-semibold text-ink">Find the run you need in seconds.</h2>
             <p className="mt-2 text-sm text-muted-foreground">Jump to active work, approvals, or failures with one click.</p>
             <div className="mt-5 flex flex-wrap gap-3">
-              <Button variant="primary" type="button" onClick={() => navigate("/workflows/new")}>
+              <Button variant="primary" type="button" onClick={() => navigate("/workflows/studio/new")}>
                 <Play className="h-4 w-4" />
                 Start a run
               </Button>
@@ -260,7 +261,7 @@ export default function RunsPage() {
               <div className="mt-3 space-y-2">
                 <button
                   type="button"
-                  onClick={() => navigate("/workflows/new")}
+                  onClick={() => navigate("/workflows/studio/new")}
                   className="flex w-full items-center justify-between rounded-xl border border-border bg-card/80 px-3 py-2 text-left transition hover:border-accent"
                 >
                   <div>
@@ -467,17 +468,21 @@ export default function RunsPage() {
           {isLoading ? (
             <div className="text-sm text-muted-foreground">Loading runs...</div>
           ) : filteredRuns.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-              No runs match these filters.
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" type="button" onClick={resetFilters}>
-                  Clear filters
-                </Button>
-                <Button variant="primary" size="sm" type="button" onClick={() => navigate("/workflows/new")}>
-                  Start a run
-                </Button>
-              </div>
-            </div>
+            <EmptyState
+              icon={<Inbox className="h-5 w-5" />}
+              title="No runs match these filters."
+              className="py-6"
+              action={
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" type="button" onClick={resetFilters}>
+                    Clear filters
+                  </Button>
+                  <Button variant="primary" size="sm" type="button" onClick={() => navigate("/workflows/studio/new")}>
+                    Start a run
+                  </Button>
+                </div>
+              }
+            />
           ) : (
             filteredRuns.map((run, index) => {
               const progress = runProgress(run);

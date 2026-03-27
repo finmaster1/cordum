@@ -58,6 +58,7 @@
   --color-danger: var(--c-danger);
   --color-info: var(--c-info);
   --color-success: var(--c-success);
+  --color-governance: var(--c-governance);
   --color-ink: var(--foreground);
 
   /* Mac fonts — IBM Plex + Space Grotesk */
@@ -114,6 +115,7 @@
   --c-danger: #b83a3a;
   --c-info: #3b82f6;
   --c-success: #1f7a57;
+  --c-governance: #7c3aed;
 
   /* Mac glass/gradient vars */
   --surface-glass: rgba(255, 252, 245, 0.7);
@@ -171,6 +173,7 @@
   --c-danger: #e26a6a;
   --c-info: #60a5fa;
   --c-success: #36b67c;
+  --c-governance: #a78bfa;
 
   --surface-glass: rgba(20, 27, 30, 0.75);
   --bg-radial-1: rgba(39, 179, 168, 0.2);
@@ -278,6 +281,9 @@
   }
   .instrument-card.status-danger::before {
     background: var(--color-danger);
+  }
+  .instrument-card.status-governance::before {
+    background: var(--color-governance);
   }
   .instrument-card.status-info::before {
     background: var(--color-info);
@@ -400,6 +406,9 @@
   .glow-danger {
     box-shadow: 0 0 20px rgba(184, 58, 58, 0.1), 0 0 40px rgba(184, 58, 58, 0.03);
   }
+  .glow-governance {
+    box-shadow: 0 0 20px rgba(124, 58, 237, 0.1), 0 0 40px rgba(124, 58, 237, 0.03);
+  }
 
   /* Gradient border — Mac accent gradient */
   .gradient-border {
@@ -427,7 +436,7 @@
   }
 
   .field-help-group .field-help-tooltip {
-    @apply pointer-events-none absolute left-0 top-full z-50 mt-1 w-64 rounded-2xl border border-border bg-card p-2 text-[11px] leading-relaxed text-foreground opacity-0 shadow-xl transition-opacity;
+    @apply pointer-events-none absolute left-0 top-full z-50 mt-1 w-64 rounded-2xl border border-border bg-card p-2 text-xs leading-relaxed text-foreground opacity-0 shadow-xl transition-opacity;
   }
   .field-help-group:hover .field-help-tooltip,
   .field-help-group:focus-within .field-help-tooltip {

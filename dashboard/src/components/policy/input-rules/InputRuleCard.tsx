@@ -21,7 +21,7 @@ function decisionClasses(decision: GlobalPolicyInputRule["decision"]): string {
     case "allow":
       return "bg-[var(--color-success)]/15 text-[var(--color-success)] border-[var(--color-success)]/30";
     case "deny":
-      return "bg-destructive/15 text-destructive border-destructive/30";
+      return "bg-[var(--color-governance)]/15 text-[var(--color-governance)] border-[var(--color-governance)]/30";
     case "require_approval":
       return "bg-[var(--color-warning)]/15 text-[var(--color-warning)] border-[var(--color-warning)]/30";
     case "allow_with_constraints":
@@ -78,20 +78,20 @@ export function InputRuleCard({
     >
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="rounded bg-surface-2 px-2 py-1 text-[10px] font-mono text-muted-foreground">
+          <span className="rounded bg-surface-2 px-2 py-1 text-xs font-mono text-muted-foreground">
             #{index + 1}
           </span>
           <h3 className="text-sm font-semibold text-foreground">{rule.id}</h3>
           <span
             className={cn(
-              "rounded border px-2 py-0.5 text-[10px] font-mono uppercase",
+              "rounded border px-2 py-0.5 text-xs font-mono uppercase",
               decisionClasses(rule.decision),
             )}
           >
             {rule.decision}
           </span>
           {advanced.count > 0 && (
-            <span className="rounded border border-cordum/40 bg-cordum/10 px-2 py-0.5 text-[10px] font-mono text-cordum-foreground">
+            <span className="rounded border border-cordum/40 bg-cordum/10 px-2 py-0.5 text-xs font-mono text-cordum-foreground">
               adv:{advanced.count}
             </span>
           )}
@@ -155,13 +155,13 @@ export function InputRuleCard({
         {matchChips.slice(0, 10).map((chip) => (
           <span
             key={`${rule.id}-${chip}`}
-            className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground"
+            className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground"
           >
             {chip}
           </span>
         ))}
         {matchChips.length > 10 && (
-          <span className="rounded bg-surface-2 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+          <span className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted-foreground">
             +{matchChips.length - 10} more
           </span>
         )}

@@ -37,7 +37,7 @@ describe("CommandPalette routing logic", () => {
       case "job":
         return `/jobs/${result.id}`;
       case "workflow":
-        return `/workflows/${result.id}`;
+        return `/workflows/${result.id}/studio`;
       case "run":
         return `/workflows`;
       case "pack":
@@ -51,8 +51,8 @@ describe("CommandPalette routing logic", () => {
     expect(resultPath({ type: "job", id: "j-123" })).toBe("/jobs/j-123");
   });
 
-  it("routes workflows to /workflows/:id", () => {
-    expect(resultPath({ type: "workflow", id: "wf-1" })).toBe("/workflows/wf-1");
+  it("routes workflows to /workflows/:id/studio", () => {
+    expect(resultPath({ type: "workflow", id: "wf-1" })).toBe("/workflows/wf-1/studio");
   });
 
   it("routes runs to /workflows (merged tab)", () => {

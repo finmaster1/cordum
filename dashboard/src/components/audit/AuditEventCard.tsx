@@ -111,7 +111,7 @@ function resourceLink(resourceType: string, resourceId: string): string | null {
     case "job":
       return `/jobs/${resourceId}`;
     case "workflow":
-      return `/workflows/${resourceId}`;
+      return `/workflows/${resourceId}/studio`;
     case "policy":
     case "bundle":
       return `/policies`;
@@ -129,8 +129,8 @@ function resourceLink(resourceType: string, resourceId: string): string | null {
 const decisionVariant: Record<string, string> = {
   allow: "success",
   safety_allow: "success",
-  deny: "danger",
-  safety_deny: "danger",
+  deny: "governance",
+  safety_deny: "governance",
   require_approval: "warning",
   safety_require_approval: "warning",
   throttle: "info",
@@ -260,7 +260,7 @@ function SystemEventContent({ entry, searchQuery }: { entry: AuditEntry; searchQ
           </Badge>
         )}
         {sourceComponent && (
-          <span className="inline-flex items-center rounded border border-border/60 bg-surface2 px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground">
+          <span className="inline-flex items-center rounded border border-border/60 bg-surface2 px-1.5 py-0.5 text-xs font-mono text-muted-foreground">
             {sourceComponent}
           </span>
         )}
@@ -269,7 +269,7 @@ function SystemEventContent({ entry, searchQuery }: { entry: AuditEntry; searchQ
         <p className="text-xs text-muted-foreground"><HighlightText text={entry.message} query={searchQuery ?? ""} /></p>
       )}
       {traceId && (
-        <p className="text-[11px]">
+        <p className="text-xs">
           <span className="text-muted-foreground">Trace: </span>
           <Link to={`/jobs/${traceId}`} className="font-mono text-accent hover:underline">
             {traceId.slice(0, 12)}...
@@ -281,12 +281,12 @@ function SystemEventContent({ entry, searchQuery }: { entry: AuditEntry; searchQ
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setDetailsOpen(!detailsOpen); }}
-            className="text-[11px] text-muted-foreground hover:text-accent transition-colors"
+            className="text-xs text-muted-foreground hover:text-accent transition-colors"
           >
             {detailsOpen ? "Hide details" : "Show details"}
           </button>
           {detailsOpen && (
-            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
               {Object.entries(details).map(([k, v]) => (
                 <div key={k} className="contents">
                   <dt className="font-semibold text-muted-foreground">{k}</dt>
@@ -387,7 +387,7 @@ export function AuditEventCard({ entry, onClick, searchQuery }: AuditEventCardPr
       <div className="space-y-2">
         {/* Header: timestamp + severity dot */}
         <div className="flex items-center justify-between">
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <span className="font-mono text-xs text-muted-foreground">
             {formatTimestampMs(entry.timestamp)}
           </span>
           {severity !== "low" && (
@@ -403,7 +403,7 @@ export function AuditEventCard({ entry, onClick, searchQuery }: AuditEventCardPr
 
         {/* Payload-only match indicator */}
         {isPayloadOnlyMatch(entry, searchQuery) && (
-          <p className="text-[11px] italic text-muted-foreground">Match found in payload</p>
+          <p className="text-xs italic text-muted-foreground">Match found in payload</p>
         )}
 
         {/* Related events action */}
@@ -411,7 +411,7 @@ export function AuditEventCard({ entry, onClick, searchQuery }: AuditEventCardPr
           <button
             type="button"
             onClick={handleRelated}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-accent transition-colors"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-accent transition-colors"
           >
             <Link2 className="h-3 w-3" />
             Related

@@ -15,6 +15,7 @@ import { ProgressBar } from "../components/ProgressBar";
 import { useConfigStore } from "../state/config";
 import type { RawDLQEntry, Heartbeat, LicenseInfo } from "../types/api";
 import { ErrorBanner } from "../components/ui/ErrorBanner";
+import { EmptyState } from "../components/ui/EmptyState";
 
 type DiffLine = {
   left: string;
@@ -537,9 +538,7 @@ export default function SystemPage() {
               <div className="text-xs text-muted-foreground">Live worker utilization by pool</div>
             </CardHeader>
             {poolMetrics.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                No pool metrics available.
-              </div>
+              <EmptyState title="No pool metrics available." className="py-6" />
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
                 {poolMetrics.map((pool) => (
@@ -579,7 +578,7 @@ export default function SystemPage() {
             <CardTitle>Workers</CardTitle>
           </CardHeader>
           {workers.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">No active workers.</div>
+            <EmptyState title="No active workers." className="py-6" />
           ) : (
             <div className="grid gap-3 lg:grid-cols-2">
               {workers.map((worker, index) => (
@@ -605,7 +604,7 @@ export default function SystemPage() {
               <div className="text-xs text-muted-foreground">Backlog growth over time</div>
             </CardHeader>
             {dlqTrend.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">No DLQ data.</div>
+              <EmptyState title="No DLQ data." className="py-6" />
             ) : (
               <div className="h-56">
                 <ResponsiveContainer width="100%" height="100%">
@@ -641,7 +640,7 @@ export default function SystemPage() {
               <div className="text-xs text-muted-foreground">Retry or purge failed jobs</div>
             </CardHeader>
             {dlqEntries.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">DLQ is empty.</div>
+              <EmptyState title="DLQ is empty." className="py-6" />
             ) : (
               <div className="space-y-3">
                 {dlqEntries.map((entry) => {
@@ -810,7 +809,7 @@ export default function SystemPage() {
             </div>
             <div className="mt-4 rounded-2xl border border-border bg-card/70 p-4">
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="space-y-1 text-[11px] font-mono">
+                <div className="space-y-1 text-xs font-mono">
                   {configDiff.map((line, index) => (
                     <div
                       key={`cfg-left-${index}`}
@@ -822,7 +821,7 @@ export default function SystemPage() {
                     </div>
                   ))}
                 </div>
-                <div className="space-y-1 text-[11px] font-mono">
+                <div className="space-y-1 text-xs font-mono">
                   {configDiff.map((line, index) => (
                     <div
                       key={`cfg-right-${index}`}
@@ -851,7 +850,7 @@ export default function SystemPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">No schemas registered.</div>
+              <EmptyState title="No schemas registered." className="py-6" />
             )}
           </Card>
         </>

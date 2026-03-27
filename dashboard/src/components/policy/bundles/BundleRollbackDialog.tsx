@@ -25,7 +25,7 @@ export function BundleRollbackDialog({
       description={
         <p>
           This will restore all policy bundles to the state captured in snapshot{" "}
-          <code className="font-mono text-foreground bg-surface-2 px-1 py-0.5 rounded text-[10px]">
+          <code className="font-mono text-foreground bg-surface-2 px-1 py-0.5 rounded text-xs">
             {snapshotId}
           </code>
           . The current live policy will be replaced.

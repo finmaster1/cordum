@@ -12,26 +12,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
-import { StatusBadge, type BadgeVariant } from "@/components/ui/StatusBadge";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { Workflow, WorkflowRun } from "@/api/types";
 import type { StudioMode } from "./types";
-
-// ---------------------------------------------------------------------------
-// Run status → badge variant mapping
-// ---------------------------------------------------------------------------
-
-function runStatusToBadge(status?: string): { variant: BadgeVariant; label: string } {
-  switch (status) {
-    case "succeeded": return { variant: "healthy", label: "Succeeded" };
-    case "running": return { variant: "info", label: "Running" };
-    case "failed": return { variant: "danger", label: "Failed" };
-    case "pending": return { variant: "muted", label: "Pending" };
-    case "waiting": return { variant: "warning", label: "Waiting" };
-    case "cancelled": return { variant: "muted", label: "Cancelled" };
-    case "timed_out": return { variant: "danger", label: "Timed Out" };
-    default: return { variant: "muted", label: "Draft" };
-  }
-}
+import { statusToBadgeVariant, statusToBadgeLabel } from "./nodeRegistry";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -73,7 +57,7 @@ export function StudioToolbar({
   const navigate = useNavigate();
   const isEdit = mode === "edit";
   const isNew = !workflow?.id;
-  const runBadge = run ? runStatusToBadge(run.status) : null;
+  const runBadge = run ? { variant: statusToBadgeVariant(run.status), label: statusToBadgeLabel(run.status) } : null;
 
   const handleBack = useCallback(() => {
     navigate("/workflows");
@@ -135,11 +119,13 @@ export function StudioToolbar({
           <button
             type="button"
             onClick={() => onModeChange("view")}
+            disabled={isSaving}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all",
               !isEdit
                 ? "bg-surface-0 text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
+              isSaving && "opacity-50 cursor-not-allowed",
             )}
           >
             <Eye className="w-3 h-3" />
@@ -148,11 +134,13 @@ export function StudioToolbar({
           <button
             type="button"
             onClick={() => onModeChange("edit")}
+            disabled={isSaving}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all",
               isEdit
                 ? "bg-surface-0 text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
+              isSaving && "opacity-50 cursor-not-allowed",
             )}
           >
             <Pencil className="w-3 h-3" />
@@ -166,7 +154,7 @@ export function StudioToolbar({
         {isEdit ? (
           <>
             {onDelete && workflow?.id && (
-              <Button variant="ghost" size="sm" onClick={onDelete} title="Delete workflow">
+              <Button variant="ghost" size="sm" onClick={onDelete} disabled={isSaving} title="Delete workflow">
                 <Trash2 className="w-3 h-3" />
               </Button>
             )}

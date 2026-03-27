@@ -37,7 +37,7 @@ export function DataTable<T>({
               <th
                 key={col.key}
                 className={cn(
-                  "text-left text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest",
+                  "text-left text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest",
                   compact ? "px-3 py-2" : "px-5 py-3",
                   col.align === "right" && "text-right",
                   col.align === "center" && "text-center",

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../components/layout/AppShell";
 import { CommandPalette } from "../components/CommandPalette";
 import { useEventStream } from "../hooks/useEventStream";
@@ -13,9 +13,6 @@ const JobsPage = lazy(() => import("../pages/JobsPage"));
 const JobDetailPage = lazy(() => import("../pages/JobDetailPage"));
 const RunDetailPage = lazy(() => import("../pages/RunDetailPage"));
 const WorkflowsPage = lazy(() => import("../pages/WorkflowsPage"));
-const WorkflowCreatePage = lazy(() => import("../pages/WorkflowCreatePage"));
-const WorkflowBuilderPage = lazy(() => import("../components/workflow/WorkflowBuilder").then(m => ({ default: m.WorkflowBuilder })));
-const WorkflowDetailPage = lazy(() => import("../pages/WorkflowDetailPage"));
 const WorkflowStudioPage = lazy(() => import("../pages/WorkflowStudioPage"));
 const PacksPage = lazy(() => import("../pages/PacksPage"));
 const PoolsPage = lazy(() => import("../pages/PoolsPage"));
@@ -54,6 +51,16 @@ const OutputSafetySettings = lazy(() => import("../pages/settings/OutputSafetySe
 const NotFoundPage = lazy(() => import("../pages/NotFoundPage"));
 const LoginPage = lazy(() => import("../pages/LoginPage"));
 const AuthCallbackPage = lazy(() => import("../pages/AuthCallbackPage"));
+
+// Legacy workflow redirects
+function WorkflowViewRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/workflows/${id}/studio`} replace />;
+}
+function WorkflowEditRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/workflows/${id}/studio?mode=edit`} replace />;
+}
 
 function AuthGate({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -102,13 +109,12 @@ function MainApp() {
           <Route path="/jobs" element={<JobsPage />} />
           <Route path="/jobs/:jobId" element={<JobDetailPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
-          <Route path="/workflows/new" element={<WorkflowCreatePage />} />
           <Route path="/workflows/studio/new" element={<WorkflowStudioPage />} />
           <Route path="/workflows/:id/studio" element={<WorkflowStudioPage />} />
-          <Route path="/workflows/:id/edit" element={<WorkflowBuilderPage />} />
-          <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
-          <Route path="/workflows/:id/studio" element={<WorkflowStudioPage />} />
-          <Route path="/workflows/studio/new" element={<WorkflowStudioPage />} />
+          {/* Legacy workflow redirects */}
+          <Route path="/workflows/new" element={<Navigate to="/workflows/studio/new" replace />} />
+          <Route path="/workflows/:id/edit" element={<WorkflowEditRedirect />} />
+          <Route path="/workflows/:id" element={<WorkflowViewRedirect />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:agentId" element={<AgentDetailPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />

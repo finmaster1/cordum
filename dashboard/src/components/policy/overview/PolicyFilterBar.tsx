@@ -47,7 +47,7 @@ export function PolicyFilterBar({
         {/* Icon + label */}
         <div className="flex items-center gap-2 shrink-0">
           <Target className="w-4 h-4 text-cordum" />
-          <span className="text-[12px] font-semibold text-foreground whitespace-nowrap">
+          <span className="text-xs font-semibold text-foreground whitespace-nowrap">
             What affects...
           </span>
         </div>
@@ -60,7 +60,7 @@ export function PolicyFilterBar({
             value={searchText}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search rules..."
-            className="w-full h-8 pl-8 pr-3 bg-surface-2 border border-border rounded-full font-mono text-[12px] text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors"
+            className="w-full h-8 pl-8 pr-3 bg-surface-2 border border-border rounded-full font-mono text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors"
           />
         </div>
 
@@ -70,7 +70,7 @@ export function PolicyFilterBar({
           value={tenantFilter}
           onChange={(e) => onTenantFilterChange(e.target.value)}
           placeholder="Tenant"
-          className="h-8 px-3 bg-surface-2 border border-border rounded-full font-mono text-[12px] text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors min-w-[100px] max-w-[140px]"
+          className="h-8 px-3 bg-surface-2 border border-border rounded-full font-mono text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors min-w-[100px] max-w-[140px]"
         />
 
         {/* Topic filter */}
@@ -79,7 +79,7 @@ export function PolicyFilterBar({
           value={topicFilter}
           onChange={(e) => onTopicFilterChange(e.target.value)}
           placeholder="Topic (e.g. job.aws.*)"
-          className="h-8 px-3 bg-surface-2 border border-border rounded-full font-mono text-[12px] text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors min-w-[140px] max-w-[220px]"
+          className="h-8 px-3 bg-surface-2 border border-border rounded-full font-mono text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors min-w-[140px] max-w-[220px]"
         />
 
         {/* Capability filter */}
@@ -88,7 +88,7 @@ export function PolicyFilterBar({
           value={capabilityFilter}
           onChange={(e) => onCapabilityFilterChange(e.target.value)}
           placeholder="Capability"
-          className="h-8 px-3 bg-surface-2 border border-border rounded-full font-mono text-[12px] text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors min-w-[100px] max-w-[140px]"
+          className="h-8 px-3 bg-surface-2 border border-border rounded-full font-mono text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-cordum transition-colors min-w-[100px] max-w-[140px]"
         />
 
         {/* Clear */}
@@ -96,7 +96,7 @@ export function PolicyFilterBar({
           <button
             type="button"
             onClick={onClear}
-            className="flex items-center gap-1 h-8 px-3 rounded-full text-[11px] font-mono border border-border text-muted-foreground hover:border-destructive hover:text-destructive transition-all"
+            className="flex items-center gap-1 h-8 px-3 rounded-full text-xs font-mono border border-border text-muted-foreground hover:border-destructive hover:text-destructive transition-all"
           >
             <X className="w-3 h-3" />
             Clear
@@ -114,7 +114,7 @@ export function PolicyFilterBar({
               type="button"
               onClick={() => onScopeChange(s.id)}
               className={cn(
-                "px-3 py-1 rounded-full font-mono text-[11px] transition-all",
+                "px-3 py-1 rounded-full font-mono text-xs transition-all",
                 scope === s.id
                   ? "bg-cordum/15 text-cordum"
                   : "bg-surface-2 text-muted-foreground hover:bg-surface-3 hover:text-foreground",

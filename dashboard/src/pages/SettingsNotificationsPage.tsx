@@ -91,14 +91,14 @@ export default function SettingsNotificationsPage() {
           {categories.map(cat => (
             <div key={cat} className="instrument-card overflow-hidden">
               <div className="px-4 py-3 bg-surface-0 border-b border-border">
-                <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">{cat}</p>
+                <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{cat}</p>
               </div>
               <div className="divide-y divide-border">
                 {EVENTS.filter(e => e.category === cat).map(event => (
                   <div key={event.key} className="flex items-center justify-between px-4 py-3 hover:bg-surface-1 transition-colors">
                     <div>
                       <p className="text-xs font-medium text-foreground">{event.label}</p>
-                      <p className="text-[10px] font-mono text-muted-foreground">{event.key}</p>
+                      <p className="text-xs font-mono text-muted-foreground">{event.key}</p>
                     </div>
                     <button type="button"
                       onClick={() => setPreferences(prev => ({ ...prev, [event.key]: !prev[event.key] }))}

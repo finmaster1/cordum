@@ -6,9 +6,9 @@ import { cn } from "../../lib/utils";
 import { formatCount } from "../../lib/format";
 import type { PolicyRule } from "../../api/types";
 
-const decisionStyles: Record<string, { label: string; variant: "success" | "danger" | "warning" | "info" }> = {
+const decisionStyles: Record<string, { label: string; variant: "success" | "governance" | "warning" | "info" }> = {
   allow: { label: "Allow", variant: "success" },
-  deny: { label: "Deny", variant: "danger" },
+  deny: { label: "Deny", variant: "governance" },
   require_approval: { label: "Require Approval", variant: "warning" },
   throttle: { label: "Throttle", variant: "info" },
 };
@@ -119,13 +119,13 @@ export function RuleCard({
       )}
 
       {/* Priority number */}
-      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-accent/10 text-[10px] font-bold text-accent">
+      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-accent/10 text-xs font-bold text-accent">
         {index + 1}
       </span>
 
       {/* Disabled badge */}
       {isDisabled && (
-        <Badge variant="warning" className="mt-0.5 text-[10px]">Disabled</Badge>
+        <Badge variant="warning" className="mt-0.5 text-xs">Disabled</Badge>
       )}
 
       {/* Rule sentence */}
@@ -175,7 +175,7 @@ export function RuleCard({
         </p>
 
         {/* Inline stats */}
-        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
           {rule.hitCount24h !== undefined && (
             <span className="flex items-center gap-1.5">
               <MiniSparkline value={rule.hitCount24h} />
@@ -191,7 +191,7 @@ export function RuleCard({
 
         {/* Conflict warning */}
         {conflictWarning && (
-          <div className="flex items-center gap-1.5 text-[11px] text-warning">
+          <div className="flex items-center gap-1.5 text-xs text-warning">
             <AlertTriangle className="h-3 w-3" />
             {conflictWarning}
           </div>

@@ -103,7 +103,7 @@ export default function TracePage() {
                     <div className="flex-1">
                       <div className="text-sm font-semibold text-ink flex items-center gap-2">
                         {job.topic}
-                        <span className="text-[10px] font-normal text-muted-foreground font-mono bg-card/50 px-1 rounded">
+                        <span className="text-xs font-normal text-muted-foreground font-mono bg-card/50 px-1 rounded">
                           {job.id?.slice(0, 8) || "unknown"}
                         </span>
                       </div>

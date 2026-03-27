@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { registerQueryClient } from "./state/config";
@@ -34,8 +34,6 @@ const AgentsPage = lazy(() => import("./pages/AgentsPage"));
 const AgentDetailPage = lazy(() => import("./pages/AgentDetailPage"));
 const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
 const WorkflowsPage = lazy(() => import("./pages/WorkflowsPage"));
-const WorkflowDetailPage = lazy(() => import("./pages/WorkflowDetailPage"));
-const WorkflowCreatePage = lazy(() => import("./pages/WorkflowCreatePage"));
 const WorkflowStudioPage = lazy(() => import("./pages/WorkflowStudioPage"));
 const RunDetailPage = lazy(() => import("./pages/RunDetailPage"));
 const PacksPage = lazy(() => import("./pages/PacksPage"));
@@ -61,6 +59,16 @@ const GovernBundlesPage = lazy(() => import("./pages/govern/BundlesPage"));
 const GovernBundleDetailPage = lazy(() => import("./pages/govern/BundleDetailPage"));
 const GovernSimulatorPage = lazy(() => import("./pages/govern/SimulatorPage"));
 const GovernQuarantinePage = lazy(() => import("./pages/govern/QuarantinePage"));
+
+// Legacy workflow redirects (bookmarks / external links)
+function WorkflowViewRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/workflows/${id}/studio`} replace />;
+}
+function WorkflowEditRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/workflows/${id}/studio?mode=edit`} replace />;
+}
 
 export const LEGACY_POLICY_ROUTE_REDIRECTS = {
   root: "/govern/overview",
@@ -116,14 +124,13 @@ function ProtectedRoutes() {
 
           {/* ORCHESTRATE */}
           <Route path="/workflows" element={<WorkflowsPage />} />
-          <Route path="/workflows/new" element={<WorkflowCreatePage />} />
           <Route path="/workflows/studio/new" element={<WorkflowStudioPage />} />
           <Route path="/workflows/:id/studio" element={<WorkflowStudioPage />} />
-          <Route path="/workflows/:id/edit" element={<WorkflowCreatePage />} />
-          <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
-          <Route path="/workflows/:id/studio" element={<WorkflowStudioPage />} />
-          <Route path="/workflows/studio/new" element={<WorkflowStudioPage />} />
           <Route path="/workflows/:id/runs/:runId" element={<RunDetailPage />} />
+          {/* Legacy workflow redirects */}
+          <Route path="/workflows/new" element={<Navigate to="/workflows/studio/new" replace />} />
+          <Route path="/workflows/:id/edit" element={<WorkflowEditRedirect />} />
+          <Route path="/workflows/:id" element={<WorkflowViewRedirect />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
 
           {/* GOVERN */}

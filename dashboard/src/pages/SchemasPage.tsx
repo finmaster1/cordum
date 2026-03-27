@@ -58,8 +58,8 @@ export default function SchemasPage() {
           <table className="w-full text-sm min-w-[400px]">
             <thead>
               <tr className="border-b border-border bg-surface-0">
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Fields</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Name</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Fields</th>
               </tr>
             </thead>
             <tbody>
@@ -72,13 +72,13 @@ export default function SchemasPage() {
                   onClick={() => navigate(`/schemas/${schema.id}`)}
                   className="border-b border-border last:border-0 hover:bg-surface-1 cursor-pointer transition-colors"
                 >
-                  <td className="px-4 py-3">
+                  <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
                       <FileJson className="w-3.5 h-3.5 text-cordum" />
                       <span className="font-medium text-foreground">{schema.name ?? schema.id}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{schema.fields?.length ?? 0} fields</td>
+                  <td className="px-5 py-3 text-xs text-muted-foreground">{schema.fields?.length ?? 0} fields</td>
                 </motion.tr>
               ))}
             </tbody>

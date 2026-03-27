@@ -9,7 +9,7 @@
 
 export const chartColors = {
   allow: "#1f7a57",
-  deny: "#b83a3a",
+  deny: "#7c3aed",
   require_approval: "#c58a1c",
   allow_with_constraints: "#0f7f7a",
   throttle: "#d4833a",

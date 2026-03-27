@@ -429,7 +429,7 @@ export function ArtifactPanel({ jobId }: ArtifactPanelProps) {
                 ) : (
                   <FileSearch className="h-3.5 w-3.5" />
                 )}
-                <span className="font-mono text-[11px] text-ink" title={selectedRef.ptr}>
+                <span className="font-mono text-xs text-ink" title={selectedRef.ptr}>
                   {selectedRef.ptr}
                 </span>
               </div>

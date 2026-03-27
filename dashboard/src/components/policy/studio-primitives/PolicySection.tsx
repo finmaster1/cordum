@@ -55,7 +55,7 @@ export function PolicySection({
           )}
           <span>
             <span className="font-semibold">{title}</span>
-            {description && <span className="mt-0.5 block text-[11px] text-muted-foreground">{description}</span>}
+            {description && <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>}
           </span>
         </button>
         {rightSlot}

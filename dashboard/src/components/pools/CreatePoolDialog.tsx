@@ -55,7 +55,7 @@ export function CreatePoolDialog({ open, onClose, onSubmit, isPending }: CreateP
       description={
         <div className="space-y-3 mt-2">
           <div>
-            <label className="text-[11px] font-medium text-foreground">Pool Name</label>
+            <label className="text-xs font-medium text-foreground">Pool Name</label>
             <input
               type="text"
               value={name}
@@ -63,10 +63,10 @@ export function CreatePoolDialog({ open, onClose, onSubmit, isPending }: CreateP
               placeholder="my-pool-name"
               className="mt-1 w-full h-9 px-3 text-xs bg-surface-0 border border-border rounded-2xl text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-cordum font-mono"
             />
-            {error && <p className="mt-1 text-[10px] text-destructive">{error}</p>}
+            {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
           </div>
           <div>
-            <label className="text-[11px] font-medium text-foreground">Requires (comma-separated)</label>
+            <label className="text-xs font-medium text-foreground">Requires (comma-separated)</label>
             <input
               type="text"
               value={requires}
@@ -76,7 +76,7 @@ export function CreatePoolDialog({ open, onClose, onSubmit, isPending }: CreateP
             />
           </div>
           <div>
-            <label className="text-[11px] font-medium text-foreground">Description</label>
+            <label className="text-xs font-medium text-foreground">Description</label>
             <input
               type="text"
               value={description}

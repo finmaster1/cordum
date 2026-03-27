@@ -3,6 +3,7 @@ import type { Node, Edge } from "reactflow";
 import type { Workflow, WorkflowRun, WorkflowStep, RunStatus } from "@/api/types";
 import type { UnifiedNodeData, StudioMode, StudioGraphData } from "./types";
 import { colorEdgesByStatus, markCriticalPath } from "../workflows/dag/dagStyles";
+import { logger } from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -32,10 +33,26 @@ function applyDagreLayout(
     g.setEdge(edge.source, edge.target);
   }
 
-  dagre.layout(g);
+  try {
+    dagre.layout(g);
+  } catch (err) {
+    logger.error("workflow-studio", "Dagre layout failed, using fallback positions", {
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return nodes.map((node, i) => ({
+      ...node,
+      position: { x: 40, y: 40 + i * (NODE_HEIGHT + RANK_SEP) },
+    }));
+  }
 
   return nodes.map((node) => {
     const pos = g.node(node.id);
+    if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") {
+      logger.warn("workflow-studio", "Dagre returned invalid position for node", { nodeId: node.id });
+      return node;
+    }
     return {
       ...node,
       position: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 },

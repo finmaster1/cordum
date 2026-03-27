@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Circle,
   Shield,
+  ShieldAlert,
   ShieldOff,
 } from "lucide-react";
 
@@ -14,7 +15,7 @@ type IconComponent = ComponentType<SVGProps<SVGSVGElement> & { className?: strin
 
 export interface StatusMeta {
   label: string;
-  tone: "success" | "warning" | "danger" | "info" | "muted" | "accent";
+  tone: "success" | "warning" | "danger" | "info" | "muted" | "accent" | "governance";
   shape: "circle" | "diamond" | "square" | "shield" | "triangle";
   icon: IconComponent;
 }
@@ -53,9 +54,10 @@ export function jobStatusMeta(state?: string): StatusMeta {
     case "output_quarantined":
       return { label: "quarantined", tone: "warning", shape: "shield", icon: AlertTriangle };
     case "failed":
-    case "denied":
     case "timeout":
       return { label: state, tone: "danger", shape: "diamond", icon: XCircle };
+    case "denied":
+      return { label: state, tone: "governance", shape: "shield", icon: ShieldAlert };
     case "pending":
       return { label: state, tone: "warning", shape: "diamond", icon: Clock };
     case "cancelled":
@@ -75,7 +77,7 @@ export function approvalStatusMeta(required?: boolean): StatusMeta {
 export function decisionTypeMeta(type: string): { label: string; color: string; tone: string } {
   const map: Record<string, { label: string; color: string; tone: string }> = {
     allow: { label: "Allow", color: "green", tone: "success" },
-    deny: { label: "Deny", color: "red", tone: "danger" },
+    deny: { label: "Deny", color: "purple", tone: "governance" },
     require_approval: { label: "Require Approval", color: "yellow", tone: "warning" },
     allow_with_constraints: { label: "Constrained", color: "blue", tone: "info" },
     throttle: { label: "Throttle", color: "orange", tone: "warning" },

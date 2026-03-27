@@ -39,14 +39,14 @@ export function WorkflowPolicyOverridesDiff({ diff, readOnly, onChange }: Workfl
         <FileDiff className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-xs font-semibold text-foreground">Diff Constraints</span>
         {!hasValues && (
-          <span className="text-[10px] font-mono text-muted-foreground ml-auto">global defaults</span>
+          <span className="text-xs font-mono text-muted-foreground ml-auto">global defaults</span>
         )}
       </div>
       <div className="space-y-2">
         <div className="grid grid-cols-2 gap-2">
           {NUM_FIELDS.map(({ key, label }) => (
             <div key={key} className="flex flex-col gap-0.5">
-              <label className="text-[10px] text-muted-foreground" htmlFor={`diff-${key}`}>
+              <label className="text-xs text-muted-foreground" htmlFor={`diff-${key}`}>
                 {label}
               </label>
               {readOnly ? (
@@ -75,7 +75,7 @@ export function WorkflowPolicyOverridesDiff({ diff, readOnly, onChange }: Workfl
         </div>
 
         <div className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-muted-foreground" htmlFor="diff-deny-paths">
+          <label className="text-xs text-muted-foreground" htmlFor="diff-deny-paths">
             Deny path globs <span className="font-mono">(comma-separated)</span>
           </label>
           {readOnly ? (

@@ -11,10 +11,10 @@ interface SimulatorDecisionSummaryProps {
 
 export function getDecisionDisplayVariant(
   decision: string,
-): "healthy" | "danger" | "warning" | "info" | "muted" {
+): "healthy" | "governance" | "warning" | "info" | "muted" {
   const normalized = decision.toLowerCase();
   if (normalized === "allow") return "healthy";
-  if (normalized === "deny") return "danger";
+  if (normalized === "deny") return "governance";
   if (normalized === "quarantine") return "warning";
   if (normalized === "require_approval") return "info";
   if (normalized === "allow_with_constraints" || normalized === "throttle") return "info";
@@ -26,7 +26,7 @@ function DecisionIcon({ decision }: { decision: string }) {
   if (normalized === "allow" || normalized === "allow_with_constraints")
     return <ShieldCheck className="w-5 h-5 text-[var(--color-success)]" />;
   if (normalized === "deny")
-    return <ShieldAlert className="w-5 h-5 text-destructive" />;
+    return <ShieldAlert className="w-5 h-5 text-[var(--color-governance)]" />;
   return <ShieldQuestion className="w-5 h-5 text-[var(--color-warning)]" />;
 }
 
@@ -51,14 +51,14 @@ export function SimulatorDecisionSummary({
               {decision}
             </StatusBadge>
             {matchedRule && (
-              <span className="text-[11px] font-mono text-muted-foreground truncate">
+              <span className="text-xs font-mono text-muted-foreground truncate">
                 matched: {matchedRule}
               </span>
             )}
           </div>
         </div>
         {evaluationTimeMs !== undefined && (
-          <div className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
             <Clock className="w-3 h-3" />
             {evaluationTimeMs}ms
           </div>

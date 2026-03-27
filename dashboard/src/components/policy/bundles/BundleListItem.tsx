@@ -42,7 +42,7 @@ export function BundleListItem({ bundle, canPublish, onOpen }: BundleListItemPro
           <p className="text-sm font-semibold text-foreground truncate">
             {bundle.name || bundle.id}
           </p>
-          <p className="text-[11px] text-muted-foreground font-mono truncate">
+          <p className="text-xs text-muted-foreground font-mono truncate">
             {bundle.id}
           </p>
         </div>
@@ -56,7 +56,7 @@ export function BundleListItem({ bundle, canPublish, onOpen }: BundleListItemPro
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <div className="rounded border border-border/70 bg-surface-1 px-2 py-1.5">
           <dt className="flex items-center gap-1 text-muted-foreground">
             <FileText className="h-3 w-3" />
@@ -93,7 +93,7 @@ export function BundleListItem({ bundle, canPublish, onOpen }: BundleListItemPro
       </dl>
 
       {bundle.sha256 && (
-        <p className="mt-2 text-[10px] font-mono text-muted-foreground/70 truncate">
+        <p className="mt-2 text-xs font-mono text-muted-foreground/70 truncate">
           sha256:{bundle.sha256.slice(0, 16)}...
         </p>
       )}

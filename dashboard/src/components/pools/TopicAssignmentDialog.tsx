@@ -46,12 +46,12 @@ export function TopicAssignmentDialog({ open, onClose, onAddTopic, onRemoveTopic
       description={
         <div className="space-y-3 mt-2">
           {topics.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground italic">No topics mapped to this pool.</p>
+            <p className="text-xs text-muted-foreground italic">No topics mapped to this pool.</p>
           ) : (
             <div className="space-y-1 max-h-40 overflow-y-auto">
               {topics.map((topic) => (
                 <div key={topic} className="flex items-center justify-between rounded-lg bg-surface-0 px-3 py-1.5">
-                  <span className="text-[11px] font-mono text-foreground">{topic}</span>
+                  <span className="text-xs font-mono text-foreground">{topic}</span>
                   <button
                     type="button"
                     onClick={() => onRemoveTopic(topic)}
@@ -83,7 +83,7 @@ export function TopicAssignmentDialog({ open, onClose, onAddTopic, onRemoveTopic
               Add
             </button>
           </div>
-          {error && <p className="text-[10px] text-destructive">{error}</p>}
+          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
       }
     />

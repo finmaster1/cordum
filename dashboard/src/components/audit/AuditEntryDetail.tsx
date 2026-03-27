@@ -51,7 +51,7 @@ export function AuditEntryDetail({ entry, onClose }: AuditEntryDetailProps) {
           <div className="flex items-start justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="info" className="text-[10px]">
+                <Badge variant="info" className="text-xs">
                   {entry.eventType}
                 </Badge>
                 <span className="font-mono text-xs text-muted-foreground">

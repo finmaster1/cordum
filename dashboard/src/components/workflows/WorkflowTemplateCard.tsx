@@ -105,7 +105,7 @@ function StepTypeIcons({ steps }: { steps: Workflow["steps"] }) {
         return <Icon key={step.id ?? i} className="h-3 w-3 text-muted-foreground" />;
       })}
       {overflow > 0 && (
-        <span className="text-[10px] text-muted-foreground">+{overflow}</span>
+        <span className="text-xs text-muted-foreground">+{overflow}</span>
       )}
     </div>
   );
@@ -130,7 +130,7 @@ export function WorkflowTemplateCard({ workflow, onRunNow }: WorkflowTemplateCar
   return (
     <Card
       className="cursor-pointer hover:shadow-lg transition-shadow"
-      onClick={() => navigate(`/workflows/${workflow.id}`)}
+      onClick={() => navigate(`/workflows/${workflow.id}/studio`)}
     >
       {/* Top row: name + trigger badge + Run Now */}
       <div className="flex items-start justify-between gap-2">
@@ -147,7 +147,7 @@ export function WorkflowTemplateCard({ workflow, onRunNow }: WorkflowTemplateCar
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              navigate(`/workflows/${workflow.id}/edit`);
+              navigate(`/workflows/${workflow.id}/studio?mode=edit`);
             }}
             title="Edit workflow"
           >

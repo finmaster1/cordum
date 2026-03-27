@@ -77,7 +77,7 @@ export function TokenBudgetGroup({
         />
       </div>
 
-      <div className="flex justify-between text-[10px] text-muted-foreground">
+      <div className="flex justify-between text-xs text-muted-foreground">
         <span>Input {inputPct.toFixed(0)}%</span>
         <span>Output {outputPct.toFixed(0)}%</span>
       </div>

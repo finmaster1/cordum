@@ -14,13 +14,13 @@ export function StateChangeBlock({ activity }: Props) {
           <GitCommit className="h-3 w-3 text-accent" />
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">{stepLabel}</div>
         </div>
-        <span className="text-[10px] text-muted-foreground">{formatRelative(activity.timestamp)}</span>
+        <span className="text-xs text-muted-foreground">{formatRelative(activity.timestamp)}</span>
       </div>
       <div className="mt-2 text-sm text-ink">
         {activity.content}
       </div>
       {(activity.metadata?.job_id || activity.payload?.to_step) && (
-        <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
           {activity.payload?.from_step && activity.payload?.to_step ? (
             <span>{activity.payload.from_step} → {activity.payload.to_step}</span>
           ) : null}

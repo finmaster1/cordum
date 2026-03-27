@@ -15,6 +15,8 @@ import {
   Workflow,
   Code,
   Database,
+  Globe,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   X,
@@ -97,6 +99,8 @@ const STEP_ICONS: Record<string, React.ReactNode> = {
   subworkflow: <Workflow className="h-4 w-4" />,
   transform: <Code className="h-4 w-4" />,
   storage: <Database className="h-4 w-4" />,
+  http: <Globe className="h-4 w-4" />,
+  "error-trigger": <AlertTriangle className="h-4 w-4" />,
 };
 
 // ---------------------------------------------------------------------------
@@ -123,7 +127,7 @@ function CollapsibleJson({ label, data }: { label: string; data: unknown }) {
         {label}
       </button>
       {open && (
-        <pre className="max-h-[300px] overflow-auto border-t border-border bg-surface2/30 px-3 py-2 text-[11px] text-ink">
+        <pre className="max-h-[300px] overflow-auto border-t border-border bg-surface2/30 px-3 py-2 text-xs text-ink">
           {safeJsonStr(data, 5000)}
         </pre>
       )}
@@ -138,7 +142,7 @@ function CollapsibleJson({ label, data }: { label: string; data: unknown }) {
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </h4>
       {children}
@@ -288,7 +292,7 @@ function JobDetail({
               {safetyDecision.type}
             </Badge>
             {safetyDecision.matchedRule && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 rule: {safetyDecision.matchedRule}
               </span>
             )}
@@ -584,7 +588,7 @@ function DelayDetail({
         <Section label={isRunning ? "Time Elapsed" : "Total Wait"}>
           <span className="text-xs font-medium text-ink">{formatDuration(elapsed)}</span>
           {isRunning && delayMs != null && elapsed < delayMs && (
-            <span className="ml-2 text-[10px] text-muted-foreground">
+            <span className="ml-2 text-xs text-muted-foreground">
               ({formatDuration(delayMs - elapsed)} remaining)
             </span>
           )}
@@ -717,7 +721,7 @@ function SwitchDetail({
                       <RunStatusBadge status={stepRun?.status ?? "pending"} />
                     </div>
                   </div>
-                  <p className="mt-1 text-[11px] text-muted-foreground">{truncate(stepRun?.name || entry.stepId, 120)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{truncate(stepRun?.name || entry.stepId, 120)}</p>
                 </div>
               );
             })}
@@ -798,7 +802,7 @@ function ParallelDetail({
         <div className="h-2 w-full overflow-hidden rounded-full bg-surface2">
           <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progressPct}%` }} />
         </div>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
           <span>succeeded: {succeeded}</span>
           <span>failed: {failed}</span>
           <span>cancelled: {cancelled}</span>
@@ -941,7 +945,7 @@ function LoopDetail({
             <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progressPct}%` }} />
           </div>
         )}
-        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
           <span>dispatched: {dispatchedIterations}</span>
           <span>active: {activeChildren}</span>
           <span>failed: {failedChildren}</span>
@@ -1064,7 +1068,7 @@ function SubWorkflowDetail({
 
       <Section label="Child Workflow">
         {childWorkflowId ? (
-          <Link to={`/workflows/${childWorkflowId}`} className="text-xs font-mono text-accent hover:underline">
+          <Link to={`/workflows/${childWorkflowId}/studio`} className="text-xs font-mono text-accent hover:underline">
             {childWorkflowId}
           </Link>
         ) : (
@@ -1148,14 +1152,14 @@ function TransformDetail({
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-ink">{key}</span>
                   {runStep?.status === "succeeded" && outputMap[key] !== undefined && (
-                    <Badge variant="success" className="text-[10px]">evaluated</Badge>
+                    <Badge variant="success" className="text-xs">evaluated</Badge>
                   )}
                 </div>
-                <pre className="mt-1 rounded bg-surface2/40 px-2 py-1 text-[11px] font-mono text-muted-foreground">
+                <pre className="mt-1 rounded bg-surface2/40 px-2 py-1 text-xs font-mono text-muted-foreground">
                   {typeof expr === "string" ? expr : JSON.stringify(expr, null, 2)}
                 </pre>
                 {runStep?.status === "succeeded" && outputMap[key] !== undefined && (
-                  <pre className="mt-1 rounded bg-success/5 border border-success/20 px-2 py-1 text-[11px] font-mono text-ink">
+                  <pre className="mt-1 rounded bg-success/5 border border-success/20 px-2 py-1 text-xs font-mono text-ink">
                     {typeof outputMap[key] === "string"
                       ? outputMap[key] as string
                       : JSON.stringify(outputMap[key], null, 2)}
@@ -1254,7 +1258,7 @@ function StorageDetail({
 
       {runStep?.status === "succeeded" && outputMap.value !== undefined && (
         <Section label="Value">
-          <pre className="rounded-lg border border-success/20 bg-success/5 px-3 py-2 text-[11px] font-mono text-ink">
+          <pre className="rounded-lg border border-success/20 bg-success/5 px-3 py-2 text-xs font-mono text-ink">
             {typeof outputMap.value === "string"
               ? outputMap.value
               : JSON.stringify(outputMap.value, null, 2)}
@@ -1270,6 +1274,139 @@ function StorageDetail({
       )}
 
       <CollapsibleJson label="Full Output" data={runStep?.output} />
+    </div>
+  );
+}
+
+function HttpDetail({
+  step,
+  runStep,
+}: {
+  step: WorkflowStep;
+  runStep?: WorkflowStep;
+}) {
+  const config = step.config ?? {};
+  const input = (step.input ?? config.input ?? {}) as Record<string, unknown>;
+  const method =
+    (typeof input.method === "string" ? input.method.toUpperCase() : undefined) ??
+    (typeof config.method === "string" ? config.method.toUpperCase() : undefined) ??
+    "";
+  const url =
+    (typeof input.url === "string" ? input.url : undefined) ??
+    (typeof config.url === "string" ? config.url : undefined) ??
+    "";
+  const headers = (input.headers ?? config.headers) as Record<string, unknown> | undefined;
+
+  let duration: number | undefined;
+  if (runStep?.startedAt && runStep?.completedAt) {
+    duration = new Date(runStep.completedAt).getTime() - new Date(runStep.startedAt).getTime();
+  }
+
+  const methodVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+    GET: "info",
+    POST: "success",
+    PUT: "warning",
+    PATCH: "warning",
+    DELETE: "danger",
+  };
+
+  return (
+    <div className="space-y-4">
+      <Section label="Execution">
+        <div className="flex items-center justify-between">
+          <RunStatusBadge status={runStep?.status} />
+          {duration != null && (
+            <span className="text-xs text-muted-foreground">{formatDuration(duration)}</span>
+          )}
+        </div>
+        {runStep?.startedAt && <InfoRow label="Started" value={formatDate(runStep.startedAt)} />}
+        {runStep?.completedAt && <InfoRow label="Completed" value={formatDate(runStep.completedAt)} />}
+      </Section>
+
+      <Section label="Request">
+        <div className="flex items-center gap-2">
+          {method && <Badge variant={methodVariant[method] ?? "default"}>{method}</Badge>}
+        </div>
+        {url && (
+          <pre className="mt-1.5 rounded-lg bg-surface2/40 px-3 py-2 text-xs font-mono text-ink break-all whitespace-pre-wrap">
+            {truncate(url, 300)}
+          </pre>
+        )}
+      </Section>
+
+      {headers && Object.keys(headers).length > 0 && (
+        <CollapsibleJson label="Headers" data={headers} />
+      )}
+
+      {runStep?.error && (
+        <Card className="border-danger/40 bg-danger/5">
+          <p className="text-xs font-semibold text-danger">Error</p>
+          <p className="mt-1 text-xs text-ink">{truncate(runStep.error, 500)}</p>
+        </Card>
+      )}
+
+      <CollapsibleJson label="Request Body" data={input.body ?? config.body} />
+      <CollapsibleJson label="Response" data={runStep?.output} />
+    </div>
+  );
+}
+
+function ErrorTriggerDetail({
+  step,
+  runStep,
+}: {
+  step: WorkflowStep;
+  runStep?: WorkflowStep;
+}) {
+  const config = step.config ?? {};
+  const input = (step.input ?? config.input ?? {}) as Record<string, unknown>;
+  const catchFrom =
+    (typeof input.catch_from === "string" ? input.catch_from : undefined) ??
+    (typeof config.catchFrom === "string" ? config.catchFrom : undefined) ??
+    "";
+  const retryCount =
+    typeof input.retry_count === "number" ? input.retry_count
+    : typeof config.retryCount === "number" ? config.retryCount
+    : undefined;
+  const retryDelay =
+    (typeof input.retry_delay === "string" ? input.retry_delay : undefined) ??
+    (typeof config.retryDelay === "string" ? config.retryDelay : undefined) ??
+    "";
+  const onError = step.on_error ?? (typeof config.onError === "string" ? config.onError : "");
+
+  let duration: number | undefined;
+  if (runStep?.startedAt && runStep?.completedAt) {
+    duration = new Date(runStep.completedAt).getTime() - new Date(runStep.startedAt).getTime();
+  }
+
+  return (
+    <div className="space-y-4">
+      <Section label="Execution">
+        <div className="flex items-center justify-between">
+          <RunStatusBadge status={runStep?.status} />
+          {duration != null && (
+            <span className="text-xs text-muted-foreground">{formatDuration(duration)}</span>
+          )}
+        </div>
+        {runStep?.startedAt && <InfoRow label="Started" value={formatDate(runStep.startedAt)} />}
+        {runStep?.completedAt && <InfoRow label="Completed" value={formatDate(runStep.completedAt)} />}
+      </Section>
+
+      <Section label="Error Handling">
+        {catchFrom && <InfoRow label="Catches from" value={catchFrom} />}
+        {onError && <InfoRow label="On error action" value={onError} />}
+        {retryCount != null && <InfoRow label="Retry count" value={String(retryCount)} />}
+        {retryDelay && <InfoRow label="Retry delay" value={retryDelay} />}
+      </Section>
+
+      {runStep?.error && (
+        <Card className="border-danger/40 bg-danger/5">
+          <p className="text-xs font-semibold text-danger">Caught Error</p>
+          <p className="mt-1 text-xs text-ink">{truncate(runStep.error, 500)}</p>
+        </Card>
+      )}
+
+      <CollapsibleJson label="Output" data={runStep?.output} />
     </div>
   );
 }
@@ -1320,7 +1457,7 @@ export function NodeDetailPanel({
                 >
                   {truncate(step.name || step.id, 60)}
                 </h3>
-                <Badge variant="info" className="text-[10px]">
+                <Badge variant="info" className="text-xs">
                   {step.type}
                 </Badge>
               </div>
@@ -1372,10 +1509,16 @@ export function NodeDetailPanel({
           {step.type === "storage" && (
             <StorageDetail step={step} runStep={runStep} />
           )}
+          {step.type === "http" && (
+            <HttpDetail step={step} runStep={runStep} />
+          )}
+          {step.type === "error-trigger" && (
+            <ErrorTriggerDetail step={step} runStep={runStep} />
+          )}
           {step.type === "notify" && (
             <GenericDetail runStep={runStep} />
           )}
-          {!["job", "worker", "agent-task", "pack-action", "tool-call", "approval", "condition", "switch", "delay", "fan-out", "fanout", "parallel", "loop", "sub-workflow", "subworkflow", "transform", "storage", "notify"].includes(step.type) && (
+          {!["job", "worker", "agent-task", "pack-action", "tool-call", "approval", "condition", "switch", "delay", "fan-out", "fanout", "parallel", "loop", "sub-workflow", "subworkflow", "transform", "storage", "http", "error-trigger", "notify"].includes(step.type) && (
             <GenericDetail runStep={runStep} />
           )}
         </div>

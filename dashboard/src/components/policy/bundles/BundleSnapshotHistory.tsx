@@ -42,7 +42,7 @@ export function BundleSnapshotHistory({ canRollback, onRollback }: BundleSnapsho
 
   return (
     <div className="space-y-3">
-      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
         {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}
       </p>
       <div className="divide-y divide-border rounded-lg border border-border">
@@ -51,7 +51,7 @@ export function BundleSnapshotHistory({ canRollback, onRollback }: BundleSnapsho
             <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <p className="text-xs font-mono text-foreground truncate">{snapshot.id}</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {snapshot.createdAt
                   ? new Date(snapshot.createdAt).toLocaleString()
                   : "Unknown date"}

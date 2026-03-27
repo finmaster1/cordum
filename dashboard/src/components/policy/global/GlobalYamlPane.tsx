@@ -43,13 +43,13 @@ export function GlobalYamlPane({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           safety.yaml
         </p>
         <div className="flex items-center gap-1">
           {activeRuleId && activeLine && (
             <button type="button"
-              className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground"
               onClick={jumpToActiveRule}
             >
               <LocateFixed className="h-3 w-3" />
@@ -57,7 +57,7 @@ export function GlobalYamlPane({
             </button>
           )}
           <button type="button"
-            className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-[10px] font-mono text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-1 rounded border border-border bg-surface-1 px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground"
             onClick={() => {
               navigator.clipboard.writeText(yaml);
               toast.success("YAML copied");

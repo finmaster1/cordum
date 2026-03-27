@@ -87,7 +87,7 @@ export function NotificationChannelCard({
           <p className="text-xs text-danger">{channel.error}</p>
         )}
 
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Last sent: {timeAgo(channel.lastSentAt)}</span>
         </div>
 

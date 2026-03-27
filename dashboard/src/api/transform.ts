@@ -146,6 +146,7 @@ export interface BackendWorkflowStep {
   delay_sec?: number;
   delay_until?: string;
   route_labels?: Record<string, string>;
+  on_error?: string;
   status?: string;
   output?: Record<string, unknown>;
   error?: string;
@@ -833,6 +834,7 @@ function buildWorkflowStepConfig(step: BackendWorkflowStep): Record<string, unkn
   if (step.output_schema) config.outputSchema = step.output_schema;
   if (step.output_schema_id) config.outputSchemaId = step.output_schema_id;
   if (step.output_path) config.outputPath = step.output_path;
+  if (step.on_error) config.onError = step.on_error;
 
   return config;
 }
@@ -877,6 +879,7 @@ export function mapWorkflowStep(step: BackendWorkflowStep, fallbackId: string): 
     delay_sec: step.delay_sec,
     delay_until: step.delay_until,
     route_labels: step.route_labels,
+    on_error: step.on_error,
     // Legacy compat
     config,
     dependsOn: step.depends_on,
@@ -919,7 +922,7 @@ export function mapWorkflow(def: BackendWorkflow): Workflow {
   };
 }
 
-const VALID_RUN_STATUSES = new Set<string>(["pending", "running", "waiting", "succeeded", "failed", "timed_out", "cancelled"]);
+const VALID_RUN_STATUSES = new Set<string>(["pending", "running", "waiting", "succeeded", "failed", "denied", "timed_out", "cancelled"]);
 
 function normalizeRunStatus(raw?: string): WorkflowStep["status"] {
   const lower = (raw || "").toLowerCase();
@@ -1245,7 +1248,7 @@ export function auditResourceLink(
 ): string {
   switch (resourceType.toLowerCase()) {
     case "job": return `/jobs/${resourceId}`;
-    case "workflow": return `/workflows/${resourceId}`;
+    case "workflow": return `/workflows/${resourceId}/studio`;
     case "run": return `/workflows`;
     case "policy": return `/govern/bundles`;
     case "user": return `/settings`;

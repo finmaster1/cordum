@@ -149,11 +149,11 @@ export default function SettingsUsersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface-0">
-                  <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">User</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Role</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Last Active</th>
-                  <th className="text-right px-4 py-3 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Actions</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">User</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Role</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Active</th>
+                  <th className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -165,13 +165,13 @@ export default function SettingsUsersPage() {
                     transition={{ delay: i * 0.03 }}
                     className="border-b border-border last:border-0 hover:bg-surface-1 transition-colors"
                   >
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3">
                       <div>
                         <p className="text-sm font-medium text-foreground">{user.name}</p>
                         <p className="text-xs text-muted-foreground">{user.email}</p>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3">
                       <select
                         value={user.role}
                         onChange={(e) => updateRoleMutation.mutate({ id: user.id, role: e.target.value })}
@@ -181,11 +181,11 @@ export default function SettingsUsersPage() {
                         {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                       </select>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3">
                       <StatusBadge variant={user.status === "active" ? "healthy" : user.status === "invited" ? "warning" : "danger"}>{user.status}</StatusBadge>
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{user.lastActive}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-5 py-3 text-xs text-muted-foreground">{user.lastActive}</td>
+                    <td className="px-5 py-3 text-right">
                       <button type="button" onClick={() => setDeleteTarget(user)} className="p-1.5 rounded hover:bg-destructive/10 transition-colors">
                         <Trash2 className="w-3.5 h-3.5 text-destructive" />
                       </button>
@@ -216,7 +216,7 @@ export default function SettingsUsersPage() {
               </div>
               <p className="text-xs text-muted-foreground">{role.desc}</p>
               <div className="mt-3 pt-3 border-t border-border">
-                <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">Permissions</p>
+                <p className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest mb-2">Permissions</p>
                 <div className="space-y-1">
                   {role.value === "admin" && ["All resources", "User management", "System config", "API keys"].map(p => (
                     <p key={p} className="text-xs text-foreground">&#x2713; {p}</p>
@@ -244,7 +244,7 @@ export default function SettingsUsersPage() {
         </div>
         <div className="space-y-4">
           <div>
-            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">Username</label>
+            <label className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest block mb-1.5">Username</label>
             <input
               type="text"
               value={inviteUsername}
@@ -254,7 +254,7 @@ export default function SettingsUsersPage() {
             />
           </div>
           <div>
-            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">Email</label>
+            <label className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest block mb-1.5">Email</label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <input
@@ -267,7 +267,7 @@ export default function SettingsUsersPage() {
             </div>
           </div>
           <div>
-            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">Password</label>
+            <label className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest block mb-1.5">Password</label>
             <div className="relative">
               <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <input
@@ -280,7 +280,7 @@ export default function SettingsUsersPage() {
             </div>
           </div>
           <div>
-            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">Role</label>
+            <label className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest block mb-1.5">Role</label>
             <select
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value)}

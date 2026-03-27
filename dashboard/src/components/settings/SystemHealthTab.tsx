@@ -340,7 +340,7 @@ function ComponentCard({
         {component.version && (
           <div className="flex items-center justify-between">
             <span>Version</span>
-            <Badge variant="info" className="text-[10px]">{component.version}</Badge>
+            <Badge variant="info" className="text-xs">{component.version}</Badge>
           </div>
         )}
         <div className="flex justify-between">
@@ -488,7 +488,7 @@ export function SystemHealthTab() {
       {/* Distributed lock inspector */}
       <LockInspector />
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Auto-refreshes every 30 seconds.
       </p>
     </div>

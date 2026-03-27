@@ -49,7 +49,7 @@ function resolveStep(
     if (defStep) return defStep;
   }
 
-  // Construct a minimal step from node data
+  // Construct step from node data (includes all fields the node carries)
   const d = selectedNode.data;
   return {
     id: d.stepId,
@@ -57,6 +57,22 @@ function resolveStep(
     type: d.stepType,
     topic: d.topic,
     condition: d.condition,
+    worker_id: d.worker_id,
+    for_each: d.for_each,
+    max_parallel: d.max_parallel,
+    input: d.input,
+    input_schema: d.input_schema,
+    input_schema_id: d.input_schema_id,
+    output_path: d.output_path,
+    output_schema: d.output_schema,
+    output_schema_id: d.output_schema_id,
+    meta: d.meta,
+    on_error: d.on_error,
+    retry: d.retry,
+    timeout_sec: d.timeout_sec,
+    delay_sec: d.delay_sec,
+    delay_until: d.delay_until,
+    route_labels: d.route_labels,
     config: d.config,
   };
 }

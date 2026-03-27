@@ -5,6 +5,8 @@ import { Activity, AlertTriangle, CheckCircle2, Server, Layers, Plus, Settings, 
 import { api } from "../lib/api";
 import { formatPercent, formatRelative } from "../lib/format";
 import { Card, CardHeader, CardTitle } from "../components/ui/Card";
+import { PageHeader } from "../components/layout/PageHeader";
+import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { ProgressBar } from "../components/ProgressBar";
@@ -151,36 +153,37 @@ export default function PoolsPage() {
           </Button>
         </div>
       )}
+      <PageHeader
+        label="Infrastructure"
+        title="Worker Pools"
+        subtitle="Pool topology, utilization, and topic routing"
+      />
       <Card>
-        <CardHeader>
-          <CardTitle>Worker Pool Topology</CardTitle>
-          <div className="text-xs text-muted-foreground">Worker pools, routing, and heartbeat health</div>
-        </CardHeader>
         <div className="grid gap-4 lg:grid-cols-4">
-          <div className="rounded-2xl border border-border bg-card/70 p-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="instrument-card">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
               <Layers className="h-4 w-4" />
               Pools
             </div>
             <div className="mt-2 text-2xl font-semibold text-ink">{pools.length}</div>
           </div>
-          <div className="rounded-2xl border border-border bg-card/70 p-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="instrument-card">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
               <Server className="h-4 w-4" />
               Workers
             </div>
             <div className="mt-2 text-2xl font-semibold text-ink">{totalWorkers}</div>
             <div className="text-xs text-muted-foreground">{healthyWorkers} healthy</div>
           </div>
-          <div className="rounded-2xl border border-border bg-card/70 p-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="instrument-card">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
               <Activity className="h-4 w-4" />
               Topics Mapped
             </div>
             <div className="mt-2 text-2xl font-semibold text-ink">{totalTopics}</div>
           </div>
-          <div className="rounded-2xl border border-border bg-card/70 p-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="instrument-card">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground">
               {staleWorkers.length > 0 ? (
                 <AlertTriangle className="h-4 w-4 text-warning" />
               ) : (
@@ -215,9 +218,12 @@ export default function PoolsPage() {
             </div>
           </CardHeader>
           {pools.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-              No pools configured or no workers registered.
-            </div>
+            <EmptyState
+              icon={<Layers className="w-5 h-5" />}
+              title="No pools configured"
+              description="Create a worker pool to organize and route agents."
+              className="py-10"
+            />
           ) : (
             <div className="space-y-3">
               {pools.map((pool) => {
@@ -241,12 +247,12 @@ export default function PoolsPage() {
                           <span className="text-sm font-semibold text-ink">{pool.name}</span>
                           <PoolStatusBadge status={pool.status} />
                           {isOverloaded ? (
-                            <span className="rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                            <span className="rounded bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning">
                               high load
                             </span>
                           ) : null}
                           {hasStale ? (
-                            <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-medium text-danger">
+                            <span className="rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">
                               {pool.staleCount} stale
                             </span>
                           ) : null}
@@ -293,13 +299,13 @@ export default function PoolsPage() {
                         {pool.topics.slice(0, 5).map((topic) => (
                           <span
                             key={topic}
-                            className="rounded bg-muted/10 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+                            className="rounded bg-muted/10 px-1.5 py-0.5 text-xs font-mono text-muted-foreground"
                           >
                             {topic}
                           </span>
                         ))}
                         {pool.topics.length > 5 ? (
-                          <span className="text-[10px] text-muted-foreground">+{pool.topics.length - 5} more</span>
+                          <span className="text-xs text-muted-foreground">+{pool.topics.length - 5} more</span>
                         ) : null}
                       </div>
                     ) : (
@@ -327,13 +333,16 @@ export default function PoolsPage() {
             const displayWorkers = selectedPoolData?.workers || workers;
             if (displayWorkers.length === 0) {
               return (
-                <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                  {selectedPoolData ? "No workers in this pool." : "No workers registered."}
-                </div>
+                <EmptyState
+                  icon={<Server className="w-5 h-5" />}
+                  title={selectedPoolData ? "No workers in this pool" : "No workers registered"}
+                  description={selectedPoolData ? "Workers assigned to this pool will appear here." : "Start agents to register workers."}
+                  className="py-10"
+                />
               );
             }
             return (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+              <div className="space-y-4 max-h-[500px] overflow-y-auto">
                 {displayWorkers.map((worker, index) => {
                   const isStale = (() => {
                     if (!worker.updated_at) return false;
@@ -353,20 +362,20 @@ export default function PoolsPage() {
                         </div>
                         <div className="flex items-center gap-1">
                           {isStale ? (
-                            <span className="rounded bg-warning/10 px-1.5 py-0.5 text-[9px] font-medium text-warning">
+                            <span className="rounded bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning">
                               stale
                             </span>
                           ) : (
-                            <span className="rounded bg-success/10 px-1.5 py-0.5 text-[9px] font-medium text-success">
+                            <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">
                               active
                             </span>
                           )}
-                          <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[9px] font-medium text-accent">
+                          <span className="rounded bg-accent/10 px-1.5 py-0.5 text-xs font-medium text-accent">
                             {worker.pool || "default"}
                           </span>
                         </div>
                       </div>
-                      <div className="mt-2 grid gap-1 text-[10px] text-muted-foreground">
+                      <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
                         <div className="flex justify-between">
                           <span>CPU</span>
                           <span>{typeof worker.cpu_load === "number" ? formatPercent(worker.cpu_load) : "-"}</span>
@@ -420,18 +429,21 @@ export default function PoolsPage() {
           <div className="text-xs text-muted-foreground">How job topics are mapped to worker pools</div>
         </CardHeader>
         {pools.filter((p) => p.topics.length > 0).length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-            No topic mappings configured. Jobs will use the default pool.
-          </div>
+          <EmptyState
+            icon={<Link2 className="w-5 h-5" />}
+            title="No topic mappings"
+            description="Jobs will use the default pool. Map topics to pools for targeted routing."
+            className="py-10"
+          />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left">
-                  <th className="pb-2 font-semibold uppercase tracking-[0.2em] text-muted-foreground">Topic</th>
-                  <th className="pb-2 font-semibold uppercase tracking-[0.2em] text-muted-foreground">Pool</th>
-                  <th className="pb-2 font-semibold uppercase tracking-[0.2em] text-muted-foreground">Workers</th>
-                  <th className="pb-2 font-semibold uppercase tracking-[0.2em] text-muted-foreground">Requires</th>
+                <tr className="border-b border-border text-left bg-surface-0">
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Topic</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Pool</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Workers</th>
+                  <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Requires</th>
                 </tr>
               </thead>
               <tbody>
@@ -447,20 +459,20 @@ export default function PoolsPage() {
                   .sort((a, b) => a.topic.localeCompare(b.topic))
                   .map(({ topic, pool, workers: workerCount, requires }) => (
                     <tr key={`${topic}-${pool}`} className="border-b border-border/50">
-                      <td className="py-2 font-mono text-ink">{topic}</td>
-                      <td className="py-2">
+                      <td className="px-5 py-3 font-mono text-sm text-ink">{topic}</td>
+                      <td className="px-5 py-3">
                         <button
                           type="button"
                           onClick={() => setSelectedPool(pool)}
-                          className="text-accent hover:underline"
+                          className="text-sm text-accent hover:underline"
                         >
                           {pool}
                         </button>
                       </td>
-                      <td className="py-2 text-muted-foreground">{workerCount}</td>
-                      <td className="py-2">
+                      <td className="px-5 py-3 text-sm text-muted-foreground">{workerCount}</td>
+                      <td className="px-5 py-3">
                         {requires.length > 0 ? (
-                          <span className="rounded bg-info/10 px-1.5 py-0.5 text-[10px] text-info">
+                          <span className="rounded bg-info/10 px-1.5 py-0.5 text-xs text-info">
                             {requires.join(", ")}
                           </span>
                         ) : (

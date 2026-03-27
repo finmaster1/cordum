@@ -122,7 +122,7 @@ export function SchemaRegisterForm({ onSuccess, initialData }: SchemaRegisterFor
         {errors.body && (
           <p className="mt-1 text-xs text-danger">{errors.body.message}</p>
         )}
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Paste a JSON Schema object.
         </p>
       </div>

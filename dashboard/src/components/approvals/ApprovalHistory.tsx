@@ -392,7 +392,7 @@ export function ApprovalHistory() {
                   <td className="px-4 py-3 text-xs">
                     {item.workflowId ? (
                       <Link
-                        to={`/workflows/${item.workflowId}`}
+                        to={`/workflows/${item.workflowId}/studio`}
                         className="text-accent hover:underline"
                       >
                         {item.workflowId.slice(0, 8)}

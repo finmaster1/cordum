@@ -90,7 +90,7 @@ const RANGES: { value: TimeRange; label: string }[] = [
 
 const DECISION_COLORS: Record<string, string> = {
   allow: "#1f7a57",
-  deny: "#b83a3a",
+  deny: "#7c3aed",
   require_approval: "#c58a1c",
   throttle: "#0f7f7a",
 };

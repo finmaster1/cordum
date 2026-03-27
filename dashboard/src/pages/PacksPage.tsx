@@ -173,7 +173,7 @@ function InstalledPackCard({ pack, index, isUninstalling, onUninstall }: {
         </StatusBadge>
       </div>
 
-      <span className="text-[10px] font-mono text-muted-foreground mb-2">v{pack.version}</span>
+      <span className="text-xs font-mono text-muted-foreground mb-2">v{pack.version}</span>
 
       {pack.description && (
         <p className="text-xs text-muted-foreground flex-1 mb-3">{pack.description}</p>
@@ -182,13 +182,13 @@ function InstalledPackCard({ pack, index, isUninstalling, onUninstall }: {
       {pack.capabilities.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-3">
           {pack.capabilities.map(c => (
-            <span key={c} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground">{c}</span>
+            <span key={c} className="text-xs font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground">{c}</span>
           ))}
         </div>
       )}
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
-        <span className="text-[10px] text-muted-foreground">{pack.author ? `by ${pack.author}` : "\u00A0"}</span>
+        <span className="text-xs text-muted-foreground">{pack.author ? `by ${pack.author}` : "\u00A0"}</span>
         <Button variant="danger" size="sm" onClick={onUninstall} loading={isUninstalling}>
           <Trash2 className="w-3 h-3 mr-1" />Uninstall
         </Button>
@@ -231,7 +231,7 @@ function MarketplacePackCard({ pack, index, isInstalling, onInstall }: {
       {(pack.capabilities ?? []).length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {(pack.capabilities ?? []).map(c => (
-            <span key={c} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground">{c}</span>
+            <span key={c} className="text-xs font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground">{c}</span>
           ))}
         </div>
       )}
@@ -239,7 +239,7 @@ function MarketplacePackCard({ pack, index, isInstalling, onInstall }: {
       {(pack.riskTags ?? []).length > 0 && (
         <div className="flex flex-wrap gap-1 mb-3">
           {(pack.riskTags ?? []).map(t => (
-            <span key={t} className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)]">
+            <span key={t} className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded bg-[var(--color-warning)]/10 text-[var(--color-warning)]">
               <AlertTriangle className="w-2.5 h-2.5" />{t}
             </span>
           ))}
@@ -248,9 +248,9 @@ function MarketplacePackCard({ pack, index, isInstalling, onInstall }: {
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-muted-foreground">{pack.author ? `by ${pack.author}` : "\u00A0"}</span>
+          <span className="text-xs text-muted-foreground">{pack.author ? `by ${pack.author}` : "\u00A0"}</span>
           {pack.catalogTitle && (
-            <span className="text-[10px] text-muted-foreground/60">{pack.catalogTitle}</span>
+            <span className="text-xs text-muted-foreground/60">{pack.catalogTitle}</span>
           )}
         </div>
         {alreadyInstalled ? (

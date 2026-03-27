@@ -34,7 +34,7 @@ export function OutputRulesList({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Output rules are evaluated for scan findings; multiple rules can match.
         </p>
         {canEdit && (

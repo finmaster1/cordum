@@ -148,7 +148,7 @@ export function SavedFiltersDropdown({
         <Bookmark className="h-3.5 w-3.5" />
         Saved
         {userFilters.length > 0 && (
-          <span className="ml-1 rounded-full bg-accent/15 px-1.5 text-[10px] font-semibold text-accent">
+          <span className="ml-1 rounded-full bg-accent/15 px-1.5 text-xs font-semibold text-accent">
             {userFilters.length}
           </span>
         )}
@@ -186,7 +186,7 @@ export function SavedFiltersDropdown({
         <div className="absolute left-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
           {builtIn.length > 0 && (
             <>
-              <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="px-3 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Built-in
               </div>
               {builtIn.map((f) => (
@@ -198,7 +198,7 @@ export function SavedFiltersDropdown({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-ink">{f.name}</p>
-                    <p className="truncate text-[10px] text-muted-foreground">{summarizeFilters(f.filters)}</p>
+                    <p className="truncate text-xs text-muted-foreground">{summarizeFilters(f.filters)}</p>
                   </div>
                 </button>
               ))}
@@ -206,7 +206,7 @@ export function SavedFiltersDropdown({
           )}
           {userFilters.length > 0 && (
             <>
-              <div className="border-t border-border px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="border-t border-border px-3 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Your filters
               </div>
               {userFilters.map((f) => (
@@ -218,7 +218,7 @@ export function SavedFiltersDropdown({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-ink">{f.name}</p>
-                    <p className="truncate text-[10px] text-muted-foreground">{summarizeFilters(f.filters)}</p>
+                    <p className="truncate text-xs text-muted-foreground">{summarizeFilters(f.filters)}</p>
                   </div>
                   <button
                     type="button"

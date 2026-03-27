@@ -38,10 +38,10 @@ function extractRules(yaml: string): { rules: ParsedRule[]; error: string | null
   }
 }
 
-function decisionVariant(decision: string): "healthy" | "warning" | "danger" | "muted" {
+function decisionVariant(decision: string): "healthy" | "warning" | "governance" | "muted" {
   const d = decision.toLowerCase();
   if (d === "allow") return "healthy";
-  if (d === "deny") return "danger";
+  if (d === "deny") return "governance";
   if (d === "require_approval" || d === "throttle") return "warning";
   return "muted";
 }
@@ -67,13 +67,13 @@ export function BundleVisualPreview({ yaml }: BundleVisualPreviewProps) {
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
         {rules.length} rule{rules.length !== 1 ? "s" : ""}
       </p>
       <div className="divide-y divide-border rounded-lg border border-border">
         {rules.map((rule, index) => (
           <div key={rule.id || index} className="flex items-start gap-3 px-4 py-3">
-            <span className="shrink-0 text-[10px] font-mono text-muted-foreground/60 pt-0.5">
+            <span className="shrink-0 text-xs font-mono text-muted-foreground/60 pt-0.5">
               {index + 1}
             </span>
             <div className="min-w-0 flex-1">
@@ -86,7 +86,7 @@ export function BundleVisualPreview({ yaml }: BundleVisualPreviewProps) {
                 )}
               </div>
               {rule.reason && (
-                <p className="text-[11px] text-muted-foreground">{rule.reason}</p>
+                <p className="text-xs text-muted-foreground">{rule.reason}</p>
               )}
             </div>
           </div>

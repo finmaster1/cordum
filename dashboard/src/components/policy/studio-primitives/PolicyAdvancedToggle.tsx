@@ -30,7 +30,7 @@ export function PolicyAdvancedToggle({
       )}
     >
       <span>{label}</span>
-      <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-mono text-foreground">
+      <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs font-mono text-foreground">
         {configuredCount} configured
       </span>
     </button>

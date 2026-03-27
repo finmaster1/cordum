@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-type AccentVariant = "healthy" | "warning" | "danger" | "info" | "muted" | "cordum";
+type AccentVariant = "healthy" | "warning" | "danger" | "info" | "muted" | "cordum" | "governance";
 
 const statusClass: Record<AccentVariant, string> = {
   healthy: "",
@@ -10,6 +10,7 @@ const statusClass: Record<AccentVariant, string> = {
   info: "status-info",
   muted: "status-muted",
   cordum: "glow-cordum",
+  governance: "status-governance glow-governance",
 };
 
 interface InstrumentCardProps {
@@ -65,7 +66,7 @@ export function InstrumentCardHeader({
           {title}
         </h3>
         {subtitle && (
-          <p className="text-[11px] text-muted-foreground mt-1 leading-normal">{subtitle}</p>
+          <p className="text-xs text-muted-foreground mt-1 leading-normal">{subtitle}</p>
         )}
       </div>
       <div className="flex items-center gap-3 shrink-0">

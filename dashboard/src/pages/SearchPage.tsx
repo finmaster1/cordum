@@ -6,6 +6,7 @@ import { formatRelative } from "../lib/format";
 import { Card, CardHeader, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
+import { EmptyState } from "../components/ui/EmptyState";
 import { JobStatusBadge, RunStatusBadge } from "../components/StatusBadge";
 import type { JobRecord, PackRecord, RawWorkflow, RawWorkflowRun } from "../types/api";
 import { ErrorBanner } from "../components/ui/ErrorBanner";
@@ -107,9 +108,7 @@ export default function SearchPage() {
       </Card>
 
       {!enabled ? (
-        <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-          Enter a search term to see results.
-        </div>
+        <EmptyState title="Enter a search term to see results." className="py-6" />
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
@@ -158,7 +157,7 @@ export default function SearchPage() {
                       variant="outline"
                       size="sm"
                       type="button"
-                      onClick={() => navigate(`/workflows/${workflow.id}`)}
+                      onClick={() => navigate(`/workflows/${workflow.id}/studio`)}
                     >
                       Open
                     </Button>

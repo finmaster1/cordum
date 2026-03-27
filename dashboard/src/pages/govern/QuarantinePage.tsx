@@ -107,19 +107,19 @@ function FindingRow({ finding }: { finding: OutputFinding }) {
           </span>
           <span className="text-xs font-mono text-muted-foreground">{finding.type}</span>
           {finding.scanner && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground font-mono">
+            <span className="text-xs px-1.5 py-0.5 rounded bg-surface-2 text-muted-foreground font-mono">
               {finding.scanner}
             </span>
           )}
           {finding.confidence != null && (
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-xs text-muted-foreground font-mono">
               {Math.round(finding.confidence * 100)}% conf
             </span>
           )}
         </div>
         <p className="text-xs text-foreground/90 leading-relaxed">{finding.detail}</p>
         {finding.matched_pattern && (
-          <p className="mt-1 text-[10px] font-mono text-muted-foreground">
+          <p className="mt-1 text-xs font-mono text-muted-foreground">
             Pattern: <code className="px-1 py-0.5 rounded bg-surface-2 text-foreground/80">{finding.matched_pattern}</code>
           </p>
         )}
@@ -179,11 +179,11 @@ function QuarantineItemCard({
               {highestSeverity}
             </StatusBadge>
             {criticalCount > 0 && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
+              <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
                 {criticalCount} critical finding{criticalCount > 1 ? "s" : ""}
               </span>
             )}
-            <span className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-xs text-muted-foreground font-mono">
               {formatRelativeTime(item.updatedAt)}
             </span>
           </div>
@@ -191,7 +191,7 @@ function QuarantineItemCard({
             {item.output_safety?.reason?.trim() || "Output quarantined by policy scanners"}
           </p>
           {item.topic && (
-            <p className="mt-1 text-[10px] font-mono text-muted-foreground">
+            <p className="mt-1 text-xs font-mono text-muted-foreground">
               topic: <span className="text-foreground/80">{item.topic}</span>
             </p>
           )}
@@ -243,7 +243,7 @@ function QuarantineItemCard({
               {/* Findings */}
               {findings.length > 0 ? (
                 <div className="space-y-1">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
+                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
                     {findings.length} Finding{findings.length > 1 ? "s" : ""}
                   </p>
                   <div className="divide-y divide-border/50">
@@ -257,7 +257,7 @@ function QuarantineItemCard({
               )}
 
               {/* Metadata row */}
-              <div className="mt-4 flex flex-wrap gap-4 text-[10px] font-mono text-muted-foreground">
+              <div className="mt-4 flex flex-wrap gap-4 text-xs font-mono text-muted-foreground">
                 {item.output_safety?.rule_id && (
                   <span>
                     Rule: <span className="text-foreground/80">{item.output_safety.rule_id}</span>
@@ -515,7 +515,7 @@ export default function QuarantinePage() {
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
+                <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
                   {filtered.length} of {items.length} item{items.length !== 1 ? "s" : ""}
                 </p>
               </div>

@@ -32,7 +32,7 @@ export function InputRulesList({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Ordered rule cards enforce first-match behavior.
         </p>
         {canEdit && (

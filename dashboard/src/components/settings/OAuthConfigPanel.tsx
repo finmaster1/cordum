@@ -164,7 +164,7 @@ export function OAuthConfigPanel() {
             Redirect URI
           </label>
           <Input value={redirectUri} readOnly className="bg-surface2/50 font-mono text-xs" />
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Add this URI to your {providerDef.label} OAuth app settings.
           </p>
         </div>
@@ -177,7 +177,7 @@ export function OAuthConfigPanel() {
             placeholder="Space-separated scopes"
             {...register("scopes")}
           />
-          <p className="mt-1 text-[10px] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Defaults: {providerDef.defaultScopes}
           </p>
         </div>

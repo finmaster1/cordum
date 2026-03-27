@@ -8,16 +8,16 @@ import type { SafetyDecision } from "../../api/types";
 // Variant mapping
 // ---------------------------------------------------------------------------
 
-const decisionVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+const decisionVariant: Record<string, "success" | "danger" | "warning" | "info" | "governance"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
 
 const borderColor: Record<string, string> = {
   allow: "border-l-success",
-  deny: "border-l-danger",
+  deny: "border-l-[var(--color-governance)]",
   require_approval: "border-l-warning",
   throttle: "border-l-accent",
 };
@@ -47,7 +47,7 @@ export function SafetyExplainCard({ decision }: { decision: SafetyDecision }) {
           {/* Matched rule */}
           {decision.matchedRule && (
             <div>
-              <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Matched Rule
               </dt>
               <dd className="mt-0.5 text-sm text-ink font-mono">{decision.matchedRule}</dd>
@@ -57,7 +57,7 @@ export function SafetyExplainCard({ decision }: { decision: SafetyDecision }) {
           {/* Reason */}
           {decision.reason && (
             <div>
-              <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Reason
               </dt>
               <dd className="mt-0.5 text-sm text-ink">{decision.reason}</dd>
@@ -67,14 +67,14 @@ export function SafetyExplainCard({ decision }: { decision: SafetyDecision }) {
           {/* Eval path */}
           {decision.evalPath && decision.evalPath.length > 0 && (
             <div>
-              <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Evaluation Path
               </dt>
               <dd className="mt-1">
                 <ol className="space-y-1">
                   {decision.evalPath.map((rule, i) => (
                     <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface2 text-[9px] font-bold">
+                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface2 text-xs font-bold">
                         {i + 1}
                       </span>
                       <span className="font-mono">{rule}</span>

@@ -48,18 +48,18 @@ export function MessageBlock({ activity }: Props) {
             <span className="text-xs font-semibold uppercase tracking-wide text-ink">
               {activity.metadata?.step_id ? `${config.label} · ${activity.metadata.step_id}` : config.label}
             </span>
-            <span className="text-[10px] text-muted-foreground">{formatRelative(activity.timestamp)}</span>
+            <span className="text-xs text-muted-foreground">{formatRelative(activity.timestamp)}</span>
           </div>
           <div className="text-sm text-ink whitespace-pre-wrap break-words">{activity.content}</div>
           {(activity.metadata?.step_id || activity.metadata?.job_id) && (
             <div className="mt-2 flex flex-wrap gap-2">
               {activity.metadata?.step_id && (
-                <span className="rounded-lg bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                <span className="rounded-lg bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
                   Step: {activity.metadata.step_id}
                 </span>
               )}
               {activity.metadata?.job_id && (
-                <span className="rounded-lg bg-muted/20 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <span className="rounded-lg bg-muted/20 px-2 py-0.5 text-xs font-medium text-muted-foreground">
                   Job: {activity.metadata.job_id.slice(0, 8)}
                 </span>
               )}

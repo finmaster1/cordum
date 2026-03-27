@@ -170,7 +170,7 @@ export function CommandPalette() {
                   placeholder="Type a command or search..."
                   className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                 />
-                <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 border border-border text-muted-foreground">
+                <kbd className="text-xs font-mono px-1.5 py-0.5 rounded bg-surface-2 border border-border text-muted-foreground">
                   ESC
                 </kbd>
               </div>
@@ -184,7 +184,7 @@ export function CommandPalette() {
                 ) : (
                   Object.entries(grouped).map(([section, items]) => (
                     <div key={section}>
-                      <p className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/60">
+                      <p className="px-4 pt-2 pb-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/60">
                         {section}
                       </p>
                       {items.map((item) => {
@@ -215,7 +215,7 @@ export function CommandPalette() {
               </div>
 
               {/* Footer */}
-              <div className="flex items-center gap-4 px-4 py-2 border-t border-border text-[10px] text-muted-foreground">
+              <div className="flex items-center gap-4 px-4 py-2 border-t border-border text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <kbd className="px-1 py-0.5 rounded bg-surface-2 border border-border font-mono">↑↓</kbd>
                   navigate

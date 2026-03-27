@@ -801,7 +801,7 @@ export function NodeConfigPanel({ node, onSave, onClose, onDelete, allNodes }: N
                 </Button>
               </div>
               {switchCaseFields.length === 0 && (
-                <p className="text-[11px] text-muted-foreground">Add one or more match → target branch routes.</p>
+                <p className="text-xs text-muted-foreground">Add one or more match → target branch routes.</p>
               )}
               {switchCaseFields.map((field, index) => (
                 <div key={field.id} className="grid grid-cols-[1fr_1fr_auto] gap-2">
@@ -838,7 +838,7 @@ export function NodeConfigPanel({ node, onSave, onClose, onDelete, allNodes }: N
                 ))}
               </Select>
             </Field>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               First matching case is selected. If none match, default branch is used.
             </p>
           </>
@@ -865,7 +865,7 @@ export function NodeConfigPanel({ node, onSave, onClose, onDelete, allNodes }: N
             <Field label="Until (stop when true)">
               <Textarea {...register("until")} placeholder="steps.scan.output.clean == true" rows={2} />
             </Field>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               `condition` keeps iterating while truthy. `until` stops when truthy. If both are empty, the loop runs exactly max iterations.
             </p>
           </>
@@ -917,7 +917,7 @@ export function NodeConfigPanel({ node, onSave, onClose, onDelete, allNodes }: N
                 <Input {...register("outputPath")} placeholder="ctx.result" />
               </Field>
             )}
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Storage steps read/write/delete values in the workflow run context using dot-separated key paths. Use `$&#123;expr&#125;` templates for dynamic values.
             </p>
           </>
@@ -978,10 +978,10 @@ function Field({
     <div>
       <label className="mb-1 flex items-baseline gap-1 text-xs text-muted-foreground">
         {label}
-        {hint && <span className="text-[10px] text-muted/60">({hint})</span>}
+        {hint && <span className="text-xs text-muted/60">({hint})</span>}
       </label>
       {children}
-      {error && <p className="mt-0.5 text-[10px] text-danger">{error}</p>}
+      {error && <p className="mt-0.5 text-xs text-danger">{error}</p>}
     </div>
   );
 }

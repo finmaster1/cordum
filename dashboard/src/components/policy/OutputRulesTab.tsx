@@ -28,9 +28,10 @@ function severityVariant(severity?: string): "danger" | "warning" | "info" | "de
   }
 }
 
-function decisionVariant(decision?: string): "danger" | "warning" | "success" | "default" {
+function decisionVariant(decision?: string): "danger" | "warning" | "success" | "default" | "governance" {
   switch ((decision || "").toLowerCase()) {
     case "deny":
+      return "governance";
     case "quarantine":
       return "danger";
     case "redact":

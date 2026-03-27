@@ -340,7 +340,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) error {
 				e.appendTimeline(ctx, run, "step_output_invalid", stepID, res.JobId, string(child.Status), res.ResultPtr, err.Error(), nil)
 			}
 		}
-		if !retry && (child.Status == StepStatusSucceeded || child.Status == StepStatusFailed || child.Status == StepStatusCancelled || child.Status == StepStatusTimedOut) {
+		if !retry && (child.Status == StepStatusSucceeded || child.Status == StepStatusFailed || child.Status == StepStatusDenied || child.Status == StepStatusCancelled || child.Status == StepStatusTimedOut) {
 			e.appendTimeline(ctx, run, "step_completed", stepID, res.JobId, string(child.Status), res.ResultPtr, res.ErrorMessage, nil)
 		}
 		if !retry && child.Status == StepStatusSucceeded && res.ResultPtr != "" {
@@ -356,22 +356,22 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) error {
 			parent.CompletedAt = nil
 		} else {
 			parent.Status = aggregateChildren(parent)
-			if parent.Status == StepStatusSucceeded || parent.Status == StepStatusFailed || parent.Status == StepStatusTimedOut {
+			if parent.Status == StepStatusSucceeded || parent.Status == StepStatusFailed || parent.Status == StepStatusDenied || parent.Status == StepStatusTimedOut {
 				parent.CompletedAt = &now
 			}
 		}
-		// Cancel running/pending forEach siblings when parent fails or times out.
-		if (parent.Status == StepStatusFailed || parent.Status == StepStatusTimedOut) && stepDef != nil && stepDef.ForEach != "" {
+		// Cancel running/pending forEach siblings when parent fails, is denied, or times out.
+		if (parent.Status == StepStatusFailed || parent.Status == StepStatusDenied || parent.Status == StepStatusTimedOut) && stepDef != nil && stepDef.ForEach != "" {
 			e.cancelForEachSiblings(ctx, run, parent, now)
 		}
 		run.Steps[baseStepID] = parent
-		if parent.Status == StepStatusFailed || parent.Status == StepStatusTimedOut {
+		if parent.Status == StepStatusFailed || parent.Status == StepStatusDenied || parent.Status == StepStatusTimedOut {
 			e.activateOnErrorHandler(ctx, run, wfDef, baseStepID, parent, now)
 		}
 		if retry && delay > 0 {
 			e.scheduleAfter(delay, run.WorkflowID, run.ID)
 		}
-		if e.OnStepFinished != nil && !retry && (child.Status == StepStatusSucceeded || child.Status == StepStatusFailed || child.Status == StepStatusCancelled || child.Status == StepStatusTimedOut) {
+		if e.OnStepFinished != nil && !retry && (child.Status == StepStatusSucceeded || child.Status == StepStatusFailed || child.Status == StepStatusDenied || child.Status == StepStatusCancelled || child.Status == StepStatusTimedOut) {
 			e.OnStepFinished(run.ID, stepID, child.Status)
 		}
 	} else {
@@ -400,7 +400,7 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) error {
 				e.appendTimeline(ctx, run, "step_output_invalid", stepID, res.JobId, string(stepRun.Status), res.ResultPtr, err.Error(), nil)
 			}
 		}
-		if !retry && (stepRun.Status == StepStatusSucceeded || stepRun.Status == StepStatusFailed || stepRun.Status == StepStatusCancelled || stepRun.Status == StepStatusTimedOut) {
+		if !retry && (stepRun.Status == StepStatusSucceeded || stepRun.Status == StepStatusFailed || stepRun.Status == StepStatusDenied || stepRun.Status == StepStatusCancelled || stepRun.Status == StepStatusTimedOut) {
 			e.appendTimeline(ctx, run, "step_completed", stepID, res.JobId, string(stepRun.Status), res.ResultPtr, res.ErrorMessage, nil)
 		}
 		if !retry && stepRun.Status == StepStatusSucceeded && res.ResultPtr != "" {
@@ -409,13 +409,13 @@ func (e *Engine) HandleJobResult(ctx context.Context, res *pb.JobResult) error {
 			}
 		}
 		run.Steps[stepID] = stepRun
-		if !retry && (stepRun.Status == StepStatusFailed || stepRun.Status == StepStatusTimedOut) {
+		if !retry && (stepRun.Status == StepStatusFailed || stepRun.Status == StepStatusDenied || stepRun.Status == StepStatusTimedOut) {
 			e.activateOnErrorHandler(ctx, run, wfDef, stepID, stepRun, now)
 		}
 		if retry && delay > 0 {
 			e.scheduleAfter(delay, run.WorkflowID, run.ID)
 		}
-		if e.OnStepFinished != nil && !retry && (stepRun.Status == StepStatusSucceeded || stepRun.Status == StepStatusFailed || stepRun.Status == StepStatusCancelled || stepRun.Status == StepStatusTimedOut) {
+		if e.OnStepFinished != nil && !retry && (stepRun.Status == StepStatusSucceeded || stepRun.Status == StepStatusFailed || stepRun.Status == StepStatusDenied || stepRun.Status == StepStatusCancelled || stepRun.Status == StepStatusTimedOut) {
 			e.OnStepFinished(run.ID, stepID, stepRun.Status)
 		}
 	}

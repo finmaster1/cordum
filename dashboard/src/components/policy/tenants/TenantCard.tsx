@@ -22,14 +22,14 @@ export function TenantCard({ tenant, canEdit, onOpen }: TenantCardProps) {
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-foreground">{tenant.label}</p>
-          <p className="text-[11px] text-muted-foreground font-mono">{tenant.id}</p>
+          <p className="text-xs text-muted-foreground font-mono">{tenant.id}</p>
         </div>
         <StatusBadge variant={canEdit ? "healthy" : "muted"}>
           {canEdit ? "editable" : "read-only"}
         </StatusBadge>
       </div>
 
-      <dl className="grid grid-cols-3 gap-2 text-[11px]">
+      <dl className="grid grid-cols-3 gap-2 text-xs">
         <div className="rounded border border-border/70 bg-surface-1 px-2 py-1.5">
           <dt className="text-muted-foreground">allow_topics</dt>
           <dd className="mt-1 font-mono text-foreground">{tenant.allowTopicsCount}</dd>

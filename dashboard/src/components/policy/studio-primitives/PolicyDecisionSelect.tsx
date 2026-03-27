@@ -50,7 +50,7 @@ export function PolicyDecisionSelect({
         </select>
       </PolicyField>
       {helperText && (
-        <p className="rounded-md border border-cordum/30 bg-cordum/10 px-2 py-1 text-[11px] text-cordum-foreground">
+        <p className="rounded-md border border-cordum/30 bg-cordum/10 px-2 py-1 text-xs text-cordum-foreground">
           {helperText}
         </p>
       )}

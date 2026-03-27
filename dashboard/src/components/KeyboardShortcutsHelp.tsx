@@ -97,8 +97,8 @@ export function KeyboardShortcutsHelp() {
         </div>
 
         {/* Footer hint */}
-        <p className="text-center text-[11px] text-muted-foreground">
-          Press <kbd className="rounded bg-[var(--surface2)] px-1 py-0.5 font-mono text-[10px]">g</kbd> then a letter within 1 second
+        <p className="text-center text-xs text-muted-foreground">
+          Press <kbd className="rounded bg-[var(--surface2)] px-1 py-0.5 font-mono text-xs">g</kbd> then a letter within 1 second
         </p>
       </div>
     </div>

@@ -52,9 +52,9 @@ const statusBg: Record<string, string> = {
   blocked: "bg-[var(--color-warning)]/5",
 };
 
-const safetyVariant: Record<string, "success" | "danger" | "warning" | "info"> = {
+const safetyVariant: Record<string, "success" | "governance" | "warning" | "info"> = {
   allow: "success",
-  deny: "danger",
+  deny: "governance",
   require_approval: "warning",
   throttle: "info",
 };
@@ -133,14 +133,14 @@ function RunNode({ data }: { data: RunNodeData }) {
         </div>
         <div className="flex flex-col min-w-0">
           <span className="text-xs font-semibold text-ink truncate">{data.label}</span>
-          <span className="text-[10px] text-muted-foreground capitalize">{status.replace(/_/g, " ")}</span>
+          <span className="text-xs text-muted-foreground capitalize">{status.replace(/_/g, " ")}</span>
         </div>
       </div>
 
       {/* Safety decision badge for job-type nodes */}
       {data.stepType === "job" && typeof data.safetyDecision === "string" && (
         <div className="mt-1.5">
-          <Badge variant={safetyVariant[data.safetyDecision] ?? "default"} className="text-[9px] px-1.5 py-0.5">
+          <Badge variant={safetyVariant[data.safetyDecision] ?? "default"} className="text-xs px-1.5 py-0.5">
             {data.safetyDecision}
           </Badge>
         </div>
@@ -148,7 +148,7 @@ function RunNode({ data }: { data: RunNodeData }) {
 
       {/* Job link indicator for job nodes */}
       {data.stepType === "job" && typeof data.jobId === "string" && (
-        <div className="mt-1 text-[10px] text-accent cursor-pointer hover:underline">
+        <div className="mt-1 text-xs text-accent cursor-pointer hover:underline">
           View job &rarr;
         </div>
       )}

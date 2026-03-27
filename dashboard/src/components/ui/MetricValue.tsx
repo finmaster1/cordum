@@ -28,7 +28,7 @@ export function MetricValue({
   return (
     <div className={cn("flex flex-col", className)}>
       <div className="flex items-center justify-between mb-4">
-        <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+        <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">
           {label}
         </span>
         {icon && <span className="text-cordum/60">{icon}</span>}

@@ -26,9 +26,9 @@ export function DrainPoolDialog({ open, onClose, onConfirm, isPending, poolName,
       description={
         <div className="space-y-3">
           <p>Draining stops new job routing to this pool. In-flight jobs on {workerCount} worker(s) will complete normally.</p>
-          <p className="text-[11px] text-muted-foreground">The pool auto-transitions to inactive when all jobs finish or the timeout expires.</p>
+          <p className="text-xs text-muted-foreground">The pool auto-transitions to inactive when all jobs finish or the timeout expires.</p>
           <div>
-            <label className="text-[11px] font-medium text-foreground">Drain Timeout (seconds)</label>
+            <label className="text-xs font-medium text-foreground">Drain Timeout (seconds)</label>
             <input
               type="number"
               value={timeout}

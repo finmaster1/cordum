@@ -13,7 +13,7 @@ export function PoolStatusBadge({ status }: PoolStatusBadgeProps) {
   const style = statusStyles[resolved] || statusStyles.active;
 
   return (
-    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${style}`}>
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium uppercase tracking-wider ${style}`}>
       {resolved}
     </span>
   );

@@ -47,10 +47,10 @@ function Field({ label, error, hint, children }: {
     <div>
       <label className="mb-1 flex items-baseline gap-1 text-xs text-muted-foreground">
         {label}
-        {hint && <span className="text-[10px] text-muted/60">({hint})</span>}
+        {hint && <span className="text-xs text-muted/60">({hint})</span>}
       </label>
       {children}
-      {error && <p className="mt-0.5 text-[10px] text-danger">{error}</p>}
+      {error && <p className="mt-0.5 text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -140,7 +140,7 @@ function KeyValueEditor({ value, onChange }: {
       <button
         type="button"
         onClick={() => updatePairs([...pairs, { key: "", value: "" }])}
-        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-ink"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-ink"
       >
         <Plus className="h-3 w-3" /> Add label
       </button>

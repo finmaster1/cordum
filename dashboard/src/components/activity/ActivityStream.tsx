@@ -92,7 +92,7 @@ export function ActivityStream({
           </div>
           <div>
             <div className="text-sm font-semibold text-ink">Activity Stream</div>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
               {isRunActive ? "Live run narrative" : "History"}
             </div>
           </div>
@@ -196,7 +196,7 @@ export function ActivityStream({
               <span className="sr-only">Send</span>
             </Button>
           </div>
-          <div className="mt-2 text-[10px] text-muted-foreground">Press Enter to send, Shift+Enter for new line</div>
+          <div className="mt-2 text-xs text-muted-foreground">Press Enter to send, Shift+Enter for new line</div>
         </div>
       ) : null}
     </div>

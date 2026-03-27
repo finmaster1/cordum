@@ -40,7 +40,7 @@ export function PostureSummary({ bundles, allRules }: PostureSummaryProps) {
 
   return (
     <div>
-      <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block mb-3">
+      <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest block mb-3">
         Posture Summary
       </span>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -62,7 +62,7 @@ export function PostureSummary({ bundles, allRules }: PostureSummaryProps) {
           />
         </InstrumentCard>
 
-        <InstrumentCard accent={stats.denyCount > 0 ? "danger" : "muted"}>
+        <InstrumentCard accent={stats.denyCount > 0 ? "governance" : "muted"}>
           <MetricValue
             value={stats.denyCount}
             label="Deny Rules"

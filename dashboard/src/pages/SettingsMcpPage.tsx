@@ -78,7 +78,7 @@ export default function SettingsMcpPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="instrument-card p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Servers</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Servers</span>
                 <Server className="w-4 h-4 text-cordum" />
               </div>
               <span className="font-mono text-2xl font-bold text-foreground">1</span>
@@ -86,7 +86,7 @@ export default function SettingsMcpPage() {
             </div>
             <div className="instrument-card p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Tools</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Tools</span>
                 <Wrench className="w-4 h-4 text-cordum" />
               </div>
               <span className="font-mono text-2xl font-bold text-foreground">{tools.length}</span>
@@ -94,7 +94,7 @@ export default function SettingsMcpPage() {
             </div>
             <div className="instrument-card p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Clients</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Clients</span>
                 <Zap className="w-4 h-4 text-cordum" />
               </div>
               <span className="font-mono text-2xl font-bold text-foreground">{mcpStatus?.connectedClients ?? 0}</span>
@@ -102,7 +102,7 @@ export default function SettingsMcpPage() {
             </div>
             <div className="instrument-card p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Uptime</span>
+                <span className="text-xs font-mono text-muted-foreground uppercase tracking-widest">Uptime</span>
                 <Shield className="w-4 h-4 text-cordum" />
               </div>
               <span className="font-mono text-2xl font-bold text-foreground">{mcpStatus?.uptime ? formatUptime(mcpStatus.uptime) : "\u2014"}</span>
@@ -196,7 +196,7 @@ export default function SettingsMcpPage() {
 
                         {/* Tools */}
                         <div>
-                          <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Tools ({tools.length})</p>
+                          <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2">Tools ({tools.length})</p>
                           {tools.length === 0 ? (
                             <p className="text-xs text-muted-foreground">No tools registered</p>
                           ) : (
@@ -206,7 +206,7 @@ export default function SettingsMcpPage() {
                                   <Wrench className="w-3 h-3 text-cordum shrink-0" />
                                   <div className="flex-1 min-w-0">
                                     <span className="text-xs font-mono font-medium text-foreground">{tool.name}</span>
-                                    <p className="text-[10px] text-muted-foreground">{tool.description}</p>
+                                    <p className="text-xs text-muted-foreground">{tool.description}</p>
                                   </div>
                                   <StatusBadge variant={tool.enabled ? "healthy" : "muted"}>
                                     {tool.enabled ? "enabled" : "disabled"}
@@ -220,16 +220,16 @@ export default function SettingsMcpPage() {
                         {/* Resources */}
                         {resources.length > 0 && (
                           <div>
-                            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Resources ({resources.length})</p>
+                            <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2">Resources ({resources.length})</p>
                             <div className="space-y-1.5">
                               {resources.map((res) => (
                                 <div key={res.uri} className="flex items-center gap-3 px-3 py-2 rounded-2xl bg-surface-1">
                                   <Globe className="w-3 h-3 text-[var(--color-info)] shrink-0" />
                                   <div className="flex-1 min-w-0">
                                     <span className="text-xs font-mono font-medium text-foreground">{res.name}</span>
-                                    <p className="text-[10px] text-muted-foreground">{res.uri}</p>
+                                    <p className="text-xs text-muted-foreground">{res.uri}</p>
                                   </div>
-                                  <span className="text-[10px] font-mono text-muted-foreground">{res.mimeType}</span>
+                                  <span className="text-xs font-mono text-muted-foreground">{res.mimeType}</span>
                                   <StatusBadge variant={res.enabled ? "healthy" : "muted"}>
                                     {res.enabled ? "enabled" : "disabled"}
                                   </StatusBadge>

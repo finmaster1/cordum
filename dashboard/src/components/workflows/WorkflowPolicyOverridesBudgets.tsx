@@ -26,13 +26,13 @@ export function WorkflowPolicyOverridesBudgets({ budgets, readOnly, onChange }: 
         <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-xs font-semibold text-foreground">Budget Constraints</span>
         {!hasValues && (
-          <span className="text-[10px] font-mono text-muted-foreground ml-auto">global defaults</span>
+          <span className="text-xs font-mono text-muted-foreground ml-auto">global defaults</span>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {BUDGET_FIELDS.map(({ key, label, unit }) => (
           <div key={key} className="flex flex-col gap-0.5">
-            <label className="text-[10px] text-muted-foreground" htmlFor={`budget-${key}`}>
+            <label className="text-xs text-muted-foreground" htmlFor={`budget-${key}`}>
               {label} {unit && <span className="font-mono">({unit})</span>}
             </label>
             {readOnly ? (

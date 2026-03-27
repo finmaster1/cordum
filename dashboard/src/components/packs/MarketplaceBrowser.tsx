@@ -83,7 +83,7 @@ function MarketplaceCard({
         {(pack.capabilities ?? []).length > 0 && (
           <div className="mb-4 flex flex-wrap gap-1.5">
             {(pack.capabilities ?? []).map((cap) => (
-              <Badge key={cap} variant="info" className="text-[11px]">
+              <Badge key={cap} variant="info" className="text-xs">
                 {cap}
               </Badge>
             ))}

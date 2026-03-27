@@ -55,7 +55,7 @@ export function ConnectionIndicator() {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-medium border transition-all duration-300 ${c.badgeClass}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border transition-all duration-300 ${c.badgeClass}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${c.dotClass}`} />
       {c.label}

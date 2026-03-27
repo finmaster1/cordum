@@ -9,8 +9,8 @@ describe("getDecisionDisplayVariant", () => {
     expect(getDecisionDisplayVariant("allow")).toBe("healthy");
   });
 
-  it("maps deny to danger", () => {
-    expect(getDecisionDisplayVariant("deny")).toBe("danger");
+  it("maps deny to governance", () => {
+    expect(getDecisionDisplayVariant("deny")).toBe("governance");
   });
 
   it("maps quarantine to warning", () => {

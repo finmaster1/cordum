@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { extractConstraints, hasAnyConstraints } from "@/components/workflows/WorkflowPolicyOverrides";
 import { extractWorkflowRules } from "@/components/workflows/WorkflowPolicyOverrideRules";
 
-describe("WorkflowDetailPage policy tab integration", () => {
+describe("WorkflowPolicyOverrides integration", () => {
   it("extracts constraints from a realistic workflow config", () => {
     const config = {
       constraints: {
@@ -54,9 +54,9 @@ describe("WorkflowDetailPage policy tab integration", () => {
   });
 });
 
-describe("WorkflowDetailPage RBAC consistency", () => {
+describe("Workflow RBAC consistency", () => {
   it("workflow editing is not role-gated (follows existing page pattern)", () => {
-    // WorkflowDetailPage shows Edit/Run buttons without RBAC checks.
+    // Workflow pages show Edit/Run buttons without RBAC checks.
     // Policy overrides follow the same pattern: readOnly=false for all authenticated users.
     // This documents the current behavior for regression detection.
     expect(true).toBe(true);

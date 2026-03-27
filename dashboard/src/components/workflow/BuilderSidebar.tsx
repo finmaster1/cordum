@@ -74,7 +74,7 @@ export function BuilderSidebar({
           Node Types
         </h3>
 
-        <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted/60">
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/60">
           Agent &amp; Actions
         </h4>
         <div className="grid grid-cols-2 gap-2">
@@ -91,7 +91,7 @@ export function BuilderSidebar({
           ))}
         </div>
 
-        <h4 className="mb-2 mt-3 text-[10px] font-semibold uppercase tracking-wider text-muted/60">
+        <h4 className="mb-2 mt-3 text-xs font-semibold uppercase tracking-wider text-muted/60">
           Flow Control
         </h4>
         <div className="grid grid-cols-2 gap-2">

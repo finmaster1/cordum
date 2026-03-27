@@ -115,12 +115,12 @@ function CategoryFilters({
           {label}
         </label>
       ))}
-      <span className="text-[10px] text-muted-foreground">|</span>
+      <span className="text-xs text-muted-foreground">|</span>
       <button
         type="button"
         onClick={setAll}
         disabled={allActive}
-        className="text-[11px] font-semibold text-accent hover:underline disabled:opacity-40"
+        className="text-xs font-semibold text-accent hover:underline disabled:opacity-40"
       >
         All
       </button>
@@ -128,7 +128,7 @@ function CategoryFilters({
         type="button"
         onClick={setNone}
         disabled={noneActive}
-        className="text-[11px] font-semibold text-accent hover:underline disabled:opacity-40"
+        className="text-xs font-semibold text-accent hover:underline disabled:opacity-40"
       >
         None
       </button>
@@ -164,7 +164,7 @@ function TimelineEntry({ entry, category }: { entry: PolicyAuditEntry; category:
             <p className="text-sm font-medium text-ink">
               {describeEntry(entry)}
             </p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {entry.actor && <span>{entry.actor} &middot; </span>}
               <span title={new Date(entry.timestamp).toLocaleString()}>
                 {timeAgo(entry.timestamp)}
@@ -182,7 +182,7 @@ function TimelineEntry({ entry, category }: { entry: PolicyAuditEntry; category:
 
         {/* Expanded details */}
         {expanded && entry.details && (
-          <pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-border bg-surface2/30 p-2.5 text-[11px] text-muted-foreground">
+          <pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-border bg-surface2/30 p-2.5 text-xs text-muted-foreground">
             {JSON.stringify(entry.details, null, 2)}
           </pre>
         )}

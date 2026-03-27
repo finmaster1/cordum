@@ -24,7 +24,7 @@ export function ToolCallBlock({ activity }: Props) {
           </div>
           <div>
             <div className="text-sm font-semibold text-ink">{activity.payload?.tool_name || "Tool call"}</div>
-            <div className="text-[10px] text-muted-foreground">{formatRelative(activity.timestamp)}</div>
+            <div className="text-xs text-muted-foreground">{formatRelative(activity.timestamp)}</div>
           </div>
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -33,7 +33,7 @@ export function ToolCallBlock({ activity }: Props) {
         </div>
       </div>
       {activity.payload?.tool_inputs ? (
-        <pre className="mt-3 rounded-xl bg-card/80 p-3 text-[11px] text-ink">
+        <pre className="mt-3 rounded-xl bg-card/80 p-3 text-xs text-ink">
           {JSON.stringify(activity.payload.tool_inputs, null, 2)}
         </pre>
       ) : null}

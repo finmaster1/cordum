@@ -443,7 +443,7 @@ export function AuditFiltersBar({ onChange }: AuditFiltersBarProps) {
               >
                 {cat.label}
                 {selectedCount > 0 && !allSelected && (
-                  <span className="ml-1 text-[10px]">({selectedCount})</span>
+                  <span className="ml-1 text-xs">({selectedCount})</span>
                 )}
               </button>
             );
@@ -466,7 +466,7 @@ export function AuditFiltersBar({ onChange }: AuditFiltersBarProps) {
                   type="button"
                   onClick={() => toggleEventType(st.value)}
                   className={cn(
-                    "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                    "rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
                     active
                       ? "border-accent bg-accent/10 text-accent"
                       : "border-border text-muted-foreground hover:border-accent/40 hover:text-ink",
@@ -604,7 +604,7 @@ export function AuditFiltersBar({ onChange }: AuditFiltersBarProps) {
               onChange={(e) => setParam("to", e.target.value)}
               className="rounded-lg border border-border bg-card/70 px-2 py-1 text-xs text-ink"
             />
-            <span className="text-[10px] text-muted-foreground">({tz})</span>
+            <span className="text-xs text-muted-foreground">({tz})</span>
           </div>
         )}
       </div>

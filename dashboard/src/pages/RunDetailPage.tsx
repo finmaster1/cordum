@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   ArrowLeft, Send, Briefcase, Shield, GitBranch, Clock,
   CheckCircle2, XCircle, Loader2, MessageSquare, AlertTriangle,
@@ -212,7 +213,7 @@ export default function WorkflowRunDetailPage() {
     if (!workflowId || !runId) return;
     cancelMutation.mutate(
       { workflowId, runId },
-      { onSuccess: () => { setCancelOpen(false); navigate(`/workflows/${workflowId}`); } },
+      { onSuccess: () => { setCancelOpen(false); navigate(`/workflows/${workflowId}/studio`); } },
     );
   };
 
@@ -294,7 +295,7 @@ export default function WorkflowRunDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-surface-0 shrink-0">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => navigate(`/workflows/${workflowId}`)} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
+          <button type="button" onClick={() => navigate(`/workflows/${workflowId}/studio`)} className="p-1.5 rounded-full hover:bg-surface-2 transition-colors">
             <ArrowLeft className="w-4 h-4 text-muted-foreground" />
           </button>
           <div>
@@ -309,13 +310,13 @@ export default function WorkflowRunDetailPage() {
               </StatusBadge>
               <span className="text-xs font-mono text-muted-foreground">{completedCount}/{totalSteps} steps</span>
               {isRunning ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-[var(--color-success)]/15 text-[var(--color-success)]">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-[var(--color-success)]/15 text-[var(--color-success)]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" />
                   LIVE
                 </span>
               ) : run?.status && ["succeeded", "failed", "cancelled", "timed_out"].includes(run.status) ? (
                 <span className={cn(
-                  "text-[10px] font-mono",
+                  "text-xs font-mono",
                   run.status === "succeeded" ? "text-[var(--color-success)]" : "text-destructive",
                 )}>
                   {run.status === "succeeded" ? "Completed" : run.status === "failed" ? "Failed" : run.status === "cancelled" ? "Cancelled" : "Timed out"}
@@ -363,7 +364,7 @@ export default function WorkflowRunDetailPage() {
         {/* Steps Panel — Animated Graph */}
         <div className="w-80 border-r border-border bg-surface-0 overflow-y-auto shrink-0">
           <div className="p-4">
-            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-3">
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">
               Execution Graph ({completedCount}/{totalSteps})
             </p>
             {timelineLoading && steps.length === 0 ? (
@@ -409,18 +410,18 @@ export default function WorkflowRunDetailPage() {
                             <Icon className="w-3 h-3 text-muted-foreground" />
                           </div>
                           {step.status === "skipped" && (
-                            <p className="text-[10px] text-muted-foreground italic mt-0.5">Skipped: dependency failed</p>
+                            <p className="text-xs text-muted-foreground italic mt-0.5">Skipped: dependency failed</p>
                           )}
                           <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] text-muted-foreground capitalize">{step.type}</span>
+                            <span className="text-xs text-muted-foreground capitalize">{step.type}</span>
                             {step.duration && (
-                              <span className={cn("text-[10px] font-mono", isActive ? "text-cordum" : "text-muted-foreground")}>
+                              <span className={cn("text-xs font-mono", isActive ? "text-cordum" : "text-muted-foreground")}>
                                 {step.duration}
                               </span>
                             )}
                           </div>
                         </div>
-                        <span className="text-[10px] font-mono text-muted-foreground">{i + 1}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{i + 1}</span>
                       </motion.div>
                     );
                   })}
@@ -441,7 +442,7 @@ export default function WorkflowRunDetailPage() {
               >
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Step Output</p>
+                    <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Step Output</p>
                     {selectedStep.output && (
                       <button type="button"
                         onClick={() => { if (selectedStep.output) { navigator.clipboard.writeText(selectedStep.output); toast.success("Copied"); } }}
@@ -477,10 +478,10 @@ export default function WorkflowRunDetailPage() {
           <div className="flex items-center gap-2 px-5 py-3 border-b border-border bg-surface-0">
             <MessageSquare className="w-4 h-4 text-cordum" />
             <span className="text-sm font-display font-semibold text-foreground">Run Chat</span>
-            <span className="text-[10px] font-mono text-muted-foreground ml-auto">{messages.length} messages</span>
+            <span className="text-xs font-mono text-muted-foreground ml-auto">{messages.length} messages</span>
           </div>
           {isChatFallback && (
-            <div className="flex items-center gap-2 px-5 py-1.5 border-b border-[var(--color-warning)]/20 bg-[var(--color-warning)]/5 text-[11px] text-[var(--color-warning)]">
+            <div className="flex items-center gap-2 px-5 py-1.5 border-b border-[var(--color-warning)]/20 bg-[var(--color-warning)]/5 text-xs text-[var(--color-warning)]">
               <AlertTriangle className="w-3 h-3 shrink-0" />
               Showing timeline events {chatError ? "(chat unavailable)" : "(no chat messages)"}
             </div>
@@ -489,7 +490,12 @@ export default function WorkflowRunDetailPage() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-5 space-y-3">
             {messages.length === 0 && (
-              <p className="text-xs text-muted-foreground text-center py-8">No messages yet</p>
+              <EmptyState
+                icon={<MessageSquare className="w-5 h-5" />}
+                title="No messages yet"
+                description="Messages will appear here as the run progresses."
+                className="py-8"
+              />
             )}
             {messages.map((msg, i) => (
               <motion.div
@@ -506,14 +512,14 @@ export default function WorkflowRunDetailPage() {
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className={cn(
-                    "text-[10px] font-mono uppercase",
+                    "text-xs font-mono uppercase",
                     msg.role === "user" ? "text-cordum" :
                     msg.role === "agent" ? "text-[var(--color-info)]" :
                     "text-muted-foreground",
                   )}>
                     {msg.role}
                   </span>
-                  <span className="text-[10px] text-muted-foreground">{msg.timestamp}</span>
+                  <span className="text-xs text-muted-foreground">{msg.timestamp}</span>
                 </div>
                 <p className="text-sm text-foreground leading-relaxed">{msg.content}</p>
               </motion.div>
@@ -536,7 +542,7 @@ export default function WorkflowRunDetailPage() {
                 <Send className="w-3.5 h-3.5" />
               </Button>
             </div>
-            <p className="text-[9px] text-muted-foreground mt-1.5">Press Enter to send. Messages are visible to all participants.</p>
+            <p className="text-xs text-muted-foreground mt-1.5">Press Enter to send. Messages are visible to all participants.</p>
           </div>
         </div>
       </div>

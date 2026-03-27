@@ -47,10 +47,10 @@ function Field({ label, error, hint, children }: {
     <div>
       <label className="mb-1 flex items-baseline gap-1 text-xs text-muted-foreground">
         {label}
-        {hint && <span className="text-[10px] text-muted/60">({hint})</span>}
+        {hint && <span className="text-xs text-muted/60">({hint})</span>}
       </label>
       {children}
-      {error && <p className="mt-0.5 text-[10px] text-danger">{error}</p>}
+      {error && <p className="mt-0.5 text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -182,7 +182,7 @@ export function PackActionPanel({ node, onSave, onClose, onDelete }: PackActionP
                 disabled={!selectedPackId}
               />
               {selectedPackId && !hasCapabilities && (
-                <p className="mt-1 text-[10px] text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {isMcpPack
                     ? "MCP pack — type the tool/action name manually."
                     : "This pack has no declared actions. Enter an action name or leave empty."}

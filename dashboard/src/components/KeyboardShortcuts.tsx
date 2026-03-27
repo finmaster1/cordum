@@ -74,7 +74,7 @@ export function KeyboardShortcutsDialog() {
               <div className="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
                 {shortcuts.map((section) => (
                   <div key={section.section}>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/60 mb-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/60 mb-2">
                       {section.section}
                     </p>
                     <div className="space-y-1.5">
@@ -84,11 +84,11 @@ export function KeyboardShortcutsDialog() {
                           <div className="flex items-center gap-1">
                             {item.keys.map((key, i) => (
                               <span key={i}>
-                                <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 text-[10px] font-mono rounded bg-surface-2 border border-border text-muted-foreground">
+                                <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 text-xs font-mono rounded bg-surface-2 border border-border text-muted-foreground">
                                   {key}
                                 </kbd>
                                 {i < item.keys.length - 1 && (
-                                  <span className="text-muted-foreground/40 mx-0.5 text-[10px]">+</span>
+                                  <span className="text-muted-foreground/40 mx-0.5 text-xs">+</span>
                                 )}
                               </span>
                             ))}

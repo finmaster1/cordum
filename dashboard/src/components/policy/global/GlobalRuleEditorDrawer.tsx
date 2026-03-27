@@ -464,22 +464,22 @@ export function GlobalRuleEditorDrawer({
           />
 
           {showPrimaryConstraints && (
-            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-[11px] text-cordum-foreground">
+            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-xs text-cordum-foreground">
               <strong>allow_with_constraints:</strong> configure constraints below to enforce runtime/tooling boundaries.
             </p>
           )}
           {showPrimaryRemediations && (
-            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-[11px] text-cordum-foreground">
+            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-xs text-cordum-foreground">
               <strong>deny:</strong> add remediations below so operators have safe alternatives.
             </p>
           )}
           {showThrottleHint && (
-            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-[11px] text-cordum-foreground">
+            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-xs text-cordum-foreground">
               <strong>throttle:</strong> optional constraints are available in Advanced.
             </p>
           )}
           {draft.decision === "require_approval" && !advancedOpen && (
-            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-[11px] text-cordum-foreground">
+            <p className="rounded-md border border-cordum/30 bg-cordum/10 px-3 py-2 text-xs text-cordum-foreground">
               Remediations for require_approval are available in Advanced.
             </p>
           )}
@@ -559,7 +559,7 @@ export function GlobalRuleEditorDrawer({
                 value={draft.match.mcp.denyTools}
                 onChange={(next) => setDraft((p) => ({ ...p, match: { ...p.match, mcp: { ...p.match.mcp, denyTools: next } } }))}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 MCP precedence: <span className="font-medium text-foreground">deny overrides allow</span> when both rules match.
               </p>
 
@@ -584,7 +584,7 @@ export function GlobalRuleEditorDrawer({
                 />
               </PolicyField>
               {labelLineErrors.length > 0 && (
-                <ul className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive">
+                <ul className="space-y-1 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
                   {labelLineErrors.map((lineError) => (
                     <li key={lineError}>{lineError}</li>
                   ))}
@@ -605,7 +605,7 @@ export function GlobalRuleEditorDrawer({
                   !constraintsEnabled && "opacity-70",
                 )}
               >
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Constraints are active for <span className="font-medium text-foreground">allow_with_constraints</span> and <span className="font-medium text-foreground">throttle</span>.
                 </p>
                 {!hasConstraintConfig && (
@@ -720,7 +720,7 @@ export function GlobalRuleEditorDrawer({
               )}
             >
               {validationErrors.remediations && (
-                <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-destructive" role="alert">
+                <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive" role="alert">
                   {validationErrors.remediations}
                 </p>
               )}
@@ -779,7 +779,7 @@ export function GlobalRuleEditorDrawer({
 
         <div className="fixed bottom-0 right-0 z-[121] flex w-full max-w-xl flex-col gap-2 border-t border-border bg-surface-1 px-5 py-3">
           {showRemediationMismatchConfirm && (
-            <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 p-2 text-[11px] text-[var(--color-warning)]">
+            <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 p-2 text-xs text-[var(--color-warning)]">
               <p>
                 This rule has remediations configured but decision is{" "}
                 <span className="font-mono text-[var(--color-warning)]">{draft.decision}</span>. Remediations apply to deny decisions.
@@ -797,7 +797,7 @@ export function GlobalRuleEditorDrawer({
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               {hasValidationErrors && (
-                <p id={validationSummaryId} className="text-[11px] text-[var(--color-warning)]" aria-live="polite">
+                <p id={validationSummaryId} className="text-xs text-[var(--color-warning)]" aria-live="polite">
                   Fix highlighted validation errors before saving.
                 </p>
               )}

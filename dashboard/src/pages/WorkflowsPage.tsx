@@ -76,7 +76,7 @@ export default function WorkflowsPage() {
               <RefreshCw className="w-3 h-3 mr-1" />
               Refresh
             </Button>
-            <Button variant="primary" size="sm" onClick={() => navigate("/workflows/new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate("/workflows/studio/new")}>
               <Plus className="w-3 h-3 mr-1" />
               New Workflow
             </Button>
@@ -107,7 +107,7 @@ export default function WorkflowsPage() {
           title="No workflows found"
           description={search ? "Try adjusting your search" : "Create your first workflow to orchestrate agent tasks"}
           action={
-            <Button variant="primary" size="sm" onClick={() => navigate("/workflows/new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate("/workflows/studio/new")}>
               <Plus className="w-3 h-3 mr-1" />
               New Workflow
             </Button>
@@ -124,11 +124,11 @@ export default function WorkflowsPage() {
           <table className="w-full min-w-[700px]">
             <thead>
               <tr className="border-b border-border bg-surface-0">
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Name</th>
-                <th className="text-center px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Version</th>
-                <th className="text-center px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Steps</th>
-                <th className="text-left px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
-                <th className="text-right px-5 py-3 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Run</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Name</th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Version</th>
+                <th className="text-center px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Steps</th>
+                <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                <th className="text-right px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Last Run</th>
                 <th className="px-5 py-3"></th>
               </tr>
             </thead>
@@ -136,7 +136,7 @@ export default function WorkflowsPage() {
               {filtered.map((w) => (
                 <tr
                   key={w.id}
-                  {...clickableRowProps(() => navigate(`/workflows/${w.id}`))}
+                  {...clickableRowProps(() => navigate(`/workflows/${w.id}/studio`))}
                   className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer"
                 >
                   <td className="px-5 py-3">

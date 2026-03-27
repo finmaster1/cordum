@@ -122,7 +122,7 @@ export function DLQRowActions({
       <div className="flex items-center gap-1">
         {feedback && (
           <span
-            className={`text-[10px] font-semibold ${
+            className={`text-xs font-semibold ${
               feedback.type === "success" ? "text-success" : "text-danger"
             }`}
           >

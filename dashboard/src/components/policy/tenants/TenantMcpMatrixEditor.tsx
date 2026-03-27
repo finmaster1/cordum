@@ -31,7 +31,7 @@ export function TenantMcpMatrixEditor({
           <span className="font-medium text-foreground">deny overrides allow</span>{" "}
           for matching server/tool/resource/action patterns.
         </p>
-        <p className="mt-1 text-[11px]">
+        <p className="mt-1 text-xs">
           Entries are normalized for duplicate removal with case-insensitive matching.
         </p>
       </div>

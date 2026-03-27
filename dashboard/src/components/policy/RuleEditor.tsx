@@ -56,7 +56,7 @@ type RuleFormData = z.infer<typeof ruleSchema>;
 
 const decisions = [
   { value: "allow" as const, label: "Allow", icon: Check, color: "border-success text-success bg-[color:rgba(31,122,87,0.08)]", active: "border-success bg-[color:rgba(31,122,87,0.18)] text-success ring-2 ring-success/30" },
-  { value: "deny" as const, label: "Deny", icon: ShieldOff, color: "border-danger text-danger bg-[color:rgba(184,58,58,0.08)]", active: "border-danger bg-[color:rgba(184,58,58,0.18)] text-danger ring-2 ring-danger/30" },
+  { value: "deny" as const, label: "Deny", icon: ShieldOff, color: "border-[var(--color-governance)] text-[var(--color-governance)] bg-[var(--color-governance)]/8", active: "border-[var(--color-governance)] bg-[var(--color-governance)]/18 text-[var(--color-governance)] ring-2 ring-[var(--color-governance)]/30" },
   { value: "require_approval" as const, label: "Require Approval", icon: Shield, color: "border-warning text-warning bg-[color:rgba(197,138,28,0.08)]", active: "border-warning bg-[color:rgba(197,138,28,0.18)] text-warning ring-2 ring-warning/30" },
   { value: "throttle" as const, label: "Throttle", icon: Clock, color: "border-accent text-accent bg-[color:rgba(15,127,122,0.08)]", active: "border-accent bg-[color:rgba(15,127,122,0.18)] text-accent ring-2 ring-accent/30" },
 ] as const;
@@ -336,7 +336,7 @@ export function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
                       Priority
                     </label>
                     <Input id="re-priority" type="number" min={1} max={1000} placeholder="100" {...register("priority")} />
-                    <p className="mt-1 text-[10px] text-muted-foreground">Lower number = higher priority (1-1000)</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Lower number = higher priority (1-1000)</p>
                     {errors.priority && <p className="mt-1 text-xs text-danger">{errors.priority.message}</p>}
                   </div>
                   <div>
@@ -344,7 +344,7 @@ export function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
                       TTL
                     </label>
                     <Input id="re-ttl" placeholder="24h, 7d, 30d" {...register("ttl")} />
-                    <p className="mt-1 text-[10px] text-muted-foreground">How long this rule stays active</p>
+                    <p className="mt-1 text-xs text-muted-foreground">How long this rule stays active</p>
                   </div>
                 </div>
                 <div>
@@ -376,7 +376,7 @@ export function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
                           key={l}
                           type="button"
                           onClick={() => removeLabel(l)}
-                          className="inline-flex items-center gap-0.5 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-ink transition hover:border-danger hover:text-danger"
+                          className="inline-flex items-center gap-0.5 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-ink transition hover:border-danger hover:text-danger"
                         >
                           {l}
                           <X className="h-2.5 w-2.5" />

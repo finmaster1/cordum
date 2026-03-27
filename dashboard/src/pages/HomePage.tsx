@@ -206,7 +206,7 @@ export default function HomePage() {
             {/* KPI 1: Recent Jobs */}
             <InstrumentCard>
               <MetricValue label="Recent Jobs" value={totalJobs.toLocaleString()} icon={<Activity className="w-4 h-4" />}>
-                <div className="flex gap-3 mt-3 text-[10px] font-mono text-muted-foreground">
+                <div className="flex gap-3 mt-3 text-xs font-mono text-muted-foreground">
                   <span>{runningJobs} running</span>
                   <span className="text-[var(--color-success)]">{completedJobs} done</span>
                   <span className="text-destructive">{failedJobs} failed</span>
@@ -246,7 +246,7 @@ export default function HomePage() {
                 unit="allowed"
                 icon={<ShieldCheck className="w-4 h-4" />}
               >
-                <div className="flex gap-3 mt-3 text-[10px] font-mono">
+                <div className="flex gap-3 mt-3 text-xs font-mono">
                   <span className="text-[var(--color-success)]">{safetyAllowed} allow</span>
                   <span className="text-destructive">{safetyDenied} deny</span>
                   <span className="text-[var(--color-warning)]">{safetyApproval} review</span>
@@ -263,7 +263,7 @@ export default function HomePage() {
                 icon={<UserCheck className={cn("w-4 h-4", pendingApprovals.length > 0 ? "text-[var(--color-warning)]" : "text-cordum")} />}
               >
                 {pendingApprovals.length > 0 && (
-                  <Button variant="ghost" size="sm" className="mt-2.5 text-[var(--color-warning)] hover:text-[var(--color-warning)] p-0 h-auto font-mono text-[10px] uppercase tracking-widest" onClick={() => navigate("/approvals")}>
+                  <Button variant="ghost" size="sm" className="mt-2.5 text-[var(--color-warning)] hover:text-[var(--color-warning)] p-0 h-auto font-mono text-xs uppercase tracking-widest" onClick={() => navigate("/approvals")}>
                     Review now <ArrowRight className="w-3 h-3 ml-1" />
                   </Button>
                 )}
@@ -285,9 +285,9 @@ export default function HomePage() {
           <div className="flex items-start justify-between mb-5">
             <div className="min-w-0">
               <h3 className="font-display font-semibold text-sm text-foreground tracking-tight">Job Activity</h3>
-              <p className="text-[11px] text-muted-foreground mt-1 leading-none">Safety overlay — allowed vs denied vs approval</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-none">Safety overlay — allowed vs denied vs approval</p>
             </div>
-            <div className="flex items-center gap-4 text-[10px] font-mono shrink-0">
+            <div className="flex items-center gap-4 text-xs font-mono shrink-0">
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-success)]" />Allowed</span>
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-destructive" />Denied</span>
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-warning)]" />Approval</span>
@@ -377,12 +377,12 @@ export default function HomePage() {
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-surface-0">
-              <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Job ID</th>
-              <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Topic</th>
-              <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
-              <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Safety</th>
-              <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Duration</th>
-              <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-widest">Time</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Job ID</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Topic</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Safety</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Duration</th>
+              <th className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">Time</th>
             </tr>
           </thead>
           <tbody>
@@ -394,9 +394,9 @@ export default function HomePage() {
                   onClick={() => navigate(`/jobs/${job.id}`)}
                   className="border-b border-border hover:bg-surface-1 transition-colors cursor-pointer group"
                 >
-                  <td className="px-5 py-2.5 font-mono text-sm text-cordum group-hover:underline">{job.id.slice(0, 12)}</td>
-                  <td className="px-5 py-2.5 text-sm text-foreground">{job.topic || "—"}</td>
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3 font-mono text-sm text-cordum group-hover:underline">{job.id.slice(0, 12)}</td>
+                  <td className="px-5 py-3 text-sm text-foreground">{job.topic || "—"}</td>
+                  <td className="px-5 py-3">
                     <StatusBadge
                       variant={
                         job.status === "running" ? "healthy" :
@@ -409,15 +409,15 @@ export default function HomePage() {
                       {job.status}
                     </StatusBadge>
                   </td>
-                  <td className="px-5 py-2.5">
+                  <td className="px-5 py-3">
                     <SafetyDecisionBadge decision={safetyDecision} />
                   </td>
-                  <td className="px-5 py-2.5 text-sm text-muted-foreground font-mono">
+                  <td className="px-5 py-3 text-sm text-muted-foreground font-mono">
                     {job.duration
                       ? `${Math.round(job.duration / 1000)}s`
                       : job.status === "running" ? "running..." : "—"}
                   </td>
-                  <td className="px-5 py-2.5 text-sm text-muted-foreground">
+                  <td className="px-5 py-3 text-sm text-muted-foreground">
                     {job.updatedAt ? formatRelativeTime(new Date(job.updatedAt).toISOString()) : "—"}
                   </td>
                 </tr>
@@ -463,17 +463,17 @@ export default function HomePage() {
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-[var(--color-success)] animate-pulse" : "bg-muted-foreground")} />
-                  <span className="font-mono text-[11px] text-foreground truncate">{w.name || w.id.slice(0, 10)}</span>
+                  <span className="font-mono text-xs text-foreground truncate">{w.name || w.id.slice(0, 10)}</span>
                 </div>
                 <div className="space-y-1.5">
-                  <div className="flex justify-between text-[9px] uppercase tracking-wider font-mono">
+                  <div className="flex justify-between text-xs uppercase tracking-wider font-mono">
                     <span className="text-muted-foreground">CPU</span>
                     <span className="text-foreground">{w.cpuLoad ?? 0}%</span>
                   </div>
                   <div className="w-full h-1 rounded-full bg-surface-2 overflow-hidden">
                     <div className="h-full rounded-full bg-cordum transition-all" style={{ width: `${w.cpuLoad ?? 0}%` }} />
                   </div>
-                  <div className="flex justify-between text-[9px] uppercase tracking-wider font-mono">
+                  <div className="flex justify-between text-xs uppercase tracking-wider font-mono">
                     <span className="text-muted-foreground">MEM</span>
                     <span className="text-foreground">{w.memoryLoad ?? 0}%</span>
                   </div>
@@ -482,7 +482,7 @@ export default function HomePage() {
                   </div>
                 </div>
                 {/* Last policy eval line */}
-                <div className="mt-2 pt-1.5 border-t border-border/40 text-[9px] font-mono text-muted-foreground">
+                <div className="mt-2 pt-1.5 border-t border-border/40 text-xs font-mono text-muted-foreground">
                   Jobs: {w.activeJobs ?? 0} / {w.capacity ?? 0}
                 </div>
               </InstrumentCard>
@@ -529,7 +529,7 @@ export default function HomePage() {
                   )} />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-foreground font-semibold truncate">{svc.name}</p>
-                    <p className="text-[10px] text-muted-foreground font-mono">{svc.latency || "—"}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{svc.latency || "—"}</p>
                   </div>
                 </div>
               </InstrumentCard>
@@ -567,7 +567,7 @@ export default function HomePage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-3 mb-2">
                     <span className="font-mono text-sm text-cordum">{approval.id.slice(0, 12)}</span>
-                    <span className="text-[10px] text-muted-foreground font-mono">
+                    <span className="text-xs text-muted-foreground font-mono">
                       {approval.requestedAt ? formatRelativeTime(approval.requestedAt) : "—"}
                     </span>
                   </div>

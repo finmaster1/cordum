@@ -62,7 +62,7 @@ export default function SettingsEnvironmentsPage() {
               </div>
               <div className="space-y-2 mb-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">URL</span>
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">URL</span>
                   <div className="flex items-center gap-1">
                     <span className="text-xs font-mono text-foreground">{env.url}</span>
                     <button type="button" onClick={() => { navigator.clipboard.writeText(env.url); toast.success("Copied"); }} className="p-0.5 rounded hover:bg-surface-2">
@@ -71,15 +71,15 @@ export default function SettingsEnvironmentsPage() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Region</span>
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Region</span>
                   <span className="text-xs text-foreground">{env.region}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Version</span>
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Version</span>
                   <span className="text-xs font-mono text-foreground">{env.version}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Workers</span>
+                  <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Workers</span>
                   <span className="text-xs text-foreground">{env.workers} connected</span>
                 </div>
               </div>

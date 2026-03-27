@@ -322,7 +322,7 @@ export function PolicyFirewallView({
                 {rule.reason ? <div className="mt-2 text-xs text-muted-foreground">{rule.reason}</div> : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(matchSummary.length ? matchSummary : ["Any"]).map((item) => (
-                    <span key={item} className="rounded-full border border-border bg-card/80 px-3 py-1 text-[10px] text-ink">
+                    <span key={item} className="rounded-full border border-border bg-card/80 px-3 py-1 text-xs text-ink">
                       {item}
                     </span>
                   ))}
@@ -330,7 +330,7 @@ export function PolicyFirewallView({
                 {constraintSummary.length ? (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {constraintSummary.map((item) => (
-                      <span key={item} className="rounded-full border border-border bg-card/80 px-3 py-1 text-[10px] text-ink">
+                      <span key={item} className="rounded-full border border-border bg-card/80 px-3 py-1 text-xs text-ink">
                         {item}
                       </span>
                     ))}

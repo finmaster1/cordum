@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -24,6 +25,8 @@ import "reactflow/dist/style.css";
 import { Info, X, Maximize2, Minimize2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
+import { toast } from "sonner";
 import type { UnifiedNodeData, StudioMode, StudioGraphData } from "./types";
 import { UnifiedNode } from "./nodes/UnifiedNode";
 
@@ -114,7 +117,7 @@ function DAGLegend({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <div className="space-y-1.5">
-        <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</span>
+        <span className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</span>
         <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[var(--color-success)]" />Succeeded</div>
         <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-destructive" />Failed</div>
         <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[var(--color-info)] animate-pulse" />Running</div>
@@ -122,7 +125,7 @@ function DAGLegend({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[var(--color-warning)]" />Waiting</div>
       </div>
       <div className="space-y-1.5">
-        <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Edges</span>
+        <span className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edges</span>
         <div className="flex items-center gap-2"><span className="h-0.5 w-5 bg-[var(--accent)]" />Critical path</div>
         <div className="flex items-center gap-2"><span className="h-0.5 w-5 bg-[var(--color-success)]" />Completed</div>
         <div className="flex items-center gap-2"><span className="h-0.5 w-5 bg-destructive" />To failed</div>
@@ -148,10 +151,8 @@ export interface StudioCanvasProps {
 // Node ID generator
 // ---------------------------------------------------------------------------
 
-let nodeCounter = 0;
 function nextNodeId(): string {
-  nodeCounter += 1;
-  return `step-${Date.now()}-${nodeCounter}`;
+  return `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +178,12 @@ function StudioCanvasInner({
 
   const isEdit = mode === "edit";
 
-  // Keep parent ref in sync
-  if (graphRef) {
-    graphRef.current = { nodes, edges };
-  }
+  // Keep parent ref in sync (via effect, not during render)
+  useEffect(() => {
+    if (graphRef) {
+      graphRef.current = { nodes, edges };
+    }
+  }, [graphRef, nodes, edges]);
 
   // Apply highlighting in view mode
   const { nodes: displayNodes, edges: displayEdges } = useMemo(
@@ -205,12 +208,49 @@ function StudioCanvasInner({
     onNodeSelect?.(null);
   }, [onNodeSelect]);
 
+  const isValidConnection = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return false;
+      if (connection.source === connection.target) return false;
+      // Duplicate edge check (same source → target)
+      if (edges.some((e) => e.source === connection.source && e.target === connection.target)) {
+        return false;
+      }
+      // Cycle detection via BFS from target following outgoing edges
+      const visited = new Set<string>();
+      const queue = [connection.target];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current === connection.source) return false;
+        if (visited.has(current)) continue;
+        visited.add(current);
+        for (const edge of edges) {
+          if (edge.source === current) queue.push(edge.target);
+        }
+      }
+      return true;
+    },
+    [edges],
+  );
+
   const handleConnect = useCallback(
     (connection: Connection) => {
       if (!isEdit) return;
+      if (!isValidConnection(connection)) {
+        logger.warn("workflow-studio", "Rejected invalid connection", {
+          source: connection.source,
+          target: connection.target,
+        });
+        toast.error("Invalid connection", {
+          description: connection.source === connection.target
+            ? "A node cannot connect to itself"
+            : "This connection would create a cycle or already exists",
+        });
+        return;
+      }
       setEdges((eds) => addEdge({ ...connection, type: "smoothstep" }, eds));
     },
-    [isEdit, setEdges],
+    [isEdit, isValidConnection, setEdges],
   );
 
   const handleNodesDelete = useCallback(
@@ -294,6 +334,7 @@ function StudioCanvasInner({
         onNodesChange={isEdit ? handleNodesChange : undefined}
         onEdgesChange={isEdit ? handleEdgesChange : undefined}
         onConnect={handleConnect}
+        isValidConnection={isValidConnection}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         onNodesDelete={handleNodesDelete}
