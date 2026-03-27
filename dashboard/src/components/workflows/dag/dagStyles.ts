@@ -20,7 +20,7 @@ export function markCriticalPath(
   for (const step of steps) {
     const status = step.status;
     const isCompleted =
-      status === "succeeded" || status === "failed";
+      status === "succeeded" || status === "failed" || status === "denied";
 
     if (isCompleted && step.startedAt && step.completedAt) {
       const dur =
@@ -126,7 +126,7 @@ const RUNNING_STATUSES: Set<string> = new Set([
   "running",
 ]);
 
-const FAILED_STATUSES: Set<string> = new Set(["failed", "timed_out"]);
+const FAILED_STATUSES: Set<string> = new Set(["failed", "denied", "timed_out"]);
 
 /**
  * Color edges based on the status of their source and target steps.

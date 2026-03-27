@@ -18,7 +18,7 @@ import { Drawer } from "../components/ui/Drawer";
 import type { RawWorkflowRun } from "../types/api";
 import { ErrorBanner } from "../components/ui/ErrorBanner";
 
-const statusOptions = ["all", "running", "waiting", "pending", "succeeded", "failed", "cancelled", "timed_out"];
+const statusOptions = ["all", "running", "waiting", "pending", "succeeded", "failed", "denied", "cancelled", "timed_out"];
 const timeOptions = [
   { label: "All", value: "all" },
   { label: "24h", value: "24h" },
@@ -32,7 +32,7 @@ function runProgress(run: RawWorkflowRun) {
     return { percent: 0, activeStep: "", activeStatus: "" };
   }
   const completed = steps.filter((step) =>
-    ["succeeded", "failed", "cancelled", "timed_out"].includes(step.status)
+    ["succeeded", "failed", "denied", "cancelled", "timed_out"].includes(step.status)
   ).length;
   // First look for running/waiting steps
   let active = steps.find((step) => ["running", "waiting"].includes(step.status));

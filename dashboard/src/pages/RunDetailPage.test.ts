@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
  * Tests for RunDetailPage logic: skipped step detection, live vs historical indicator.
  */
 
-const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"];
+const TERMINAL_STATUSES = ["succeeded", "failed", "denied", "cancelled", "timed_out"];
 const ACTIVE_STATUSES = ["running", "pending", "waiting"];
 
 function isRunning(status: string): boolean {

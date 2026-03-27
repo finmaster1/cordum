@@ -63,6 +63,7 @@ const SPARKLINE_COLORS: Record<string, string> = {
   succeeded: "bg-[var(--color-success)]",
   completed: "bg-[var(--color-success)]",
   failed: "bg-destructive",
+  denied: "bg-[var(--color-governance)]",
   timed_out: "bg-destructive",
   cancelled: "bg-muted-foreground",
   running: "bg-[var(--color-info)]",

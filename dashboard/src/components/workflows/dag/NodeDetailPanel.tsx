@@ -778,9 +778,9 @@ function ParallelDetail({
   const runStepsByID = new Map((run?.steps ?? []).map((entry) => [entry.id, entry]));
   const childRuns = childStepIDs.map((childID) => runStepsByID.get(childID)).filter(Boolean) as WorkflowStep[];
   const succeeded = childRuns.filter((entry) => entry.status === "succeeded").length;
-  const failed = childRuns.filter((entry) => entry.status === "failed" || entry.status === "timed_out").length;
+  const failed = childRuns.filter((entry) => entry.status === "failed" || entry.status === "denied" || entry.status === "timed_out").length;
   const cancelled = childRuns.filter((entry) => entry.status === "cancelled").length;
-  const done = childRuns.filter((entry) => ["succeeded", "failed", "timed_out", "cancelled"].includes(entry.status ?? "")).length;
+  const done = childRuns.filter((entry) => ["succeeded", "failed", "denied", "timed_out", "cancelled"].includes(entry.status ?? "")).length;
   const total = childStepIDs.length;
   const progressPct = total > 0 ? Math.round((done / total) * 100) : 0;
 
@@ -885,7 +885,7 @@ function LoopDetail({
 
   const dispatchedIterations = childRuns.length;
   const terminalChildren = childRuns.filter((entry) =>
-    ["succeeded", "failed", "timed_out", "cancelled"].includes(entry.step.status ?? ""),
+    ["succeeded", "failed", "denied", "timed_out", "cancelled"].includes(entry.step.status ?? ""),
   ).length;
   const failedChildren = childRuns.filter((entry) =>
     ["failed", "timed_out", "cancelled"].includes(entry.step.status ?? ""),

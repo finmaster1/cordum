@@ -800,6 +800,7 @@ export function useActiveRuns() {
 const TERMINAL_STATUSES = new Set<string>([
   "succeeded",
   "failed",
+  "denied",
   "cancelled",
   "timed_out",
 ]);

@@ -31,6 +31,8 @@ export function runStatusMeta(status?: string): StatusMeta {
     case "failed":
     case "timed_out":
       return { label: status, tone: "danger", shape: "circle", icon: XCircle };
+    case "denied":
+      return { label: status, tone: "governance", shape: "shield", icon: ShieldAlert };
     case "pending":
       return { label: status, tone: "warning", shape: "circle", icon: Clock };
     case "cancelled":

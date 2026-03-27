@@ -564,6 +564,24 @@ export default function JobDetailPage() {
             ))}
           </div>
         )}
+
+        {/* Error — collapsible, right under tags */}
+        {(job.errorMessage || job.status === "failed") && (
+          <CollapsibleSection
+            title="Error"
+            defaultOpen={job.status === "failed"}
+            badge={<StatusBadge variant="danger">error</StatusBadge>}
+          >
+            <div className="rounded-2xl bg-destructive/5 border border-destructive/15 p-4">
+              <p className="text-sm font-mono text-destructive whitespace-pre-wrap">{job.errorMessage || `Job failed (no error message provided). Status code: ${job.errorCode || "unknown"}`}</p>
+              {job.errorCode && (
+                <p className="text-xs text-muted-foreground mt-2 font-mono">
+                  Code: {job.errorCode} {job.errorCodeEnum ? `(${job.errorCodeEnum})` : ""}
+                </p>
+              )}
+            </div>
+          </CollapsibleSection>
+        )}
       </motion.div>
 
       {/* ── B. Safety Story — always visible ── */}
@@ -619,24 +637,10 @@ export default function JobDetailPage() {
             </div>
           </div>
 
-          {/* Step 2: Constraints Applied */}
-          {job.safetyDecision?.type === "allow_with_constraints" && (
-            <div className="instrument-card p-0 overflow-hidden">
-              <div className="px-5 py-3 border-b border-border bg-surface-0 flex items-center gap-2">
-                <div className="w-5 h-5 rounded-full bg-[var(--color-warning)]/15 flex items-center justify-center text-xs font-mono font-bold text-[var(--color-warning)]">2</div>
-                <span className="text-xs font-mono font-medium text-foreground">Constraints Applied</span>
-                <StatusBadge variant="warning">constrained</StatusBadge>
-              </div>
-              <div className="p-5">
-                <p className="text-xs text-muted-foreground">This job was allowed with constraints. Connect to a live Cordum instance to see constraint details.</p>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Output Evaluation */}
+          {/* Step 2: Output Evaluation */}
           <div className={cn("instrument-card p-0 overflow-hidden", job.output_safety?.decision === "QUARANTINE" ? "status-danger" : "")}>
             <div className="px-5 py-3 border-b border-border bg-surface-0 flex items-center gap-2">
-              <div className="w-5 h-5 rounded-full bg-[var(--color-info)]/15 flex items-center justify-center text-xs font-mono font-bold text-[var(--color-info)]">{job.safetyDecision?.type === "allow_with_constraints" ? "3" : "2"}</div>
+              <div className="w-5 h-5 rounded-full bg-[var(--color-info)]/15 flex items-center justify-center text-xs font-mono font-bold text-[var(--color-info)]">2</div>
               <span className="text-xs font-mono font-medium text-foreground">Output Policy Evaluation</span>
               {job.output_safety ? (
                 <StatusBadge variant={job.output_safety.decision === "ALLOW" ? "healthy" : job.output_safety.decision === "REDACT" ? "warning" : "danger"}>
@@ -717,30 +721,6 @@ export default function JobDetailPage() {
         </div>
         <JobTimeline job={job} />
       </motion.div>
-
-      {/* ── D. Error section — collapsible ── */}
-      {(job.errorMessage || job.status === "failed") && (
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.15 }}
-        >
-          <CollapsibleSection
-            title="Error"
-            defaultOpen={job.status === "failed"}
-            badge={<StatusBadge variant="danger">error</StatusBadge>}
-          >
-            <div className="rounded-2xl bg-destructive/5 border border-destructive/15 p-4">
-              <p className="text-sm font-mono text-destructive whitespace-pre-wrap">{job.errorMessage || `Job failed (no error message provided). Status code: ${job.errorCode || "unknown"}`}</p>
-              {job.errorCode && (
-                <p className="text-xs text-muted-foreground mt-2 font-mono">
-                  Code: {job.errorCode} {job.errorCodeEnum ? `(${job.errorCodeEnum})` : ""}
-                </p>
-              )}
-            </div>
-          </CollapsibleSection>
-        </motion.div>
-      )}
 
       {/* ── E. Collapsed drawers ── */}
       <motion.div

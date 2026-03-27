@@ -39,7 +39,7 @@ function extractStepId(event: StreamEvent): string | undefined {
   return (p.stepId ?? p.step_id) as string | undefined;
 }
 
-const VALID_RUN_STATUSES = new Set<string>(["pending", "running", "waiting", "succeeded", "failed", "timed_out", "cancelled"]);
+const VALID_RUN_STATUSES = new Set<string>(["pending", "running", "waiting", "succeeded", "failed", "denied", "timed_out", "cancelled"]);
 
 function extractStatus(event: StreamEvent): RunStatus | undefined {
   const p = event.payload ?? {};

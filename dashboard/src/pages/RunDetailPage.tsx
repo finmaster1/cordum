@@ -314,7 +314,7 @@ export default function WorkflowRunDetailPage() {
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" />
                   LIVE
                 </span>
-              ) : run?.status && ["succeeded", "failed", "cancelled", "timed_out"].includes(run.status) ? (
+              ) : run?.status && ["succeeded", "failed", "denied", "cancelled", "timed_out"].includes(run.status) ? (
                 <span className={cn(
                   "text-xs font-mono",
                   run.status === "succeeded" ? "text-[var(--color-success)]" : "text-destructive",

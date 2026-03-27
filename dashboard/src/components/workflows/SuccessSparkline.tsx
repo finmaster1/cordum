@@ -6,6 +6,7 @@ const COLOR_MAP: Record<string, string> = {
   succeeded: "#1f7a57",
   completed: "#1f7a57",
   failed: "#b83a3a",
+  denied: "#7c3aed",
   timed_out: "#b83a3a",
   cancelled: "#6b7280",
   running: "#0f7f7a",

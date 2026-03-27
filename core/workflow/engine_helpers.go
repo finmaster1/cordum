@@ -181,8 +181,8 @@ func depsSatisfied(step *Step, run *WorkflowRun, wfDef *Workflow) bool {
 		if sr.Status == StepStatusSucceeded {
 			continue
 		}
-		// A failed or timed-out dependency is satisfied if its on_error handler succeeded.
-		if (sr.Status == StepStatusFailed || sr.Status == StepStatusTimedOut) && wfDef != nil {
+		// A failed, denied, or timed-out dependency is satisfied if its on_error handler succeeded.
+		if (sr.Status == StepStatusFailed || sr.Status == StepStatusDenied || sr.Status == StepStatusTimedOut) && wfDef != nil {
 			depDef := wfDef.Steps[dep]
 			if depDef != nil && depDef.OnError != "" {
 				handlerSR := run.Steps[depDef.OnError]
@@ -363,7 +363,7 @@ func parsePositiveInt(value any) (int, error) {
 
 func isTerminalStepStatus(status StepStatus) bool {
 	switch status {
-	case StepStatusSucceeded, StepStatusFailed, StepStatusCancelled, StepStatusTimedOut:
+	case StepStatusSucceeded, StepStatusFailed, StepStatusDenied, StepStatusCancelled, StepStatusTimedOut:
 		return true
 	default:
 		return false

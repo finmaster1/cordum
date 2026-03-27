@@ -6,7 +6,7 @@ import type { ActivityItem } from "../../types/activity";
  */
 
 const MAX_ACTIVITY_ITEMS = 100;
-const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"];
+const TERMINAL_STATUSES = ["succeeded", "failed", "denied", "cancelled", "timed_out"];
 
 type FilterTab = "all" | "errors" | "safety" | "progress";
 

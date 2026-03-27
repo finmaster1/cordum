@@ -37,6 +37,7 @@ const statusColor: Record<string, string> = {
   succeeded: "#1f7a57",
   completed: "#1f7a57",
   failed: "#b83a3a",
+  denied: "#7c3aed",
   timed_out: "#d4833a",
   cancelled: "#5a6a70",
   blocked: "#c58a1c",

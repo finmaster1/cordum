@@ -348,7 +348,7 @@ func cancelStepRun(sr *StepRun, now time.Time) {
 		return
 	}
 	switch sr.Status {
-	case StepStatusSucceeded, StepStatusFailed, StepStatusCancelled, StepStatusTimedOut:
+	case StepStatusSucceeded, StepStatusFailed, StepStatusDenied, StepStatusCancelled, StepStatusTimedOut:
 		// leave terminal states
 	default:
 		sr.Status = StepStatusCancelled
@@ -367,7 +367,7 @@ func timeoutStepRun(sr *StepRun, now time.Time) {
 		return
 	}
 	switch sr.Status {
-	case StepStatusSucceeded, StepStatusFailed, StepStatusCancelled, StepStatusTimedOut:
+	case StepStatusSucceeded, StepStatusFailed, StepStatusDenied, StepStatusCancelled, StepStatusTimedOut:
 		// leave terminal states
 	default:
 		sr.Status = StepStatusTimedOut
@@ -637,7 +637,7 @@ func updateRunStatus(run *WorkflowRun, wfDef *Workflow, now time.Time) {
 			continue
 		}
 		switch sr.Status {
-		case StepStatusFailed:
+		case StepStatusFailed, StepStatusDenied:
 			stepDef := wfDef.Steps[stepID]
 			if stepDef != nil && stepDef.OnError != "" {
 				switch walkOnErrorChain(wfDef, run, stepID) {

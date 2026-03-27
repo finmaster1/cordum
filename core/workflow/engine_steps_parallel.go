@@ -143,7 +143,7 @@ func summarizeParallelChildren(parent *StepRun, childStepIDs []string) (succeede
 		switch child.Status {
 		case StepStatusSucceeded:
 			succeeded++
-		case StepStatusFailed, StepStatusCancelled, StepStatusTimedOut:
+		case StepStatusFailed, StepStatusDenied, StepStatusCancelled, StepStatusTimedOut:
 			failed++
 		case StepStatusRunning, StepStatusWaiting:
 			running++

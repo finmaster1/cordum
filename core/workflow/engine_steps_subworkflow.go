@@ -191,7 +191,7 @@ func subWorkflowChildErrorMessage(childRun *WorkflowRun) string {
 			continue
 		}
 		switch sr.Status {
-		case StepStatusFailed, StepStatusTimedOut, StepStatusCancelled:
+		case StepStatusFailed, StepStatusDenied, StepStatusTimedOut, StepStatusCancelled:
 			if sr.Error != nil {
 				if msg, ok := sr.Error["message"].(string); ok && strings.TrimSpace(msg) != "" {
 					return msg
