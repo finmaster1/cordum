@@ -189,13 +189,20 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      {/* Skip-to-main for keyboard navigation — first focusable element */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-surface-1 focus:border focus:border-accent focus:rounded-xl focus:text-sm focus:font-semibold focus:text-accent focus:shadow-sm"
+      >
+        Skip to main content
+      </a>
       <CommandPalette />
       <KeyboardShortcutsDialog />
 
       {/* Mobile hamburger */}
       <button type="button"
         onClick={() => setMobileOpen(true)}
-        className="md:hidden fixed top-3 left-3 z-50 p-2 rounded-md bg-surface-1 border border-border text-muted-foreground hover:text-foreground transition-colors"
+        className="md:hidden fixed top-3 left-3 z-50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md bg-surface-1 border border-border text-muted-foreground hover:text-foreground transition-colors"
         aria-label="Open navigation"
       >
         <Menu className="w-5 h-5" />
@@ -235,7 +242,7 @@ export function AppShell({ children }: AppShellProps) {
                 </div>
                 <button type="button"
                   onClick={() => setMobileOpen(false)}
-                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
+                  className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors"
                   aria-label="Close navigation"
                 >
                   <X className="w-4 h-4" />
@@ -429,6 +436,7 @@ export function AppShell({ children }: AppShellProps) {
           </a>
           <button type="button"
             onClick={toggleTheme}
+            aria-label={collapsed ? (theme === "dark" ? "Switch to light mode" : "Switch to dark mode") : undefined}
             className={cn(
               "flex items-center gap-3 w-full px-3 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-surface-2 transition-colors",
               collapsed && "justify-center px-0",
@@ -461,7 +469,7 @@ export function AppShell({ children }: AppShellProps) {
         {/* Collapse toggle */}
         <button type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="absolute -right-3 top-20 w-6 h-6 rounded-full bg-surface-2 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
+          className="absolute -right-5 top-[72px] w-10 h-10 rounded-full bg-surface-2 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-surface-3 transition-colors"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? (
@@ -522,8 +530,9 @@ export function AppShell({ children }: AppShellProps) {
                 </div>
                 <button type="button"
                   onClick={logout}
-                  className="p-1 rounded-md text-muted-foreground hover:text-destructive transition-colors"
+                  className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive transition-colors"
                   title="Logout"
+                  aria-label="Sign out"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
