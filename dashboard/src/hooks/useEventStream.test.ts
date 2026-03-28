@@ -55,7 +55,10 @@ vi.stubGlobal("crypto", { randomUUID: () => "mock-uuid" });
 // Mock useQueryClient
 const mockInvalidateQueries = vi.fn();
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
+  useQueryClient: () => ({
+    invalidateQueries: mockInvalidateQueries,
+    getQueryCache: () => ({ getAll: () => [] }),
+  }),
 }));
 
 // Mock config store

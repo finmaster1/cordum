@@ -183,16 +183,27 @@ function invalidateForEvent(
   const jobId = payload?.jobId as string | undefined;
   const workerId = payload?.workerId as string | undefined;
 
-  // Narrow invalidation: target specific resource + mark list stale
+  // Invalidate both detail and list queries so filtered views update in real-time.
+  // Using default refetchType ("active") so visible queries refetch immediately.
   if (eventType.startsWith("job.") && jobId) {
     queryClient.invalidateQueries({ queryKey: ["job", jobId] });
-    queryClient.invalidateQueries({ queryKey: ["jobs"], refetchType: "none" });
-    queryClient.invalidateQueries({ queryKey: ["dlq"], refetchType: "none" });
+    queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    queryClient.invalidateQueries({ queryKey: ["dlq"] });
     return;
   }
   if (eventType.startsWith("worker.") && workerId) {
     queryClient.invalidateQueries({ queryKey: ["worker", workerId] });
-    queryClient.invalidateQueries({ queryKey: ["workers"], refetchType: "none" });
+    queryClient.invalidateQueries({ queryKey: ["workers"] });
+    return;
+  }
+  if (eventType.startsWith("workflow.run") || eventType.startsWith("workflow.step")) {
+    const eventObj = event as unknown as Record<string, unknown> | null | undefined;
+    const runId = eventObj?.run_id ?? eventObj?.runId;
+    if (typeof runId === "string" && runId) {
+      queryClient.invalidateQueries({ queryKey: ["workflow-run", runId] });
+    }
+    queryClient.invalidateQueries({ queryKey: ["workflows"] });
+    queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
     return;
   }
 
@@ -262,10 +273,21 @@ export function useEventStream(): void {
         setStatus("connected");
         logger.info("ws", "Connected");
 
-        // On reconnect, invalidate all caches to recover missed events
+        // On reconnect, selectively invalidate caches to recover missed events.
+        // Skip queries that are currently fetching (e.g. in-flight mutations or
+        // active refetches) to prevent desync when a user is mid-save.
         if (wasReconnect) {
-          logger.info("ws", "Reconnected — invalidating all caches");
-          queryClient.invalidateQueries();
+          const allQueries = queryClient.getQueryCache().getAll();
+          const pendingCount = allQueries.filter(
+            (q) => q.state.fetchStatus === "fetching",
+          ).length;
+          logger.info("ws", "Reconnected — selective cache invalidation", {
+            total: allQueries.length,
+            skipped: pendingCount,
+          });
+          queryClient.invalidateQueries({
+            predicate: (query) => query.state.fetchStatus !== "fetching",
+          });
           useToastStore.getState().addToast({
             type: "info",
             title: "Connection restored",

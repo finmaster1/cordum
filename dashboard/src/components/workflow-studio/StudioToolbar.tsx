@@ -119,13 +119,13 @@ export function StudioToolbar({
           <button
             type="button"
             onClick={() => onModeChange("view")}
-            disabled={isSaving}
+            disabled={isSaving || isRunning}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150",
               !isEdit
                 ? "bg-[var(--primary)]/10 text-[var(--primary)] shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
-              isSaving && "opacity-50 cursor-not-allowed",
+              (isSaving || isRunning) && "opacity-50 cursor-not-allowed",
             )}
           >
             <Eye className="w-3 h-3" />
@@ -134,13 +134,13 @@ export function StudioToolbar({
           <button
             type="button"
             onClick={() => onModeChange("edit")}
-            disabled={isSaving}
+            disabled={isSaving || isRunning}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150",
               isEdit
                 ? "bg-[var(--primary)]/10 text-[var(--primary)] shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
-              isSaving && "opacity-50 cursor-not-allowed",
+              (isSaving || isRunning) && "opacity-50 cursor-not-allowed",
             )}
           >
             <Pencil className="w-3 h-3" />
@@ -154,7 +154,7 @@ export function StudioToolbar({
         {isEdit ? (
           <>
             {onDelete && workflow?.id && (
-              <Button variant="ghost" size="sm" onClick={onDelete} disabled={isSaving} title="Delete workflow">
+              <Button variant="ghost" size="sm" onClick={onDelete} disabled={isSaving || isRunning} title="Delete workflow">
                 <Trash2 className="w-3 h-3" />
               </Button>
             )}

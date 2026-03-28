@@ -478,17 +478,17 @@ describe("transform contract hardening", () => {
   });
 
   describe("microsToISO edge cases", () => {
-    it("returns empty string for non-finite values", () => {
-      expect(microsToISO(NaN)).toBe("");
-      expect(microsToISO(Infinity)).toBe("");
-      expect(microsToISO(-1)).toBe("");
-      expect(microsToISO(0)).toBe("");
+    it("returns null for non-finite values", () => {
+      expect(microsToISO(NaN)).toBeNull();
+      expect(microsToISO(Infinity)).toBeNull();
+      expect(microsToISO(-1)).toBeNull();
+      expect(microsToISO(0)).toBeNull();
     });
 
-    it("returns empty string for non-numbers", () => {
-      expect(microsToISO("not a number")).toBe("");
-      expect(microsToISO(null)).toBe("");
-      expect(microsToISO(undefined)).toBe("");
+    it("returns null for non-numbers", () => {
+      expect(microsToISO("not a number")).toBeNull();
+      expect(microsToISO(null)).toBeNull();
+      expect(microsToISO(undefined)).toBeNull();
     });
 
     it("converts valid microsecond timestamps", () => {

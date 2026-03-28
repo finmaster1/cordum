@@ -144,7 +144,7 @@ func (e *Engine) withJobLock(jobID string, ttl time.Duration, fn func(context.Co
 			case <-renewCtx.Done():
 				return
 			case <-ticker.C:
-				rCtx, rCancel := context.WithTimeout(context.Background(), storeOpTimeout)
+				rCtx, rCancel := context.WithTimeout(renewCtx, storeOpTimeout)
 				if err := e.jobStore.RenewLock(rCtx, key, token, ttl); err != nil {
 					consecutiveFailures++
 					if consecutiveFailures >= maxRenewalFailures {
@@ -398,6 +398,23 @@ func (e *Engine) HandlePacket(p *pb.BusPacket) error {
 			return nil
 		}
 		tenant := ExtractTenant(req)
+
+		// Cross-check tenant: the gateway sets req.TenantId from the authenticated
+		// org. If env["tenant_id"] carries a different value, a crafted request may
+		// have injected a mismatched tenant. Log + deny.
+		if authTenant := strings.TrimSpace(req.GetTenantId()); authTenant != "" {
+			envTenant := strings.TrimSpace(req.GetEnv()["tenant_id"])
+			if envTenant != "" && envTenant != authTenant {
+				slog.Error("SECURITY: tenant mismatch between auth and env — rejecting job",
+					"component", "scheduler", "job_id", req.GetJobId(),
+					"auth_tenant", authTenant, "env_tenant", envTenant)
+				if e.metrics != nil {
+					e.metrics.IncValidationRejections()
+				}
+				return nil
+			}
+		}
+
 		slog.Info("job request received",
 			"job_id", req.JobId,
 			"topic", req.Topic,
@@ -537,7 +554,21 @@ func (e *Engine) handleJobRequest(req *pb.JobRequest, traceID string) error {
 			state, err := e.jobStore.GetState(ctx, jobID)
 			if err == nil {
 				currentState = state
-				if terminalStates[state] || state == JobStateDispatched || state == JobStateRunning {
+				if state == JobStateDispatched || state == JobStateRunning {
+					return nil
+				}
+				if terminalStates[state] {
+					// Job already in terminal state. This is a redelivery — likely
+					// after a DLQ emit failure. Attempt best-effort DLQ emit for
+					// states that require one (DENIED, FAILED). Duplicate DLQ
+					// publishes are harmless (at-least-once NATS semantics).
+					if state == JobStateDenied || state == JobStateFailed {
+						dlqStatus := pb.JobStatus_JOB_STATUS_FAILED
+						if state == JobStateDenied {
+							dlqStatus = pb.JobStatus_JOB_STATUS_DENIED
+						}
+						_ = e.emitDLQWithRetry(jobID, topic, dlqStatus, "terminal state redelivery", "redelivery_dlq_retry")
+					}
 					return nil
 				}
 			} else if !errors.Is(err, redis.Nil) {
@@ -630,7 +661,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			return RetryAfter(err, retryDelayStore)
 		}
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, reason, "max_scheduling_retries"); err != nil {
-			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed, retrying", "job_id", jobID, "error", err)
+			return RetryAfter(err, retryDelayPublish)
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
 		return nil
@@ -744,7 +776,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 		}
 		e.incSafetyDenied(topic)
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, record.Reason, "safety_denied"); err != nil {
-			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed, retrying", "job_id", jobID, "error", err)
+			return RetryAfter(err, retryDelayPublish)
 		}
 		return nil
 	default:
@@ -760,7 +793,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 		}
 		e.incSafetyDenied(topic)
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, record.Reason, "safety_unknown"); err != nil {
-			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed, retrying", "job_id", jobID, "error", err)
+			return RetryAfter(err, retryDelayPublish)
 		}
 		return nil
 	}
@@ -778,7 +812,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 					return RetryAfter(err, retryDelayStore)
 				}
 				if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, reason, "max_retries_exceeded"); err != nil {
-					slog.Error("dlq emit failed", "job_id", jobID, "error", err)
+					slog.Error("dlq emit failed, retrying", "job_id", jobID, "error", err)
+					return RetryAfter(err, retryDelayPublish)
 				}
 				return nil
 			}
@@ -873,7 +908,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, dispatchErr.Error(), reasonCodeForSchedulingError(dispatchErr)); err != nil {
-			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
+			slog.Error("dlq emit failed, retrying", "job_id", jobID, "error", err)
+			return RetryAfter(err, retryDelayPublish)
 		}
 		return nil
 	}
@@ -1006,11 +1042,25 @@ func (e *Engine) checkSafetyDecision(req *pb.JobRequest) (SafetyDecisionRecord, 
 		}
 	}
 
+	// Check for engine shutdown BEFORE starting the safety call. During
+	// shutdown, we must not allow jobs through via fail-open. Return an
+	// error so the job is not processed (it will be redelivered when the
+	// engine restarts).
+	if e.ctx.Err() != nil {
+		return SafetyDecisionRecord{
+			Decision:  SafetyDeny,
+			Reason:    "engine shutting down",
+			CheckedAt: time.Now().UTC().UnixNano() / int64(time.Microsecond),
+		}, e.ctx.Err()
+	}
+
 	safetyCtx, safetyCancel := context.WithTimeout(e.ctx, safetyCheckTimeout)
 	defer safetyCancel()
 
 	record, err := e.safety.Check(safetyCtx, req)
-	if safetyCtx.Err() != nil && e.ctx.Err() != nil {
+	// If the engine context was cancelled during the safety call (shutdown
+	// race), return immediately — do not proceed to fail-open logic.
+	if e.ctx.Err() != nil {
 		return record, e.ctx.Err()
 	}
 	if safetyCtx.Err() != nil {
@@ -1354,32 +1404,58 @@ func (e *Engine) startAsyncOutputCheck(jobID, topic string, res *pb.JobResult, r
 		}
 		e.incOutputPolicyQuarantined(topic)
 		e.incOutputDenials(topic)
-		if err := e.withJobLock(jobID, jobLockTTL, func(lockCtx context.Context) error {
-			if e.jobStore != nil {
-				stateCtx, stateCancel := context.WithTimeout(lockCtx, storeOpTimeout)
-				defer stateCancel()
-				curr, getErr := e.jobStore.GetState(stateCtx, jobID)
-				if getErr == nil {
-					if curr == JobStateQuarantined {
-						return nil
-					}
-					if curr != JobStateSucceeded {
-						// Only downgrade from succeeded to quarantined.
-						return nil
+		reason := strings.TrimSpace(record.Reason)
+		if reason == "" {
+			reason = "output quarantined by async policy"
+		}
+
+		// Retry the quarantine state transition up to 3 times with backoff.
+		// If all retries fail, emit a DLQ entry so the failure is tracked.
+		const maxQuarantineRetries = 3
+		var lastErr error
+		for attempt := 1; attempt <= maxQuarantineRetries; attempt++ {
+			lastErr = e.withJobLock(jobID, jobLockTTL, func(lockCtx context.Context) error {
+				if e.jobStore != nil {
+					stateCtx, stateCancel := context.WithTimeout(lockCtx, storeOpTimeout)
+					defer stateCancel()
+					curr, getErr := e.jobStore.GetState(stateCtx, jobID)
+					if getErr == nil {
+						if curr == JobStateQuarantined {
+							return nil
+						}
+						if curr != JobStateSucceeded {
+							// Only downgrade from succeeded to quarantined.
+							return nil
+						}
 					}
 				}
+				if err := e.setJobState(jobID, JobStateQuarantined); err != nil {
+					return err
+				}
+				e.emitOutputAuditEvent(jobID, topic, outputPolicyAsync, reason, record.Decision)
+				return e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, reason, outputPolicyAsync)
+			})
+			if lastErr == nil {
+				break
 			}
-			if err := e.setJobState(jobID, JobStateQuarantined); err != nil {
-				return err
+			slog.Error("async quarantine transition failed",
+				"job_id", jobID, "topic", topic, "attempt", attempt,
+				"max_attempts", maxQuarantineRetries, "error", lastErr)
+			if attempt < maxQuarantineRetries {
+				time.Sleep(time.Duration(attempt) * time.Second)
 			}
-			reason := strings.TrimSpace(record.Reason)
-			if reason == "" {
-				reason = "output quarantined by async policy"
-			}
-			e.emitOutputAuditEvent(jobID, topic, outputPolicyAsync, reason, record.Decision)
-			return e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, reason, outputPolicyAsync)
-		}); err != nil {
-			slog.Error("async quarantine transition failed", "job_id", jobID, "error", err)
+		}
+
+		// Safety net: if quarantine state transition failed after all retries,
+		// emit a DLQ entry so the failure is visible to operators. The job
+		// remains in SUCCEEDED state, which is wrong, but at least the DLQ
+		// entry ensures the issue is discoverable.
+		if lastErr != nil {
+			slog.Error("CRITICAL: quarantine transition exhausted all retries — job remains in succeeded state",
+				"job_id", jobID, "topic", topic, "error", lastErr,
+				"output_decision", string(record.Decision), "reason", reason)
+			_ = e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED,
+				fmt.Sprintf("quarantine_state_failed: %v", lastErr), "quarantine_failed")
 		}
 	}()
 }

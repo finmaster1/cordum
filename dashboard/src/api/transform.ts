@@ -405,14 +405,14 @@ function logInvalidDateInput(fn: string, raw: unknown): void {
   }
 }
 
-export function microsToISO(raw: unknown): string {
+export function microsToISO(raw: unknown): string | null {
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
     logInvalidDateInput("microsToISO", raw);
-    return "";
+    return null;
   }
   const ms = Math.floor(raw / 1000);
   const d = new Date(ms);
-  return isNaN(d.getTime()) ? "" : d.toISOString();
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 export function normalizeJobStatus(raw?: string): JobStatus {
@@ -874,7 +874,7 @@ export function mapApprovalItem(item: BackendApprovalItem): Approval | null {
     jobId: job.id,
     status: deriveApprovalStatus(item.job.state, item.decision, item.resolved_by),
     requestedAt,
-    resolvedAt: item.resolved_at ? microsToISO(item.resolved_at) : undefined,
+    resolvedAt: (item.resolved_at ? microsToISO(item.resolved_at) : undefined) ?? undefined,
     actor: item.resolved_by,
     actorId: job.actorId,
     reason: decisionSummary?.why || item.policy_reason,

@@ -224,6 +224,7 @@ describe("api client - error handling", () => {
   });
 
   it("throws ApiError and logs out on 401 responses", async () => {
+    vi.useFakeTimers();
     const mockedWindow = {
       location: {
         pathname: "/dashboard",
@@ -242,10 +243,15 @@ describe("api client - error handling", () => {
     expect(err.status).toBe(401);
     expect(err.message).toBe("Unauthorized — session expired");
     expect(mockConfigState.logout).toHaveBeenCalledTimes(1);
+    // Redirect is delayed by 1.5s so users see the session-expired toast.
+    expect(mockedWindow.location.href).toBe("/dashboard");
+    vi.advanceTimersByTime(1500);
     expect(mockedWindow.location.href).toBe("/login");
+    vi.useRealTimers();
   });
 
   it("coalesces simultaneous 401 responses into a single logout", async () => {
+    vi.useFakeTimers();
     const mockedWindow = {
       location: {
         pathname: "/dashboard",
@@ -270,7 +276,10 @@ describe("api client - error handling", () => {
     expect(firstError.status).toBe(401);
     expect(secondError.status).toBe(401);
     expect(mockConfigState.logout).toHaveBeenCalledTimes(1);
+    // Only one redirect scheduled (isLoggingOut guard).
+    vi.advanceTimersByTime(1500);
     expect(mockedWindow.location.href).toBe("/login");
+    vi.useRealTimers();
   });
 
   it("throws forbidden ApiError on 403 with parsed body", async () => {

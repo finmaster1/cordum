@@ -1604,3 +1604,102 @@ func TestMergePolicies_NilBaseInputRules(t *testing.T) {
 		t.Fatalf("expected 2 input rules from extra when base is nil, got %d", len(merged.InputRules))
 	}
 }
+
+// TestConcurrentEvaluateAndSetPolicy verifies that concurrent policy reloads
+// during evaluate() don't cause panics, nil dereferences, or stale decisions.
+// This reproduces the TOCTOU race fixed by capturing all policy-related state
+// under a single RLock in evaluate().
+func TestConcurrentEvaluateAndSetPolicy(t *testing.T) {
+	policyA := &config.SafetyPolicy{
+		DefaultTenant: "default",
+		Tenants: map[string]config.TenantPolicy{
+			"default": {AllowTopics: []string{"job.*"}},
+		},
+		Rules: []config.PolicyRule{
+			{
+				ID:       "allow-all",
+				Match:    config.PolicyMatch{Topics: []string{"job.*"}},
+				Decision: "allow",
+			},
+		},
+	}
+	policyB := &config.SafetyPolicy{
+		DefaultTenant: "default",
+		Tenants: map[string]config.TenantPolicy{
+			"default": {AllowTopics: []string{"job.*"}},
+		},
+		Rules: []config.PolicyRule{
+			{
+				ID:       "deny-all",
+				Match:    config.PolicyMatch{Topics: []string{"job.*"}},
+				Decision: "deny",
+				Reason:   "policy B denies all",
+			},
+		},
+	}
+
+	srv := &server{}
+	srv.setPolicy(policyA, "snap-a")
+
+	const (
+		numEvaluators = 50
+		numReloads    = 200
+	)
+	ctx := context.Background()
+
+	// Channel to collect panics — any panic is a test failure.
+	panics := make(chan any, numEvaluators)
+	done := make(chan struct{})
+
+	// Goroutine that swaps policy rapidly.
+	go func() {
+		for i := 0; i < numReloads; i++ {
+			if i%2 == 0 {
+				srv.setPolicy(policyB, "snap-b")
+			} else {
+				srv.setPolicy(policyA, "snap-a")
+			}
+		}
+		close(done)
+	}()
+
+	// Concurrent evaluators.
+	for i := 0; i < numEvaluators; i++ {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					panics <- r
+				}
+			}()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				req := &pb.PolicyCheckRequest{
+					Topic: "job.test",
+					JobId: fmt.Sprintf("job-%d", time.Now().UnixNano()),
+				}
+				resp, err := srv.evaluate(ctx, req, "check")
+				if err != nil {
+					t.Errorf("evaluate returned error: %v", err)
+					return
+				}
+				// Decision must be valid — either allow or deny, never zero-value.
+				if resp.Decision == pb.DecisionType_DECISION_TYPE_UNSPECIFIED {
+					t.Errorf("evaluate returned unspecified decision")
+					return
+				}
+			}
+		}()
+	}
+
+	<-done
+
+	// Drain any panics.
+	close(panics)
+	for p := range panics {
+		t.Fatalf("concurrent evaluate panicked: %v", p)
+	}
+}

@@ -352,7 +352,9 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 		return fmt.Errorf("connect redis workflow store: %w", err)
 	}
 	defer workflowStore.Close()
-	workflowEng := wf.NewEngine(workflowStore, natsBus)
+	wfCtx, wfCancel := context.WithCancel(context.Background())
+	defer wfCancel()
+	workflowEng := wf.NewEngine(workflowStore, natsBus).WithContext(wfCtx)
 
 	configSvc, err := configsvc.New(cfg.RedisURL)
 	if err != nil {

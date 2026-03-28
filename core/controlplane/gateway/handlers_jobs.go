@@ -936,14 +936,17 @@ func (s *server) handlePutArtifact(w http.ResponseWriter, r *http.Request) {
 		if meta.Labels == nil {
 			meta.Labels = map[string]string{}
 		}
-		if existing := strings.TrimSpace(meta.Labels["tenant_id"]); existing != "" {
-			if !allowCrossTenant && existing != tenant {
+		if existing := strings.TrimSpace(meta.Labels["tenant_id"]); existing != "" && existing != tenant {
+			if !allowCrossTenant {
+				slog.Warn("SECURITY: tenant mismatch in job metadata labels",
+					"component", "gateway", "auth_tenant", tenant,
+					"label_tenant", existing, "remote_addr", r.RemoteAddr)
 				writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
 				return
 			}
-		} else {
-			meta.Labels["tenant_id"] = tenant
 		}
+		// Always stamp the authenticated tenant — prevent client-injected overrides.
+		meta.Labels["tenant_id"] = tenant
 	}
 	ptr, err := s.artifactStore.Put(r.Context(), content, meta)
 	if err != nil {

@@ -262,9 +262,14 @@ func (s *server) evaluate(ctx context.Context, req *pb.PolicyCheckRequest, metho
 		tenant = strings.TrimSpace(meta.GetTenantId())
 	}
 
+	// Snapshot all policy-related pointers under a single RLock to prevent
+	// TOCTOU races with concurrent setPolicy() calls. The RLock is read-only
+	// so concurrent evaluations still run in parallel.
 	s.mu.RLock()
 	policy := s.policy
 	snapshot := s.snapshot
+	inputRules := s.inputRules
+	scanners := s.scanners
 	defaultTenant := ""
 	if policy != nil {
 		defaultTenant = strings.TrimSpace(policy.DefaultTenant)
@@ -403,7 +408,7 @@ func (s *server) evaluate(ctx context.Context, req *pb.PolicyCheckRequest, metho
 	//
 	// Input rules can only escalate (allow→deny or allow→require_approval), never downgrade.
 	ruleID := policyDecision.RuleID
-	if len(s.inputRules) > 0 {
+	if len(inputRules) > 0 {
 		if decision == pb.DecisionType_DECISION_TYPE_ALLOW || decision == pb.DecisionType_DECISION_TYPE_ALLOW_WITH_CONSTRAINTS {
 			evalReq := inputEvaluateRequest{
 				tenant:      tenant,
@@ -416,8 +421,8 @@ func (s *server) evaluate(ctx context.Context, req *pb.PolicyCheckRequest, metho
 				evalReq.capabilities = append(evalReq.capabilities, meta.GetCapability())
 				evalReq.riskTags = append(evalReq.riskTags, meta.GetRiskTags()...)
 			}
-			for _, rule := range s.inputRules {
-				matched, findings := evaluateInputRule(rule, evalReq, s.scanners)
+			for _, rule := range inputRules {
+				matched, findings := evaluateInputRule(rule, evalReq, scanners)
 				if !matched {
 					continue
 				}

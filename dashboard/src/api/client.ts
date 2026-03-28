@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useConfigStore } from "../state/config";
 import { logger } from "../lib/logger";
 
@@ -77,14 +78,19 @@ async function handleResponse<T>(res: Response, meta: { method: string; path: st
     logger.debug("api-client", "Non-JSON error body", { path: meta.path, requestId: meta.requestId });
   }
 
-  // 401 — clear auth and redirect
+  // 401 — notify user, clear auth, and redirect with delay so unsaved work
+  // isn't silently lost. The isLoggingOut guard prevents duplicate handlers
+  // when multiple in-flight requests all receive 401 simultaneously.
   if (res.status === 401) {
     const { isLoggingOut, logout } = useConfigStore.getState();
     if (!isLoggingOut) {
       logger.warn("api-client", "Unauthorized", { path: meta.path, requestId: meta.requestId, durationMs });
+      toast.error("Session expired — please log in again.");
       logout();
       if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-        window.location.href = "/login";
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 1500);
       }
     } else {
       logger.debug("api-client", "Skipping duplicate logout during unauthorized response", {

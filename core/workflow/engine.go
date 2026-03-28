@@ -17,9 +17,22 @@ import (
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// Prometheus metrics for workflow lock observability.
+var lockFallbackTotal = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: "cordum",
+	Subsystem: "workflow",
+	Name:      "lock_fallback_total",
+	Help:      "Number of times distributed lock acquisition failed and fell back to local-only locking.",
+})
+
+func init() {
+	prometheus.MustRegister(lockFallbackTotal)
+}
 
 // Engine coordinates workflow runs, dispatching steps as jobs and updating run state.
 type Engine struct {
@@ -64,6 +77,7 @@ type lockManager struct {
 	mu     sync.Mutex
 	locks  map[string]*runLock
 	locker RunLocker // optional distributed lock; nil = local-only
+	ctx    context.Context // engine lifecycle context; renewal goroutines derive from this
 }
 
 type runLock struct {
@@ -98,12 +112,13 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 	var renewDone chan struct{}
 	if lm.locker != nil {
 		key := runLockKey(runID)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(lm.ctx, 2*time.Second)
 		token, err := lm.locker.TryAcquireLock(ctx, key, runLockTTL)
 		cancel()
 		if err != nil {
-			slog.Warn("distributed run lock acquire failed, using local-only",
-				"run_id", runID, "error", err)
+			lockFallbackTotal.Inc()
+			slog.Error("distributed lock failed — using local-only lock, cross-replica race possible",
+				"component", "workflow", "run_id", runID, "error", err)
 		} else if token == "" {
 			// Another replica holds the lock — skip this run.
 			lock.mu.Unlock()
@@ -119,7 +134,7 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 			// Start renewal goroutine if the locker supports it.
 			if renewer, ok := lm.locker.(RunLockRenewer); ok {
 				var renewCtx context.Context
-				renewCtx, renewCancel = context.WithCancel(context.Background()) // #nosec G118 -- renewCancel called in deferred cleanup
+				renewCtx, renewCancel = context.WithCancel(lm.ctx) // derives from engine context; stops renewal on shutdown
 				renewDone = make(chan struct{})
 				go func() {
 					defer close(renewDone)
@@ -130,7 +145,7 @@ func (lm *lockManager) acquire(runID string) (func(), bool) {
 						case <-renewCtx.Done():
 							return
 						case <-ticker.C:
-							rCtx, rCancel := context.WithTimeout(context.Background(), 2*time.Second)
+							rCtx, rCancel := context.WithTimeout(renewCtx, 2*time.Second)
 							if err := renewer.RenewLock(rCtx, key, token, runLockTTL); err != nil {
 								slog.Warn("run lock renewal failed",
 									"run_id", runID, "error", err)
@@ -202,7 +217,7 @@ func NewEngine(store *RedisStore, bus model.Bus) *Engine {
 		store:           store,
 		bus:             bus,
 		maxForEachItems: defaultMaxForEachItems,
-		lockMgr:         lockManager{locks: make(map[string]*runLock)},
+		lockMgr:         lockManager{locks: make(map[string]*runLock), ctx: context.Background()},
 	}
 }
 
@@ -227,6 +242,14 @@ func (e *Engine) WithSchemaRegistry(registry *schemas.Registry) *Engine {
 // WithOutputSafety sets an optional output safety checker for inter-step policy enforcement.
 func (e *Engine) WithOutputSafety(c model.OutputSafetyChecker) *Engine {
 	e.outputSafety = c
+	return e
+}
+
+// WithContext sets the parent context for the lock manager. Cancelling this
+// context stops all lock renewal goroutines, preventing Redis ops after shutdown.
+// If not called, defaults to context.Background().
+func (e *Engine) WithContext(ctx context.Context) *Engine {
+	e.lockMgr.ctx = ctx
 	return e
 }
 
