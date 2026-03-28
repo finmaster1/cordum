@@ -252,7 +252,7 @@ func newTestJobStore(t *testing.T) (*store.RedisJobStore, *miniredis.Miniredis) 
 func TestDistributedRunLock_MutualExclusion(t *testing.T) {
 	jobStore, srv := newTestJobStore(t)
 	defer srv.Close()
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	lm1 := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
 	lm2 := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
@@ -313,7 +313,7 @@ func TestDistributedRunLock_MutualExclusion(t *testing.T) {
 func TestDistributedRunLock_DifferentRunIDs(t *testing.T) {
 	jobStore, srv := newTestJobStore(t)
 	defer srv.Close()
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	lm := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
 
@@ -345,7 +345,7 @@ func TestDistributedRunLock_DifferentRunIDs(t *testing.T) {
 func TestDistributedRunLock_TTLExpiry(t *testing.T) {
 	jobStore, srv := newTestJobStore(t)
 	defer srv.Close()
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	lm1 := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
 	lm2 := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
@@ -408,7 +408,7 @@ func TestDistributedRunLock_LocalFallback(t *testing.T) {
 func TestDistributedRunLock_MarkTerminalCleanup(t *testing.T) {
 	jobStore, srv := newTestJobStore(t)
 	defer srv.Close()
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	lm := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
 
@@ -442,7 +442,7 @@ func TestDistributedRunLock_MarkTerminalCleanup(t *testing.T) {
 func TestDistributedRunLock_Renewal(t *testing.T) {
 	jobStore, srv := newTestJobStore(t)
 	defer srv.Close()
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	lm := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: context.Background()}
 
@@ -478,7 +478,7 @@ func TestDistributedRunLock_Renewal(t *testing.T) {
 func TestDistributedRunLock_RenewalStopsOnContextCancel(t *testing.T) {
 	jobStore, srv := newTestJobStore(t)
 	defer srv.Close()
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 	lm := lockManager{locks: make(map[string]*runLock), locker: jobStore, ctx: parentCtx}

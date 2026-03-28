@@ -1207,11 +1207,11 @@ func TestCrashRecovery_SuccessfulDispatchPersistsRunningState(t *testing.T) {
 
 func TestWorkflowApprovalStepPersistsStructuredContext(t *testing.T) {
 	wfStore := newWorkflowStore(t)
-	defer wfStore.Close()
+	defer func() { _ = wfStore.Close() }()
 
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(wfStore, bus).WithMemory(memStore)
@@ -1374,11 +1374,11 @@ func TestWorkflowApprovalStepPersistsStructuredContext(t *testing.T) {
 
 func TestWorkflowApprovalStepSupportsLegacyMetadataOnlyPayload(t *testing.T) {
 	wfStore := newWorkflowStore(t)
-	defer wfStore.Close()
+	defer func() { _ = wfStore.Close() }()
 
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(wfStore, bus).WithMemory(memStore)
@@ -1439,11 +1439,11 @@ func TestWorkflowApprovalStepSupportsLegacyMetadataOnlyPayload(t *testing.T) {
 
 func TestWorkflowApprovalStepFailsWhenRequiredDecisionFieldMissing(t *testing.T) {
 	wfStore := newWorkflowStore(t)
-	defer wfStore.Close()
+	defer func() { _ = wfStore.Close() }()
 
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(wfStore, bus).WithMemory(memStore)
@@ -1516,7 +1516,7 @@ func TestWorkflowApprovalStepFailsWhenRequiredDecisionFieldMissing(t *testing.T)
 
 func TestWorkflowApprovalStepFailsWhenContextStoreUnavailable(t *testing.T) {
 	wfStore := newWorkflowStore(t)
-	defer wfStore.Close()
+	defer func() { _ = wfStore.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(wfStore, bus).WithMemory(&failingContextStore{err: errors.New("context store unavailable")})
@@ -1585,11 +1585,11 @@ func TestWorkflowApprovalStepFailsWhenContextStoreUnavailable(t *testing.T) {
 
 func TestWorkflowApprovalStepApproveResultAdvancesRunAndPreservesContext(t *testing.T) {
 	wfStore := newWorkflowStore(t)
-	defer wfStore.Close()
+	defer func() { _ = wfStore.Close() }()
 
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(wfStore, bus).WithMemory(memStore)
@@ -1726,11 +1726,11 @@ func TestWorkflowApprovalStepApproveResultAdvancesRunAndPreservesContext(t *test
 
 func TestWorkflowApprovalStepDeniedResultStopsRunAndPreservesContext(t *testing.T) {
 	wfStore := newWorkflowStore(t)
-	defer wfStore.Close()
+	defer func() { _ = wfStore.Close() }()
 
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(wfStore, bus).WithMemory(memStore)

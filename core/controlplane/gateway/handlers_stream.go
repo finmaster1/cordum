@@ -696,7 +696,7 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 		slog.Error("ws upgrade failed", "error", err)
 		return
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 	slog.Info("ws connected", "remote", r.RemoteAddr)
 
 	authCtx := authFromRequest(r)
@@ -778,7 +778,7 @@ func (s *server) handleJobStream(w http.ResponseWriter, r *http.Request) {
 		slog.Error("job ws upgrade failed", "job_id", jobID, "error", err)
 		return
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 	slog.Info("job ws connected", "job_id", jobID, "remote", r.RemoteAddr)
 
 	authCtx := authFromRequest(r)

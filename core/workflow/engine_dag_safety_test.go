@@ -77,7 +77,7 @@ func TestDepsSatisfied_NormalDepsEnforced(t *testing.T) {
 
 func TestIdempotencyKeyFormat(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)

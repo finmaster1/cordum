@@ -153,7 +153,7 @@ func TestOutputClientContentModeLoadsResultFromRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	defer resultClient.Close()
+	defer func() { _ = resultClient.Close() }()
 
 	content := []byte("token=ghp_abcdefghijklmnopqrstuvwxyz1234")
 	if err := resultClient.Set(context.Background(), "res:job-content", content, 0).Err(); err != nil {
@@ -205,7 +205,7 @@ func TestOutputClientContentModeRetriesMissingResultFromRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	defer resultClient.Close()
+	defer func() { _ = resultClient.Close() }()
 
 	content := []byte("retry content with AKIA1234567890ABCDEF")
 	go func() {
@@ -342,7 +342,7 @@ func TestOutputClientContentModeStoresRedactedOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	defer resultClient.Close()
+	defer func() { _ = resultClient.Close() }()
 
 	secret := []byte("prefix AKIA1234567890ABCDEF suffix")
 	if err := resultClient.Set(context.Background(), "res:job-redact", secret, 0).Err(); err != nil {

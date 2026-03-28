@@ -208,7 +208,7 @@ func main() {
 	if err != nil {
 		slog.Warn("scheduler dlq sink disabled", "error", err)
 	} else {
-		defer dlqStore.Close()
+		defer func() { _ = dlqStore.Close() }()
 	}
 
 	natsBus, err := bus.NewNatsBus(cfg.NatsURL)
@@ -238,7 +238,7 @@ func main() {
 		}
 		cancel()
 	}
-	defer sagaRedis.Close()
+	defer func() { _ = sagaRedis.Close() }()
 	sagaManager := scheduler.NewSagaManager(natsBus, sagaRedis).WithMetrics(metrics)
 
 	safetyClient, err := scheduler.NewSafetyClient(cfg.SafetyKernelAddr)
@@ -246,7 +246,7 @@ func main() {
 		slog.Error("failed to connect to safety kernel", "error", err)
 		os.Exit(1)
 	}
-	defer safetyClient.Close()
+	defer func() { _ = safetyClient.Close() }()
 	// Enable both the distributed circuit breaker and input context dereferencing
 	// so native input-policy rules can inspect workflow step payloads pre-dispatch.
 	safetyClient.WithRedis(sagaRedis).WithContextClient(jobStore.Client())
@@ -264,7 +264,7 @@ func main() {
 			slog.Error("failed to connect output policy client", "error", err)
 			os.Exit(1)
 		}
-		defer outputSafetyClient.Close()
+		defer func() { _ = outputSafetyClient.Close() }()
 	}
 
 	poolCfg, err := config.LoadPoolConfig(cfg.PoolConfigPath)
@@ -278,7 +278,7 @@ func main() {
 		slog.Error("failed to connect to Redis for config service", "error", err)
 		os.Exit(1)
 	}
-	defer configSvc.Close()
+	defer func() { _ = configSvc.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -357,7 +357,7 @@ func main() {
 	if err != nil {
 		slog.Warn("worker snapshot disabled: failed to connect to Redis", "error", err)
 	} else {
-		defer snapshotStore.Close()
+		defer func() { _ = snapshotStore.Close() }()
 
 		// Warm-start: hydrate registry from last-written snapshot to avoid 0–30s cold-start window.
 		hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)

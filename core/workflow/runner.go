@@ -84,13 +84,13 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("connect redis config service: %w", err)
 	}
-	defer configSvc.Close()
+	defer func() { _ = configSvc.Close() }()
 
 	schemaRegistry, err := schema.NewRegistry(cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("connect redis schema registry: %w", err)
 	}
-	defer schemaRegistry.Close()
+	defer func() { _ = schemaRegistry.Close() }()
 
 	natsBus, err := bus.NewNatsBus(cfg.NatsURL)
 	if err != nil {

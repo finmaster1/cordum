@@ -630,7 +630,7 @@ func ExtractTarGzReader(src io.Reader, dest string) error {
 	if err != nil {
 		return fmt.Errorf("create gzip reader: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	var (
 		files   int

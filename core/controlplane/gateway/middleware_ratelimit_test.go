@@ -17,7 +17,7 @@ func TestRedisRateLimiterBasic(t *testing.T) {
 	defer srv.Close()
 
 	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	rl := newRedisRateLimiter(client, 10, 10)
 
@@ -49,9 +49,9 @@ func TestRedisRateLimiterMultiReplica(t *testing.T) {
 	defer srv.Close()
 
 	client1 := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer client1.Close()
+	defer func() { _ = client1.Close() }()
 	client2 := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer client2.Close()
+	defer func() { _ = client2.Close() }()
 
 	rl1 := newRedisRateLimiter(client1, 10, 10)
 	rl2 := newRedisRateLimiter(client2, 10, 10)
@@ -84,7 +84,7 @@ func TestRedisRateLimiterFallback(t *testing.T) {
 	}
 
 	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	rl := newRedisRateLimiter(client, 10, 10)
 
@@ -106,7 +106,7 @@ func TestRedisRateLimiterKeyFormat(t *testing.T) {
 	defer srv.Close()
 
 	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	rl := newRedisRateLimiter(client, 10, 10)
 	rl.Allow("tenant:acme")

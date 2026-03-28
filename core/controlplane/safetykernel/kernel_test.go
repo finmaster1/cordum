@@ -225,7 +225,7 @@ func TestPolicyLoaderLoadsFragments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	doc := &configsvc.Document{
 		Scope:   configsvc.ScopeSystem,
@@ -294,7 +294,7 @@ func TestPolicyLoaderRejectsInvalidFragments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	doc := &configsvc.Document{
 		Scope:   configsvc.ScopeSystem,

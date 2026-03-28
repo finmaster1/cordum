@@ -36,7 +36,7 @@ func TestHandleStreamUpgradesWebsocketWithInstrumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 	// No assertion needed — test validates the WS upgrade succeeds.
 }
 

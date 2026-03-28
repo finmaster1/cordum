@@ -324,13 +324,13 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err != nil {
 		return fmt.Errorf("connect redis: %w", err)
 	}
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("connect redis job store: %w", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	natsBus, err := bus.NewNatsBus(cfg.NatsURL)
 	if err != nil {
@@ -348,7 +348,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err != nil {
 		return fmt.Errorf("connect redis workflow store: %w", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 	wfCtx, wfCancel := context.WithCancel(context.Background())
 	defer wfCancel()
 	workflowEng := wf.NewEngine(workflowStore, natsBus).WithContext(wfCtx)
@@ -357,7 +357,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err != nil {
 		return fmt.Errorf("connect redis config service: %w", err)
 	}
-	defer configSvc.Close()
+	defer func() { _ = configSvc.Close() }()
 	if err := seedDefaultPackCatalogs(context.Background(), configSvc); err != nil {
 		slog.Error("seed pack catalogs failed", "error", err)
 	}
@@ -368,7 +368,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err != nil {
 		return fmt.Errorf("connect redis schema registry: %w", err)
 	}
-	defer schemaRegistry.Close()
+	defer func() { _ = schemaRegistry.Close() }()
 	workflowEng = workflowEng.WithMemory(memStore).WithConfig(configSvc).WithSchemaRegistry(schemaRegistry)
 	if raw := strings.TrimSpace(os.Getenv("WORKFLOW_FOREACH_MAX_ITEMS")); raw != "" {
 		if limit, err := strconv.Atoi(raw); err == nil && limit > 0 {
@@ -380,7 +380,7 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err != nil {
 		return fmt.Errorf("connect redis dlq store: %w", err)
 	}
-	defer dlqStore.Close()
+	defer func() { _ = dlqStore.Close() }()
 	// Periodic cleanup of stale DLQ index entries whose data keys have expired.
 	dlqCleanupCtx, dlqCleanupCancel := context.WithCancel(context.Background())
 	defer dlqCleanupCancel()
@@ -390,13 +390,13 @@ func RunWithAuth(cfg *config.Config, provider AuthProvider) error {
 	if err != nil {
 		return fmt.Errorf("connect redis artifact store: %w", err)
 	}
-	defer artifactStore.Close()
+	defer func() { _ = artifactStore.Close() }()
 
 	lockStore, err := locks.NewRedisStore(cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("connect redis lock store: %w", err)
 	}
-	defer lockStore.Close()
+	defer func() { _ = lockStore.Close() }()
 
 	var safetyConn *grpc.ClientConn
 	var safetyClient pb.SafetyKernelClient

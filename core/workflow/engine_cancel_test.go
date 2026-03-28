@@ -75,7 +75,7 @@ func (b *alwaysFailBus) totalCalls() int {
 
 func TestPublishJobCancel_RetriesAndSucceeds(t *testing.T) {
 	ws := newWorkflowStore(t)
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	bus := &failNBus{failCount: 1} // fail first, succeed second
 	engine := NewEngine(ws, bus)
@@ -94,7 +94,7 @@ func TestPublishJobCancel_RetriesAndSucceeds(t *testing.T) {
 
 func TestPublishJobCancel_ExhaustsRetries(t *testing.T) {
 	ws := newWorkflowStore(t)
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	bus := &alwaysFailBus{}
 	engine := NewEngine(ws, bus)
@@ -110,7 +110,7 @@ func TestPublishJobCancel_ExhaustsRetries(t *testing.T) {
 
 func TestPublishJobCancel_NilGuards(t *testing.T) {
 	ws := newWorkflowStore(t)
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	engine := NewEngine(ws, &recordingBus{})
 
@@ -142,7 +142,7 @@ func TestCancelRun_RecordsOrphanedJobsInTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	bus := &alwaysFailBus{}
 	engine := NewEngine(ws, bus)
@@ -217,7 +217,7 @@ func TestTimeoutRun_RecordsOrphanedJobsInTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	bus := &alwaysFailBus{}
 	engine := NewEngine(ws, bus)
@@ -296,13 +296,13 @@ func TestReconciler_DetectsAndReCancelsOrphanedJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	// Use a bus that tracks cancel publishes.
 	var cancelCount atomic.Int32
@@ -374,13 +374,13 @@ func TestReconciler_NoOrphansWhenJobAlreadyCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	var cancelCount atomic.Int32
 	cbus := &countingCancelBus{cancelCount: &cancelCount}
@@ -467,7 +467,7 @@ func TestTimeoutRun_CancelsWaitingStepJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	cancelCount := &atomic.Int32{}
 	bus := &countingCancelBus{cancelCount: cancelCount}

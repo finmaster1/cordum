@@ -69,7 +69,7 @@ func TestReconcilerReconcileRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
@@ -205,13 +205,13 @@ func TestReconcilerDefersStepOnGetResultPtrError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	realJobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer realJobStore.Close()
+	defer func() { _ = realJobStore.Close() }()
 
 	bus := &stubBus{}
 	engine := NewEngine(workflowStore, bus)
@@ -302,13 +302,13 @@ func TestReconcilerSkipsStepOnGetStateError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	realJobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer realJobStore.Close()
+	defer func() { _ = realJobStore.Close() }()
 
 	bus := &stubBus{}
 	engine := NewEngine(workflowStore, bus)
@@ -380,13 +380,13 @@ func TestReconcilerProceedsOnGetFailureReasonError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	realJobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer realJobStore.Close()
+	defer func() { _ = realJobStore.Close() }()
 
 	bus := &stubBus{}
 	engine := NewEngine(workflowStore, bus)
@@ -459,7 +459,7 @@ func TestReconcilerHandleJobResultDeletedRunReturnsNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {

@@ -23,7 +23,7 @@ func TestHealth_AllOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	// Create a real NATS bus for connected state.
 	natsBus, err := bus.NewNatsBus("nats://127.0.0.1:14222")
@@ -66,7 +66,7 @@ func TestHealth_RedisDown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	// Stop Redis to simulate failure.
 	srv.Close()
@@ -110,7 +110,7 @@ func TestHealth_NATSDisconnected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	// nil bus → disconnected
 	h := &healthDeps{

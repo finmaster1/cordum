@@ -10,7 +10,7 @@ import (
 
 func TestTemplateEvaluationInStepInput(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -70,7 +70,7 @@ func TestTemplateEvaluationInStepInput(t *testing.T) {
 
 func TestForEachMaxParallelLimitsDispatch(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)

@@ -494,7 +494,7 @@ func TestSyslogExporter_ReconnectOnWriteFailure(t *testing.T) {
 		if err != nil {
 			return
 		}
-		conn.Close()
+		_ = conn.Close()
 		close(connClosed)
 	}()
 
@@ -557,7 +557,7 @@ func TestSyslogExporter_Close(t *testing.T) {
 	go func() {
 		conn, _ := ln.Accept()
 		if conn != nil {
-			conn.Close()
+			_ = conn.Close()
 		}
 	}()
 

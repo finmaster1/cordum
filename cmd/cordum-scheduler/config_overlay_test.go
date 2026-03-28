@@ -135,7 +135,7 @@ func TestBootstrapConfigWritesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 	pools := &config.PoolsConfig{Topics: map[string][]string{"job.test": {"pool-a"}}}
@@ -165,7 +165,7 @@ func TestBootstrapConfigUpdatesOnHashChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 	poolsV1 := &config.PoolsConfig{Topics: map[string][]string{"job.test": {"pool-a"}}}
@@ -208,7 +208,7 @@ func TestBootstrapConfigStoresFileHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 	pools := &config.PoolsConfig{Topics: map[string][]string{"job.test": {"pool-a"}}}
@@ -241,7 +241,7 @@ func TestLoadConfigSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	doc := &configsvc.Document{
 		Scope:   configsvc.ScopeSystem,
@@ -282,7 +282,7 @@ func TestWatchConfigChangesUpdatesRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	doc := &configsvc.Document{
 		Scope:   configsvc.ScopeSystem,
@@ -353,7 +353,7 @@ func TestWatchConfigChangesNotificationTriggersReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	// Seed config with pools data.
 	doc := &configsvc.Document{
@@ -412,7 +412,7 @@ func TestWatchConfigChangesNotificationTriggersReload(t *testing.T) {
 	if err := nc.Publish(capsdk.SubjectConfigChanged, data); err != nil {
 		t.Fatalf("publish notification: %v", err)
 	}
-	nc.Flush()
+	_ = nc.Flush()
 
 	// Wait for the notification to trigger reload.
 	deadline := time.After(3 * time.Second)
@@ -442,7 +442,7 @@ func TestWatchConfigChangesFallbackPoll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config svc: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	doc := &configsvc.Document{
 		Scope:   configsvc.ScopeSystem,

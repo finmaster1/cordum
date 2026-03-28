@@ -176,7 +176,7 @@ func TestBuildJobPayloadPartialRunInputReturnsExplicitError(t *testing.T) {
 func TestValidateStepOutputInlineSchema(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	engine := (&Engine{}).WithMemory(memStore)
 	step := &Step{OutputSchema: map[string]any{"type": "object", "required": []any{"result"}}}
@@ -224,7 +224,7 @@ func TestValidateStepOutputFailClosedOnFetchError(t *testing.T) {
 func TestValidateStepOutputFailClosedOnMissingResult(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	engine := (&Engine{}).WithMemory(memStore)
 	step := &Step{OutputSchema: map[string]any{"type": "object", "required": []any{"result"}}}
@@ -259,7 +259,7 @@ func TestValidateStepOutputNoSchemaSkipsValidation(t *testing.T) {
 func TestValidateStepOutputSchemaRegistryUnavailable(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	engine := (&Engine{}).WithMemory(memStore) // no schema registry
 	step := &Step{OutputSchemaID: "schema-123"}
@@ -379,7 +379,7 @@ func TestSetContextPathAndRecordStepOutput(t *testing.T) {
 
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	jobID := "job-ctx"
 	key := store.MakeResultKey(jobID)
@@ -409,7 +409,7 @@ func TestSetContextPathAndRecordStepOutput(t *testing.T) {
 func TestInlineResultAndFetchPayload(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	jobID := "job-inline"
 	key := store.MakeResultKey(jobID)
@@ -496,7 +496,7 @@ func TestExtractDataPath(t *testing.T) {
 func TestValidateStepOutputWithResultDataPath(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	engine := (&Engine{}).WithMemory(memStore)
 
@@ -535,7 +535,7 @@ func TestValidateStepOutputWithResultDataPath(t *testing.T) {
 func TestValidateStepOutputResultDataPathMissing(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	engine := (&Engine{}).WithMemory(memStore)
 
@@ -563,7 +563,7 @@ func TestValidateStepOutputResultDataPathMissing(t *testing.T) {
 func TestRecordStepOutputWithResultDataPath(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	wrapper := map[string]any{
 		"action": "draft",

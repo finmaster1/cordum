@@ -252,7 +252,7 @@ func countRunLocks(engine *Engine) int {
 func TestPutJobContextAndDelay(t *testing.T) {
 	memStore, srv := newMemoryStore(t)
 	defer srv.Close()
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	engine := (&Engine{}).WithMemory(memStore)
 	ptr, err := engine.putJobContext(context.Background(), "job-ctx", map[string]any{"k": "v"})

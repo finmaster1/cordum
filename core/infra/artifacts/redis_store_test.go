@@ -17,7 +17,7 @@ func TestRedisStorePutGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create redis store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	content := []byte("hello")

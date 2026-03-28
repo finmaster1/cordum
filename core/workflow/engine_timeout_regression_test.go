@@ -41,13 +41,13 @@ func newSchemaRegistry(t *testing.T) (*schema.Registry, *store.RedisStore, func(
 	reg, err := schema.NewRegistry("redis://" + srv.Addr())
 	if err != nil {
 		srv.Close()
-		memStore.Close()
+		_ = memStore.Close()
 		t.Fatalf("schema registry init: %v", err)
 	}
 	cleanup := func() {
-		reg.Close()
+		_ = reg.Close()
 		srv.Close()
-		memStore.Close()
+		_ = memStore.Close()
 	}
 	return reg, memStore, cleanup
 }

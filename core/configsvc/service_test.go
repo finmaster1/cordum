@@ -144,7 +144,7 @@ func TestEnsureDefault_NoOpIfExists(t *testing.T) {
 
 func TestEffectiveSnapshot_RedisError(t *testing.T) {
 	svc, srv := newSvcWithServer(t)
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 

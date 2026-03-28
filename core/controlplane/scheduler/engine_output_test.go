@@ -320,7 +320,7 @@ func TestHandleJobResultSecretContentEventuallyQuarantined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	defer resultClient.Close()
+	defer func() { _ = resultClient.Close() }()
 
 	secret := []byte("leak AKIA1234567890ABCDEF in output")
 	if err := resultClient.Set(context.Background(), "res:job-real-secret", secret, 0).Err(); err != nil {
@@ -393,7 +393,7 @@ func TestHandleJobResultCleanContentRemainsAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	defer resultClient.Close()
+	defer func() { _ = resultClient.Close() }()
 
 	if err := resultClient.Set(context.Background(), "res:job-real-clean", []byte("safe output"), 0).Err(); err != nil {
 		t.Fatalf("seed result content: %v", err)

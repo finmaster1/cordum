@@ -137,8 +137,7 @@ func TestVerifyPolicySignature(t *testing.T) {
 }
 
 func TestVerifyPolicySignatureRequiresKeyWhenEnforced(t *testing.T) {
-	os.Setenv("SAFETY_POLICY_SIGNATURE_REQUIRED", "1")
-	defer os.Unsetenv("SAFETY_POLICY_SIGNATURE_REQUIRED")
+	t.Setenv("SAFETY_POLICY_SIGNATURE_REQUIRED", "1")
 
 	if err := verifyPolicySignature([]byte(testPolicy), "policy.yaml"); err == nil {
 		t.Fatalf("expected signature requirement error")

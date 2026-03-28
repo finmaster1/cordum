@@ -90,7 +90,7 @@ func TestRegisterMCPRoutesEnforcesAuthAndHandlesPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unauthorized request failed: %v", err)
 	}
-	defer unauthResp.Body.Close()
+	defer func() { _ = unauthResp.Body.Close() }()
 	if unauthResp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthorized request, got %d", unauthResp.StatusCode)
 	}
@@ -103,7 +103,7 @@ func TestRegisterMCPRoutesEnforcesAuthAndHandlesPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authorized request failed: %v", err)
 	}
-	defer authResp.Body.Close()
+	defer func() { _ = authResp.Body.Close() }()
 	if authResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for authorized request, got %d", authResp.StatusCode)
 	}
@@ -123,7 +123,7 @@ func TestRegisterMCPRoutesEnforcesAuthAndHandlesPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alias request failed: %v", err)
 	}
-	defer aliasResp.Body.Close()
+	defer func() { _ = aliasResp.Body.Close() }()
 	if aliasResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for /api/v1/mcp/message, got %d", aliasResp.StatusCode)
 	}
@@ -166,7 +166,7 @@ func TestRegisterMCPRoutesStatusEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sse failed: %v", err)
 	}
-	defer sseResp.Body.Close()
+	defer func() { _ = sseResp.Body.Close() }()
 	if sseResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from sse endpoint, got %d", sseResp.StatusCode)
 	}
@@ -185,7 +185,7 @@ func TestRegisterMCPRoutesStatusEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status request failed: %v", err)
 	}
-	defer statusResp.Body.Close()
+	defer func() { _ = statusResp.Body.Close() }()
 	if statusResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from status endpoint, got %d", statusResp.StatusCode)
 	}
@@ -216,7 +216,7 @@ func TestRegisterMCPRoutesStatusEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status alias request failed: %v", err)
 	}
-	defer statusAliasResp.Body.Close()
+	defer func() { _ = statusAliasResp.Body.Close() }()
 	if statusAliasResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from /api/v1/mcp/status, got %d", statusAliasResp.StatusCode)
 	}
@@ -241,7 +241,7 @@ func TestRegisterMCPRoutesStatusEndpointWhenMCPDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status request failed: %v", err)
 	}
-	defer statusResp.Body.Close()
+	defer func() { _ = statusResp.Body.Close() }()
 	if statusResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from status endpoint when disabled, got %d", statusResp.StatusCode)
 	}
@@ -262,7 +262,7 @@ func TestRegisterMCPRoutesStatusEndpointWhenMCPDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("message request failed: %v", err)
 	}
-	defer messageResp.Body.Close()
+	defer func() { _ = messageResp.Body.Close() }()
 	if messageResp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 from message endpoint when disabled, got %d", messageResp.StatusCode)
 	}

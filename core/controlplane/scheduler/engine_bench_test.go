@@ -28,7 +28,7 @@ func silenceLogs(b *testing.B) {
 		os.Stderr = devNull
 		b.Cleanup(func() {
 			os.Stderr = origStderr
-			devNull.Close()
+			_ = devNull.Close()
 		})
 	}
 	b.Cleanup(func() {

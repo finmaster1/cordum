@@ -548,7 +548,7 @@ func TestOnMessageTerminated_DLQFirstFailure(t *testing.T) {
 func TestWithRedis(t *testing.T) {
 	client, srv := newTestRedis(t)
 	defer srv.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	b := &NatsBus{}
 	if b.redis != nil {
@@ -575,7 +575,7 @@ func TestIdempotencyRedisDown(t *testing.T) {
 		t.Fatal("expected error with closed Redis")
 	}
 
-	client.Close()
+	_ = client.Close()
 }
 
 // TestProcessedKeyTTLMatchesAckWait verifies the constant alignment.

@@ -14,7 +14,7 @@ func TestRedisStoreAcquireRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	lock, ok, err := store.Acquire(ctx, "repo:alpha", "worker-a", ModeExclusive, 2*time.Second)
@@ -46,7 +46,7 @@ func TestRedisStoreShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if _, ok, err := store.Acquire(ctx, "repo:shared", "worker-a", ModeShared, 2*time.Second); err != nil {
@@ -80,7 +80,7 @@ func TestRedisStoreRenew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if _, ok, err := store.Acquire(ctx, "repo:renew", "worker-a", ModeExclusive, 2*time.Second); err != nil {
@@ -99,7 +99,7 @@ func TestRedisStoreModeChangeRejectedMultiOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -125,7 +125,7 @@ func TestRedisStoreSingleOwnerUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -152,7 +152,7 @@ func TestRedisStoreReleasePTTLPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 

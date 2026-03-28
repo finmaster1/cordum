@@ -280,7 +280,7 @@ func (p *OIDCProvider) discover() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetch %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("oidc discovery returned %d", resp.StatusCode)
@@ -347,7 +347,7 @@ func (p *OIDCProvider) refreshJWKS(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("fetch jwks: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("jwks endpoint returned %d", resp.StatusCode)

@@ -30,8 +30,8 @@ func TestStartHTTPServerGracefulShutdown(t *testing.T) {
 	}
 	httpAddr := httpLis.Addr().String()
 	metricsAddr := metricsLis.Addr().String()
-	httpLis.Close()
-	metricsLis.Close()
+	_ = httpLis.Close()
+	_ = metricsLis.Close()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -43,7 +43,7 @@ func TestStartHTTPServerGracefulShutdown(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		resp, err := http.Get("http://" + httpAddr + "/health")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				healthy = true
 				break

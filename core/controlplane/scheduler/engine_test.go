@@ -909,7 +909,7 @@ func TestProcessJob_SetStateDeniedFailure_ReturnsRetryable(t *testing.T) {
 		t.Fatalf("expected 0 bus publishes when setJobState fails (DLQ should not fire), got %d", len(bus.published))
 	}
 	// Verify job state was NOT set (store returned error).
-	if state := store.fakeJobStore.states["job-retry-denied"]; state == JobStateDenied {
+	if state := store.states["job-retry-denied"]; state == JobStateDenied {
 		t.Fatal("job state should NOT be DENIED when SetState returned error")
 	}
 }
@@ -930,7 +930,7 @@ func TestProcessJob_SetStateFailedFailure_ReturnsRetryable(t *testing.T) {
 
 	// Use a topic with no workers to trigger dispatch failure → FAILED path.
 	// Set high attempts to trigger max scheduling retries → FAILED.
-	store.fakeJobStore.attempts["job-retry-failed"] = 999
+	store.attempts["job-retry-failed"] = 999
 
 	req := &pb.JobRequest{
 		JobId: "job-retry-failed",
@@ -1703,7 +1703,7 @@ func TestSetJobStateFailureReturnsRetryNotNil(t *testing.T) {
 			name:        "max scheduling retries/FAILED state failure retries",
 			failOnState: JobStateFailed,
 			setup: func(s *failingSetStateStore) {
-				s.fakeJobStore.attempts["job-max-retry"] = maxSchedulingRetries + 1
+				s.attempts["job-max-retry"] = maxSchedulingRetries + 1
 			},
 			req: &pb.JobRequest{
 				JobId: "job-max-retry",

@@ -487,7 +487,7 @@ func TestCacheBypassedForVelocityPolicies(t *testing.T) {
 	// so that the sliding window advances correctly on every request.
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 
 	policy := &config.SafetyPolicy{
 		DefaultTenant:   "default",
