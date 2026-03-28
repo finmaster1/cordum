@@ -13,7 +13,7 @@ import (
 
 func TestTransformBasic(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -77,7 +77,7 @@ func TestTransformBasic(t *testing.T) {
 
 func TestTransformBadExpression(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -139,7 +139,7 @@ func TestTransformBadExpression(t *testing.T) {
 
 func TestTransformOutputPath(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -203,7 +203,7 @@ func TestTransformOutputPath(t *testing.T) {
 
 func TestTransformEmptyInput(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -263,7 +263,7 @@ func TestTransformEmptyInput(t *testing.T) {
 
 func TestTransformPreservesTypes(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -325,7 +325,7 @@ func TestTransformPreservesTypes(t *testing.T) {
 
 func TestTransformNestedExpressions(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)

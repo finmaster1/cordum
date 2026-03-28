@@ -16,7 +16,7 @@ func TestRedisStoreContextAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	ctxKey := MakeContextKey("job-1")
@@ -82,7 +82,7 @@ func TestRedisStoreRespectsContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately

@@ -91,20 +91,20 @@ func TestReconcilerFailureReasonPropagation(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	redisURL := "redis://" + srv.Addr()
 	workflowStore, err := NewRedisWorkflowStore(redisURL)
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	engine := NewEngine(workflowStore, &stubBus{})
 	wfDef := &Workflow{
@@ -154,20 +154,20 @@ func TestReconcilerFallbackErrorMessage(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	redisURL := "redis://" + srv.Addr()
 	workflowStore, err := NewRedisWorkflowStore(redisURL)
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	engine := NewEngine(workflowStore, &stubBus{})
 	wfDef := &Workflow{
@@ -226,13 +226,13 @@ func TestReconcilerHandleJobResultLockBusy(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	jobStore, err := store.NewRedisJobStore("redis://" + srv.Addr())
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	ctx := context.Background()
 	lockKey := runLockKey("run-1")
@@ -256,20 +256,20 @@ func TestReconcilerStartStopsOnContext(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	redisURL := "redis://" + srv.Addr()
 	workflowStore, err := NewRedisWorkflowStore(redisURL)
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(redisURL)
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	engine := NewEngine(workflowStore, &stubBus{})
 	rec := newReconciler(workflowStore, engine, jobStore, 5*time.Millisecond, 10)
@@ -295,19 +295,19 @@ func TestHandleJobResult_CancelledContext(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	jobStore, err := store.NewRedisJobStore("redis://" + srv.Addr())
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	workflowStore, err := NewRedisWorkflowStore("redis://" + srv.Addr())
 	if err != nil {
 		t.Fatalf("workflow store: %v", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	engine := NewEngine(workflowStore, &stubBus{})
 	rec := newReconciler(workflowStore, engine, jobStore, time.Minute, 10)

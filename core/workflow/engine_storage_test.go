@@ -93,7 +93,7 @@ func TestStorageWriteReadContext(t *testing.T) {
 			},
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	run := mustGetRun(t, store, runID)
 	if run.Status != RunStatusSucceeded {
@@ -155,7 +155,7 @@ func TestStorageDeleteContext(t *testing.T) {
 			},
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// After write+delete, the verify read should fail because key was deleted.
 	run := mustGetRun(t, store, runID)
@@ -203,7 +203,7 @@ func TestStorageReadMissing(t *testing.T) {
 			},
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	run := mustGetRun(t, store, runID)
 	// Run should fail because the read step fails.
@@ -249,7 +249,7 @@ func TestStorageNestedPath(t *testing.T) {
 			},
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	run := mustGetRun(t, store, runID)
 	if run.Status != RunStatusSucceeded {
@@ -306,7 +306,7 @@ func TestStorageExpressionValue(t *testing.T) {
 			},
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	run := mustGetRun(t, store, runID)
 	if run.Status != RunStatusSucceeded {
@@ -340,7 +340,7 @@ func TestStorageUnknownOperation(t *testing.T) {
 			},
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	run := mustGetRun(t, store, runID)
 	if run.Status != RunStatusFailed {

@@ -23,7 +23,7 @@ func TestSwitchMatchesCase(t *testing.T) {
 		"",
 		"",
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ensureSwitchBranchDispatched(t, store, engine, bus, runID)
 
@@ -83,7 +83,7 @@ func TestSwitchDefaultBranch(t *testing.T) {
 		"fallback",
 		"",
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ensureSwitchBranchDispatched(t, store, engine, bus, runID)
 
@@ -129,7 +129,7 @@ func TestSwitchNoMatchNoDefaultFails(t *testing.T) {
 		"",
 		"",
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if got := countPublishedSubject(bus, capsdk.SubjectSubmit); got != 0 {
 		t.Fatalf("expected no dispatch when no case matches and no default, got %d", got)
@@ -161,7 +161,7 @@ func TestSwitchOutputPath(t *testing.T) {
 		"fallback",
 		"ctx.route_decision",
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ensureSwitchBranchDispatched(t, store, engine, bus, runID)
 
@@ -204,7 +204,7 @@ func TestSwitchUnmatchedBranchesSkipped(t *testing.T) {
 		"fallback",
 		"",
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ensureSwitchBranchDispatched(t, store, engine, bus, runID)
 
@@ -411,7 +411,7 @@ func TestSwitchMapFormatCases(t *testing.T) {
 	if err := engine.StartRun(context.Background(), "wf-map-cases", "run-map-cases"); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ensureSwitchBranchDispatched(t, store, engine, bus, "run-map-cases")
 

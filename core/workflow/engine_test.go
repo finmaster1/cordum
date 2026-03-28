@@ -82,7 +82,7 @@ func (f *failingContextStore) Close() error { return nil }
 
 func TestEngineForEachFanoutAndAggregateSuccess(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -149,7 +149,7 @@ func TestEngineForEachFanoutAndAggregateSuccess(t *testing.T) {
 
 func TestEngineForEachFanoutLimitExceeded(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus).WithMaxForEachItems(1)
@@ -214,7 +214,7 @@ func TestEngineForEachFanoutLimitExceeded(t *testing.T) {
 
 func TestEngineRetriesAndBackoff(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -289,7 +289,7 @@ func TestEngineRetriesAndBackoff(t *testing.T) {
 
 func TestEngineStepMetadataPropagates(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -378,7 +378,7 @@ func TestEngineStepMetadataPropagates(t *testing.T) {
 
 func TestEngineDelayStepCompletes(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -436,7 +436,7 @@ func TestEngineDelayStepCompletes(t *testing.T) {
 
 func TestEngineNotifyStepEmitsEvent(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -483,7 +483,7 @@ func TestEngineNotifyStepEmitsEvent(t *testing.T) {
 
 func TestEngineConditionStepEvaluates(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -543,7 +543,7 @@ func TestEngineConditionStepEvaluates(t *testing.T) {
 
 func TestEngineConditionEvalErrorFailsRun(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -598,7 +598,7 @@ func TestEngineConditionEvalErrorFailsRun(t *testing.T) {
 
 func TestEngineForEachEvalErrorFailsRun(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -662,7 +662,7 @@ func hasTimelineEvent(events []TimelineEvent, eventType string) bool {
 
 func TestScheduleAfterFiresTimer(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -717,7 +717,7 @@ func TestScheduleAfterFiresTimer(t *testing.T) {
 
 func TestScheduleAfterMultipleTimers(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -769,7 +769,7 @@ func TestScheduleAfterMultipleTimers(t *testing.T) {
 
 func TestStopCancelsPendingTimers(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -817,7 +817,7 @@ func TestStopCancelsPendingTimers(t *testing.T) {
 
 func TestScheduleAfterIgnoredAfterStop(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -834,7 +834,7 @@ func TestScheduleAfterIgnoredAfterStop(t *testing.T) {
 
 func TestScheduleAfterZeroDelayIgnored(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -851,7 +851,7 @@ func TestScheduleAfterZeroDelayIgnored(t *testing.T) {
 
 func TestOnError_RedirectsToHandlerOnFailure(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -942,7 +942,7 @@ func TestOnError_RedirectsToHandlerOnFailure(t *testing.T) {
 
 func TestOnError_NotTriggeredOnSuccess(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -1006,7 +1006,7 @@ func TestOnError_NotTriggeredOnSuccess(t *testing.T) {
 
 func TestOnError_HandlerFailsCausesRunFailure(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -1087,7 +1087,7 @@ func (b *failingBus) Subscribe(string, string, func(*pb.BusPacket) error) error 
 
 func TestCrashRecovery_DispatchFailRevertsStepToPending(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &failingBus{err: fmt.Errorf("NATS down")}
 	engine := NewEngine(store, bus)
@@ -1137,7 +1137,7 @@ func TestCrashRecovery_DispatchFailRevertsStepToPending(t *testing.T) {
 
 func TestCrashRecovery_SuccessfulDispatchPersistsRunningState(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -1854,7 +1854,7 @@ func TestWorkflowApprovalStepDeniedResultStopsRunAndPreservesContext(t *testing.
 // TestLockRunAcquireRelease verifies basic acquire/release cycle.
 func TestLockRunAcquireRelease(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -1877,7 +1877,7 @@ func TestLockRunAcquireRelease(t *testing.T) {
 // removes the entry from the lock map.
 func TestMarkRunTerminalCleanup(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -1914,7 +1914,7 @@ func TestMarkRunTerminalCleanup(t *testing.T) {
 // TestMarkRunTerminalNoEntry verifies markRunTerminal is safe when no lock exists.
 func TestMarkRunTerminalNoEntry(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -1926,7 +1926,7 @@ func TestMarkRunTerminalNoEntry(t *testing.T) {
 
 func TestForEach_ExpressionEvaluatedOnce(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2003,7 +2003,7 @@ func TestForEach_ExpressionEvaluatedOnce(t *testing.T) {
 
 func TestForEach_EmptyList_EmitsEvents(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2081,7 +2081,7 @@ func TestForEach_EmptyList_EmitsEvents(t *testing.T) {
 
 func TestCondition_FalsePath_EmitsEvents(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2171,7 +2171,7 @@ func TestHandleJobResultDeletedRunReturnsErrRunNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2227,7 +2227,7 @@ func TestHandleJobResultExistingRunReturnsNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2274,7 +2274,7 @@ func TestHandleJobResultTransientRedisErrorIsNotErrRunNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2319,7 +2319,7 @@ func TestHandleJobResultTransientRedisErrorIsNotErrRunNotFound(t *testing.T) {
 
 func TestActivateOnErrorHandlerNilRun(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 	now := time.Now().UTC()
@@ -2359,7 +2359,7 @@ func TestSetContextPathErrorLogged(t *testing.T) {
 
 func TestEngineDeniedJobResult_ProducesRunDenied(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -2426,7 +2426,7 @@ func TestEngineDeniedJobResult_ProducesRunDenied(t *testing.T) {
 
 func TestEngineDeniedJobResult_WithOnError_Recovers(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)

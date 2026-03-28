@@ -13,7 +13,7 @@ import (
 func TestParallelAllSucceed(t *testing.T) {
 	childIDs := []string{"check_a", "check_b", "check_c"}
 	store, engine, bus, runID := setupParallelRun(t, "wf-parallel-all", "run-parallel-all", childIDs, "all", 0, 0)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if countPublishedSubject(bus, capsdk.SubjectSubmit) != 3 {
 		t.Fatalf("expected 3 child dispatches, got %d", countPublishedSubject(bus, capsdk.SubjectSubmit))
@@ -51,7 +51,7 @@ func TestParallelAllSucceed(t *testing.T) {
 func TestParallelOneFailsStrategyAll(t *testing.T) {
 	childIDs := []string{"check_a", "check_b", "check_c"}
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-fail", "run-parallel-fail", childIDs, "all", 0, 0)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_a"),
@@ -86,7 +86,7 @@ func TestParallelOneFailsStrategyAll(t *testing.T) {
 func TestParallelAnyStrategy(t *testing.T) {
 	childIDs := []string{"check_a", "check_b", "check_c"}
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-any", "run-parallel-any", childIDs, "any", 0, 0)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "check_a"),
@@ -118,7 +118,7 @@ func TestParallelAnyStrategy(t *testing.T) {
 func TestParallelNOfM(t *testing.T) {
 	childIDs := []string{"check_1", "check_2", "check_3", "check_4", "check_5"}
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-nofm", "run-parallel-nofm", childIDs, "n_of_m", 3, 0)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	for _, childID := range []string{"check_1", "check_2", "check_3"} {
 		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
@@ -152,7 +152,7 @@ func TestParallelNOfM(t *testing.T) {
 func TestParallelMaxParallel(t *testing.T) {
 	childIDs := []string{"check_a", "check_b", "check_c"}
 	store, engine, bus, runID := setupParallelRun(t, "wf-parallel-throttle", "run-parallel-throttle", childIDs, "all", 0, 1)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if countPublishedSubject(bus, capsdk.SubjectSubmit) != 1 {
 		t.Fatalf("expected 1 initial dispatch with max_parallel=1, got %d", countPublishedSubject(bus, capsdk.SubjectSubmit))
@@ -200,7 +200,7 @@ func TestParallelMaxParallel(t *testing.T) {
 func TestParallelOutputAggregation(t *testing.T) {
 	childIDs := []string{"alpha", "beta"}
 	store, engine, _, runID := setupParallelRun(t, "wf-parallel-output", "run-parallel-output", childIDs, "all", 0, 0)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
 		JobId:     fmt.Sprintf("%s:%s@1", runID, "alpha"),

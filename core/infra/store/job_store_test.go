@@ -24,7 +24,7 @@ func TestRedisJobStoreStateAndResultPtr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-123"
@@ -76,7 +76,7 @@ func TestRedisJobStoreResultPtrTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-ttl"
@@ -107,7 +107,7 @@ func TestRedisJobStoreTransitionGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-456"
@@ -228,7 +228,7 @@ func TestRedisJobStoreOutputSafetyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-output-safety"
@@ -290,7 +290,7 @@ func TestRedisJobStoreListRecentJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -331,7 +331,7 @@ func TestRedisJobStoreListRecentJobsByScorePagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if err := store.SetState(ctx, "job-1", model.JobStatePending); err != nil {
@@ -377,7 +377,7 @@ func TestRedisJobStoreApprovalRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-approval"
@@ -417,7 +417,7 @@ func TestRedisJobStoreCancelJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-cancel"
@@ -464,7 +464,7 @@ func TestRedisJobStoreTraceAndDeadlines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-trace"
@@ -514,7 +514,7 @@ func TestRedisJobStoreCountActiveByTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-active"
@@ -552,7 +552,7 @@ func TestRedisJobStoreSetJobMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	req := &pb.JobRequest{
 		JobId:       "job-meta",
@@ -614,7 +614,7 @@ func TestRedisJobStoreListSafetyDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	jobID := "job-decisions"
 	first := model.SafetyDecisionRecord{
@@ -659,7 +659,7 @@ func TestRedisJobStoreIdempotencyAndLocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if err := store.SetIdempotencyKey(ctx, "idem", "job-1"); err != nil {
@@ -688,7 +688,7 @@ func TestRedisJobStoreLockConcurrentSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	token1, err := store.TryAcquireLock(ctx, "lock-1", time.Second)
@@ -716,7 +716,7 @@ func TestRedisJobStoreLockReacquireAfterExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	token1, err := store.TryAcquireLock(ctx, "lock-1", 100*time.Millisecond)
@@ -746,7 +746,7 @@ func TestRedisJobStoreLockRejectsWrongOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	token1, err := store.TryAcquireLock(ctx, "lock-1", 100*time.Millisecond)
@@ -783,7 +783,7 @@ func TestRedisJobStoreRenewLockSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	token, err := store.TryAcquireLock(ctx, "renew-test", 200*time.Millisecond)
@@ -816,7 +816,7 @@ func TestRedisJobStoreRenewLockWrongToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	token, err := store.TryAcquireLock(ctx, "renew-wrong", time.Second)
@@ -839,7 +839,7 @@ func TestRedisJobStoreRenewLockExpiredKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	// Try renewing a key that doesn't exist.
@@ -857,7 +857,7 @@ func TestRedisJobStoreRenewLockEmptyParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if err := store.RenewLock(ctx, "", "token", time.Second); err == nil {
@@ -877,7 +877,7 @@ func TestRedisJobStoreTraceAndPrincipal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-trace-2"
@@ -905,7 +905,7 @@ func TestRedisJobStoreTopicMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-topic"
@@ -952,7 +952,7 @@ func TestRedisJobStoreJobRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	req := &pb.JobRequest{
 		JobId:    "job-req",
@@ -981,7 +981,7 @@ func TestRedisJobStoreDeadlinesAndTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-deadline"
@@ -1025,7 +1025,7 @@ func TestRedisJobStoreSafetyDecisionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-safe"
@@ -1059,7 +1059,7 @@ func TestRedisJobStorePingAndTeam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if err := store.Ping(ctx); err != nil {
@@ -1083,7 +1083,7 @@ func TestRedisJobStoreIdempotencyKeyScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	ok, existing, err := store.TrySetIdempotencyKeyScoped(ctx, "tenant-a", "key-1", "job-1")
@@ -1117,7 +1117,7 @@ func TestRedisJobStoreIdempotencyKeyScopedConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	const n = 20
@@ -1239,7 +1239,7 @@ func TestRedisJobStoreIncrAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-incr"
@@ -1268,7 +1268,7 @@ func TestRedisJobStoreIncrAttemptsEmptyID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := store.IncrAttempts(context.Background(), ""); err == nil {
 		t.Fatal("expected error for empty jobID")
@@ -1330,7 +1330,7 @@ func TestRedisJobStoreListRecentSkipsExpiredMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -1388,7 +1388,7 @@ func TestNewRedisJobStore_NegativeTTLWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// TTL should fall back to default (7 days).
 	if store.metaTTL != defaultJobMetaTTL {
@@ -1416,7 +1416,7 @@ func TestNewRedisJobStore_ValidTTLApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	expected := time.Duration(3600) * time.Second
 	if store.metaTTL != expected {
@@ -1441,7 +1441,7 @@ func TestNewRedisJobStore_InvalidTTLWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create job store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if store.metaTTL != defaultJobMetaTTL {
 		t.Fatalf("expected default TTL %v, got %v", defaultJobMetaTTL, store.metaTTL)
@@ -1464,7 +1464,7 @@ func TestDeadlineSameSecondOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	base := time.Now().Add(-5 * time.Minute)
@@ -1506,7 +1506,7 @@ func TestPaginationNoGaps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	const total = 100
@@ -1559,7 +1559,7 @@ func TestTenantActiveSetNoExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	if err := store.SetTenant(ctx, "job-long", "tenant-long"); err != nil {
@@ -1600,7 +1600,7 @@ func TestBuildJobRecordsPipelineError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	// Create a job so there's something to list.

@@ -26,7 +26,7 @@ func newDLQStore(t *testing.T) *DLQStore {
 
 func TestDLQStoreCRUD(t *testing.T) {
 	store := newDLQStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	entry := DLQEntry{
@@ -77,7 +77,7 @@ func TestDLQStoreEntryTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dlq store init: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	entry := DLQEntry{
@@ -102,7 +102,7 @@ func TestDLQStoreEntryTTL(t *testing.T) {
 
 func TestDLQStoreListByScore(t *testing.T) {
 	store := newDLQStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -144,7 +144,7 @@ func TestDLQStoreListByScore(t *testing.T) {
 
 func TestDLQStoreCleanupStaleEntries(t *testing.T) {
 	store := newDLQStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -203,7 +203,7 @@ func TestDLQStoreCleanupStaleEntries(t *testing.T) {
 
 func TestDLQStoreListLazyCleanup(t *testing.T) {
 	store := newDLQStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -249,7 +249,7 @@ func TestDLQStoreListLazyCleanup(t *testing.T) {
 
 func TestDLQStoreListByScoreLazyCleanup(t *testing.T) {
 	store := newDLQStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -288,7 +288,7 @@ func TestDLQStoreListByScoreLazyCleanup(t *testing.T) {
 
 func TestDLQStoreCleanupNoStaleEntries(t *testing.T) {
 	store := newDLQStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	entry := DLQEntry{
@@ -330,7 +330,7 @@ func TestDLQCleanupDistributedLock(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	store1 := newDLQStoreWithServer(t, srv)
 	defer func() { _ = store1.Close() }()
@@ -388,7 +388,7 @@ func TestDLQCleanupLockRelease(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	store1 := newDLQStoreWithServer(t, srv)
 	defer func() { _ = store1.Close() }()
@@ -437,7 +437,7 @@ func TestDLQCleanupLockSafeRelease(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	s := newDLQStoreWithServer(t, srv)
 	defer func() { _ = s.Close() }()
@@ -473,7 +473,7 @@ func TestDLQCleanupLockBlocksSecondReplica(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	store1 := newDLQStoreWithServer(t, srv)
 	defer func() { _ = store1.Close() }()
@@ -506,7 +506,7 @@ func TestDLQCleanupLockTTLExpiry(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	s := newDLQStoreWithServer(t, srv)
 	defer func() { _ = s.Close() }()

@@ -161,8 +161,8 @@ func TestValidateInlineOutputRespectsTimeout(t *testing.T) {
 // fails. This is a regression test for the unbounded context.Background() bug.
 func TestScheduleAfterTimerCallbackBounded(t *testing.T) {
 	wfStore, srv := newTestStoreWithServer(t)
-	defer srv.Close()
-	defer wfStore.Close()
+	defer func() { _ = srv.Close() }()
+	defer func() { _ = wfStore.Close() }()
 
 	// Engine with store but no workflow — StartRun will fail fast.
 	engine := NewEngine(wfStore, nil)
@@ -192,8 +192,8 @@ func TestScheduleAfterTimerCallbackBounded(t *testing.T) {
 // after Stop() — the timer callback checks the stopped channel under timerMu.
 func TestScheduleAfterStoppedEngineDiscards(t *testing.T) {
 	wfStore, srv := newTestStoreWithServer(t)
-	defer srv.Close()
-	defer wfStore.Close()
+	defer func() { _ = srv.Close() }()
+	defer func() { _ = wfStore.Close() }()
 
 	engine := NewEngine(wfStore, nil)
 	engine.Stop() // Stop before scheduling.
@@ -210,8 +210,8 @@ func TestScheduleAfterStoppedEngineDiscards(t *testing.T) {
 // are persisted to Redis. Short delays should NOT have Redis entries.
 func TestScheduleAfterDurableTimerThreshold(t *testing.T) {
 	wfStore, srv := newTestStoreWithServer(t)
-	defer srv.Close()
-	defer wfStore.Close()
+	defer func() { _ = srv.Close() }()
+	defer func() { _ = wfStore.Close() }()
 
 	engine := NewEngine(wfStore, nil)
 	defer engine.Stop()

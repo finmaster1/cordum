@@ -13,7 +13,7 @@ import (
 
 func TestRerunFromCopiesDependencies(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 	wfDef := &Workflow{
@@ -72,7 +72,7 @@ func TestRerunFromCopiesDependencies(t *testing.T) {
 
 func TestCancelRunPublishesCancels(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -121,7 +121,7 @@ func TestCancelRunPublishesCancels(t *testing.T) {
 
 func TestWorkflowTimeoutCancelsRunningJobs(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -192,7 +192,7 @@ func TestWorkflowTimeoutCancelsRunningJobs(t *testing.T) {
 
 func TestRunLockCleanupAfterTerminalRuns(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 	wfDef := &Workflow{ID: "wf-locks", OrgID: "org", Steps: map[string]*Step{

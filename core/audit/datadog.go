@@ -115,7 +115,7 @@ func (d *DatadogExporter) Export(ctx context.Context, events []SIEMEvent) error 
 	if err != nil {
 		return fmt.Errorf("audit datadog post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		return fmt.Errorf("audit datadog drain: %w", err)
 	}

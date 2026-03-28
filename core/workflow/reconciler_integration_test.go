@@ -75,7 +75,7 @@ func TestReconcilerReconcileRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	bus := &stubBus{}
 	engine := NewEngine(workflowStore, bus)
@@ -150,7 +150,7 @@ func TestWorkflowReconcilerSingleTickPerTTLWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	lockTTL := 50 * time.Millisecond
 	var tickCount atomic.Int32
@@ -465,7 +465,7 @@ func TestReconcilerHandleJobResultDeletedRunReturnsNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job store: %v", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	bus := &stubBus{}
 	engine := NewEngine(workflowStore, bus)

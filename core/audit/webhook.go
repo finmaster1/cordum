@@ -81,7 +81,7 @@ func (w *WebhookExporter) Export(ctx context.Context, events []SIEMEvent) error 
 	if err != nil {
 		return fmt.Errorf("audit webhook post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		return fmt.Errorf("audit webhook drain: %w", err)
 	}

@@ -66,19 +66,19 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("connect redis memory store: %w", err)
 	}
-	defer memStore.Close()
+	defer func() { _ = memStore.Close() }()
 
 	jobStore, err := store.NewRedisJobStore(cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("connect redis job store: %w", err)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	workflowStore, err := NewRedisWorkflowStore(cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("connect redis workflow store: %w", err)
 	}
-	defer workflowStore.Close()
+	defer func() { _ = workflowStore.Close() }()
 
 	configSvc, err := configsvc.New(cfg.RedisURL)
 	if err != nil {

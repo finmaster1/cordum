@@ -13,7 +13,7 @@ import (
 
 func TestSubWorkflowSucceeds(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
@@ -81,7 +81,7 @@ func TestSubWorkflowSucceeds(t *testing.T) {
 
 func TestSubWorkflowFailsWhenChildFails(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 
@@ -134,7 +134,7 @@ func TestSubWorkflowFailsWhenChildFails(t *testing.T) {
 
 func TestSubWorkflowInputMapping(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 
@@ -179,7 +179,7 @@ func TestSubWorkflowInputMapping(t *testing.T) {
 
 func TestSubWorkflowOutputMapping(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 
@@ -244,7 +244,7 @@ func TestSubWorkflowOutputMapping(t *testing.T) {
 
 func TestSubWorkflowCircularDetected(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 
@@ -294,7 +294,7 @@ func TestSubWorkflowCircularDetected(t *testing.T) {
 
 func TestSubWorkflowContextInheritanceAndCallStack(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	engine := NewEngine(store, &recordingBus{})
 

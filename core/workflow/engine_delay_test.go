@@ -27,7 +27,7 @@ func newTestStoreWithServer(t *testing.T) (*RedisStore, *miniredis.Miniredis) {
 func TestDelayTimerPersistedToRedis(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	fireAt := time.Now().Add(30 * time.Second)
@@ -56,7 +56,7 @@ func TestDelayTimerPersistedToRedis(t *testing.T) {
 func TestDelayTimerRemovedOnRemove(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	fireAt := time.Now().Add(30 * time.Second)
@@ -82,7 +82,7 @@ func TestDelayTimerRemovedOnRemove(t *testing.T) {
 func TestPopFiredDelays_Atomic(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -127,7 +127,7 @@ func TestPopFiredDelays_Atomic(t *testing.T) {
 func TestListFutureDelays(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -155,7 +155,7 @@ func TestListFutureDelays(t *testing.T) {
 func TestCleanStaleDelays(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -193,7 +193,7 @@ func TestCleanStaleDelays(t *testing.T) {
 func TestRecoverDelayTimers_PastDue(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -222,7 +222,7 @@ func TestRecoverDelayTimers_PastDue(t *testing.T) {
 func TestRecoverDelayTimers_Future(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -285,7 +285,7 @@ func TestSplitDelayMember(t *testing.T) {
 func TestGetDelayTimerFuture(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	fireAt := time.Now().Add(30 * time.Second)
@@ -316,7 +316,7 @@ func TestGetDelayTimerFuture(t *testing.T) {
 func TestGetDelayTimerNotFound(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	info, err := store.GetDelayTimer(context.Background(), "wf-none", "run-none")
 	if err != nil {
@@ -331,7 +331,7 @@ func TestGetDelayTimerNotFound(t *testing.T) {
 func TestGetDelayTimerStale(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	pastTime := time.Now().Add(-10 * time.Second)
@@ -353,7 +353,7 @@ func TestGetDelayTimerStale(t *testing.T) {
 func TestDelayTimerIdempotent(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	now := time.Now()
@@ -389,7 +389,7 @@ func TestDelayTimerIdempotent(t *testing.T) {
 func TestDelayTimerPreservedOnStartRunFailure(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -437,7 +437,7 @@ func TestDelayTimerPreservedOnStartRunFailure(t *testing.T) {
 func TestDelayTimerRemovedOnStartRunSuccess(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -510,7 +510,7 @@ func TestDelayTimerRemovedOnStartRunSuccess(t *testing.T) {
 func TestDelayTimerRecoveryAfterTransientFailure(t *testing.T) {
 	store, srv := newTestStoreWithServer(t)
 	defer srv.Close()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	engine := NewEngine(store, nil)

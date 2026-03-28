@@ -22,7 +22,7 @@ func TestLoopFixedCountNoCondition(t *testing.T) {
 		},
 		nil,
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if got := countPublishedSubject(bus, capsdk.SubjectSubmit); got != 1 {
 		t.Fatalf("expected first loop iteration dispatch, got %d", got)
@@ -75,7 +75,7 @@ func TestLoopUntilStopsAtFiveIterations(t *testing.T) {
 		},
 		nil,
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	for idx := 0; idx < 10; idx++ {
 		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
@@ -118,7 +118,7 @@ func TestLoopMaxExceededFails(t *testing.T) {
 		},
 		nil,
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	for idx := 0; idx < 3; idx++ {
 		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
@@ -159,7 +159,7 @@ func TestLoopWhileConditionRunsFiveIterations(t *testing.T) {
 		},
 		nil,
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	for idx := 0; idx < 10; idx++ {
 		if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
@@ -202,7 +202,7 @@ func TestLoopZeroIterationsWhenConditionFalseInitially(t *testing.T) {
 		},
 		nil,
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if got := countPublishedSubject(bus, capsdk.SubjectSubmit); got != 0 {
 		t.Fatalf("expected no loop dispatches when initial condition is false, got %d", got)
@@ -239,7 +239,7 @@ func TestLoopScopeVariablesInChildPayload(t *testing.T) {
 			"prev":      "${loop.previous_output}",
 		},
 	)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	initial := mustGetRun(t, store, runID)
 	firstPayload := childPayload(t, initial, "loop[0]")

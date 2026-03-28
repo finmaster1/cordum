@@ -59,7 +59,7 @@ func TestHTTPTransportMessageAndSSE(t *testing.T) {
 	mux.HandleFunc("GET /mcp/sse", transport.HandleSSE)
 	mux.HandleFunc("POST /mcp/message", transport.HandleMessage)
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	go func() {
 		msg, err := transport.ReadMessage()
@@ -79,7 +79,7 @@ func TestHTTPTransportMessageAndSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post message failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from message endpoint, got %d", resp.StatusCode)
 	}

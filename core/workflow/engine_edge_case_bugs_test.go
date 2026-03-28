@@ -269,7 +269,7 @@ import (
 
 func TestBug_OnErrorNotTriggeredOnStepTimeout(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -393,7 +393,7 @@ func TestBug_UpdateRunStatusTimedOutIgnoresOnErrorHandler(t *testing.T) {
 
 func TestBug_ForEachOrphanChildrenOnFailure(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -496,7 +496,7 @@ func TestBug_ForEachOrphanChildrenOnFailure(t *testing.T) {
 
 func TestBug_ParallelAllStrategyOrphanChildrenOnFailure(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -593,7 +593,7 @@ func TestBug_ParallelAllStrategyOrphanChildrenOnFailure(t *testing.T) {
 
 func TestInvariant_OnErrorActivatedOnFailedStep(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -690,7 +690,7 @@ func TestInvariant_OnErrorActivatedOnFailedStep(t *testing.T) {
 
 func TestInvariant_ParallelAnyStrategyCancelsOnSuccess(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -780,7 +780,7 @@ func TestInvariant_ParallelAnyStrategyCancelsOnSuccess(t *testing.T) {
 
 func TestInvariant_ForEachEmptyItemsSucceeds(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -868,7 +868,7 @@ func TestInvariant_UpdateRunStatusFailedWithOnErrorSucceeded(t *testing.T) {
 
 func TestEdgeCase_ForEachMaxParallelPartialDispatchFailure(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -964,7 +964,7 @@ func TestEdgeCase_ForEachMaxParallelPartialDispatchFailure(t *testing.T) {
 
 func TestInvariant_ParallelNOfMSuccessfullyCompletes(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -1091,7 +1091,7 @@ func TestBug_DepsSatisfied_TimedOutWithOnErrorSucceeded(t *testing.T) {
 
 func TestBug_ChainedOnErrorHandlersPreemptedByUpdateRunStatus(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -1201,7 +1201,7 @@ func TestBug_ChainedOnErrorHandlersPreemptedByUpdateRunStatus(t *testing.T) {
 
 func TestBug_SubWorkflowFailureDoesNotTriggerOnError(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 
@@ -1407,7 +1407,7 @@ func TestRunStatusMatrix(t *testing.T) {
 // activated and running siblings are cancelled.
 func TestBug_ForEachTimedOutChildActivatesOnError(t *testing.T) {
 	store := newWorkflowStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	bus := &recordingBus{}
 	engine := NewEngine(store, bus)
 

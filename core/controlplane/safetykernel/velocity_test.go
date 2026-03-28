@@ -17,7 +17,7 @@ func newTestVelocityChecker(t *testing.T) (*velocityChecker, *miniredis.Miniredi
 	t.Helper()
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	vc := newVelocityChecker(client)
 	require.NotNil(t, vc)
 	return vc, mr

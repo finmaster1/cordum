@@ -201,7 +201,7 @@ func main() {
 		slog.Error("failed to connect to Redis for job store", "error", err)
 		os.Exit(1)
 	}
-	defer jobStore.Close()
+	defer func() { _ = jobStore.Close() }()
 
 	var dlqStore *store.DLQStore
 	dlqStore, err = store.NewDLQStore(cfg.RedisURL, 0)

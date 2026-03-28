@@ -23,7 +23,7 @@ func newTestStore(t *testing.T) *RedisStore {
 
 func TestWorkflowSaveGetList(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	wf := &Workflow{
@@ -59,7 +59,7 @@ func TestWorkflowSaveGetList(t *testing.T) {
 
 func TestWorkflowRunsCRUD(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	run := &WorkflowRun{
@@ -109,7 +109,7 @@ func TestWorkflowRunsCRUD(t *testing.T) {
 
 func TestWorkflowListRunsAll(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	run1 := &WorkflowRun{
@@ -148,7 +148,7 @@ func TestWorkflowListRunsAll(t *testing.T) {
 
 func TestWorkflowDeleteRemovesIndexes(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	wf := &Workflow{
@@ -186,7 +186,7 @@ func TestWorkflowDeleteRemovesIndexes(t *testing.T) {
 
 func TestRunDeleteRemovesIndexes(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	run := &WorkflowRun{
@@ -218,7 +218,7 @@ func TestRunDeleteRemovesIndexes(t *testing.T) {
 
 func TestRunStatusIndexing(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	run := &WorkflowRun{
@@ -264,7 +264,7 @@ func TestRunStatusIndexing(t *testing.T) {
 
 func TestRunIdempotencyKeyMapping(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	run := &WorkflowRun{
@@ -306,7 +306,7 @@ func TestRunIdempotencyKeyMapping(t *testing.T) {
 
 func TestRunTimelineAppendAndList(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	run := &WorkflowRun{
@@ -344,7 +344,7 @@ func TestRunTimelineAppendAndList(t *testing.T) {
 // updates to the same run are serialized by lockRun().
 func TestUpdateRunConcurrent(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 

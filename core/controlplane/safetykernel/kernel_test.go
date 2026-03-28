@@ -219,7 +219,7 @@ func TestPolicyLoaderLoadsFragments(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	svc, err := configsvc.New("redis://" + srv.Addr())
 	if err != nil {
@@ -288,7 +288,7 @@ func TestPolicyLoaderRejectsInvalidFragments(t *testing.T) {
 	if err != nil {
 		t.Skipf("miniredis unavailable: %v", err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	svc, err := configsvc.New("redis://" + srv.Addr())
 	if err != nil {
@@ -1287,7 +1287,7 @@ func newTestServerWithVelocity(t *testing.T, policy *config.SafetyPolicy, snapsh
 	t.Helper()
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	srv := &server{
 		resultClient:    client,
 		velocityChecker: newVelocityChecker(client),
@@ -1447,7 +1447,7 @@ func TestVelocityBundleRule_RedisUnavailable_FailOpen(t *testing.T) {
 	policy := bundleVelocityPolicy()
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	srv := &server{
 		resultClient:    client,
 		velocityChecker: newVelocityChecker(client),
