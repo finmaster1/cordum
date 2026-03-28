@@ -31,10 +31,9 @@ jobs:
           ${{ runner.os }}-go-
 
     - name: Drop local replace directives (CI uses published modules)
-      run: go mod edit -dropreplace github.com/cordum-io/cap/v2
-
-    - name: Download dependencies
-      run: go mod download
+      run: |
+        go mod edit -dropreplace github.com/cordum-io/cap/v2
+        go mod tidy
 
     - name: Run tests
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -93,15 +92,14 @@ jobs:
           ${{ runner.os }}-go-
 
     - name: Drop local replace directives (CI uses published modules)
-      run: go mod edit -dropreplace github.com/cordum-io/cap/v2
-
-    - name: Download dependencies
-      run: go mod download
+      run: |
+        go mod edit -dropreplace github.com/cordum-io/cap/v2
+        go mod tidy
 
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v2.1.6
         args: --timeout=5m
 
     - name: Lint shell scripts for secret leaks
@@ -129,10 +127,9 @@ jobs:
           ${{ runner.os }}-go-
 
     - name: Drop local replace directives (CI uses published modules)
-      run: go mod edit -dropreplace github.com/cordum-io/cap/v2
-
-    - name: Download dependencies
-      run: go mod download
+      run: |
+        go mod edit -dropreplace github.com/cordum-io/cap/v2
+        go mod tidy
 
     - name: Run Gosec Security Scanner
       env:
@@ -167,6 +164,11 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.25'
+
+    - name: Drop local replace directives (CI uses published modules)
+      run: |
+        go mod edit -dropreplace github.com/cordum-io/cap/v2
+        go mod tidy
 
     - name: Build all binaries
       run: |
