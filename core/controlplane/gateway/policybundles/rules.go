@@ -104,6 +104,13 @@ func NormalizeOutputRule(rule map[string]any) map[string]any {
 		"enabled":         enabled,
 		"match":           match,
 	}
+	// Pass through new rule types for dashboard display
+	if velocity, ok := rule["velocity"]; ok && velocity != nil {
+		normalized["velocity"] = velocity
+	}
+	if constraints, ok := rule["constraints"]; ok && constraints != nil {
+		normalized["constraints"] = constraints
+	}
 	if raw, ok := rule["last_triggered"]; ok {
 		normalized["last_triggered"] = strings.TrimSpace(StringFromAny(raw))
 	}

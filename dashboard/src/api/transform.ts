@@ -1002,6 +1002,7 @@ export function mapPolicyRule(raw: Record<string, unknown>): PolicyRule {
     source: typeof raw.source === "object" && raw.source ? (raw.source as Record<string, unknown>) : undefined,
     enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
     constraints: raw.constraints && typeof raw.constraints === "object" ? (raw.constraints as Record<string, unknown>) : undefined,
+    velocity: raw.velocity && typeof raw.velocity === "object" ? (raw.velocity as { max_requests: number; window_seconds: number; key: string }) : undefined,
   };
 }
 
