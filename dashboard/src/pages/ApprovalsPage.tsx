@@ -1,31 +1,394 @@
 /*
- * DESIGN: "Control Surface" — Approvals
- * Matches cordumds-gj5mw4zm.manus.space showcase patterns
+ * DESIGN: "Decision Console" — Approvals
+ * Primary hierarchy: what is being approved, why it matters, what happens next.
+ * Secondary hierarchy: workflow/job audit metadata and raw payloads for drill-down.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Approval } from "@/api/types";
 import { useApprovals, useApproveJob, useRejectJob } from "@/hooks/useApprovals";
 import { useDialogA11y } from "@/hooks/useDialogA11y";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { StatusBadge } from "@/components/ui/StatusBadge";
+import { WorkflowContext } from "@/components/approvals/WorkflowContext";
+import { StatusBadge, type BadgeVariant } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
-import { Search, RefreshCw, UserCheck, CheckCircle2, XCircle, Clock, X, ArrowRight } from "lucide-react";
+import {
+  Search,
+  RefreshCw,
+  UserCheck,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  X,
+  ArrowRight,
+  Info,
+} from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { InstrumentCard } from "@/components/ui/InstrumentCard";
 import { MetricValue } from "@/components/ui/MetricValue";
 
-function approvalStatusVariant(status: string) {
+interface ApprovalFact {
+  label: string;
+  value: string;
+}
+
+interface ApprovalAuditRow {
+  label: string;
+  value?: string;
+}
+
+function approvalStatusVariant(status: string): BadgeVariant {
   switch (status) {
-    case "pending": return "warning" as const;
-    case "approved": return "healthy" as const;
-    case "denied": return "governance" as const;
-    case "expired": return "muted" as const;
-    default: return "muted" as const;
+    case "pending":
+      return "warning";
+    case "approved":
+      return "healthy";
+    case "denied":
+    case "rejected":
+      return "governance";
+    case "expired":
+      return "muted";
+    default:
+      return "muted";
   }
+}
+
+function compactValue(value?: string, max = 16): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}…`;
+}
+
+export function formatApprovalAmount(
+  amount?: number,
+  currency?: string,
+): string | undefined {
+  if (typeof amount !== "number" || !Number.isFinite(amount)) return undefined;
+  if (!currency?.trim()) return amount.toLocaleString();
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency.trim().toUpperCase(),
+      maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toLocaleString()} ${currency.trim().toUpperCase()}`;
+  }
+}
+
+export function getApprovalSourceMeta(approval: Approval): {
+  label: string;
+  variant: BadgeVariant;
+} {
+  if (
+    approval.workflowContext ||
+    approval.decisionSummary?.source?.startsWith("workflow")
+  ) {
+    return { label: "Workflow Gate", variant: "cordum" };
+  }
+  return { label: "Safety Policy", variant: "muted" };
+}
+
+export function getApprovalPrimaryTitle(approval: Approval): string {
+  const title = approval.decisionSummary?.title?.trim();
+  if (title) return title;
+  if (approval.humanSummary?.trim()) return approval.humanSummary.trim();
+  if (approval.workflowContext?.workflowName?.trim()) {
+    return approval.workflowContext.workflowName.trim();
+  }
+  if (approval.workflowContext?.workflowId?.trim()) {
+    const step = approval.workflowContext.stepName || approval.workflowContext.stepId;
+    return step
+      ? `${approval.workflowContext.workflowId} — ${step}`
+      : approval.workflowContext.workflowId;
+  }
+  if (approval.topic?.trim()) return `Review ${approval.topic.trim()}`;
+  return "Approval request";
+}
+
+export function getApprovalPrimaryReason(approval: Approval): string | undefined {
+  const preferred = approval.decisionSummary?.why?.trim();
+  if (preferred) return preferred;
+  const fallback = approval.reason?.trim();
+  return fallback || undefined;
+}
+
+export function getApprovalEscalationReason(
+  approval: Approval,
+): string | undefined {
+  const escalation = approval.decisionSummary?.escalationReason?.trim();
+  const reason = getApprovalPrimaryReason(approval);
+  if (!escalation || escalation === reason) return undefined;
+  return escalation;
+}
+
+export function getApprovalImpactText(approval: Approval): string {
+  const nextEffect = approval.decisionSummary?.nextEffect?.trim();
+  if (nextEffect) return nextEffect;
+  if (approval.workflowContext?.stepName || approval.workflowContext?.stepId) {
+    const step = approval.workflowContext.stepName || approval.workflowContext.stepId;
+    return `Approve to continue ${step}.`;
+  }
+  if (approval.workflowContext?.workflowId) {
+    return "Approve to continue the workflow.";
+  }
+  return "Approve to release the blocked job execution.";
+}
+
+export function getApprovalRejectImpactText(approval: Approval): string {
+  if (approval.workflowContext?.workflowId) {
+    return "Reject to stop this approval path and preserve the workflow audit trail.";
+  }
+  return "Reject to keep the job out of execution and record the denial.";
+}
+
+export function getApprovalFacts(approval: Approval): ApprovalFact[] {
+  const facts: ApprovalFact[] = [];
+  const amount = formatApprovalAmount(
+    approval.decisionSummary?.amount,
+    approval.decisionSummary?.currency,
+  );
+  if (amount) facts.push({ label: "Amount", value: amount });
+  if (approval.decisionSummary?.vendor?.trim()) {
+    facts.push({ label: "Vendor", value: approval.decisionSummary.vendor.trim() });
+  }
+  if (approval.decisionSummary?.itemCount) {
+    facts.push({
+      label: "Items",
+      value: `${approval.decisionSummary.itemCount} item${approval.decisionSummary.itemCount === 1 ? "" : "s"}`,
+    });
+  } else if (approval.decisionSummary?.itemsPreview?.length) {
+    facts.push({
+      label: "Items",
+      value: approval.decisionSummary.itemsPreview.slice(0, 2).join(", "),
+    });
+  }
+  const step = approval.workflowContext?.stepName || approval.workflowContext?.stepId;
+  if (step) facts.push({ label: "Step", value: step });
+  return facts;
+}
+
+export function getApprovalAuditRows(approval: Approval): ApprovalAuditRow[] {
+  return [
+    { label: "Approval ID", value: approval.id },
+    { label: "Job ID", value: approval.jobId },
+    { label: "Topic", value: approval.topic },
+    {
+      label: "Workflow",
+      value: approval.workflowContext?.workflowName || approval.workflowContext?.workflowId,
+    },
+    { label: "Run ID", value: approval.workflowContext?.runId },
+    { label: "Policy snapshot", value: approval.policySnapshot },
+    { label: "Job hash", value: approval.jobHash },
+    { label: "Approval ref", value: approval.approvalRef },
+    { label: "Context pointer", value: approval.contextPtr },
+    {
+      label: "Requested",
+      value: approval.requestedAt ? formatRelativeTime(approval.requestedAt) : undefined,
+    },
+    { label: "Decided by", value: approval.actor },
+    {
+      label: "Resolved",
+      value: approval.resolvedAt ? formatRelativeTime(approval.resolvedAt) : undefined,
+    },
+  ].filter((row) => !!row.value);
+}
+
+export function getApprovalSearchText(approval: Approval): string {
+  return [
+    approval.id,
+    approval.jobId,
+    approval.topic,
+    approval.humanSummary,
+    approval.reason,
+    approval.decisionSummary?.title,
+    approval.decisionSummary?.why,
+    approval.decisionSummary?.vendor,
+    approval.decisionSummary?.nextEffect,
+    approval.decisionSummary?.itemsPreview?.join(" "),
+    approval.workflowContext?.workflowId,
+    approval.workflowContext?.workflowName,
+    approval.workflowContext?.runId,
+    approval.workflowContext?.stepId,
+    approval.workflowContext?.stepName,
+    approval.policySnapshot,
+    approval.jobHash,
+    approval.approvalRef,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function renderJson(data: unknown): string {
+  try {
+    return JSON.stringify(data, null, 2);
+  } catch {
+    return String(data);
+  }
+}
+
+function DecisionFacts({
+  approval,
+  compact = false,
+}: {
+  approval: Approval;
+  compact?: boolean;
+}) {
+  const facts = getApprovalFacts(approval);
+  if (!facts.length) return null;
+
+  return (
+    <ul
+      className={cn("flex flex-wrap gap-2", compact ? "pt-1" : "pt-2")}
+      aria-label="Decision facts"
+    >
+      {facts.map((fact) => (
+        <li
+          key={`${fact.label}:${fact.value}`}
+          className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2/80 px-3 py-1.5 text-xs"
+        >
+          <span className="font-mono uppercase tracking-wide text-muted-foreground">
+            {fact.label}
+          </span>
+          <span className="font-medium text-foreground">{fact.value}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DecisionSummaryBlock({
+  approval,
+  compact = false,
+}: {
+  approval: Approval;
+  compact?: boolean;
+}) {
+  const title = getApprovalPrimaryTitle(approval);
+  const reason = getApprovalPrimaryReason(approval);
+  const escalationReason = getApprovalEscalationReason(approval);
+  const contextStatus = approval.decisionSummary?.contextStatus;
+  const missingFields = approval.decisionSummary?.missingFields ?? [];
+  const TitleTag = compact ? "h3" : "h2";
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <TitleTag
+          className={cn(
+            "font-display font-semibold leading-tight text-foreground",
+            compact ? "text-base" : "text-xl",
+          )}
+        >
+          {title}
+        </TitleTag>
+        {reason ? (
+          <p className="text-sm leading-relaxed text-muted-foreground">{reason}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Review the request details before deciding.
+          </p>
+        )}
+      </div>
+
+      {escalationReason && (
+        <div className="flex items-start gap-2 rounded-2xl border border-[var(--color-warning)]/20 bg-[var(--color-warning)]/10 px-3 py-2 text-sm text-foreground">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-warning)]" />
+          <div>
+            <p className="text-xs font-mono uppercase tracking-wide text-[var(--color-warning)]">
+              Escalation
+            </p>
+            <p>{escalationReason}</p>
+          </div>
+        </div>
+      )}
+
+      {contextStatus && contextStatus !== "available" && (
+        <div className="rounded-2xl border border-border bg-surface-2/70 px-3 py-2 text-xs text-muted-foreground">
+          Approval context is{" "}
+          <span className="font-medium text-foreground">
+            {contextStatus.replace(/_/g, " ")}
+          </span>
+          {missingFields.length > 0 && <> — missing {missingFields.join(", ")}.</>}
+        </div>
+      )}
+
+      <DecisionFacts approval={approval} compact={compact} />
+    </div>
+  );
+}
+
+function SecondaryMetadata({
+  approval,
+  compact = false,
+}: {
+  approval: Approval;
+  compact?: boolean;
+}) {
+  const rows = compact
+    ? [
+        { label: "Approval", value: compactValue(approval.id) },
+        { label: "Job", value: compactValue(approval.jobId) },
+        { label: "Topic", value: approval.topic },
+        { label: "Run", value: compactValue(approval.workflowContext?.runId) },
+      ].filter((row) => !!row.value)
+    : getApprovalAuditRows(approval);
+
+  if (!rows.length) return null;
+
+  if (compact) {
+    return (
+      <div className="border-t border-border/70 pt-3">
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-mono text-muted-foreground">
+          {rows.map((row) => (
+            <li key={row.label} className="inline-flex items-center gap-1">
+              <span className="uppercase tracking-wide">{row.label}</span>
+              <span className="text-foreground/80">{row.value}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  return (
+    <dl className="grid gap-3 sm:grid-cols-2">
+      {rows.map((row) => (
+        <div key={row.label} className="space-y-1">
+          <dt className="text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
+            {row.label}
+          </dt>
+          <dd className="break-all text-sm text-foreground">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function JsonDisclosure({
+  title,
+  data,
+}: {
+  title: string;
+  data?: Record<string, unknown>;
+}) {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  return (
+    <details className="rounded-2xl border border-border bg-surface-2/60 p-3">
+      <summary className="cursor-pointer list-none text-xs font-mono uppercase tracking-wide text-muted-foreground">
+        {title}
+      </summary>
+      <pre className="mt-3 overflow-auto rounded-xl bg-surface-1 p-3 text-xs text-foreground">
+        {renderJson(data)}
+      </pre>
+    </details>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +432,13 @@ export default function ApprovalsPage() {
   const [denyReason, setDenyReason] = useState("");
 
   const drawerRef = useDialogA11y(() => setSelectedApproval(null));
-  const { data: approvalsData, isLoading, refetch } = useApprovals();
+  const {
+    data: approvalsData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useApprovals();
   const approvals = approvalsData?.items ?? [];
   const approveMutation = useApproveJob();
   const rejectMutation = useRejectJob();
@@ -89,30 +458,34 @@ export default function ApprovalsPage() {
   const approved = all.filter((a) => a.status === "approved");
   const denied = all.filter((a) => a.status === "denied");
 
-  const filtered = all
-    .filter((a) => {
-      if (activeTab !== "all" && a.status !== activeTab) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return a.id.toLowerCase().includes(q) || (a.topic ?? "").toLowerCase().includes(q) || (a.jobId ?? "").toLowerCase().includes(q);
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (a.status === "pending" && b.status !== "pending") return -1;
-      if (b.status === "pending" && a.status !== "pending") return 1;
-      return new Date(b.requestedAt ?? 0).getTime() - new Date(a.requestedAt ?? 0).getTime();
-    });
+  const filtered = useMemo(
+    () =>
+      all
+        .filter((approval) => {
+          if (activeTab !== "all" && approval.status !== activeTab) return false;
+          if (!search.trim()) return true;
+          return getApprovalSearchText(approval).includes(search.trim().toLowerCase());
+        })
+        .sort((a, b) => {
+          if (a.status === "pending" && b.status !== "pending") return -1;
+          if (b.status === "pending" && a.status !== "pending") return 1;
+          return (
+            new Date(b.requestedAt ?? 0).getTime() -
+            new Date(a.requestedAt ?? 0).getTime()
+          );
+        }),
+    [activeTab, all, search],
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         label="Safety"
         title="Approvals"
-        subtitle="Human-in-the-loop review queue for agent actions"
+        subtitle="Review the business decision first, then inspect technical audit detail only when needed."
         actions={
           <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="w-3 h-3 mr-1" />
+            <RefreshCw className="mr-1 h-3 w-3" />
             Refresh
           </Button>
         }
@@ -122,7 +495,7 @@ export default function ApprovalsPage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="grid grid-cols-3 gap-4"
+        className="grid gap-4 md:grid-cols-3"
       >
         {isLoading ? (
           Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)
@@ -132,7 +505,16 @@ export default function ApprovalsPage() {
               <MetricValue
                 label="Pending"
                 value={pending.length}
-                icon={<Clock className={cn("w-4 h-4", pending.length > 0 ? "text-[var(--color-warning)]" : "text-muted-foreground")} />}
+                icon={
+                  <Clock
+                    className={cn(
+                      "h-4 w-4",
+                      pending.length > 0
+                        ? "text-[var(--color-warning)]"
+                        : "text-muted-foreground",
+                    )}
+                  />
+                }
               />
             </InstrumentCard>
 
@@ -140,7 +522,7 @@ export default function ApprovalsPage() {
               <MetricValue
                 label="Approved"
                 value={approved.length}
-                icon={<CheckCircle2 className="w-4 h-4 text-[var(--color-success)]" />}
+                icon={<CheckCircle2 className="h-4 w-4 text-[var(--color-success)]" />}
               />
             </InstrumentCard>
 
@@ -148,37 +530,48 @@ export default function ApprovalsPage() {
               <MetricValue
                 label="Denied"
                 value={denied.length}
-                icon={<XCircle className={cn("w-4 h-4", denied.length > 0 ? "text-[var(--color-governance)]" : "text-muted-foreground")} />}
+                icon={
+                  <XCircle
+                    className={cn(
+                      "h-4 w-4",
+                      denied.length > 0
+                        ? "text-[var(--color-governance)]"
+                        : "text-muted-foreground",
+                    )}
+                  />
+                }
               />
             </InstrumentCard>
           </>
         )}
       </motion.div>
 
-      {/* Filters — showcase style */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative w-full max-w-md">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search approvals..."
+            aria-label="Search approvals"
+            placeholder="Search decision summaries, vendors, workflow steps, or IDs"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-full pl-8 pr-3 text-xs bg-surface-1 border border-border rounded-2xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
+            className="h-10 w-full rounded-2xl border border-border bg-surface-1 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
           />
         </div>
-        <div className="flex items-center gap-1 bg-surface-1 border border-border rounded-2xl p-0.5">
+        <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-border bg-surface-1 p-0.5">
           {[
             { id: "pending", label: "Pending", count: pending.length },
             { id: "approved", label: "Approved", count: approved.length },
             { id: "denied", label: "Denied", count: denied.length },
             { id: "all", label: "All", count: all.length },
           ].map((tab) => (
-            <button type="button"
+            <button
+              type="button"
               key={tab.id}
+              aria-pressed={activeTab === tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded transition-colors",
+                "rounded-xl px-3 py-2 text-xs font-medium transition-colors",
                 activeTab === tab.id
                   ? "bg-cordum/10 text-cordum"
                   : "text-muted-foreground hover:text-foreground",
@@ -186,130 +579,197 @@ export default function ApprovalsPage() {
             >
               {tab.label}
               {tab.count > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs font-mono bg-surface-2">{tab.count}</span>
+                <span className="ml-1.5 rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
+                  {tab.count}
+                </span>
               )}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Approval Cards — showcase style */}
       {isLoading ? (
         <SkeletonTable rows={5} />
+      ) : isError ? (
+        <EmptyState
+          icon={<XCircle className="h-5 w-5" />}
+          title="Approval queue unavailable"
+          description={
+            error instanceof Error
+              ? error.message
+              : "The approval queue could not be loaded."
+          }
+          action={
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Try again
+            </Button>
+          }
+        />
       ) : filtered.length === 0 ? (
         <EmptyState
-          icon={<UserCheck className="w-5 h-5" />}
+          icon={<UserCheck className="h-5 w-5" />}
           title={activeTab === "pending" ? "No pending approvals" : "No approvals found"}
-          description={activeTab === "pending" ? "All clear — no actions waiting for review" : "Try adjusting your search or filters"}
+          description={
+            activeTab === "pending"
+              ? "All clear — no actions are waiting for human review."
+              : "Try adjusting your search terms or status filter."
+          }
         />
       ) : (
         <div className="space-y-3">
           <AnimatePresence mode="popLayout">
-          {filtered.map((approval) => (
-            <motion.div
-              key={approval.id}
-              layout
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: -100, height: 0, marginBottom: 0, overflow: "hidden" }}
-              transition={{ duration: 0.3 }}
-              className={cn(
-                "instrument-card cursor-pointer",
-                approval.status === "pending" && "border-[var(--color-warning)]/30",
-                approval.status === "denied" && "border-[var(--color-governance)]/30",
-              )}
-              onClick={() => setSelectedApproval(approval)}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-2.5">
-                    <span className="font-mono text-sm text-cordum">{approval.id.slice(0, 16)}</span>
-                    <StatusBadge variant={approvalStatusVariant(approval.status)} dot pulse={approval.status === "pending"}>
-                      {approval.status}
-                    </StatusBadge>
-                    {approval.workflowContext && (
-                      <span className="px-1.5 py-0.5 text-xs font-mono bg-cordum/10 text-cordum rounded">
-                        Workflow Gate
-                      </span>
-                    )}
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {approval.requestedAt ? formatRelativeTime(approval.requestedAt) : "—"}
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-semibold font-display text-foreground leading-snug">
-                    {approval.workflowContext
-                      ? `${approval.workflowContext.workflowId} — ${approval.workflowContext.stepName || approval.workflowContext.stepId}`
-                      : approval.humanSummary || approval.topic || "Approval Request"}
-                  </h3>
-                </div>
-                {approval.status === "pending" ? (
-                  <div className="flex gap-2 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={rejectMutation.isPending || approveMutation.isPending}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDenyTarget(approval);
-                        setDenyReason("");
-                      }}
-                    >
-                      <XCircle className="w-3.5 h-3.5 mr-1" />
-                      Deny
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={approveMutation.isPending || rejectMutation.isPending}
-                      loading={approveMutation.isPending}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleApprove(approval);
-                      }}
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                      Approve
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="shrink-0 text-muted-foreground group-hover:text-cordum transition-colors pt-1">
-                    <ArrowRight className="w-4 h-4" />
-                  </div>
+          {filtered.map((approval) => {
+            const source = getApprovalSourceMeta(approval);
+            const title = getApprovalPrimaryTitle(approval);
+            const impact = getApprovalImpactText(approval);
+
+            return (
+              <motion.article
+                key={approval.id}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{
+                  opacity: 0,
+                  x: -100,
+                  height: 0,
+                  marginBottom: 0,
+                  overflow: "hidden",
+                }}
+                transition={{ duration: 0.3 }}
+                className={cn(
+                  "instrument-card group cursor-pointer overflow-hidden border-border/70 bg-surface-1/95 focus:outline-none focus:ring-1 focus:ring-cordum",
+                  approval.status === "pending" && "border-[var(--color-warning)]/30",
+                  approval.status === "denied" && "border-[var(--color-governance)]/30",
                 )}
-              </div>
-            </motion.div>
-          ))}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open approval detail for ${title}`}
+                onClick={() => setSelectedApproval(approval)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedApproval(approval);
+                  }
+                }}
+              >
+                <div className="flex flex-col gap-4 p-4 md:p-5">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge
+                          variant={approvalStatusVariant(approval.status)}
+                          dot
+                          pulse={approval.status === "pending"}
+                        >
+                          {approval.status}
+                        </StatusBadge>
+                        <StatusBadge variant={source.variant}>
+                          {source.label}
+                        </StatusBadge>
+                        <span className="text-xs text-muted-foreground">
+                          {approval.requestedAt
+                            ? formatRelativeTime(approval.requestedAt)
+                            : "—"}
+                        </span>
+                      </div>
+
+                      <DecisionSummaryBlock approval={approval} compact />
+                      <p className="text-xs text-muted-foreground">{impact}</p>
+                    </div>
+
+                    {approval.status === "pending" ? (
+                      <div className="flex shrink-0 flex-wrap gap-2 xl:flex-col xl:items-stretch">
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          aria-label={`Deny ${title}`}
+                          disabled={
+                            rejectMutation.isPending || approveMutation.isPending
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDenyTarget(approval);
+                            setDenyReason("");
+                          }}
+                        >
+                          <XCircle className="mr-1 h-3.5 w-3.5" />
+                          Deny
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          aria-label={`Approve ${title}`}
+                          disabled={
+                            approveMutation.isPending || rejectMutation.isPending
+                          }
+                          loading={approveMutation.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleApprove(approval);
+                          }}
+                        >
+                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                          Approve
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="shrink-0 pt-1 text-muted-foreground transition-colors group-hover:text-cordum">
+                        <ArrowRight className="h-4 w-4" />
+                      </div>
+                    )}
+                  </div>
+
+                  <SecondaryMetadata approval={approval} compact />
+                </div>
+              </motion.article>
+            );
+          })}
           </AnimatePresence>
         </div>
       )}
 
-      {/* Deny Confirmation Dialog */}
-      <ConfirmDialog open={!!denyTarget}
+      <ConfirmDialog
+        open={!!denyTarget}
         onClose={() => setDenyTarget(null)}
-        onConfirm={() => handleDenyConfirm(denyTarget, denyReason, { mutate: (input) => handleDeny({ id: input.id } as Approval, input.reason), clearTarget: () => setDenyTarget(null) })}
-        title="Deny Approval"
+        onConfirm={() =>
+          handleDenyConfirm(denyTarget, denyReason, {
+            mutate: (input) =>
+              handleDeny({ id: input.id } as Approval, input.reason),
+            clearTarget: () => setDenyTarget(null),
+          })
+        }
+        title="Deny approval"
         description={
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Are you sure you want to deny this approval request?</p>
+            <p className="text-sm text-muted-foreground">
+              Explain why this approval should be denied. The note becomes part
+              of the audit trail.
+            </p>
             <div>
-              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider block mb-1">Reason</label>
+              <label className="mb-1 block text-xs font-mono uppercase tracking-wide text-muted-foreground">
+                Reason
+              </label>
               <textarea
                 value={denyReason}
                 onChange={(e) => setDenyReason(e.target.value)}
-                placeholder="Why is this request being denied?"
+                placeholder="Why should this request be denied?"
                 rows={3}
-                className="w-full px-3 py-2 text-sm bg-surface-2 border border-border rounded-2xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum resize-none"
+                className="w-full resize-none rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cordum"
               />
             </div>
           </div>
         }
         confirmLabel="Deny"
-        variant="destructive" />
+        variant="destructive"
+      />
 
-      {/* Detail Drawer */}
       {selectedApproval && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setSelectedApproval(null)} />
+          <div
+            className="fixed inset-0 z-40 bg-black/40"
+            onClick={() => setSelectedApproval(null)}
+          />
           <motion.div
             ref={drawerRef}
             role="dialog"
@@ -318,89 +778,172 @@ export default function ApprovalsPage() {
             initial={{ x: 440 }}
             animate={{ x: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 right-0 w-[440px] bg-surface-1 border-l border-border shadow-2xl z-50 overflow-y-auto"
+            className="fixed inset-y-0 right-0 z-50 w-full max-w-[560px] overflow-y-auto border-l border-border bg-surface-1 shadow-2xl"
           >
-            <div className="p-5 border-b border-border flex items-center justify-between">
-              <div>
-                <h2 id="approval-drawer-title" className="font-display font-semibold text-sm text-foreground">Approval Detail</h2>
-                <p className="text-xs text-muted-foreground font-mono mt-0.5">{selectedApproval.id}</p>
+            <div className="flex items-start justify-between gap-4 border-b border-border p-5">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    variant={approvalStatusVariant(selectedApproval.status)}
+                    dot
+                    pulse={selectedApproval.status === "pending"}
+                  >
+                    {selectedApproval.status}
+                  </StatusBadge>
+                  <StatusBadge variant={getApprovalSourceMeta(selectedApproval).variant}>
+                    {getApprovalSourceMeta(selectedApproval).label}
+                  </StatusBadge>
+                </div>
+                <div>
+                  <h2
+                    id="approval-drawer-title"
+                    className="font-display text-lg font-semibold text-foreground"
+                  >
+                    {getApprovalPrimaryTitle(selectedApproval)}
+                  </h2>
+                  <p className="mt-0.5 text-xs font-mono text-muted-foreground">
+                    {selectedApproval.id}
+                  </p>
+                </div>
               </div>
-              <button type="button"
+              <button
+                type="button"
+                aria-label="Close approval detail"
                 onClick={() => setSelectedApproval(null)}
-                className="p-1.5 rounded-full hover:bg-surface-2 text-muted-foreground hover:text-foreground transition-colors"
+                className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
               >
-                <X className="w-4 h-4" />
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="p-5 space-y-5">
-              <div className="flex items-center gap-2">
-                <StatusBadge variant={approvalStatusVariant(selectedApproval.status)} dot pulse={selectedApproval.status === "pending"}>
-                  {selectedApproval.status}
-                </StatusBadge>
-                {selectedApproval.workflowContext && (
-                  <span className="px-1.5 py-0.5 text-xs font-mono bg-cordum/10 text-cordum rounded">
-                    Workflow Gate
-                  </span>
+            <div className="space-y-6 p-5">
+              <section aria-labelledby="approval-decision-section" className="space-y-4">
+                <p
+                  id="approval-decision-section"
+                  className="text-xs font-mono uppercase tracking-wide text-muted-foreground"
+                >
+                  Decision summary
+                </p>
+                <DecisionSummaryBlock approval={selectedApproval} />
+              </section>
+
+              <section className="rounded-3xl border border-border bg-surface-2/60 p-4">
+                <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">
+                  Impact
+                </p>
+                <div className="mt-3 space-y-3 text-sm">
+                  <div>
+                    <p className="font-medium text-foreground">If approved</p>
+                    <p className="mt-1 text-muted-foreground">
+                      {getApprovalImpactText(selectedApproval)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">If denied</p>
+                    <p className="mt-1 text-muted-foreground">
+                      {getApprovalRejectImpactText(selectedApproval)}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section
+                aria-labelledby="approval-workflow-section"
+                className="space-y-3 rounded-3xl border border-border bg-surface-2/40 p-4"
+              >
+                <p
+                  id="approval-workflow-section"
+                  className="text-xs font-mono uppercase tracking-wide text-muted-foreground"
+                >
+                  Workflow & context
+                </p>
+                <WorkflowContext
+                  workflowContext={selectedApproval.workflowContext}
+                  nextEffect={getApprovalImpactText(selectedApproval)}
+                  rejectEffect={getApprovalRejectImpactText(selectedApproval)}
+                />
+              </section>
+
+              <section
+                aria-labelledby="approval-payload-section"
+                className="space-y-3 rounded-3xl border border-border bg-surface-2/30 p-4"
+              >
+                <p
+                  id="approval-payload-section"
+                  className="text-xs font-mono uppercase tracking-wide text-muted-foreground"
+                >
+                  Structured payload
+                </p>
+                {selectedApproval.decisionSummary?.itemsPreview?.length ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">
+                      Item preview
+                    </p>
+                    <ul className="space-y-1 text-sm text-muted-foreground">
+                      {selectedApproval.decisionSummary.itemsPreview.map((item) => (
+                        <li key={item} className="flex items-start gap-2">
+                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-cordum" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No additional line-item preview is available for this request.
+                  </p>
                 )}
-              </div>
-              <dl className="space-y-3">
-                {[
-                  ["Source", selectedApproval.workflowContext ? "Workflow Gate" : "Safety Policy"],
-                  ["Topic", selectedApproval.workflowContext?.workflowId || selectedApproval.topic],
-                  ...(selectedApproval.workflowContext
-                    ? [["Step", selectedApproval.workflowContext.stepName || selectedApproval.workflowContext.stepId], ["Run ID", selectedApproval.workflowContext.runId]]
-                    : []),
-                  ["Job ID", selectedApproval.jobId],
-                  ["Requested", selectedApproval.requestedAt ? formatRelativeTime(selectedApproval.requestedAt) : "—"],
-                  ["Summary", selectedApproval.humanSummary],
-                  ["Decided By", selectedApproval.actor],
-                  ["Reason", selectedApproval.reason],
-                ].map(([label, value]) => (
-                  <div key={label as string}>
-                    <dt className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-0.5">{label}</dt>
-                    <dd className="text-sm text-foreground">{(value as string) || "—"}</dd>
-                  </div>
-                ))}
-              </dl>
-              {selectedApproval.jobInput && Object.keys(selectedApproval.jobInput).length > 0 && (
-                <div>
-                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">Job Input</p>
-                  <div className="rounded-2xl bg-surface-2/50 border border-border p-3 font-mono text-xs text-foreground overflow-auto max-h-[200px]">
-                    <pre>{JSON.stringify(selectedApproval.jobInput, null, 2)}</pre>
-                  </div>
-                </div>
-              )}
-              {selectedApproval.jobContext && (
-                <div>
-                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">Context</p>
-                  <div className="rounded-2xl bg-surface-2/50 border border-border p-3 font-mono text-xs text-foreground overflow-auto max-h-[200px]">
-                    <pre>{JSON.stringify(selectedApproval.jobContext, null, 2)}</pre>
-                  </div>
-                </div>
-              )}
+                <JsonDisclosure title="Raw request payload" data={selectedApproval.jobInput} />
+              </section>
               {selectedApproval.status === "pending" && (
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    variant="primary"
-                    className="flex-1"
-                    disabled={approveMutation.isPending || rejectMutation.isPending}
-                    loading={approveMutation.isPending}
-                    onClick={() => handleApprove(selectedApproval)}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                    Approve
-                  </Button>
-                  <Button
-                    variant="danger"
-                    className="flex-1"
-                    disabled={rejectMutation.isPending || approveMutation.isPending}
-                    onClick={() => { setDenyTarget(selectedApproval); setDenyReason(""); }}
-                  >
-                    <XCircle className="w-3.5 h-3.5 mr-1" />
-                    Deny
-                  </Button>
-                </div>
+                <section
+                  aria-label="Approval actions"
+                  className="rounded-3xl border border-border bg-surface-2/40 p-4"
+                >
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      aria-label={`Approve ${getApprovalPrimaryTitle(selectedApproval)}`}
+                      disabled={approveMutation.isPending || rejectMutation.isPending}
+                      loading={approveMutation.isPending}
+                      onClick={() => handleApprove(selectedApproval)}
+                    >
+                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                      Approve
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className="w-full"
+                      aria-label={`Deny ${getApprovalPrimaryTitle(selectedApproval)}`}
+                      disabled={rejectMutation.isPending || approveMutation.isPending}
+                      onClick={() => {
+                        setDenyTarget(selectedApproval);
+                        setDenyReason("");
+                      }}
+                    >
+                      <XCircle className="mr-1 h-3.5 w-3.5" />
+                      Deny
+                    </Button>
+                  </div>
+                </section>
               )}
+
+              <section
+                aria-labelledby="approval-audit-section"
+                className="space-y-4 rounded-3xl border border-border bg-surface-2/20 p-4"
+              >
+                <p
+                  id="approval-audit-section"
+                  className="text-xs font-mono uppercase tracking-wide text-muted-foreground"
+                >
+                  Audit & debug detail
+                </p>
+                <SecondaryMetadata approval={selectedApproval} />
+                <JsonDisclosure
+                  title="Fallback context payload"
+                  data={selectedApproval.jobContext}
+                />
+              </section>
             </div>
           </motion.div>
         </>

@@ -8,6 +8,10 @@ import type {
   OutputSafetyRecord,
   SafetyDecision,
   Approval,
+  ApprovalContextStatus,
+  ApprovalDecisionSummary,
+  ApprovalDecisionSummaryCompleteness,
+  ApprovalDecisionSummarySource,
   UrgencyLevel,
   AuditEntry,
   AuditCategory,
@@ -207,6 +211,23 @@ export interface BackendWorkflowRun {
   }>;
 }
 
+export interface BackendApprovalDecisionSummary {
+  source?: ApprovalDecisionSummarySource;
+  completeness?: ApprovalDecisionSummaryCompleteness;
+  context_status?: ApprovalContextStatus;
+  title?: string;
+  subject?: string;
+  why?: string;
+  next_effect?: string;
+  amount?: number;
+  currency?: string;
+  vendor?: string;
+  item_count?: number;
+  items_preview?: string[];
+  escalation_reason?: string;
+  missing_fields?: string[];
+}
+
 export interface BackendApprovalItem {
   job?: BackendJobRecord;
   decision?: string;
@@ -222,8 +243,11 @@ export interface BackendApprovalItem {
   resolved_comment?: string;
   constraints?: Record<string, unknown>;
   job_input?: Record<string, unknown>;
+  decision_summary?: BackendApprovalDecisionSummary;
   workflow_id?: string;
+  workflow_name?: string;
   workflow_run_id?: string;
+  workflow_step_id?: string;
   step_index?: number;
   step_name?: string;
   total_steps?: number;
@@ -830,11 +854,14 @@ export function mapApprovalItem(item: BackendApprovalItem): Approval | null {
   const now = Date.now();
   const requestedAt = job.updatedAt || new Date().toISOString();
   const waitMs = now - new Date(requestedAt).getTime();
+  const decisionSummary = mapApprovalDecisionSummary(item.decision_summary);
 
   const workflowContext =
     item.workflow_id || item.workflow_run_id
       ? {
           workflowId: item.workflow_id || "",
+          workflowName: item.workflow_name,
+          stepId: item.workflow_step_id,
           runId: item.workflow_run_id || "",
           stepIndex: item.step_index,
           stepName: item.step_name,
@@ -850,9 +877,10 @@ export function mapApprovalItem(item: BackendApprovalItem): Approval | null {
     resolvedAt: item.resolved_at ? microsToISO(item.resolved_at) : undefined,
     actor: item.resolved_by,
     actorId: job.actorId,
-    reason: item.policy_reason,
+    reason: decisionSummary?.why || item.policy_reason,
     comment: item.resolved_comment,
     policyRule: item.policy_rule_id,
+    decisionSummary,
     jobContext: {
       topic: job.topic,
       tenant: job.tenant,
@@ -864,11 +892,9 @@ export function mapApprovalItem(item: BackendApprovalItem): Approval | null {
     riskTags: job.riskTags,
     capabilities: job.capabilities,
     workflowContext,
-    humanSummary: deriveHumanSummary(
-      job.topic,
-      job.capabilities,
-      item.policy_reason,
-    ),
+    humanSummary:
+      decisionSummary?.title ||
+      deriveHumanSummary(job.topic, job.capabilities, item.policy_reason),
     urgencyLevel: computeUrgencyLevel(Math.max(0, waitMs)),
     waitMs: Math.max(0, waitMs),
     policySnapshot: item.policy_snapshot,
@@ -878,6 +904,51 @@ export function mapApprovalItem(item: BackendApprovalItem): Approval | null {
     contextPtr: item.context_ptr,
     jobInput: item.job_input as Record<string, unknown> | undefined,
     constraints: item.constraints,
+  };
+}
+
+function mapApprovalDecisionSummary(
+  summary?: BackendApprovalDecisionSummary,
+): ApprovalDecisionSummary | undefined {
+  if (!summary || typeof summary !== "object") return undefined;
+  const title = typeof summary.title === "string" ? summary.title.trim() : "";
+  if (!title) return undefined;
+  return {
+    source: summary.source ?? "policy_only",
+    completeness: summary.completeness ?? "minimal",
+    contextStatus: summary.context_status ?? "absent",
+    title,
+    subject: typeof summary.subject === "string" ? summary.subject : undefined,
+    why: typeof summary.why === "string" ? summary.why : undefined,
+    nextEffect:
+      typeof summary.next_effect === "string"
+        ? summary.next_effect
+        : undefined,
+    amount:
+      typeof summary.amount === "number" && Number.isFinite(summary.amount)
+        ? summary.amount
+        : undefined,
+    currency:
+      typeof summary.currency === "string" ? summary.currency : undefined,
+    vendor: typeof summary.vendor === "string" ? summary.vendor : undefined,
+    itemCount:
+      typeof summary.item_count === "number" && Number.isFinite(summary.item_count)
+        ? summary.item_count
+        : undefined,
+    itemsPreview: Array.isArray(summary.items_preview)
+      ? summary.items_preview.filter(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        )
+      : undefined,
+    escalationReason:
+      typeof summary.escalation_reason === "string"
+        ? summary.escalation_reason
+        : undefined,
+    missingFields: Array.isArray(summary.missing_fields)
+      ? summary.missing_fields.filter(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        )
+      : undefined,
   };
 }
 

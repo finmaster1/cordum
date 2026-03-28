@@ -855,7 +855,7 @@ curl -sS -X POST http://localhost:8081/api/v1/workflows/WF_ID/runs \
 ### GET `/api/v1/approvals`
 
 - Auth: required + admin
-- Query: `limit`, `cursor`
+- Query: `limit`, `cursor`, `include_resolved` (`false` to show pending approvals only)
 - Response:
 
 ```json
@@ -866,16 +866,71 @@ curl -sS -X POST http://localhost:8081/api/v1/workflows/WF_ID/runs \
       "decision": "REQUIRE_APPROVAL",
       "policy_snapshot": "cfg:...",
       "policy_rule_id": "rule-1",
-      "policy_reason": "...",
+      "policy_reason": "finance approval required",
       "constraints": {},
       "job_hash": "...",
       "approval_required": true,
-      "approval_ref": "job-id"
+      "approval_ref": "job-id",
+      "workflow_id": "wf-1",
+      "workflow_run_id": "run-1",
+      "workflow_step_id": "approve",
+      "step_name": "Manager Approval",
+      "gate_type": "workflow_approval",
+      "context_ptr": "ctx:mem:job-workflow-context",
+      "job_input": {
+        "kind": "workflow_approval_context",
+        "version": 1,
+        "workflow": {
+          "workflow_id": "wf-1",
+          "run_id": "run-1",
+          "step_id": "approve",
+          "step_name": "Manager Approval"
+        },
+        "decision": {
+          "amount": 1250,
+          "currency": "USD",
+          "vendor": "Acme Travel",
+          "approval_reason": "manager threshold exceeded",
+          "next_effect": "Approve to continue Manager Approval."
+        }
+      },
+      "decision_summary": {
+        "source": "workflow_payload",
+        "completeness": "rich",
+        "context_status": "available",
+        "title": "Review Acme Travel spending request",
+        "why": "manager threshold exceeded",
+        "next_effect": "Approve to continue Manager Approval.",
+        "amount": 1250,
+        "currency": "USD",
+        "vendor": "Acme Travel"
+      },
+      "resolved_by": "manager-2",
+      "resolved_comment": "ticket INC-123",
+      "resolution": "approved",
+      "resolved_at": 1709000002000000
     }
   ],
   "next_cursor": 1739400000000000
 }
 ```
+
+Notes:
+
+- Workflow approval gates and policy approvals share the same list endpoint.
+- `decision_summary` is the primary decision-first contract for the dashboard. It
+  highlights what is being approved, why it matters, and what happens next.
+- `context_ptr` and `job_input` are only present when a workflow payload was persisted
+  and successfully hydrated. Older non-workflow approvals may omit them.
+- `decision_summary.context_status` can be `available`, `missing`, `malformed`,
+  `unavailable`, or `absent` so degraded workflow data fails informatively instead of
+  appearing as an empty approval shell.
+- `decision_summary.source` distinguishes rich workflow payloads (`workflow_payload`),
+  workflow-label fallback (`workflow_labels`), and legacy/policy-only approvals
+  (`policy_only`).
+- Resolved approvals continue to expose `decision_summary`, `policy_snapshot`,
+  `job_hash`, `resolved_by`, `resolved_comment`, and `resolution` for audit/history
+  views.
 
 ### POST `/api/v1/approvals/{job_id}/approve`
 

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -181,16 +182,30 @@ function StudioCanvasInner({
 
   const isEdit = mode === "edit";
 
-  // Keep parent ref in sync (via effect, not during render)
-  useEffect(() => {
+  // Keep parent ref in sync synchronously after state changes.
+  // useLayoutEffect fires before paint, eliminating the stale-ref window
+  // where a save callback could read an outdated graphRef.current.
+  useLayoutEffect(() => {
     if (graphRef) {
       graphRef.current = { nodes, edges };
     }
   }, [graphRef, nodes, edges]);
 
-  // Expose imperative handle to parent on mount
+  // Stable refs for getGraph — always point to latest state without
+  // causing the onGraphUpdate effect to re-fire on every node/edge change.
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+
+  // Expose imperative handle to parent on mount.
+  // getGraph reads from refs — always current, no stale-ref risk.
   useEffect(() => {
-    onGraphUpdate?.({ setNodes, setEdges });
+    onGraphUpdate?.({
+      setNodes,
+      setEdges,
+      getGraph: () => ({ nodes: nodesRef.current, edges: edgesRef.current }),
+    });
   }, [onGraphUpdate, setNodes, setEdges]);
 
   // Apply highlighting in view mode

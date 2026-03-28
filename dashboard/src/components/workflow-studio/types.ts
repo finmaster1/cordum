@@ -66,6 +66,8 @@ export interface StudioGraphData {
 export interface CanvasHandle {
   setNodes: React.Dispatch<React.SetStateAction<Node<UnifiedNodeData>[]>>;
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
+  /** Read current graph state synchronously — safe to call in save callbacks */
+  getGraph: () => { nodes: Node<UnifiedNodeData>[]; edges: Edge[] };
 }
 
 // ---------------------------------------------------------------------------

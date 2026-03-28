@@ -518,7 +518,8 @@ func (e *Engine) handleJobRequest(req *pb.JobRequest, traceID string) error {
 			"topic", safeTopic(req),
 		)
 		if err := e.setJobState(jobID, JobStateFailed); err != nil {
-			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
 		return nil
@@ -597,7 +598,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			"topic", safeTopic(req),
 		)
 		if err := e.setJobState(safeJobID(req), JobStateFailed); err != nil {
-			slog.Error("state transition failed", "job_id", safeJobID(req), "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", safeJobID(req), "target_state", JobStateFailed, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		e.incJobsCompleted(safeTopic(req), pb.JobStatus_JOB_STATUS_FAILED.String())
 		return nil
@@ -624,7 +626,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 		reason := fmt.Sprintf("max scheduling retries exceeded (attempts=%d)", attempts)
 		slog.Warn("giving up on job", "job_id", jobID, "topic", topic, "attempts", attempts)
 		if err := e.setJobState(jobID, JobStateFailed); err != nil {
-			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, reason, "max_scheduling_retries"); err != nil {
 			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
@@ -724,7 +727,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			"trace_id", traceID,
 		)
 		if err := e.setJobState(jobID, JobStateApproval); err != nil {
-			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateApproval, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateApproval, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		return nil
 	case SafetyDeny:
@@ -735,7 +739,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			"trace_id", traceID,
 		)
 		if err := e.setJobState(jobID, JobStateDenied); err != nil {
-			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateDenied, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateDenied, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		e.incSafetyDenied(topic)
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, record.Reason, "safety_denied"); err != nil {
@@ -750,7 +755,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			"trace_id", traceID,
 		)
 		if err := e.setJobState(jobID, JobStateDenied); err != nil {
-			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateDenied, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateDenied, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		e.incSafetyDenied(topic)
 		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_DENIED, record.Reason, "safety_unknown"); err != nil {
@@ -768,7 +774,8 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			if attempts >= allowedAttempts {
 				reason := fmt.Sprintf("max retries exceeded (attempts=%d, max_retries=%d)", attempts, maxRetries)
 				if err := e.setJobState(jobID, JobStateFailed); err != nil {
-					slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+					slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+					return RetryAfter(err, retryDelayStore)
 				}
 				if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, reason, "max_retries_exceeded"); err != nil {
 					slog.Error("dlq emit failed", "job_id", jobID, "error", err)
@@ -859,11 +866,13 @@ func (e *Engine) processJob(lockCtx context.Context, req *pb.JobRequest, traceID
 			}
 			return RetryAfter(err, backoffDelay(attempts, backoffBase, backoffMax))
 		}
+		dispatchErr := err // capture before setJobState shadows err
 		if err := e.setJobState(jobID, JobStateFailed); err != nil {
-			slog.Error("state transition failed", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			slog.Error("state transition failed, retrying", "job_id", jobID, "target_state", JobStateFailed, "error", err)
+			return RetryAfter(err, retryDelayStore)
 		}
 		e.incJobsCompleted(topic, pb.JobStatus_JOB_STATUS_FAILED.String())
-		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, err.Error(), reasonCodeForSchedulingError(err)); err != nil {
+		if err := e.emitDLQWithRetry(jobID, topic, pb.JobStatus_JOB_STATUS_FAILED, dispatchErr.Error(), reasonCodeForSchedulingError(dispatchErr)); err != nil {
 			slog.Error("dlq emit failed", "job_id", jobID, "error", err)
 		}
 		return nil

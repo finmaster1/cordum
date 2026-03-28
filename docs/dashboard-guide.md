@@ -155,7 +155,8 @@ Monitor worker pools, individual agent status, and capacity.
 
 ### Approvals (`/approvals`)
 
-Manage the human-in-the-loop approval queue for jobs flagged by safety policies.
+Manage the unified human-in-the-loop approval queue for both safety-policy approvals
+and workflow approval gates.
 
 **Tabs**: Queue (pending approvals) | History (resolved approvals)
 
@@ -166,18 +167,49 @@ Manage the human-in-the-loop approval queue for jobs flagged by safety policies.
 *Filters*: urgency (all/normal/aging/critical), workflow, rule, risk tags, assignment, sort order (wait time, creation, updated).
 
 *Approval cards* show:
+- Source badge (`Workflow Gate` or `Safety Policy`)
 - Urgency badge (pulsing red for critical)
 - Wait time ("Waiting 5m 23s")
-- Human-readable summary
-- Matched policy rule
-- Capability tags (blue) and risk tags (orange)
-- Selection checkbox for batch actions
+- Decision-first title and primary reason
+- Decision facts such as amount, vendor, item count, and workflow step when available
+- De-emphasized audit metadata (approval ID, job ID, topic, run ID) for quick debugging
+- Explicit degraded-context warning when workflow payload hydration is missing or partial
 
-*Detail panel* (right side on wider screens): full approval detail with approve/reject buttons, optional comment field, and required reason for rejection.
+Decision-first cards intentionally prioritize:
+
+1. **What is being approved**
+2. **Why it was escalated**
+3. **What approval/rejection will do next**
+
+Workflow, run, job, and policy identifiers still appear, but as secondary metadata.
+
+*Detail panel* (right side on wider screens): full approval detail with approve/reject
+buttons, optional comment field, and required reason for rejection. The drawer is split
+into decision-first sections:
+
+- **Decision summary** — title, reason, escalation callout, degraded-context warning,
+  and business facts
+- **Workflow context** — workflow name/ID, run link, approval step, and approve/reject
+  effect copy
+- **Audit details** — policy snapshot, job hash, approval ref, context pointer,
+  timestamps, and actor metadata
+- **Raw payloads** — collapsible JSON for workflow payloads and job context when those
+  payloads exist
 
 *Batch actions toolbar* (when items selected): Approve All, Reject All, Clear Selection. Role-gated to admin/operator.
 
-**History tab**: resolved approvals with decision, actor, reason, and timing.
+**History tab**: resolved approvals with decision, actor, reason, and timing. Workflow
+approvals retain their decision summary and resolver comments in history so operators can
+audit what was approved without reopening raw payloads.
+
+**Fallback behavior**:
+
+- Workflow approvals with complete payloads show vendor/amount/reason/impact prominently.
+- Legacy or non-workflow approvals still render safely via policy metadata.
+- Missing, malformed, or unavailable workflow context renders an explicit warning instead
+  of an empty card shell.
+- Loading, empty, and API-error states are handled inline without breaking keyboard or
+  drawer navigation.
 
 All filter and selection state persists in URL parameters.
 

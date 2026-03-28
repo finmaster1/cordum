@@ -17,11 +17,11 @@ const (
 // Step types with dedicated engine handlers.
 const (
 	StepTypeSwitch      StepType = "switch"      // Multi-branch condition routing
-	StepTypeParallel    StepType = "parallel"     // Concurrent branch execution (all/any/n_of_m)
-	StepTypeLoop        StepType = "loop"         // Iterative execution (while/until/fixed count)
-	StepTypeTransform   StepType = "transform"    // Inline expression evaluation
-	StepTypeStorage     StepType = "storage"      // Read/write/delete workflow context
-	StepTypeSubWorkflow StepType = "subworkflow"  // Nested workflow invocation
+	StepTypeParallel    StepType = "parallel"    // Concurrent branch execution (all/any/n_of_m)
+	StepTypeLoop        StepType = "loop"        // Iterative execution (while/until/fixed count)
+	StepTypeTransform   StepType = "transform"   // Inline expression evaluation
+	StepTypeStorage     StepType = "storage"     // Read/write/delete workflow context
+	StepTypeSubWorkflow StepType = "subworkflow" // Nested workflow invocation
 )
 
 // Generic step types — dispatched as jobs to worker pools, no dedicated engine handler.
@@ -80,6 +80,75 @@ type StepMeta struct {
 	RiskTags       []string          `json:"risk_tags,omitempty"`
 	Requires       []string          `json:"requires,omitempty"`
 	Labels         map[string]string `json:"labels,omitempty"`
+}
+
+const (
+	ApprovalContextKindWorkflow = "workflow_approval_context"
+	ApprovalContextVersionV1    = 1
+)
+
+// ApprovalWorkflowContext captures stable workflow metadata for a persisted
+// approval-gate payload so approvers and downstream APIs can see which human
+// decision is being requested without relying on scheduler labels alone.
+type ApprovalWorkflowContext struct {
+	WorkflowID   string `json:"workflow_id"`
+	WorkflowName string `json:"workflow_name,omitempty"`
+	RunID        string `json:"run_id"`
+	StepID       string `json:"step_id"`
+	StepName     string `json:"step_name,omitempty"`
+	RequestedAt  string `json:"requested_at,omitempty"`
+	TriggeredBy  string `json:"triggered_by,omitempty"`
+	TenantID     string `json:"tenant_id,omitempty"`
+	TeamID       string `json:"team_id,omitempty"`
+}
+
+// ApprovalContextEnvelope is the persisted context document for workflow
+// approval-gate jobs. Decision preserves the original structured business data
+// (amount, vendor, items, escalation reason, etc.) after template expansion,
+// while Workflow keeps the request auditable and deterministic.
+type ApprovalContextEnvelope struct {
+	Kind     string                  `json:"kind"`
+	Version  int                     `json:"version"`
+	Workflow ApprovalWorkflowContext `json:"workflow"`
+	Decision map[string]any          `json:"decision,omitempty"`
+}
+
+// AsMap returns a JSON-ready representation of the approval context envelope
+// while omitting empty optional fields from the nested workflow metadata.
+func (e ApprovalContextEnvelope) AsMap() map[string]any {
+	workflow := map[string]any{
+		"workflow_id": e.Workflow.WorkflowID,
+		"run_id":      e.Workflow.RunID,
+		"step_id":     e.Workflow.StepID,
+	}
+	if e.Workflow.WorkflowName != "" {
+		workflow["workflow_name"] = e.Workflow.WorkflowName
+	}
+	if e.Workflow.StepName != "" {
+		workflow["step_name"] = e.Workflow.StepName
+	}
+	if e.Workflow.RequestedAt != "" {
+		workflow["requested_at"] = e.Workflow.RequestedAt
+	}
+	if e.Workflow.TriggeredBy != "" {
+		workflow["triggered_by"] = e.Workflow.TriggeredBy
+	}
+	if e.Workflow.TenantID != "" {
+		workflow["tenant_id"] = e.Workflow.TenantID
+	}
+	if e.Workflow.TeamID != "" {
+		workflow["team_id"] = e.Workflow.TeamID
+	}
+
+	out := map[string]any{
+		"kind":     e.Kind,
+		"version":  e.Version,
+		"workflow": workflow,
+	}
+	if len(e.Decision) > 0 {
+		out["decision"] = e.Decision
+	}
+	return out
 }
 
 // Workflow is the persisted definition.

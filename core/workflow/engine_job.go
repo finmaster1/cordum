@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/cordum/cordum/core/infra/store"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
@@ -23,40 +24,53 @@ func makeJobPacket(traceID string, req *pb.JobRequest) *pb.BusPacket {
 	}
 }
 
+func (e *Engine) evaluateStructuredStepInput(run *WorkflowRun, step *Step, scope map[string]any, inputKind string) (map[string]any, error) {
+	if step == nil || len(step.Input) == 0 {
+		return map[string]any{}, nil
+	}
+
+	var runInputKeys, stepInputKeys []string
+	for k := range run.Input {
+		runInputKeys = append(runInputKeys, k)
+	}
+	for k := range step.Input {
+		stepInputKeys = append(stepInputKeys, k)
+	}
+	slog.Info("evaluateStructuredStepInput", "run_id", run.ID, "input_kind", inputKind, "run_input", runInputKeys, "step_input", stepInputKeys, "scope_input_type", fmt.Sprintf("%T", scope["input"]))
+
+	evaluated, err := evalTemplates(step.Input, scope)
+	if err != nil {
+		return nil, err
+	}
+	base, ok := evaluated.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s input must be object, got %T", inputKind, evaluated)
+	}
+
+	reqSet := requiredFromInlineSchema(step.InputSchema)
+	for k, raw := range step.Input {
+		if _, exists := base[k]; exists {
+			continue
+		}
+		if s, ok := raw.(string); ok && strings.Contains(s, "${") {
+			if reqSet[k] {
+				return nil, fmt.Errorf(
+					"%s input field %q has template %q that resolved to nil — "+
+						"check that run.Input contains the expected data (run input keys: %v)",
+					inputKind, k, s, runInputKeys)
+			}
+		}
+	}
+	return base, nil
+}
+
 func (e *Engine) buildJobPayload(run *WorkflowRun, step *Step, item any) (map[string]any, error) {
 	base := map[string]any{}
 	if step != nil && len(step.Input) > 0 {
-		scope := buildEvalScope(run, item)
-		var runInputKeys, stepInputKeys []string
-		for k := range run.Input { runInputKeys = append(runInputKeys, k) }
-		for k := range step.Input { stepInputKeys = append(stepInputKeys, k) }
-		slog.Info("buildJobPayload", "run_id", run.ID, "run_input", runInputKeys, "step_input", stepInputKeys, "scope_input_type", fmt.Sprintf("%T", scope["input"]))
-		evaluated, err := evalTemplates(step.Input, scope)
+		var err error
+		base, err = e.evaluateStructuredStepInput(run, step, buildEvalScope(run, item), "step")
 		if err != nil {
 			return nil, err
-		}
-		if m, ok := evaluated.(map[string]any); ok {
-			base = m
-		} else {
-			return nil, fmt.Errorf("step input must be object, got %T", evaluated)
-		}
-		// Detect template keys that resolved to nil and were dropped by
-		// evalTemplates. If any such key is required by the step's inline
-		// input schema, fail early with a clear error instead of letting
-		// downstream schema validation produce a confusing "missing properties".
-		reqSet := requiredFromInlineSchema(step.InputSchema)
-		for k, raw := range step.Input {
-			if _, exists := base[k]; exists {
-				continue
-			}
-			if s, ok := raw.(string); ok && strings.Contains(s, "${") {
-				if reqSet[k] {
-					return nil, fmt.Errorf(
-						"step input field %q has template %q that resolved to nil — "+
-							"check that run.Input contains the expected data (run input keys: %v)",
-						k, s, runInputKeys)
-				}
-			}
 		}
 	} else if run != nil && len(run.Input) > 0 {
 		base = run.Input
@@ -79,6 +93,53 @@ func (e *Engine) buildJobPayload(run *WorkflowRun, step *Step, item any) (map[st
 		return nil, err
 	}
 	return out, nil
+}
+
+// buildApprovalPayload constructs the persisted approval-gate context contract.
+// The payload is intentionally split into stable workflow metadata plus a
+// structured decision block so API/UI consumers can render human-meaningful
+// fields without reverse-engineering scheduler labels. Unlike regular worker
+// dispatch, approval steps do not fall back to the entire run input when
+// step.Input is empty; legacy approvals instead receive a metadata-only
+// envelope so the contract stays deterministic and auditable.
+func (e *Engine) buildApprovalPayload(wfDef *Workflow, run *WorkflowRun, step *Step, stepID string, requestedAt time.Time) (map[string]any, error) {
+	if run == nil {
+		run = &WorkflowRun{}
+	}
+	if requestedAt.IsZero() {
+		requestedAt = time.Now().UTC()
+	}
+
+	decision, err := e.evaluateStructuredStepInput(run, step, buildEvalScope(run, nil), "approval")
+	if err != nil {
+		return nil, err
+	}
+	if err := e.validateStepInput(step, decision); err != nil {
+		return nil, err
+	}
+
+	stepName := stepID
+	if step != nil && strings.TrimSpace(step.Name) != "" {
+		stepName = strings.TrimSpace(step.Name)
+	}
+
+	envelope := ApprovalContextEnvelope{
+		Kind:    ApprovalContextKindWorkflow,
+		Version: ApprovalContextVersionV1,
+		Workflow: ApprovalWorkflowContext{
+			WorkflowID:   wfDef.ID,
+			WorkflowName: wfDef.Name,
+			RunID:        run.ID,
+			StepID:       stepID,
+			StepName:     stepName,
+			RequestedAt:  requestedAt.UTC().Format(time.RFC3339Nano),
+			TriggeredBy:  strings.TrimSpace(run.TriggeredBy),
+			TenantID:     strings.TrimSpace(run.OrgID),
+			TeamID:       strings.TrimSpace(run.TeamID),
+		},
+		Decision: decision,
+	}
+	return envelope.AsMap(), nil
 }
 
 func (e *Engine) putJobContext(ctx context.Context, jobID string, payload map[string]any) (string, error) {
@@ -234,41 +295,26 @@ func buildStepMetadata(run *WorkflowRun, step *Step) *pb.JobMetadata {
 // scheduler places it in APPROVAL_REQUIRED state. Once approved via the
 // unified /approvals/{job_id}/approve endpoint, the scheduler auto-completes
 // the job and the result flows back through HandleJobResult.
-func (e *Engine) buildApprovalGateRequest(wfDef *Workflow, run *WorkflowRun, step *Step, stepID, jobID string) *pb.JobRequest {
+func (e *Engine) buildApprovalGateRequest(ctx context.Context, wfDef *Workflow, run *WorkflowRun, step *Step, stepID, jobID string) *pb.JobRequest {
 	if run == nil {
 		run = &WorkflowRun{}
 	}
-	labels := map[string]string{
-		"workflow_id": wfDef.ID,
-		"run_id":      run.ID,
-		"step_id":     stepID,
-		"gate_type":   "workflow_approval",
+	req := e.buildJobRequest(ctx, wfDef, run, step, stepID, jobID)
+	req.Topic = capsdk.SubjectWorkflowApprovalGate
+	req.Priority = pb.JobPriority_JOB_PRIORITY_INTERACTIVE
+	req.AdapterId = ""
+	if req.Env == nil {
+		req.Env = map[string]string{}
 	}
-	if step.WorkerID != "" {
-		labels["worker_id"] = step.WorkerID
+	req.Env["context_mode"] = defaultContextModeForTopic(req.Topic)
+	if req.Labels == nil {
+		req.Labels = map[string]string{}
 	}
-	req := &pb.JobRequest{
-		JobId:      jobID,
-		Topic:      capsdk.SubjectWorkflowApprovalGate,
-		Priority:   pb.JobPriority_JOB_PRIORITY_INTERACTIVE,
-		WorkflowId: wfDef.ID,
-		Env: map[string]string{
-			"workflow_id": wfDef.ID,
-			"run_id":      run.ID,
-			"step_id":     stepID,
-			"tenant_id":   run.OrgID,
-			"team_id":     run.TeamID,
-		},
-		Labels:   labels,
-		TenantId: run.OrgID,
-		Meta: &pb.JobMetadata{
-			IdempotencyKey: fmt.Sprintf("wf:%s:%s:%d:approval", run.ID, stepID, 1),
-		},
+	req.Labels["gate_type"] = "workflow_approval"
+	if req.Meta == nil {
+		req.Meta = &pb.JobMetadata{}
 	}
-	if run.DryRun || run.Metadata["dry_run"] == "true" {
-		req.Labels["dry_run"] = "true"
-		req.Env["dry_run"] = "true"
-	}
+	req.Meta.IdempotencyKey = fmt.Sprintf("wf:%s:%s:%d:approval", run.ID, stepID, 1)
 	return req
 }
 

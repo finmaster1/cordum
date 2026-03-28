@@ -680,9 +680,38 @@ export interface DLQEntry {
 // ---------------------------------------------------------------------------
 
 export type UrgencyLevel = "fresh" | "aging" | "critical" | "breach";
+export type ApprovalDecisionSummarySource =
+  | "workflow_payload"
+  | "workflow_labels"
+  | "policy_only";
+export type ApprovalDecisionSummaryCompleteness = "rich" | "partial" | "minimal";
+export type ApprovalContextStatus =
+  | "available"
+  | "missing"
+  | "malformed"
+  | "unavailable"
+  | "absent";
+
+export interface ApprovalDecisionSummary {
+  source: ApprovalDecisionSummarySource;
+  completeness: ApprovalDecisionSummaryCompleteness;
+  contextStatus: ApprovalContextStatus;
+  title: string;
+  subject?: string;
+  why?: string;
+  nextEffect?: string;
+  amount?: number;
+  currency?: string;
+  vendor?: string;
+  itemCount?: number;
+  itemsPreview?: string[];
+  escalationReason?: string;
+  missingFields?: string[];
+}
 
 export interface ApprovalWorkflowContext {
   workflowId: string;
+  workflowName?: string;
   runId: string;
   stepId?: string;
   stepIndex?: number;
@@ -702,6 +731,7 @@ export interface Approval {
   comment?: string;
   policyRule?: string;
   jobContext?: Record<string, unknown>;
+  decisionSummary?: ApprovalDecisionSummary;
   // Enriched fields
   topic?: string;
   safetyDecision?: SafetyDecision;

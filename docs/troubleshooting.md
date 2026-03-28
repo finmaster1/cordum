@@ -956,6 +956,71 @@ nats stream purge CORDUM_SYS --subject "sys.job.>" --force
 
 ---
 
+## 15. Approval Shows Empty or Partial Business Context
+
+**Symptoms**: The Approvals page shows a workflow approval with little or no business
+context, or the card/detail drawer displays a warning such as `Approval context is
+missing`, `malformed`, or `unavailable`.
+
+**Likely causes**:
+
+| Cause | Expected markers |
+|-------|------------------|
+| Workflow payload persisted and hydrated successfully | `decision_summary.source=workflow_payload`, `decision_summary.context_status=available`, `context_ptr` present, `job_input.decision.*` populated |
+| Stored workflow payload missing | `decision_summary.context_status=missing`, `context_ptr` usually present, `job_input` absent |
+| Gateway cannot access the memory/context store | `decision_summary.context_status=unavailable` |
+| Stored workflow payload is invalid JSON or invalid approval envelope | `decision_summary.context_status=malformed` |
+| Approval came from a legacy/non-workflow path | `decision_summary.source=policy_only`, `decision_summary.context_status=absent` |
+
+**Diagnostic commands**:
+
+```bash
+# Inspect the approval record
+curl -sS "http://localhost:8081/api/v1/approvals?include_resolved=false" \
+  -H "X-API-Key: $CORDUM_API_KEY" \
+  -H "X-Tenant-ID: $CORDUM_TENANT_ID" \
+  | jq --arg job "$JOB_ID" '
+      .items[]
+      | select(.job.id == $job)
+      | {
+          context_ptr,
+          decision_summary,
+          job_input
+        }
+    '
+
+# If this is a workflow approval, inspect the related run
+curl -sS "http://localhost:8081/api/v1/workflow-runs/${RUN_ID}" \
+  -H "X-API-Key: $CORDUM_API_KEY" \
+  -H "X-Tenant-ID: $CORDUM_TENANT_ID" \
+  | jq '{id, status, current_step, error}'
+
+# Check gateway + workflow engine logs for context hydration or workflow errors
+docker compose logs gateway workflow-engine --tail=200
+```
+
+**Fixes**:
+
+- `missing`: verify the workflow engine persisted approval context before cleanup, and
+  confirm the backing memory/context store was not reset between run creation and
+  approval listing.
+- `unavailable`: check Redis/context-store wiring, local dependency health, and gateway
+  startup logs. The gateway cannot hydrate workflow payloads if the context store is
+  unreachable.
+- `malformed`: inspect the code or test data that wrote the approval payload. The stored
+  JSON must deserialize into a valid workflow approval context envelope.
+- `policy_only` / `absent`: confirm you are looking at the intended workflow approval.
+  Legacy safety approvals are still supported and intentionally fall back to policy
+  metadata without synthesized workflow payloads.
+
+**Prevention**:
+
+- Define approval steps with structured `input` fields such as `amount`, `currency`,
+  `vendor`, `items`, `approval_reason`, and `next_effect`.
+- Add `input_schema` so missing required decision fields fail early.
+- Re-run `./tools/scripts/e2e_install_workflow.sh` or the manual flow in
+  `docs/LOCAL_E2E.md` after changing workflow approval behavior.
+
 ## Related Docs
 
 - [production.md](production.md) — Production readiness guide with incident runbooks

@@ -1,17 +1,195 @@
-import { describe, expect, it, vi } from "vitest";
-import { resolveDenyReason, handleDenyConfirm, DRAWER_A11Y } from "./ApprovalsPage";
-import { FOCUSABLE_SELECTOR } from "@/hooks/useDialogA11y";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Approval } from "@/api/types";
+import { FOCUSABLE_SELECTOR } from "@/hooks/useDialogA11y";
+import {
+  default as ApprovalsPage,
+  DRAWER_A11Y,
+  handleDenyConfirm,
+  resolveDenyReason,
+} from "./ApprovalsPage";
+
+const { hookState } = vi.hoisted(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+    true;
+
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: () => ({
+      matches: false,
+      media: "",
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+
+  return {
+    hookState: {
+      approvalsData: { items: [] as Approval[] } as { items: Approval[] },
+      isLoading: false,
+      isError: false,
+      error: null as Error | null,
+      refetch: vi.fn(),
+      approveMutate: vi.fn(),
+      rejectMutate: vi.fn(),
+      approvePending: false,
+      rejectPending: false,
+    },
+  };
+});
+
+vi.mock("@/hooks/useApprovals", () => ({
+  useApprovals: () => ({
+    data: hookState.approvalsData,
+    isLoading: hookState.isLoading,
+    isError: hookState.isError,
+    error: hookState.error,
+    refetch: hookState.refetch,
+  }),
+  useApproveJob: () => ({
+    mutate: hookState.approveMutate,
+    isPending: hookState.approvePending,
+  }),
+  useRejectJob: () => ({
+    mutate: hookState.rejectMutate,
+    isPending: hookState.rejectPending,
+  }),
+}));
 
 function makeApproval(overrides: Partial<Approval> = {}): Approval {
   return {
-    id: "approval-test-1",
-    jobId: "job-test-1",
+    id: "apr-default",
+    jobId: "job-default",
     status: "pending",
     requestedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
 }
+
+function makeWorkflowApproval(overrides: Partial<Approval> = {}): Approval {
+  return makeApproval({
+    id: "apr-77",
+    jobId: "job-77",
+    topic: "workflow.expense.approval",
+    reason: "Fallback policy reason",
+    humanSummary: "Approve 1,250 USD request with Acme Travel",
+    decisionSummary: {
+      source: "workflow_payload",
+      completeness: "rich",
+      contextStatus: "available",
+      title: "Approve 1,250 USD request with Acme Travel",
+      why: "Budget threshold exceeded",
+      nextEffect: "Approve to continue Budget Review.",
+      amount: 1250,
+      currency: "USD",
+      vendor: "Acme Travel",
+      itemCount: 2,
+      itemsPreview: ["Flight to Berlin", "Hotel stay"],
+      escalationReason: "Manager sign-off required",
+      missingFields: [],
+    },
+    workflowContext: {
+      workflowId: "wf-expense",
+      workflowName: "Expense Approval",
+      runId: "run-77",
+      stepId: "budget-review",
+      stepIndex: 1,
+      stepName: "Budget Review",
+      totalSteps: 3,
+    },
+    jobInput: {
+      decision: {
+        vendor: "Acme Travel",
+        amount: 1250,
+      },
+    },
+    jobContext: {
+      policy: "expense-threshold",
+      tenant: "default",
+    },
+    ...overrides,
+  });
+}
+
+function renderPage() {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  act(() => {
+    root.render(
+      React.createElement(
+        MemoryRouter,
+        { initialEntries: ["/approvals"] },
+        React.createElement(ApprovalsPage),
+      ),
+    );
+  });
+
+  return {
+    container,
+    cleanup: () => {
+      act(() => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+function click(element: Element | null) {
+  if (!element) throw new Error("Expected element to exist before clicking");
+  act(() => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+}
+
+function keydown(element: Element | null, key: string) {
+  if (!element) throw new Error("Expected element to exist before dispatching key");
+  act(() => {
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+    );
+  });
+}
+
+function findButtonByAriaLabelPrefix(
+  container: ParentNode,
+  prefix: string,
+): HTMLButtonElement | null {
+  return (
+    Array.from(container.querySelectorAll("button")).find((button) =>
+      (button.getAttribute("aria-label") ?? "").startsWith(prefix),
+    ) ?? null
+  ) as HTMLButtonElement | null;
+}
+
+function findTabButton(container: ParentNode, label: string): HTMLButtonElement | null {
+  return (
+    Array.from(container.querySelectorAll("button")).find(
+      (button) =>
+        button.getAttribute("aria-pressed") !== null &&
+        button.textContent?.includes(label),
+    ) ?? null
+  ) as HTMLButtonElement | null;
+}
+
+beforeEach(() => {
+  document.body.innerHTML = "";
+  hookState.approvalsData = { items: [] };
+  hookState.isLoading = false;
+  hookState.isError = false;
+  hookState.error = null;
+  hookState.refetch = vi.fn();
+  hookState.approveMutate = vi.fn();
+  hookState.rejectMutate = vi.fn();
+  hookState.approvePending = false;
+  hookState.rejectPending = false;
+});
 
 describe("ApprovalsPage deny reason logic", () => {
   describe("resolveDenyReason", () => {
@@ -69,7 +247,7 @@ describe("ApprovalsPage deny reason logic", () => {
       handleDenyConfirm(approval, "   \t\n  ", { mutate, clearTarget });
 
       expect(mutate).toHaveBeenCalledWith({
-        id: "approval-test-1",
+        id: "apr-default",
         reason: "Denied by operator",
       });
     });
@@ -107,25 +285,236 @@ describe("ApprovalsPage drawer a11y", () => {
 
   it("drawer config has aria-labelledby pointing to title element", () => {
     expect(DRAWER_A11Y.labelledById).toBe("approval-drawer-title");
-    // Non-empty ensures the heading element has a matching id attribute
     expect(DRAWER_A11Y.labelledById.length).toBeGreaterThan(0);
   });
 
   it("drawer uses useDialogA11y hook for Escape close and focus trap", () => {
-    // The hook name is exported to verify the drawer is wired to the correct
-    // a11y implementation (Escape key, Tab focus cycling).
     expect(DRAWER_A11Y.hookName).toBe("useDialogA11y");
   });
 
   it("useDialogA11y FOCUSABLE_SELECTOR covers interactive elements", () => {
-    // Verify the focus trap selector includes all standard interactive elements
     expect(FOCUSABLE_SELECTOR).toContain("button:not([disabled])");
     expect(FOCUSABLE_SELECTOR).toContain("a[href]");
     expect(FOCUSABLE_SELECTOR).toContain("textarea:not([disabled])");
     expect(FOCUSABLE_SELECTOR).toContain("input:not([disabled])");
     expect(FOCUSABLE_SELECTOR).toContain("select:not([disabled])");
     expect(FOCUSABLE_SELECTOR).toContain("[tabindex]");
-    // Negative tabindex elements should be excluded from focus cycling
     expect(FOCUSABLE_SELECTOR).toContain('[tabindex="-1"]');
+  });
+});
+
+describe("ApprovalsPage decision-first rendering", () => {
+  it("renders workflow approvals with decision content ahead of secondary metadata and accessible actions", () => {
+    hookState.approvalsData = { items: [makeWorkflowApproval()] };
+
+    const { container, cleanup } = renderPage();
+    try {
+      const card = container.querySelector('article[role="button"]');
+      const cardText = card?.textContent ?? "";
+
+      expect(card).not.toBeNull();
+      expect(cardText).toContain("Approve 1,250 USD request with Acme Travel");
+      expect(cardText).toContain("Budget threshold exceeded");
+      expect(cardText).toContain("Workflow Gate");
+      expect(cardText).toContain("Approve to continue Budget Review.");
+      expect(cardText.indexOf("Approve 1,250 USD request with Acme Travel")).toBeLessThan(
+        cardText.indexOf("apr-77"),
+      );
+
+      const approveButton = findButtonByAriaLabelPrefix(container, "Approve ");
+      const denyButton = findButtonByAriaLabelPrefix(container, "Deny ");
+      expect(approveButton).not.toBeNull();
+      expect(denyButton).not.toBeNull();
+
+      click(approveButton);
+      expect(hookState.approveMutate).toHaveBeenCalledWith({ id: "apr-77" });
+      expect(container.querySelector("#approval-drawer-title")).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("opens the workflow approval drawer from the keyboard and keeps audit/raw data secondary", () => {
+    hookState.approvalsData = { items: [makeWorkflowApproval()] };
+
+    const { container, cleanup } = renderPage();
+    try {
+      const card = container.querySelector('article[role="button"]');
+      keydown(card, "Enter");
+
+      const drawer = container.querySelector(
+        '[role="dialog"][aria-labelledby="approval-drawer-title"]',
+      ) as HTMLElement | null;
+      const drawerText = drawer?.textContent ?? "";
+      const disclosures = Array.from(
+        drawer?.querySelectorAll("details") ?? [],
+      ) as HTMLDetailsElement[];
+
+      expect(drawer).not.toBeNull();
+      expect(drawerText).toContain("Decision summary");
+      expect(drawerText).toContain("Workflow & context");
+      expect(drawerText).toContain("Audit & debug detail");
+      expect(drawerText).toContain("Expense Approval");
+      expect(drawerText).toContain("Step 2 of 3");
+      expect(drawerText.indexOf("Decision summary")).toBeLessThan(
+        drawerText.indexOf("Audit & debug detail"),
+      );
+      expect(disclosures).toHaveLength(2);
+      disclosures.forEach((disclosure) => {
+        expect(disclosure.open).toBe(false);
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders legacy approvals with safe fallback messaging and visible but secondary audit detail", () => {
+    hookState.approvalsData = {
+      items: [
+        makeApproval({
+          id: "apr-legacy",
+          jobId: "job-legacy",
+          topic: "finance.expense.review",
+          reason: "Requires manual review",
+          policySnapshot: "policy-v4",
+        }),
+      ],
+    };
+
+    const { container, cleanup } = renderPage();
+    try {
+      const card = container.querySelector('article[role="button"]');
+      expect(card?.textContent).toContain("Review finance.expense.review");
+      expect(card?.textContent).toContain("Requires manual review");
+      expect(card?.textContent).toContain("Safety Policy");
+
+      click(card);
+      const drawer = container.querySelector(
+        '[role="dialog"][aria-labelledby="approval-drawer-title"]',
+      ) as HTMLElement | null;
+      const drawerText = drawer?.textContent ?? "";
+
+      expect(drawerText).toContain(
+        "This approval is not attached to a workflow run. Review the decision summary and audit details below.",
+      );
+      expect(drawerText).toContain("policy-v4");
+      expect(drawer?.querySelectorAll("details")).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders degraded workflow approvals with explicit context warnings instead of an empty shell", () => {
+    hookState.approvalsData = {
+      items: [
+        makeWorkflowApproval({
+          decisionSummary: {
+            source: "workflow_payload",
+            completeness: "partial",
+            contextStatus: "missing",
+            title: "Approve manager-approval",
+            why: "manager review required",
+            missingFields: ["approval_context", "business_context"],
+          },
+          jobInput: undefined,
+          jobContext: undefined,
+        }),
+      ],
+    };
+
+    const { container, cleanup } = renderPage();
+    try {
+      const card = container.querySelector('article[role="button"]');
+      expect(card?.textContent).toContain("Approve manager-approval");
+      expect(card?.textContent).toContain("manager review required");
+      expect(card?.textContent).toContain(
+        "Approval context is missing — missing approval_context, business_context.",
+      );
+
+      click(card);
+      const drawer = container.querySelector(
+        '[role="dialog"][aria-labelledby="approval-drawer-title"]',
+      ) as HTMLElement | null;
+      const drawerText = drawer?.textContent ?? "";
+
+      expect(drawerText).toContain(
+        "Approval context is missing — missing approval_context, business_context.",
+      );
+      expect(drawer?.querySelectorAll("details")).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("shows approved history without pending action buttons when the approved tab is selected", () => {
+    hookState.approvalsData = {
+      items: [
+        makeApproval({
+          id: "apr-approved",
+          jobId: "job-approved",
+          status: "approved",
+          humanSummary: "Approve renewal for Example Corp",
+          reason: "Finance approved the renewal",
+        }),
+      ],
+    };
+
+    const { container, cleanup } = renderPage();
+    try {
+      click(findTabButton(container, "Approved"));
+
+      const card = container.querySelector('article[role="button"]');
+      expect(card?.textContent).toContain("Approve renewal for Example Corp");
+      expect(findButtonByAriaLabelPrefix(container, "Approve ")).toBeNull();
+      expect(findButtonByAriaLabelPrefix(container, "Deny ")).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("shows a clear empty-state message when no pending approvals are available", () => {
+    hookState.approvalsData = { items: [] };
+
+    const { container, cleanup } = renderPage();
+    try {
+      expect(container.textContent).toContain("No pending approvals");
+      expect(container.textContent).toContain(
+        "All clear — no actions are waiting for human review.",
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("shows loading skeletons while approvals are being fetched", () => {
+    hookState.isLoading = true;
+    hookState.approvalsData = { items: [] };
+
+    const { container, cleanup } = renderPage();
+    try {
+      expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
+      expect(container.textContent).not.toContain("Approval queue unavailable");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("shows the API error state and lets the user retry", () => {
+    hookState.isError = true;
+    hookState.error = new Error("Gateway offline");
+
+    const { container, cleanup } = renderPage();
+    try {
+      expect(container.textContent).toContain("Approval queue unavailable");
+      expect(container.textContent).toContain("Gateway offline");
+
+      const retryButton = Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("Try again"),
+      );
+      click(retryButton ?? null);
+      expect(hookState.refetch).toHaveBeenCalledTimes(1);
+    } finally {
+      cleanup();
+    }
   });
 });

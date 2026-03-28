@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -18,8 +19,252 @@ import (
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	wf "github.com/cordum/cordum/core/workflow"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+type approvalDecisionSummary struct {
+	Source           string   `json:"source,omitempty"`
+	Completeness     string   `json:"completeness,omitempty"`
+	ContextStatus    string   `json:"context_status,omitempty"`
+	Title            string   `json:"title"`
+	Subject          string   `json:"subject,omitempty"`
+	Why              string   `json:"why,omitempty"`
+	NextEffect       string   `json:"next_effect,omitempty"`
+	Amount           *float64 `json:"amount,omitempty"`
+	Currency         string   `json:"currency,omitempty"`
+	Vendor           string   `json:"vendor,omitempty"`
+	ItemCount        *int     `json:"item_count,omitempty"`
+	ItemsPreview     []string `json:"items_preview,omitempty"`
+	EscalationReason string   `json:"escalation_reason,omitempty"`
+	MissingFields    []string `json:"missing_fields,omitempty"`
+}
+
+func approvalWorkflowMetadata(payload map[string]any) map[string]any {
+	if payload == nil || strings.TrimSpace(approvalStringFromAny(payload["kind"])) != wf.ApprovalContextKindWorkflow {
+		return nil
+	}
+	meta, _ := payload["workflow"].(map[string]any)
+	return meta
+}
+
+func approvalDecisionPayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	if strings.TrimSpace(approvalStringFromAny(payload["kind"])) == wf.ApprovalContextKindWorkflow {
+		decision, _ := payload["decision"].(map[string]any)
+		return decision
+	}
+	return payload
+}
+
+func approvalStringFromAny(raw any) string {
+	switch value := raw.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case fmt.Stringer:
+		return strings.TrimSpace(value.String())
+	case map[string]any:
+		for _, key := range []string{"name", "title", "label", "summary", "id"} {
+			if candidate := strings.TrimSpace(approvalStringFromAny(value[key])); candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func firstStringValue(raw map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if candidate := approvalStringFromAny(raw[key]); candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func numberFromAny(raw any) (float64, bool) {
+	switch value := raw.(type) {
+	case int:
+		return float64(value), true
+	case int32:
+		return float64(value), true
+	case int64:
+		return float64(value), true
+	case float32:
+		return float64(value), true
+	case float64:
+		return value, true
+	case json.Number:
+		f, err := value.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
+func firstNumberValue(raw map[string]any, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		if value, ok := numberFromAny(raw[key]); ok {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+func summarizeApprovalItems(raw any) (int, []string) {
+	values, ok := raw.([]any)
+	if !ok || len(values) == 0 {
+		return 0, nil
+	}
+	preview := make([]string, 0, min(len(values), 3))
+	for _, value := range values {
+		if candidate := approvalStringFromAny(value); candidate != "" {
+			preview = append(preview, candidate)
+			continue
+		}
+		if item, ok := value.(map[string]any); ok {
+			if candidate := firstStringValue(item, "name", "title", "sku", "id", "category"); candidate != "" {
+				preview = append(preview, candidate)
+			}
+		}
+		if len(preview) == 3 {
+			break
+		}
+	}
+	return len(values), preview
+}
+
+func formatApprovalAmount(amount float64) string {
+	if math.Trunc(amount) == amount {
+		return fmt.Sprintf("%.0f", amount)
+	}
+	return fmt.Sprintf("%.2f", amount)
+}
+
+func buildApprovalDecisionSummary(req *pb.JobRequest, policyReason string, payload map[string]any, contextStatus string) approvalDecisionSummary {
+	workflowMeta := approvalWorkflowMetadata(payload)
+	decision := approvalDecisionPayload(payload)
+	labels := req.GetLabels()
+	stepName := firstStringValue(workflowMeta, "step_name")
+	if stepName == "" {
+		stepName = strings.TrimSpace(labels["step_id"])
+	}
+	workflowID := firstStringValue(workflowMeta, "workflow_id")
+	if workflowID == "" {
+		workflowID = strings.TrimSpace(labels["workflow_id"])
+	}
+	topic := strings.TrimSpace(req.GetTopic())
+	contextPtr := strings.TrimSpace(req.GetContextPtr())
+
+	source := "policy_only"
+	if contextPtr != "" || workflowMeta != nil {
+		source = "workflow_payload"
+	} else if workflowID != "" || stepName != "" {
+		source = "workflow_labels"
+	}
+
+	subject := firstStringValue(decision, "title", "subject", "summary", "request_name", "name", "approval_for")
+	vendor := firstStringValue(decision, "vendor", "merchant", "supplier", "payee", "counterparty")
+	amount, amountOK := firstNumberValue(decision, "amount", "total", "value", "subtotal")
+	currency := firstStringValue(decision, "currency", "currency_code")
+	itemCount, itemsPreview := summarizeApprovalItems(decision["items"])
+	if itemCount == 0 {
+		if itemCountValue, ok := firstNumberValue(decision, "item_count", "items_count"); ok {
+			itemCount = int(itemCountValue)
+		}
+	}
+	escalationReason := firstStringValue(decision, "escalation_reason", "escalation", "escalated_because")
+	why := firstNonEmpty(
+		escalationReason,
+		firstStringValue(decision, "approval_reason", "business_reason", "justification", "reason", "why"),
+		strings.TrimSpace(policyReason),
+	)
+
+	if subject == "" {
+		subject = composeApprovalSubject(stepName, topic, vendor, amount, amountOK, currency, itemCount)
+	}
+	nextEffect := firstStringValue(decision, "next_effect", "approve_effect", "impact", "outcome", "next_step")
+	if nextEffect == "" {
+		switch {
+		case stepName != "":
+			nextEffect = fmt.Sprintf("Approve to continue %s.", stepName)
+		case workflowID != "":
+			nextEffect = "Approve to continue the workflow."
+		}
+	}
+
+	businessContextPresent := vendor != "" || (amountOK && currency != "") || itemCount > 0
+	completeness := "minimal"
+	switch {
+	case source == "workflow_payload" && contextStatus == "available" && businessContextPresent && why != "":
+		completeness = "rich"
+	case source == "workflow_payload" && (businessContextPresent || why != "" || stepName != ""):
+		completeness = "partial"
+	}
+
+	summary := approvalDecisionSummary{
+		Source:           source,
+		Completeness:     completeness,
+		ContextStatus:    contextStatus,
+		Title:            subject,
+		Subject:          subject,
+		Why:              why,
+		NextEffect:       nextEffect,
+		Currency:         currency,
+		Vendor:           vendor,
+		ItemsPreview:     itemsPreview,
+		EscalationReason: escalationReason,
+	}
+	if amountOK {
+		summary.Amount = &amount
+	}
+	if itemCount > 0 {
+		summary.ItemCount = &itemCount
+	}
+	if source == "workflow_payload" {
+		if contextStatus != "available" {
+			summary.MissingFields = append(summary.MissingFields, "approval_context")
+		}
+		if !businessContextPresent {
+			summary.MissingFields = append(summary.MissingFields, "business_context")
+		}
+		if why == "" {
+			summary.MissingFields = append(summary.MissingFields, "why")
+		}
+	}
+	return summary
+}
+
+func composeApprovalSubject(stepName, topic, vendor string, amount float64, amountOK bool, currency string, itemCount int) string {
+	switch {
+	case amountOK && currency != "" && vendor != "":
+		return fmt.Sprintf("Approve %s %s request with %s", formatApprovalAmount(amount), currency, vendor)
+	case amountOK && currency != "":
+		return fmt.Sprintf("Approve %s %s request", formatApprovalAmount(amount), currency)
+	case vendor != "" && itemCount > 0:
+		return fmt.Sprintf("Approve %d-item request with %s", itemCount, vendor)
+	case vendor != "":
+		return fmt.Sprintf("Approve request with %s", vendor)
+	case itemCount > 0:
+		return fmt.Sprintf("Approve %d-item request", itemCount)
+	case stepName != "":
+		return fmt.Sprintf("Approve %s", stepName)
+	case topic != "":
+		return fmt.Sprintf("Review %s", topic)
+	default:
+		return "Approval requested"
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
 
 func (s *server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.workflowEng) {
@@ -166,6 +411,10 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		// dashboard can distinguish gate approvals from policy approvals.
 		// Also skip approvals whose workflow run has already terminated.
 		if req, err := s.jobStore.GetJobRequest(r.Context(), job.ID); err == nil && req != nil {
+			var (
+				payload       map[string]any
+				contextStatus = "absent"
+			)
 			if req.Labels != nil {
 				// Filter out stale approvals: if the run is terminal, skip this item.
 				if runID := strings.TrimSpace(req.Labels["run_id"]); runID != "" && s.workflowStore != nil {
@@ -182,6 +431,7 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 					item["workflow_run_id"] = v
 				}
 				if v := req.Labels["step_id"]; v != "" {
+					item["workflow_step_id"] = v
 					item["step_name"] = v
 				}
 				if v := req.Labels["gate_type"]; v != "" {
@@ -193,17 +443,48 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 			// they are approving.
 			if ptr := strings.TrimSpace(req.GetContextPtr()); ptr != "" {
 				item["context_ptr"] = ptr
+				contextStatus = "unavailable"
 				if s.memStore != nil {
 					if key, err := store.KeyFromPointer(ptr); err == nil {
-						if raw, err := s.memStore.GetContext(r.Context(), key); err == nil && len(raw) > 0 {
-							var payload map[string]any
-							if err := json.Unmarshal(raw, &payload); err == nil {
+						if raw, err := s.memStore.GetContext(r.Context(), key); err == nil {
+							if len(raw) == 0 {
+								contextStatus = "missing"
+							} else if err := json.Unmarshal(raw, &payload); err == nil {
+								contextStatus = "available"
 								item["job_input"] = payload
+							} else {
+								contextStatus = "malformed"
 							}
+						} else if errors.Is(err, redis.Nil) {
+							contextStatus = "missing"
 						}
+					} else {
+						contextStatus = "malformed"
 					}
 				}
 			}
+			if workflowMeta := approvalWorkflowMetadata(payload); workflowMeta != nil {
+				if _, exists := item["workflow_id"]; !exists {
+					if value := firstStringValue(workflowMeta, "workflow_id"); value != "" {
+						item["workflow_id"] = value
+					}
+				}
+				if _, exists := item["workflow_run_id"]; !exists {
+					if value := firstStringValue(workflowMeta, "run_id"); value != "" {
+						item["workflow_run_id"] = value
+					}
+				}
+				if value := firstStringValue(workflowMeta, "workflow_name"); value != "" {
+					item["workflow_name"] = value
+				}
+				if value := firstStringValue(workflowMeta, "step_id"); value != "" {
+					item["workflow_step_id"] = value
+				}
+				if value := firstStringValue(workflowMeta, "step_name"); value != "" {
+					item["step_name"] = value
+				}
+			}
+			item["decision_summary"] = buildApprovalDecisionSummary(req, record.Reason, payload, contextStatus)
 		}
 		items = append(items, item)
 	}
@@ -389,7 +670,8 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 			result = handlerResult{http.StatusConflict, "approval job hash unavailable"}
 			return nil
 		}
-		isWorkflowGate := strings.TrimSpace(req.GetTopic()) == capsdk.SubjectApprovalGate
+		topic := strings.TrimSpace(req.GetTopic())
+		isWorkflowGate := topic == capsdk.SubjectApprovalGate || topic == capsdk.SubjectWorkflowApprovalGate
 		if !isWorkflowGate && req.Labels != nil && strings.EqualFold(strings.TrimSpace(req.Labels["gate_type"]), "workflow_approval") {
 			isWorkflowGate = true
 		}
@@ -699,4 +981,3 @@ func snapshotBase(snap string) string {
 	}
 	return snap
 }
-

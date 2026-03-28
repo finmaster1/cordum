@@ -477,6 +477,105 @@ func TestListApprovalsIncludesResolutionFields(t *testing.T) {
 	}
 }
 
+func TestListResolvedWorkflowApprovalsRetainsDecisionSummaryAndAuditFields(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-approval-workflow-resolved"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+	if err := s.memStore.PutContext(ctx, ctxKey, []byte(`{"kind":"workflow_approval_context","version":1,"workflow":{"workflow_id":"wf-b2b","run_id":"run-b2b","step_id":"approve","step_name":"Manager Approval"},"decision":{"amount":2500,"currency":"USD","vendor":"Acme Travel","escalation_reason":"budget threshold exceeded"}}`)); err != nil {
+		t.Fatalf("put context: %v", err)
+	}
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		TenantId:   "default",
+		Labels: map[string]string{
+			"workflow_id": "wf-b2b",
+			"run_id":      "run-b2b",
+			"step_id":     "approve",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	if err := s.jobStore.SetJobMeta(ctx, req); err != nil {
+		t.Fatalf("set job meta: %v", err)
+	}
+	if err := s.jobStore.SetJobRequest(ctx, req); err != nil {
+		t.Fatalf("set job req: %v", err)
+	}
+	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
+		t.Fatalf("set approval state: %v", err)
+	}
+	if err := s.jobStore.SetState(ctx, jobID, model.JobStateSucceeded); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	if err := s.jobStore.SetTenant(ctx, jobID, "default"); err != nil {
+		t.Fatalf("set tenant: %v", err)
+	}
+	if err := s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		PolicySnapshot:   "snap-b2b",
+		JobHash:          "hash-b2b",
+		Reason:           "finance approval required",
+	}); err != nil {
+		t.Fatalf("set safety decision: %v", err)
+	}
+	if err := s.jobStore.SetApprovalRecord(ctx, jobID, store.ApprovalRecord{
+		ApprovedBy:     "manager-1",
+		ApprovedRole:   "manager",
+		ApprovedAt:     1709000001000000,
+		Reason:         "approved",
+		Note:           "within quarterly budget",
+		PolicySnapshot: "snap-b2b",
+		JobHash:        "hash-b2b",
+	}); err != nil {
+		t.Fatalf("set approval record: %v", err)
+	}
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals", nil)
+	httpReq.Header.Set("X-Tenant-ID", "default")
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Items) == 0 {
+		t.Fatalf("expected approvals")
+	}
+
+	item := payload.Items[0]
+	summary, ok := item["decision_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected decision_summary object got %#v", item["decision_summary"])
+	}
+	if summary["source"] != "workflow_payload" {
+		t.Fatalf("expected workflow_payload source got %#v", summary["source"])
+	}
+	if summary["context_status"] != "available" {
+		t.Fatalf("expected available context status got %#v", summary["context_status"])
+	}
+	if summary["vendor"] != "Acme Travel" {
+		t.Fatalf("expected vendor Acme Travel got %#v", summary["vendor"])
+	}
+	if item["policy_snapshot"] != "snap-b2b" || item["job_hash"] != "hash-b2b" {
+		t.Fatalf("expected audit metadata preserved got snapshot=%#v hash=%#v", item["policy_snapshot"], item["job_hash"])
+	}
+	if item["resolved_by"] != "manager-1" {
+		t.Fatalf("expected resolved_by manager-1 got %#v", item["resolved_by"])
+	}
+}
+
 func TestListApprovalsOmitsResolutionFieldsWhenNoRecord(t *testing.T) {
 	s, _, _ := newTestGateway(t)
 
@@ -740,13 +839,13 @@ func TestApproveJob_RejectsTimedOutRun(t *testing.T) {
 		t.Fatalf("save workflow: %v", err)
 	}
 	run := &wf.WorkflowRun{
-		ID:         "run-timedout-1",
-		WorkflowID: wfDef.ID,
-		OrgID:      "default",
-		Status:     wf.RunStatusTimedOut,
-		Steps:      map[string]*wf.StepRun{},
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:          "run-timedout-1",
+		WorkflowID:  wfDef.ID,
+		OrgID:       "default",
+		Status:      wf.RunStatusTimedOut,
+		Steps:       map[string]*wf.StepRun{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
 		CompletedAt: &now,
 	}
 	if err := s.workflowStore.CreateRun(ctx, run); err != nil {

@@ -159,8 +159,11 @@ export function WorkflowStudio() {
   );
 
   // --- Build workflow payload from current graph state ---
+  // Uses canvasHandle.getGraph() for guaranteed-fresh state (reads React hook
+  // state via refs, not the useLayoutEffect-synced graphRef). Falls back to
+  // graphRef.current if canvasHandle isn't mounted yet.
   const buildPayload = useCallback((): Partial<Workflow> => {
-    const currentGraph = graphRef.current;
+    const currentGraph = canvasHandle.current?.getGraph() ?? graphRef.current;
     if (!currentGraph) return { name, steps: [] };
 
     const definition = graphToDefinition(currentGraph.nodes, currentGraph.edges, {

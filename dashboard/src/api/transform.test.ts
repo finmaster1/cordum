@@ -140,6 +140,193 @@ describe("api/transform mappings", () => {
     expect(approval?.urgencyLevel).toBeDefined();
   });
 
+  it("maps decision-first approval summaries into stable frontend fields", () => {
+    const approval = mapApprovalItem({
+      approval_ref: "approval-rich",
+      policy_reason: "fallback policy reason",
+      workflow_id: "wf-7",
+      workflow_name: "Expense Approval",
+      workflow_run_id: "run-7",
+      workflow_step_id: "approve-budget",
+      step_name: "Budget Review",
+      context_ptr: "redis://ctx:job-7",
+      job_input: {
+        decision: {
+          vendor: "Acme Travel",
+        },
+      },
+      decision_summary: {
+        source: "workflow_payload",
+        completeness: "rich",
+        context_status: "available",
+        title: "Approve 1250 USD request with Acme Travel",
+        subject: "Approve 1250 USD request with Acme Travel",
+        why: "manager threshold exceeded",
+        next_effect: "Approve to continue Budget Review.",
+        amount: 1250,
+        currency: "USD",
+        vendor: "Acme Travel",
+        item_count: 2,
+        items_preview: ["flight", "hotel"],
+        escalation_reason: "manager threshold exceeded",
+        missing_fields: [],
+      },
+      job: {
+        id: "job-7",
+        topic: "job.workflow.approval",
+        state: "APPROVAL_REQUIRED",
+        updated_at: Date.now() * 1000,
+      },
+    });
+
+    expect(approval).not.toBeNull();
+    expect(approval?.decisionSummary?.source).toBe("workflow_payload");
+    expect(approval?.decisionSummary?.vendor).toBe("Acme Travel");
+    expect(approval?.decisionSummary?.amount).toBe(1250);
+    expect(approval?.decisionSummary?.itemsPreview).toEqual(["flight", "hotel"]);
+    expect(approval?.reason).toBe("manager threshold exceeded");
+    expect(approval?.humanSummary).toBe(
+      "Approve 1250 USD request with Acme Travel",
+    );
+    expect(approval?.workflowContext).toEqual({
+      workflowId: "wf-7",
+      workflowName: "Expense Approval",
+      runId: "run-7",
+      stepId: "approve-budget",
+      stepIndex: undefined,
+      stepName: "Budget Review",
+      totalSteps: undefined,
+    });
+    expect(approval?.contextPtr).toBe("redis://ctx:job-7");
+    expect(approval?.jobInput).toEqual({
+      decision: {
+        vendor: "Acme Travel",
+      },
+    });
+  });
+
+  it("falls back to legacy approval fields when decision summaries are absent or invalid", () => {
+    const approval = mapApprovalItem({
+      approval_ref: "approval-legacy",
+      policy_reason: "Requires manual review",
+      decision_summary: {
+        source: "policy_only",
+        completeness: "minimal",
+        context_status: "absent",
+        title: "   ",
+      },
+      job: {
+        id: "job-legacy",
+        topic: "job.review",
+        state: "APPROVAL_REQUIRED",
+        updated_at: Date.now() * 1000,
+      },
+    });
+
+    expect(approval).not.toBeNull();
+    expect(approval?.decisionSummary).toBeUndefined();
+    expect(approval?.reason).toBe("Requires manual review");
+    expect(approval?.humanSummary).toContain('Job on "job.review"');
+  });
+
+  it("maps degraded workflow approvals with missing context markers into stable frontend fields", () => {
+    const approval = mapApprovalItem({
+      approval_ref: "approval-missing-context",
+      policy_reason: "manager review required",
+      workflow_id: "wf-9",
+      workflow_name: "Expense Approval",
+      workflow_run_id: "run-9",
+      workflow_step_id: "manager-approval",
+      step_name: "Manager Approval",
+      context_ptr: "redis://ctx:job-9",
+      decision_summary: {
+        source: "workflow_payload",
+        completeness: "partial",
+        context_status: "missing",
+        title: "Approve manager-approval",
+        why: "manager review required",
+        missing_fields: ["approval_context", "business_context"],
+      },
+      job: {
+        id: "job-9",
+        topic: "job.workflow.approval",
+        state: "APPROVAL_REQUIRED",
+        updated_at: Date.now() * 1000,
+      },
+    });
+
+    expect(approval).not.toBeNull();
+    expect(approval?.status).toBe("pending");
+    expect(approval?.decisionSummary?.source).toBe("workflow_payload");
+    expect(approval?.decisionSummary?.contextStatus).toBe("missing");
+    expect(approval?.decisionSummary?.completeness).toBe("partial");
+    expect(approval?.decisionSummary?.missingFields).toEqual([
+      "approval_context",
+      "business_context",
+    ]);
+    expect(approval?.humanSummary).toBe("Approve manager-approval");
+    expect(approval?.reason).toBe("manager review required");
+    expect(approval?.contextPtr).toBe("redis://ctx:job-9");
+    expect(approval?.jobInput).toBeUndefined();
+    expect(approval?.workflowContext?.stepName).toBe("Manager Approval");
+  });
+
+  it("maps resolved denied workflow approvals without losing decision-first fields", () => {
+    const approval = mapApprovalItem({
+      approval_ref: "approval-denied",
+      policy_reason: "finance approval required",
+      resolved_by: "manager-2",
+      resolved_at: 1_709_000_002_000_000,
+      resolved_comment: "over budget for this quarter",
+      workflow_id: "wf-10",
+      workflow_name: "Expense Approval",
+      workflow_run_id: "run-10",
+      workflow_step_id: "approve",
+      step_name: "Manager Approval",
+      context_ptr: "redis://ctx:job-10",
+      decision_summary: {
+        source: "workflow_payload",
+        completeness: "rich",
+        context_status: "available",
+        title: "Approve 8800 USD request with Contoso Travel",
+        why: "budget threshold exceeded",
+        amount: 8800,
+        currency: "USD",
+        vendor: "Contoso Travel",
+        escalation_reason: "budget threshold exceeded",
+      },
+      job_input: {
+        decision: {
+          vendor: "Contoso Travel",
+          amount: 8800,
+        },
+      },
+      job: {
+        id: "job-10",
+        topic: "job.workflow.approval",
+        state: "DENIED",
+        updated_at: Date.now() * 1000,
+      },
+    });
+
+    expect(approval).not.toBeNull();
+    expect(approval?.status).toBe("denied");
+    expect(approval?.actor).toBe("manager-2");
+    expect(approval?.comment).toBe("over budget for this quarter");
+    expect(approval?.decisionSummary?.vendor).toBe("Contoso Travel");
+    expect(approval?.decisionSummary?.contextStatus).toBe("available");
+    expect(approval?.humanSummary).toBe(
+      "Approve 8800 USD request with Contoso Travel",
+    );
+    expect(approval?.jobInput).toEqual({
+      decision: {
+        vendor: "Contoso Travel",
+        amount: 8800,
+      },
+    });
+    expect(approval?.resolvedAt).toContain("T");
+  });
+
   it("maps policy bundle detail content and tolerates malformed YAML", () => {
     const mapped = mapPolicyBundleDetail({
       id: "bundle-1",

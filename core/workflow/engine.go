@@ -668,16 +668,56 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 			// Approval steps dispatch a gate job so they appear in the unified
 			// /approvals list. The scheduler places the job in APPROVAL_REQUIRED
 			// state; once approved, it auto-completes and the result flows back
-			// through HandleJobResult to advance the workflow.
+			// through HandleJobResult to advance the workflow. The approval job
+			// must carry a persisted context_ptr with structured human decision
+			// data; if payload build or context persistence fails we fail the step
+			// before entering WAITING so operators never see a blind approval.
 			if step.Type == StepTypeApproval {
 				if parentSR.Status == "" || parentSR.Status == StepStatusPending {
 					jobID := fmt.Sprintf("%s:%s@1", run.ID, stepID)
-					req := e.buildApprovalGateRequest(wfDef, run, step, stepID, jobID)
+					req := e.buildApprovalGateRequest(ctx, wfDef, run, step, stepID, jobID)
+					payload, err := e.buildApprovalPayload(wfDef, run, step, stepID, now)
+					if err != nil {
+						parentSR.Status = StepStatusFailed
+						parentSR.Error = map[string]any{"message": err.Error()}
+						run.Steps[stepID] = parentSR
+						slog.Error("approval payload build failed", "run_id", run.ID, "step_id", stepID, "error", err)
+						e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), nil)
+						if e.OnStepFinished != nil {
+							e.OnStepFinished(run.ID, stepID, parentSR.Status)
+						}
+						continue
+					}
+					ptr, err := e.putJobContext(ctx, jobID, payload)
+					if err != nil || strings.TrimSpace(ptr) == "" {
+						if err == nil {
+							err = errors.New("approval context store unavailable")
+						}
+						parentSR.Status = StepStatusFailed
+						parentSR.Error = map[string]any{"message": err.Error()}
+						parentSR.Input = payload
+						run.Steps[stepID] = parentSR
+						slog.Error("approval context store failed", "run_id", run.ID, "step_id", stepID, "job_id", jobID, "error", err)
+						e.appendTimeline(ctx, run, "step_failed", stepID, jobID, string(parentSR.Status), "", err.Error(), map[string]any{"approval_payload": payload})
+						if e.OnStepFinished != nil {
+							e.OnStepFinished(run.ID, stepID, parentSR.Status)
+						}
+						continue
+					}
+					req.ContextPtr = ptr
 
 					parentSR.Status = StepStatusWaiting
 					parentSR.StartedAt = &now
 					parentSR.JobID = jobID
 					parentSR.Attempts = 1
+					if parentSR.Input != nil {
+						for k, v := range parentSR.Input {
+							if _, exists := payload[k]; !exists {
+								payload[k] = v
+							}
+						}
+					}
+					parentSR.Input = payload
 					run.Status = RunStatusWaiting
 					run.Steps[stepID] = parentSR
 
@@ -704,7 +744,7 @@ func (e *Engine) scheduleReady(ctx context.Context, wfDef *Workflow, run *Workfl
 								"run_id", run.ID, "step_id", stepID, "error", updateErr)
 						}
 					} else {
-						e.appendTimeline(ctx, run, "step_waiting", stepID, jobID, string(parentSR.Status), "", "approval requested", nil)
+						e.appendTimeline(ctx, run, "step_waiting", stepID, jobID, string(parentSR.Status), "", "approval requested", map[string]any{"context_ptr": req.ContextPtr})
 						if e.OnStepDispatched != nil {
 							e.OnStepDispatched(run.ID, stepID, jobID)
 						}

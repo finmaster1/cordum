@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/cordum/cordum/core/controlplane/scheduler"
+	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
+	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,6 +119,68 @@ func TestListApprovalsEmptySafetyDecision(t *testing.T) {
 	assert.Len(t, items, 1, "item with empty safety decision should still be listed")
 }
 
+func TestListApprovalsIncludesWorkflowApprovalJobInput(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-workflow-context"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+	payload := []byte(`{"kind":"workflow_approval_context","version":1,"workflow":{"workflow_id":"wf-1","run_id":"run-1","step_id":"approve","step_name":"Manager Approval"},"decision":{"amount":1250,"currency":"USD","vendor":"Acme Travel","escalation_reason":"manager threshold exceeded"}}`)
+	require.NoError(t, s.memStore.PutContext(ctx, ctxKey, payload))
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		Labels: map[string]string{
+			"workflow_id": "wf-1",
+			"run_id":      "run-1",
+			"step_id":     "approve",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		JobHash:          "hash-" + jobID,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	item := items[0].(map[string]any)
+	assert.Equal(t, ctxPtr, item["context_ptr"])
+	assert.Equal(t, "wf-1", item["workflow_id"])
+	assert.Equal(t, "run-1", item["workflow_run_id"])
+
+	jobInput, ok := item["job_input"].(map[string]any)
+	require.True(t, ok, "expected job_input map")
+	decision, ok := jobInput["decision"].(map[string]any)
+	require.True(t, ok, "expected decision map")
+	assert.Equal(t, "Acme Travel", decision["vendor"])
+
+	summary, ok := item["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "workflow_payload", summary["source"])
+	assert.Equal(t, "rich", summary["completeness"])
+	assert.Equal(t, "available", summary["context_status"])
+	assert.Equal(t, "Acme Travel", summary["vendor"])
+	assert.Equal(t, "manager threshold exceeded", summary["why"])
+	assert.Contains(t, summary["title"], "Acme Travel")
+}
+
 func TestApproveJobWithTraceIDError(t *testing.T) {
 	s, _, sc := newTestGateway(t)
 	sc.setSnapshots([]string{"snap-test"})
@@ -140,6 +204,373 @@ func TestApproveJobWithTraceIDError(t *testing.T) {
 	assert.Equal(t, jobID, resp["job_id"])
 	// trace_id should be empty string (not nil, not error).
 	assert.Equal(t, "", resp["trace_id"], "trace_id should be empty when lookup fails")
+}
+
+func TestApproveWorkflowGateByTopicWithoutGateLabel(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-workflow-topic-only"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+	require.NoError(t, s.memStore.PutContext(ctx, ctxKey, []byte(`{"kind":"workflow_approval_context","version":1,"workflow":{"workflow_id":"wf-1","run_id":"run-1","step_id":"approve"}}`)))
+
+	jobReq := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, jobReq))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, jobReq))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	hash, err := scheduler.HashJobRequest(jobReq)
+	require.NoError(t, err)
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		JobHash:          hash,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/approve", strings.NewReader(`{"reason":"ok"}`))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.SetPathValue("job_id", jobID)
+	rr := httptest.NewRecorder()
+	s.handleApproveJob(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code, "workflow gate approval should succeed when identified by topic only; body: %s", rr.Body.String())
+}
+
+func TestListApprovalsDecisionSummaryMarksMalformedContext(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-workflow-malformed-context"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+	require.NoError(t, s.memStore.PutContext(ctx, ctxKey, []byte(`{"broken":`)))
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		Labels: map[string]string{
+			"workflow_id": "wf-2",
+			"run_id":      "run-2",
+			"step_id":     "manager-approval",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		Reason:           "manager review required",
+		JobHash:          "hash-" + jobID,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	summary, ok := items[0].(map[string]any)["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "workflow_payload", summary["source"])
+	assert.Equal(t, "malformed", summary["context_status"])
+	assert.Equal(t, "partial", summary["completeness"])
+	assert.Equal(t, "manager review required", summary["why"])
+	assert.Contains(t, summary["missing_fields"].([]any), "approval_context")
+	assert.Contains(t, summary["missing_fields"].([]any), "business_context")
+}
+
+func TestListApprovalsDecisionSummaryMarksPartialAvailableContext(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-workflow-partial-context"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+	payload := []byte(`{"kind":"workflow_approval_context","version":1,"workflow":{"workflow_id":"wf-3","run_id":"run-3","step_id":"legal-review","step_name":"Legal Review"},"decision":{"approval_reason":"legal sign-off required"}}`)
+	require.NoError(t, s.memStore.PutContext(ctx, ctxKey, payload))
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		Labels: map[string]string{
+			"workflow_id": "wf-3",
+			"run_id":      "run-3",
+			"step_id":     "legal-review",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		Reason:           "fallback reason should not win",
+		JobHash:          "hash-" + jobID,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	summary, ok := items[0].(map[string]any)["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "workflow_payload", summary["source"])
+	assert.Equal(t, "available", summary["context_status"])
+	assert.Equal(t, "partial", summary["completeness"])
+	assert.Equal(t, "legal sign-off required", summary["why"])
+	assert.Equal(t, "Approve Legal Review", summary["title"])
+
+	missingFields, ok := summary["missing_fields"].([]any)
+	require.True(t, ok, "expected missing_fields array")
+	assert.Contains(t, missingFields, "business_context")
+	assert.NotContains(t, missingFields, "approval_context")
+	assert.NotContains(t, missingFields, "why")
+}
+
+func TestListApprovalsDecisionSummaryMarksMissingContext(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-workflow-missing-context"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		Labels: map[string]string{
+			"workflow_id": "wf-4",
+			"run_id":      "run-4",
+			"step_id":     "manager-approval",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		Reason:           "manager review required",
+		JobHash:          "hash-" + jobID,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	item := items[0].(map[string]any)
+	assert.Equal(t, ctxPtr, item["context_ptr"])
+	_, hasJobInput := item["job_input"]
+	assert.False(t, hasJobInput, "missing context should not synthesize job_input")
+
+	summary, ok := item["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "workflow_payload", summary["source"])
+	assert.Equal(t, "missing", summary["context_status"])
+	assert.Equal(t, "partial", summary["completeness"])
+	assert.Equal(t, "manager review required", summary["why"])
+	assert.Equal(t, "Approve manager-approval", summary["title"])
+	assert.Contains(t, summary["missing_fields"].([]any), "approval_context")
+	assert.Contains(t, summary["missing_fields"].([]any), "business_context")
+}
+
+func TestListApprovalsDecisionSummaryMarksUnavailableWhenMemoryStoreMissing(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+	s.memStore = nil
+
+	jobID := "job-workflow-unavailable-context"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		Labels: map[string]string{
+			"workflow_id": "wf-5",
+			"run_id":      "run-5",
+			"step_id":     "director-approval",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		Reason:           "director sign-off required",
+		JobHash:          "hash-" + jobID,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	item := items[0].(map[string]any)
+	assert.Equal(t, ctxPtr, item["context_ptr"])
+	_, hasJobInput := item["job_input"]
+	assert.False(t, hasJobInput, "unavailable context should not expose a blank job_input")
+
+	summary, ok := item["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "workflow_payload", summary["source"])
+	assert.Equal(t, "unavailable", summary["context_status"])
+	assert.Equal(t, "partial", summary["completeness"])
+	assert.Equal(t, "director sign-off required", summary["why"])
+	assert.Contains(t, summary["missing_fields"].([]any), "approval_context")
+	assert.Contains(t, summary["missing_fields"].([]any), "business_context")
+}
+
+func TestListApprovalsDecisionSummaryFallsBackForLegacyApprovals(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-legacy-approval-summary"
+	req := &pb.JobRequest{
+		JobId:    jobID,
+		Topic:    "job.finance.expense.review",
+		TenantId: "default",
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		Reason:           "finance review required",
+		PolicySnapshot:   "snap-legacy",
+		JobHash:          "hash-" + jobID,
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals?include_resolved=false", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	item := items[0].(map[string]any)
+	summary, ok := item["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "policy_only", summary["source"])
+	assert.Equal(t, "minimal", summary["completeness"])
+	assert.Equal(t, "absent", summary["context_status"])
+	assert.Equal(t, "finance review required", summary["why"])
+	assert.Equal(t, "Review job.finance.expense.review", summary["title"])
+	_, hasJobInput := item["job_input"]
+	assert.False(t, hasJobInput, "legacy approvals should not require synthetic job_input blobs")
+}
+
+func TestListResolvedDeniedWorkflowApprovalsRetainDecisionSummaryAndAuditFields(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-workflow-denied-resolved"
+	ctxKey := store.MakeContextKey(jobID)
+	ctxPtr := store.PointerForKey(ctxKey)
+	payload := []byte(`{"kind":"workflow_approval_context","version":1,"workflow":{"workflow_id":"wf-b2b-denied","run_id":"run-b2b-denied","step_id":"approve","step_name":"Manager Approval"},"decision":{"amount":8800,"currency":"USD","vendor":"Contoso Travel","escalation_reason":"budget threshold exceeded"}}`)
+	require.NoError(t, s.memStore.PutContext(ctx, ctxKey, payload))
+
+	req := &pb.JobRequest{
+		JobId:      jobID,
+		Topic:      capsdk.SubjectWorkflowApprovalGate,
+		ContextPtr: ctxPtr,
+		TenantId:   "default",
+		Labels: map[string]string{
+			"workflow_id": "wf-b2b-denied",
+			"run_id":      "run-b2b-denied",
+			"step_id":     "approve",
+			"gate_type":   "workflow_approval",
+		},
+	}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, req))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, req))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateApproval))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateDenied))
+	require.NoError(t, s.jobStore.SetTenant(ctx, jobID, "default"))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		PolicySnapshot:   "snap-b2b-denied",
+		JobHash:          "hash-b2b-denied",
+		Reason:           "finance approval required",
+	}))
+	require.NoError(t, s.jobStore.SetApprovalRecord(ctx, jobID, store.ApprovalRecord{
+		ApprovedBy:     "manager-2",
+		ApprovedRole:   "manager",
+		ApprovedAt:     1709000002000000,
+		Reason:         "rejected",
+		Note:           "over budget for this quarter",
+		PolicySnapshot: "snap-b2b-denied",
+		JobHash:        "hash-b2b-denied",
+	}))
+
+	httpReq := httptest.NewRequest(http.MethodGet, "/api/v1/approvals", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, httpReq)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	require.Len(t, items, 1)
+
+	item := items[0].(map[string]any)
+	summary, ok := item["decision_summary"].(map[string]any)
+	require.True(t, ok, "expected decision_summary map")
+	assert.Equal(t, "workflow_payload", summary["source"])
+	assert.Equal(t, "available", summary["context_status"])
+	assert.Equal(t, "Contoso Travel", summary["vendor"])
+	assert.Equal(t, "budget threshold exceeded", summary["why"])
+	assert.Equal(t, "snap-b2b-denied", item["policy_snapshot"])
+	assert.Equal(t, "hash-b2b-denied", item["job_hash"])
+	assert.Equal(t, "manager-2", item["resolved_by"])
+	assert.Equal(t, "over budget for this quarter", item["resolved_comment"])
+	assert.Equal(t, "rejected", item["resolution"])
 }
 
 func TestRejectJobWithEmptySafetyDecision(t *testing.T) {

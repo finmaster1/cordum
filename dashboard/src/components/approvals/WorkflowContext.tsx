@@ -3,10 +3,6 @@ import { ExternalLink } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { ApprovalWorkflowContext } from "../../api/types";
 
-// ---------------------------------------------------------------------------
-// Step indicator dot
-// ---------------------------------------------------------------------------
-
 function StepDot({
   state,
   label,
@@ -20,12 +16,12 @@ function StepDot({
         className={cn(
           "h-2.5 w-2.5 rounded-full",
           state === "completed" && "bg-[var(--color-success)]",
-          state === "current" && "bg-[var(--color-warning)] animate-pulse",
+          state === "current" && "animate-pulse bg-[var(--color-warning)]",
           state === "pending" && "bg-muted",
         )}
       />
       {label && (
-        <span className="text-xs text-muted-foreground max-w-[60px] text-center truncate">
+        <span className="max-w-[72px] truncate text-center text-xs text-muted-foreground">
           {label}
         </span>
       )}
@@ -33,106 +29,128 @@ function StepDot({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Step connector line
-// ---------------------------------------------------------------------------
-
 function StepLine({ completed }: { completed: boolean }) {
   return (
     <div
       className={cn(
-        "h-0.5 flex-1 min-w-3",
+        "h-0.5 min-w-3 flex-1",
         completed ? "bg-[var(--color-success)]" : "bg-muted",
       )}
     />
   );
 }
 
-// ---------------------------------------------------------------------------
-// WorkflowContext
-// ---------------------------------------------------------------------------
-
 interface WorkflowContextProps {
   workflowContext?: ApprovalWorkflowContext;
+  nextEffect?: string;
+  rejectEffect?: string;
 }
 
-export function WorkflowContext({ workflowContext }: WorkflowContextProps) {
+export function WorkflowContext({
+  workflowContext,
+  nextEffect,
+  rejectEffect,
+}: WorkflowContextProps) {
   if (!workflowContext) {
-    return <p className="text-xs text-muted-foreground">This job is not part of a workflow.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        This approval is not attached to a workflow run. Review the decision
+        summary and audit details below.
+      </p>
+    );
   }
 
-  const { workflowId, runId, stepIndex, stepName, totalSteps } = workflowContext;
+  const {
+    workflowId,
+    workflowName,
+    runId,
+    stepId,
+    stepIndex,
+    stepName,
+    totalSteps,
+  } = workflowContext;
   const hasStepInfo = stepIndex != null && totalSteps != null;
+  const workflowLabel = workflowName?.trim() || workflowId;
+  const stepLabel = stepName || stepId || "Current approval step";
+  const approveMessage =
+    nextEffect ||
+    (hasStepInfo && stepIndex + 1 < totalSteps
+      ? `Approve to continue to step ${stepIndex + 2} of ${totalSteps}.`
+      : "Approve to continue the workflow.");
+  const rejectMessage =
+    rejectEffect || "Reject to stop this workflow path and preserve the audit trail.";
 
   return (
-    <div className="space-y-3">
-      {/* Workflow + Run links */}
-      <div className="space-y-1 text-xs">
-        <p className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">Workflow:</span>
-          <Link
-            to={`/workflows/${workflowId}/studio`}
-            className="font-medium text-accent hover:underline inline-flex items-center gap-1"
-          >
-            {workflowId.slice(0, 16)}
-            <ExternalLink className="h-3 w-3" />
-          </Link>
-        </p>
-        <p>
-          <span className="text-muted-foreground">Run: </span>
-          <Link
-            to={`/workflows/${workflowId}/studio?run=${runId}`}
-            className="font-mono text-accent hover:underline"
-          >
-            {runId.slice(0, 16)}
-          </Link>
-        </p>
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">
+            Workflow
+          </p>
+          {workflowId ? (
+            <Link
+              to={`/workflows/${workflowId}/studio`}
+              className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+            >
+              {workflowLabel}
+              <ExternalLink className="h-3 w-3" />
+            </Link>
+          ) : (
+            <p className="text-sm font-medium text-foreground">{workflowLabel}</p>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">
+            Run
+          </p>
+          {workflowId && runId ? (
+            <Link
+              to={`/workflows/${workflowId}/studio?run=${runId}`}
+              className="font-mono text-sm text-accent hover:underline"
+            >
+              {runId}
+            </Link>
+          ) : (
+            <p className="font-mono text-sm text-foreground">{runId || "—"}</p>
+          )}
+        </div>
       </div>
 
-      {/* Step position */}
-      {hasStepInfo && (
-        <>
-          <p className="text-xs">
-            <span className="text-muted-foreground">Step: </span>
-            <span className="font-medium text-ink">
-              {stepIndex + 1} of {totalSteps}
-              {stepName && ` — ${stepName}`}
-            </span>
+      <div className="rounded-2xl border border-border bg-surface-1/70 p-3">
+        <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">
+          Approval step
+        </p>
+        <p className="mt-1 text-sm font-medium text-foreground">{stepLabel}</p>
+        {hasStepInfo && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Step {stepIndex + 1} of {totalSteps}
           </p>
+        )}
+      </div>
 
-          {/* Visual step indicator */}
-          <div className="flex items-center gap-0.5 py-1">
-            {Array.from({ length: totalSteps }, (_, i) => {
-              const state =
-                i < stepIndex ? "completed" : i === stepIndex ? "current" : "pending";
-              return (
-                <div key={i} className="contents">
-                  {i > 0 && <StepLine completed={i <= stepIndex} />}
-                  <StepDot
-                    state={state}
-                    label={i === stepIndex ? stepName ?? `Step ${i + 1}` : undefined}
-                  />
-                </div>
-              );
-            })}
-          </div>
-
-          {/* What happens next */}
-          <div className="space-y-1 text-xs text-muted-foreground">
-            {stepIndex + 1 < totalSteps && (
-              <p>
-                If approved, workflow continues to step {stepIndex + 2} of {totalSteps}.
-              </p>
-            )}
-            {stepIndex + 1 >= totalSteps && (
-              <p>
-                If approved, this is the final step — workflow will complete.
-              </p>
-            )}
-            <p>If rejected, the workflow run will be terminated.</p>
-          </div>
-        </>
+      {hasStepInfo && (
+        <div className="flex items-center gap-0.5 py-1">
+          {Array.from({ length: totalSteps }, (_, i) => {
+            const state =
+              i < stepIndex ? "completed" : i === stepIndex ? "current" : "pending";
+            return (
+              <div key={i} className="contents">
+                {i > 0 && <StepLine completed={i <= stepIndex} />}
+                <StepDot
+                  state={state}
+                  label={i === stepIndex ? stepLabel : undefined}
+                />
+              </div>
+            );
+          })}
+        </div>
       )}
+
+      <div className="space-y-2 text-xs text-muted-foreground">
+        <p>{approveMessage}</p>
+        <p>{rejectMessage}</p>
+      </div>
     </div>
   );
 }

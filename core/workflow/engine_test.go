@@ -2,13 +2,17 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	miniredis "github.com/alicebob/miniredis/v2"
+	memstore "github.com/cordum/cordum/core/infra/store"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/google/uuid"
@@ -61,6 +65,20 @@ func newWorkflowStore(t *testing.T) *RedisStore {
 	}
 	return store
 }
+
+type failingContextStore struct {
+	err error
+}
+
+func (f *failingContextStore) PutContext(context.Context, string, []byte) error { return f.err }
+func (f *failingContextStore) GetContext(context.Context, string) ([]byte, error) {
+	return nil, f.err
+}
+func (f *failingContextStore) PutResult(context.Context, string, []byte) error { return f.err }
+func (f *failingContextStore) GetResult(context.Context, string) ([]byte, error) {
+	return nil, f.err
+}
+func (f *failingContextStore) Close() error { return nil }
 
 func TestEngineForEachFanoutAndAggregateSuccess(t *testing.T) {
 	store := newWorkflowStore(t)
@@ -1187,6 +1205,650 @@ func TestCrashRecovery_SuccessfulDispatchPersistsRunningState(t *testing.T) {
 	}
 }
 
+func TestWorkflowApprovalStepPersistsStructuredContext(t *testing.T) {
+	wfStore := newWorkflowStore(t)
+	defer wfStore.Close()
+
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(wfStore, bus).WithMemory(memStore)
+
+	wfDef := &Workflow{
+		ID:    "wf-approval-rich",
+		OrgID: "org-1",
+		Name:  "Vendor approvals",
+		Steps: map[string]*Step{
+			"approve": {
+				ID:   "approve",
+				Name: "Manager Approval",
+				Type: StepTypeApproval,
+				Input: map[string]any{
+					"amount":            "${input.request.amount}",
+					"currency":          "${input.request.currency}",
+					"vendor":            "${input.request.vendor.name}",
+					"items":             "${input.request.items}",
+					"escalation_reason": "${steps.risk.output.reason}",
+					"optional_note":     "${input.request.note}",
+				},
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount":   map[string]any{"type": "number"},
+						"currency": map[string]any{"type": "string"},
+						"vendor":   map[string]any{"type": "string"},
+						"items":    map[string]any{"type": "array"},
+					},
+					"required": []any{"amount", "currency", "vendor", "items"},
+				},
+			},
+		},
+	}
+	if err := wfStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	// This run models the production contract later consumed by the approvals
+	// API/UI: workflow metadata plus structured decision data (amount, vendor,
+	// items, escalation reason), with missing optional fields omitted entirely.
+	run := &WorkflowRun{
+		ID:          "run-approval-rich",
+		WorkflowID:  wfDef.ID,
+		OrgID:       "org-1",
+		TeamID:      "team-1",
+		TriggeredBy: "alice",
+		Input: map[string]any{
+			"request": map[string]any{
+				"amount":   4200,
+				"currency": "USD",
+				"vendor":   map[string]any{"name": "Acme Travel"},
+				"items": []any{
+					map[string]any{"sku": "flight", "price": 4200},
+				},
+			},
+		},
+		Context: map[string]any{
+			"steps": map[string]any{
+				"risk": map[string]any{
+					"output": map[string]any{
+						"reason": "manager threshold exceeded",
+					},
+				},
+			},
+		},
+		Status:    RunStatusPending,
+		Steps:     map[string]*StepRun{},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := wfStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if bus.Count() != 1 {
+		t.Fatalf("expected one approval dispatch, got %d", bus.Count())
+	}
+
+	final, err := wfStore.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	sr := final.Steps["approve"]
+	if sr == nil {
+		t.Fatal("expected approval step state")
+	}
+	if sr.Status != StepStatusWaiting {
+		t.Fatalf("expected approval step waiting, got %s", sr.Status)
+	}
+	if final.Status != RunStatusWaiting {
+		t.Fatalf("expected run waiting, got %s", final.Status)
+	}
+
+	req := bus.Snapshot()[0].packet.GetJobRequest()
+	if req == nil {
+		t.Fatal("expected approval job request")
+	}
+	if req.Topic != capsdk.SubjectWorkflowApprovalGate {
+		t.Fatalf("expected workflow approval topic, got %q", req.Topic)
+	}
+	if req.ContextPtr == "" {
+		t.Fatal("expected context_ptr on approval job request")
+	}
+	if got := req.Labels["gate_type"]; got != "workflow_approval" {
+		t.Fatalf("expected gate_type workflow_approval, got %q", got)
+	}
+
+	key, err := memstore.KeyFromPointer(req.ContextPtr)
+	if err != nil {
+		t.Fatalf("parse context ptr: %v", err)
+	}
+	raw, err := memStore.GetContext(context.Background(), key)
+	if err != nil {
+		t.Fatalf("fetch approval context: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode approval payload: %v", err)
+	}
+	if payload["kind"] != ApprovalContextKindWorkflow {
+		t.Fatalf("expected workflow approval payload kind, got %#v", payload["kind"])
+	}
+	if payload["version"] != float64(ApprovalContextVersionV1) {
+		t.Fatalf("expected approval payload version %d, got %#v", ApprovalContextVersionV1, payload["version"])
+	}
+	workflowMeta, ok := payload["workflow"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected workflow metadata object, got %T", payload["workflow"])
+	}
+	if workflowMeta["workflow_id"] != wfDef.ID || workflowMeta["run_id"] != run.ID {
+		t.Fatalf("unexpected workflow metadata: %#v", workflowMeta)
+	}
+	if workflowMeta["step_name"] != "Manager Approval" {
+		t.Fatalf("expected step_name Manager Approval, got %#v", workflowMeta["step_name"])
+	}
+	if workflowMeta["triggered_by"] != "alice" {
+		t.Fatalf("expected triggered_by alice, got %#v", workflowMeta["triggered_by"])
+	}
+	decision, ok := payload["decision"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected decision object, got %T", payload["decision"])
+	}
+	if decision["vendor"] != "Acme Travel" {
+		t.Fatalf("expected vendor Acme Travel, got %#v", decision["vendor"])
+	}
+	if decision["escalation_reason"] != "manager threshold exceeded" {
+		t.Fatalf("expected escalation reason, got %#v", decision["escalation_reason"])
+	}
+	if _, exists := decision["optional_note"]; exists {
+		t.Fatalf("optional_note should be omitted when missing, got %#v", decision["optional_note"])
+	}
+	if !reflect.DeepEqual(sr.Input, payload) {
+		t.Fatalf("step input should match persisted approval payload\nstep=%#v\npayload=%#v", sr.Input, payload)
+	}
+}
+
+func TestWorkflowApprovalStepSupportsLegacyMetadataOnlyPayload(t *testing.T) {
+	wfStore := newWorkflowStore(t)
+	defer wfStore.Close()
+
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(wfStore, bus).WithMemory(memStore)
+
+	wfDef := &Workflow{
+		ID:    "wf-approval-legacy",
+		OrgID: "org-1",
+		Name:  "Legacy approvals",
+		Steps: map[string]*Step{
+			"approve": {ID: "approve", Type: StepTypeApproval},
+		},
+	}
+	if err := wfStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	run := &WorkflowRun{
+		ID:         "run-approval-legacy",
+		WorkflowID: wfDef.ID,
+		OrgID:      "org-1",
+		Status:     RunStatusPending,
+		Steps:      map[string]*StepRun{},
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := wfStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	req := bus.Snapshot()[0].packet.GetJobRequest()
+	// Legacy approval steps without explicit input must still get a stable
+	// envelope so downstream consumers can identify the workflow gate without
+	// accidentally inheriting the whole workflow run input.
+	key, err := memstore.KeyFromPointer(req.ContextPtr)
+	if err != nil {
+		t.Fatalf("parse context ptr: %v", err)
+	}
+	raw, err := memStore.GetContext(context.Background(), key)
+	if err != nil {
+		t.Fatalf("fetch approval context: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode approval payload: %v", err)
+	}
+	if _, exists := payload["decision"]; exists {
+		t.Fatalf("legacy approval payload should omit decision block, got %#v", payload["decision"])
+	}
+	workflowMeta := payload["workflow"].(map[string]any)
+	if workflowMeta["step_id"] != "approve" {
+		t.Fatalf("expected step_id approve, got %#v", workflowMeta["step_id"])
+	}
+}
+
+func TestWorkflowApprovalStepFailsWhenRequiredDecisionFieldMissing(t *testing.T) {
+	wfStore := newWorkflowStore(t)
+	defer wfStore.Close()
+
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(wfStore, bus).WithMemory(memStore)
+
+	wfDef := &Workflow{
+		ID:    "wf-approval-missing",
+		OrgID: "org-1",
+		Steps: map[string]*Step{
+			"approve": {
+				ID:   "approve",
+				Type: StepTypeApproval,
+				Input: map[string]any{
+					"amount":   "${input.request.amount}",
+					"currency": "${input.request.currency}",
+				},
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount":   map[string]any{"type": "number"},
+						"currency": map[string]any{"type": "string"},
+					},
+					"required": []any{"amount", "currency"},
+				},
+			},
+		},
+	}
+	if err := wfStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	run := &WorkflowRun{
+		ID:         "run-approval-missing",
+		WorkflowID: wfDef.ID,
+		OrgID:      "org-1",
+		Input: map[string]any{
+			"request": map[string]any{"amount": 10},
+		},
+		Status:    RunStatusPending,
+		Steps:     map[string]*StepRun{},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := wfStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if bus.Count() != 0 {
+		t.Fatalf("expected no approval dispatch on validation failure, got %d", bus.Count())
+	}
+
+	final, err := wfStore.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if final.Status != RunStatusFailed {
+		t.Fatalf("expected run failed, got %s", final.Status)
+	}
+	sr := final.Steps["approve"]
+	if sr == nil || sr.Status != StepStatusFailed {
+		t.Fatalf("expected failed approval step, got %#v", sr)
+	}
+	msg, _ := sr.Error["message"].(string)
+	if !strings.Contains(msg, "currency") || !strings.Contains(msg, "resolved to nil") {
+		t.Fatalf("expected explicit missing currency error, got %q", msg)
+	}
+}
+
+func TestWorkflowApprovalStepFailsWhenContextStoreUnavailable(t *testing.T) {
+	wfStore := newWorkflowStore(t)
+	defer wfStore.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(wfStore, bus).WithMemory(&failingContextStore{err: errors.New("context store unavailable")})
+
+	wfDef := &Workflow{
+		ID:    "wf-approval-store-fail",
+		OrgID: "org-1",
+		Steps: map[string]*Step{
+			"approve": {
+				ID:   "approve",
+				Type: StepTypeApproval,
+				Input: map[string]any{
+					"amount": "${input.amount}",
+				},
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount": map[string]any{"type": "number"},
+					},
+					"required": []any{"amount"},
+				},
+			},
+		},
+	}
+	if err := wfStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	run := &WorkflowRun{
+		ID:         "run-approval-store-fail",
+		WorkflowID: wfDef.ID,
+		OrgID:      "org-1",
+		Input:      map[string]any{"amount": 99},
+		Status:     RunStatusPending,
+		Steps:      map[string]*StepRun{},
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := wfStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if bus.Count() != 0 {
+		t.Fatalf("expected no approval dispatch when context store fails, got %d", bus.Count())
+	}
+
+	final, err := wfStore.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	sr := final.Steps["approve"]
+	if sr == nil || sr.Status != StepStatusFailed {
+		t.Fatalf("expected failed approval step, got %#v", sr)
+	}
+	msg, _ := sr.Error["message"].(string)
+	if !strings.Contains(msg, "context store unavailable") {
+		t.Fatalf("expected context store failure in error, got %q", msg)
+	}
+	if sr.Input == nil {
+		t.Fatal("expected failed approval step to retain payload for debugging")
+	}
+}
+
+func TestWorkflowApprovalStepApproveResultAdvancesRunAndPreservesContext(t *testing.T) {
+	wfStore := newWorkflowStore(t)
+	defer wfStore.Close()
+
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(wfStore, bus).WithMemory(memStore)
+
+	wfDef := &Workflow{
+		ID:    "wf-approval-approve",
+		OrgID: "org-1",
+		Name:  "Expense approvals",
+		Steps: map[string]*Step{
+			"approve": {
+				ID:   "approve",
+				Name: "Finance Approval",
+				Type: StepTypeApproval,
+				Input: map[string]any{
+					"amount":   "${input.request.amount}",
+					"currency": "${input.request.currency}",
+					"vendor":   "${input.request.vendor}",
+				},
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount":   map[string]any{"type": "number"},
+						"currency": map[string]any{"type": "string"},
+						"vendor":   map[string]any{"type": "string"},
+					},
+					"required": []any{"amount", "currency", "vendor"},
+				},
+			},
+			"settle": {
+				ID:        "settle",
+				Type:      StepTypeWorker,
+				Topic:     "job.finance.settle",
+				DependsOn: []string{"approve"},
+			},
+		},
+	}
+	if err := wfStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	run := &WorkflowRun{
+		ID:          "run-approval-approve",
+		WorkflowID:  wfDef.ID,
+		OrgID:       "org-1",
+		TeamID:      "team-1",
+		TriggeredBy: "alice",
+		Input: map[string]any{
+			"request": map[string]any{
+				"amount":   1250,
+				"currency": "USD",
+				"vendor":   "Acme Travel",
+			},
+		},
+		Status:    RunStatusPending,
+		Steps:     map[string]*StepRun{},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := wfStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if bus.Count() != 1 {
+		t.Fatalf("expected approval gate dispatch, got %d", bus.Count())
+	}
+
+	req := bus.Snapshot()[0].packet.GetJobRequest()
+	if req == nil || req.ContextPtr == "" {
+		t.Fatal("expected approval gate request with context_ptr")
+	}
+	key, err := memstore.KeyFromPointer(req.ContextPtr)
+	if err != nil {
+		t.Fatalf("parse context ptr: %v", err)
+	}
+	raw, err := memStore.GetContext(context.Background(), key)
+	if err != nil {
+		t.Fatalf("fetch approval context: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode approval payload: %v", err)
+	}
+
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:  req.JobId,
+		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
+	}); err != nil {
+		t.Fatalf("handle approval result: %v", err)
+	}
+	if bus.Count() != 2 {
+		t.Fatalf("expected downstream dispatch after approval, got %d", bus.Count())
+	}
+
+	afterApprove, err := wfStore.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run after approve: %v", err)
+	}
+	approveSR := afterApprove.Steps["approve"]
+	if approveSR == nil || approveSR.Status != StepStatusSucceeded {
+		t.Fatalf("expected approval step succeeded, got %#v", approveSR)
+	}
+	if !reflect.DeepEqual(approveSR.Input, payload) {
+		t.Fatalf("approval step should retain persisted context\nstep=%#v\npayload=%#v", approveSR.Input, payload)
+	}
+	if afterApprove.Status != RunStatusRunning {
+		t.Fatalf("expected run running after approval, got %s", afterApprove.Status)
+	}
+	settleSR := afterApprove.Steps["settle"]
+	if settleSR == nil || settleSR.Status != StepStatusRunning {
+		t.Fatalf("expected settle step running, got %#v", settleSR)
+	}
+	if settleSR.JobID == "" {
+		t.Fatal("expected settle step job id after approval")
+	}
+
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:  settleSR.JobID,
+		Status: pb.JobStatus_JOB_STATUS_SUCCEEDED,
+	}); err != nil {
+		t.Fatalf("handle settle result: %v", err)
+	}
+
+	final, err := wfStore.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get final run: %v", err)
+	}
+	if final.Status != RunStatusSucceeded {
+		t.Fatalf("expected final run succeeded, got %s", final.Status)
+	}
+}
+
+func TestWorkflowApprovalStepDeniedResultStopsRunAndPreservesContext(t *testing.T) {
+	wfStore := newWorkflowStore(t)
+	defer wfStore.Close()
+
+	memStore, srv := newMemoryStore(t)
+	defer srv.Close()
+	defer memStore.Close()
+
+	bus := &recordingBus{}
+	engine := NewEngine(wfStore, bus).WithMemory(memStore)
+
+	wfDef := &Workflow{
+		ID:    "wf-approval-denied",
+		OrgID: "org-1",
+		Name:  "Expense approvals",
+		Steps: map[string]*Step{
+			"approve": {
+				ID:   "approve",
+				Name: "Finance Approval",
+				Type: StepTypeApproval,
+				Input: map[string]any{
+					"amount":   "${input.request.amount}",
+					"currency": "${input.request.currency}",
+					"vendor":   "${input.request.vendor}",
+				},
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"amount":   map[string]any{"type": "number"},
+						"currency": map[string]any{"type": "string"},
+						"vendor":   map[string]any{"type": "string"},
+					},
+					"required": []any{"amount", "currency", "vendor"},
+				},
+			},
+			"settle": {
+				ID:        "settle",
+				Type:      StepTypeWorker,
+				Topic:     "job.finance.settle",
+				DependsOn: []string{"approve"},
+			},
+		},
+	}
+	if err := wfStore.SaveWorkflow(context.Background(), wfDef); err != nil {
+		t.Fatalf("save workflow: %v", err)
+	}
+
+	run := &WorkflowRun{
+		ID:         "run-approval-denied",
+		WorkflowID: wfDef.ID,
+		OrgID:      "org-1",
+		TeamID:     "team-1",
+		Input: map[string]any{
+			"request": map[string]any{
+				"amount":   9800,
+				"currency": "USD",
+				"vendor":   "Contoso Travel",
+			},
+		},
+		Status:    RunStatusPending,
+		Steps:     map[string]*StepRun{},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := wfStore.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := engine.StartRun(context.Background(), wfDef.ID, run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if bus.Count() != 1 {
+		t.Fatalf("expected approval gate dispatch, got %d", bus.Count())
+	}
+
+	req := bus.Snapshot()[0].packet.GetJobRequest()
+	if req == nil || req.ContextPtr == "" {
+		t.Fatal("expected approval gate request with context_ptr")
+	}
+	key, err := memstore.KeyFromPointer(req.ContextPtr)
+	if err != nil {
+		t.Fatalf("parse context ptr: %v", err)
+	}
+	raw, err := memStore.GetContext(context.Background(), key)
+	if err != nil {
+		t.Fatalf("fetch approval context: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode approval payload: %v", err)
+	}
+
+	if err := engine.HandleJobResult(context.Background(), &pb.JobResult{
+		JobId:        req.JobId,
+		Status:       pb.JobStatus_JOB_STATUS_DENIED,
+		ErrorMessage: "manager rejected vendor risk",
+	}); err != nil {
+		t.Fatalf("handle denied approval result: %v", err)
+	}
+	if bus.Count() != 1 {
+		t.Fatalf("expected no downstream dispatch after denial, got %d", bus.Count())
+	}
+
+	final, err := wfStore.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get final run: %v", err)
+	}
+	if final.Status != RunStatusDenied {
+		t.Fatalf("expected denied run, got %s", final.Status)
+	}
+	approveSR := final.Steps["approve"]
+	if approveSR == nil || approveSR.Status != StepStatusDenied {
+		t.Fatalf("expected denied approval step, got %#v", approveSR)
+	}
+	if approveSR.Error["message"] != "manager rejected vendor risk" {
+		t.Fatalf("expected denial reason to be preserved, got %#v", approveSR.Error)
+	}
+	if !reflect.DeepEqual(approveSR.Input, payload) {
+		t.Fatalf("approval step should retain persisted context after denial\nstep=%#v\npayload=%#v", approveSR.Input, payload)
+	}
+	if settleSR := final.Steps["settle"]; settleSR != nil {
+		t.Fatalf("expected downstream step not to dispatch after denial, got %#v", settleSR)
+	}
+}
+
 // TestLockRunCommaOk verifies lockRun doesn't panic when the sync.Map contains
 // a value of the wrong type (e.g. a string instead of *runLock).
 // TestLockRunAcquireRelease verifies basic acquire/release cycle.
@@ -1773,7 +2435,7 @@ func TestEngineDeniedJobResult_WithOnError_Recovers(t *testing.T) {
 		ID:    "wf-denied-recover-e2e",
 		OrgID: "org-1",
 		Steps: map[string]*Step{
-			"main":    {ID: "main", Type: StepTypeWorker, Topic: "job.main", OnError: "fallback"},
+			"main":     {ID: "main", Type: StepTypeWorker, Topic: "job.main", OnError: "fallback"},
 			"fallback": {ID: "fallback", Type: StepTypeWorker, Topic: "job.fallback"},
 		},
 	}

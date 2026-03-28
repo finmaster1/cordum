@@ -67,6 +67,87 @@ describe("useApprovals internals", () => {
     expect(unchanged).toEqual(restored);
   });
 
+  it("preserves decision-first approval data across optimistic rollback helpers", () => {
+    const enriched = makeApproval({
+      id: "a-rich",
+      humanSummary: "Approve 1250 USD request with Acme Travel",
+      decisionSummary: {
+        source: "workflow_payload",
+        completeness: "rich",
+        contextStatus: "available",
+        title: "Approve 1250 USD request with Acme Travel",
+        vendor: "Acme Travel",
+      },
+      workflowContext: {
+        workflowId: "wf-1",
+        workflowName: "Expense Approval",
+        runId: "run-1",
+        stepId: "approve",
+      },
+    });
+    const list: ApiResponse<Approval[]> = {
+      items: [enriched, makeApproval({ id: "a-2", status: "pending" })],
+    };
+
+    const removed = __approvalsInternal.removeApprovalFromList(list, "a-rich");
+    expect(removed?.items!.map((item) => item.id)).toEqual(["a-2"]);
+
+    const restored = __approvalsInternal.restoreApprovalToList(
+      removed,
+      "a-rich",
+      enriched,
+    );
+    const restoredItem = restored?.items?.find((item) => item.id === "a-rich");
+    expect(restoredItem?.decisionSummary?.vendor).toBe("Acme Travel");
+    expect(restoredItem?.workflowContext?.workflowName).toBe("Expense Approval");
+    expect(restoredItem?.humanSummary).toBe(
+      "Approve 1250 USD request with Acme Travel",
+    );
+  });
+
+  it("preserves degraded workflow approval markers across optimistic rollback helpers", () => {
+    const degraded = makeApproval({
+      id: "a-missing",
+      status: "pending",
+      humanSummary: "Approve manager-approval",
+      decisionSummary: {
+        source: "workflow_payload",
+        completeness: "partial",
+        contextStatus: "missing",
+        title: "Approve manager-approval",
+        why: "manager review required",
+        missingFields: ["approval_context", "business_context"],
+      },
+      workflowContext: {
+        workflowId: "wf-9",
+        workflowName: "Expense Approval",
+        runId: "run-9",
+        stepId: "manager-approval",
+      },
+      contextPtr: "redis://ctx:job-9",
+    });
+    const list: ApiResponse<Approval[]> = {
+      items: [degraded, makeApproval({ id: "a-2", status: "pending" })],
+    };
+
+    const removed = __approvalsInternal.removeApprovalFromList(list, "a-missing");
+    const restored = __approvalsInternal.restoreApprovalToList(
+      removed,
+      "a-missing",
+      degraded,
+    );
+    const restoredItem = restored?.items?.find((item) => item.id === "a-missing");
+
+    expect(restoredItem?.decisionSummary?.contextStatus).toBe("missing");
+    expect(restoredItem?.decisionSummary?.missingFields).toEqual([
+      "approval_context",
+      "business_context",
+    ]);
+    expect(restoredItem?.workflowContext?.workflowId).toBe("wf-9");
+    expect(restoredItem?.contextPtr).toBe("redis://ctx:job-9");
+    expect(restoredItem?.humanSummary).toBe("Approve manager-approval");
+  });
+
   it("finds an approval item in mutation snapshots and validates approve-step input", () => {
     const snapshot = {
       previous: [
