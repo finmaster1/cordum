@@ -520,7 +520,7 @@ func newTestRedisServer(t *testing.T) (*server, *miniredis.Miniredis) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	t.Cleanup(func() { rc.Close() })
+	t.Cleanup(func() { _ = rc.Close() })
 	return &server{resultClient: rc}, mr
 }
 

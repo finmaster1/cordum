@@ -416,7 +416,7 @@ func TestInflightKeyFormat(t *testing.T) {
 func TestIdempotencyGuard_ProcessedKeyPreventsReprocessing(t *testing.T) {
 	client, srv := newTestRedis(t)
 	defer srv.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	pKey := processedKey("CORDUM_JOBS", 100)
@@ -449,7 +449,7 @@ func TestIdempotencyGuard_ProcessedKeyPreventsReprocessing(t *testing.T) {
 func TestInflightTracking_SetAndClear(t *testing.T) {
 	client, srv := newTestRedis(t)
 	defer srv.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	iKey := inflightKey("CORDUM_JOBS", 200)
@@ -481,7 +481,7 @@ func TestInflightTracking_SetAndClear(t *testing.T) {
 func TestInflightTracking_TTLExpiry(t *testing.T) {
 	client, srv := newTestRedis(t)
 	defer srv.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	iKey := inflightKey("CORDUM_JOBS", 300)
@@ -652,8 +652,8 @@ func TestBroadcastFanout_BothReplicasReceive(t *testing.T) {
 	}
 
 	// Allow subscriptions to propagate.
-	bus1.nc.Flush()
-	bus2.nc.Flush()
+	_ = bus1.nc.Flush()
+	_ = bus2.nc.Flush()
 	time.Sleep(50 * time.Millisecond)
 
 	// Publish a heartbeat.
@@ -662,7 +662,7 @@ func TestBroadcastFanout_BothReplicasReceive(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	bus1.nc.Flush()
+	_ = bus1.nc.Flush()
 
 	// Wait for delivery.
 	deadline := time.Now().Add(2 * time.Second)
@@ -704,8 +704,8 @@ func TestQueueGroup_OnlyOneReceives(t *testing.T) {
 		t.Fatalf("bus2 subscribe: %v", err)
 	}
 
-	bus1.nc.Flush()
-	bus2.nc.Flush()
+	_ = bus1.nc.Flush()
+	_ = bus2.nc.Flush()
 	time.Sleep(50 * time.Millisecond)
 
 	// Publish multiple messages.
@@ -716,7 +716,7 @@ func TestQueueGroup_OnlyOneReceives(t *testing.T) {
 			t.Fatalf("publish: %v", err)
 		}
 	}
-	bus1.nc.Flush()
+	_ = bus1.nc.Flush()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

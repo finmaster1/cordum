@@ -38,7 +38,7 @@ func writeSelfSignedCert(t *testing.T, certPath, keyPath, cn string) {
 	if err != nil {
 		t.Fatalf("create cert file: %v", err)
 	}
-	defer certFile.Close()
+	defer func() { _ = certFile.Close() }()
 	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
 		t.Fatalf("encode cert: %v", err)
 	}
@@ -51,7 +51,7 @@ func writeSelfSignedCert(t *testing.T, certPath, keyPath, cn string) {
 	if err != nil {
 		t.Fatalf("create key file: %v", err)
 	}
-	defer keyFile.Close()
+	defer func() { _ = keyFile.Close() }()
 	if err := pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}); err != nil {
 		t.Fatalf("encode key: %v", err)
 	}

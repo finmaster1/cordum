@@ -57,7 +57,7 @@ func TestGRPCGeneratedClientsAndServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial bufnet: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	apiClient := NewCordumApiClient(conn)
 	if _, err := apiClient.SubmitJob(context.Background(), &SubmitJobRequest{Prompt: "hi", Topic: "job.test"}); err != nil {

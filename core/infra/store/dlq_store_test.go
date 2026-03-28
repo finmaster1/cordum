@@ -333,9 +333,9 @@ func TestDLQCleanupDistributedLock(t *testing.T) {
 	defer srv.Close()
 
 	store1 := newDLQStoreWithServer(t, srv)
-	defer store1.Close()
+	defer func() { _ = store1.Close() }()
 	store2 := newDLQStoreWithServer(t, srv)
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 
 	ctx := context.Background()
 
@@ -391,7 +391,7 @@ func TestDLQCleanupLockRelease(t *testing.T) {
 	defer srv.Close()
 
 	store1 := newDLQStoreWithServer(t, srv)
-	defer store1.Close()
+	defer func() { _ = store1.Close() }()
 
 	ctx := context.Background()
 	lockTTL := 30 * time.Second
@@ -420,7 +420,7 @@ func TestDLQCleanupLockRelease(t *testing.T) {
 
 	// A second instance should now be able to acquire the lock.
 	store2 := newDLQStoreWithServer(t, srv)
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 	id2 := generateInstanceID()
 
 	ok, err := store2.client.SetNX(ctx, dlqCleanupLockKey, id2, lockTTL).Result()
@@ -440,7 +440,7 @@ func TestDLQCleanupLockSafeRelease(t *testing.T) {
 	defer srv.Close()
 
 	s := newDLQStoreWithServer(t, srv)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx := context.Background()
 
@@ -476,9 +476,9 @@ func TestDLQCleanupLockBlocksSecondReplica(t *testing.T) {
 	defer srv.Close()
 
 	store1 := newDLQStoreWithServer(t, srv)
-	defer store1.Close()
+	defer func() { _ = store1.Close() }()
 	store2 := newDLQStoreWithServer(t, srv)
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 
 	ctx := context.Background()
 	lockTTL := 30 * time.Second
@@ -509,7 +509,7 @@ func TestDLQCleanupLockTTLExpiry(t *testing.T) {
 	defer srv.Close()
 
 	s := newDLQStoreWithServer(t, srv)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	ctx := context.Background()
 
@@ -551,7 +551,7 @@ func TestDLQCleanupRunCleanupWithLock_RedisDown(t *testing.T) {
 	}
 
 	s := newDLQStoreWithServer(t, srv)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	// Stop Redis to simulate unavailability.
 	srv.Close()

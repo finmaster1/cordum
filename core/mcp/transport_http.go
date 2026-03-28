@@ -223,7 +223,7 @@ func (t *HTTPTransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := http.MaxBytesReader(w, r.Body, int64(t.maxMessageBytes))
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(body)
 	if err != nil {
 		if strings.Contains(err.Error(), "request body too large") {

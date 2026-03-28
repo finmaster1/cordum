@@ -336,7 +336,7 @@ func writeCert(path string, der []byte) error {
 	if err != nil {
 		return fmt.Errorf("write cert %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
@@ -349,7 +349,7 @@ func writeKey(path string, key *ecdsa.PrivateKey) error {
 	if err != nil {
 		return fmt.Errorf("write key %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return pem.Encode(f, &pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 

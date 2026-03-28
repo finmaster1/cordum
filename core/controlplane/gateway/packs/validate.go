@@ -295,7 +295,7 @@ func ValidateTimeoutsPatch(patch map[string]any, packID string) error {
 		}
 		for wf := range workflows {
 			if !strings.HasPrefix(wf, packID+".") {
-				return fmt.Errorf("timeout workflow %q must be namespaced under %s.", wf, packID)
+				return fmt.Errorf("timeout workflow %q must be namespaced under %s", wf, packID)
 			}
 		}
 	}

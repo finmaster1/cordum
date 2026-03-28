@@ -85,10 +85,7 @@ func newJWTValidatorFromEnv() (*jwtValidator, bool, error) {
 		v.rsaPublic = key
 	}
 
-	required := false
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("CORDUM_JWT_REQUIRED")), "true") {
-		required = true
-	}
+	required := strings.EqualFold(strings.TrimSpace(os.Getenv("CORDUM_JWT_REQUIRED")), "true")
 	return v, required, nil
 }
 

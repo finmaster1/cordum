@@ -223,7 +223,7 @@ func TestRevoke_KeyModifiedDuringRevoke(t *testing.T) {
 	seedManagedKey(ctx, t, store, "tenant-a", "id-1")
 
 	otherClient := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer otherClient.Close()
+	defer func() { _ = otherClient.Close() }()
 	var triggered atomic.Bool
 	store.client.AddHook(conflictHook{
 		key:     keyRecordKey("id-1"),
@@ -245,7 +245,7 @@ func TestRevoke_MaxRetries(t *testing.T) {
 	seedManagedKey(ctx, t, store, "tenant-a", "id-1")
 
 	otherClient := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	defer otherClient.Close()
+	defer func() { _ = otherClient.Close() }()
 	store.client.AddHook(conflictHook{
 		key:    keyRecordKey("id-1"),
 		client: otherClient,

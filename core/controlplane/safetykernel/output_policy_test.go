@@ -304,7 +304,7 @@ func TestCheckOutputDereferencesResultPointer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
-	defer resultClient.Close()
+	defer func() { _ = resultClient.Close() }()
 
 	if err := resultClient.Set(context.Background(), "res:job-pointer", []byte("leak AKIA1234567890ABCDEF in text"), 0).Err(); err != nil {
 		t.Fatalf("seed result pointer content: %v", err)

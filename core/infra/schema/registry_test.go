@@ -14,7 +14,7 @@ func TestRegistryValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	defer reg.Close()
+	defer func() { _ = reg.Close() }()
 
 	schema := map[string]any{
 		"type": "object",
@@ -62,7 +62,7 @@ func TestRegistryURL_RegisterGetDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	defer reg.Close()
+	defer func() { _ = reg.Close() }()
 
 	ctx := context.Background()
 	url := "https://cordum.io/schemas/test/item.json"
@@ -99,7 +99,7 @@ func TestRegistryValidateID_CrossRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	defer reg.Close()
+	defer func() { _ = reg.Close() }()
 
 	ctx := context.Background()
 

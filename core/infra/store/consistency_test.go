@@ -33,7 +33,7 @@ func TestSetResultPtrAndStateNotAtomic(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-atomicity"
@@ -86,7 +86,7 @@ func TestSetStateConcurrentWATCH(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-watch"
@@ -133,7 +133,7 @@ func TestSetStateRejectsInvalidTransition(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-invalid-tx"
@@ -179,7 +179,7 @@ func TestCancelJobAtomicWithTerminalCheck(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-cancel-atomic"
@@ -215,7 +215,7 @@ func TestCancelJobConcurrent(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-cancel-concurrent"
@@ -276,7 +276,7 @@ func TestTryAcquireLockTokenUniqueness(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	key := "lock:test-unique"
@@ -307,7 +307,7 @@ func TestReleaseLockTokenMismatch(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	key := "lock:test-mismatch"
@@ -337,7 +337,7 @@ func TestRenewLockAfterExpiry(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	key := "lock:test-renew-expired"
@@ -369,7 +369,7 @@ func TestDLQStoreAddConcurrent(t *testing.T) {
 
 	store, err := NewDLQStore("redis://"+srv.Addr(), time.Hour)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -417,7 +417,7 @@ func TestDLQStoreAddTrimMaintainsLimit(t *testing.T) {
 
 	store, err := NewDLQStore("redis://"+srv.Addr(), time.Hour)
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -456,7 +456,7 @@ func TestIdempotencyKeySetNXRace(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	idempotencyKey := "idem-key-123"
@@ -508,7 +508,7 @@ func TestStateIndexConsistencyOnTransition(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-idx-test"
@@ -562,7 +562,7 @@ func TestTenantActiveSetConsistencyOnTransition(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-tenant-active"
@@ -608,7 +608,7 @@ func TestTenantActiveSetIsolation(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -668,7 +668,7 @@ func TestCancelJobUpdatesTenantActiveSet(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-cancel-tenant"
@@ -714,7 +714,7 @@ func TestJobEventsLogConsistency(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-events"
@@ -759,7 +759,7 @@ func TestRecentJobsIndexUpdatedOnTransition(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-recent-idx"
@@ -796,7 +796,7 @@ func TestDeadlineIndexCleanedOnTerminalState(t *testing.T) {
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	jobID := "job-deadline-clean"

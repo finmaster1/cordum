@@ -46,7 +46,7 @@ func TestPublishHandshake(t *testing.T) {
 	if err := PublishHandshake(b, "test-gateway", pb.ComponentRole_COMPONENT_ROLE_GATEWAY, caps); err != nil {
 		t.Fatalf("publish handshake: %v", err)
 	}
-	nc.Flush()
+	_ = nc.Flush()
 
 	msg, err := sub.NextMsg(2 * time.Second)
 	if err != nil {

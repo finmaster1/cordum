@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -1411,7 +1410,7 @@ func TestNewRedisJobStore_ValidTTLApplied(t *testing.T) {
 
 	t.Setenv(envJobMetaTTLSeconds, "3600")
 	// Clear the duration variant so it doesn't override.
-	os.Unsetenv(envJobMetaTTL)
+	t.Setenv(envJobMetaTTL, "")
 
 	store, err := NewRedisJobStore("redis://" + srv.Addr())
 	if err != nil {

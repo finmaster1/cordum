@@ -61,7 +61,7 @@ func newMockOIDCServer(t *testing.T) *mockOIDCServer {
 	})
 
 	m.Server = httptest.NewServer(mux)
-	m.issuer = m.Server.URL
+	m.issuer = m.URL
 	return m
 }
 
@@ -750,7 +750,7 @@ func newMockOIDCServerWithCounter(t *testing.T) *mockOIDCServerWithCounter {
 	})
 
 	m.Server = httptest.NewServer(mux)
-	m.issuer = m.Server.URL
+	m.issuer = m.URL
 	return m
 }
 

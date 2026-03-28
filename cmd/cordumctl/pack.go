@@ -736,7 +736,7 @@ func validatePackManifest(manifest *packManifest) error {
 			return errors.New("workflow id and path required")
 		}
 		if !strings.HasPrefix(res.ID, id+".") {
-			return fmt.Errorf("workflow id %q must be namespaced under %s.", res.ID, id)
+			return fmt.Errorf("workflow id %q must be namespaced under %s", res.ID, id)
 		}
 	}
 	return nil
@@ -1504,7 +1504,7 @@ func validateTimeoutsPatch(patch map[string]any, packID string) error {
 		}
 		for wf := range workflows {
 			if !strings.HasPrefix(wf, packID+".") {
-				return fmt.Errorf("timeout workflow %q must be namespaced under %s.", wf, packID)
+				return fmt.Errorf("timeout workflow %q must be namespaced under %s", wf, packID)
 			}
 		}
 	}

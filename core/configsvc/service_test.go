@@ -43,7 +43,7 @@ func newSvcWithServer(t *testing.T) (*Service, *miniredis.Miniredis) {
 
 func TestSetGetEffective(t *testing.T) {
 	svc := newSvc(t)
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 	// system
@@ -82,7 +82,7 @@ func TestSetGetEffective(t *testing.T) {
 
 func TestEnsureDefault_CreatesIfMissing(t *testing.T) {
 	svc := newSvc(t)
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 
@@ -110,7 +110,7 @@ func TestEnsureDefault_CreatesIfMissing(t *testing.T) {
 
 func TestEnsureDefault_NoOpIfExists(t *testing.T) {
 	svc := newSvc(t)
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	ctx := context.Background()
 

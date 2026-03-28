@@ -1226,7 +1226,7 @@ func readPolicyFile(source string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if info, err := file.Stat(); err == nil && info.Size() > limit {
 		return nil, fmt.Errorf("policy exceeds max size of %d bytes", limit)
 	}

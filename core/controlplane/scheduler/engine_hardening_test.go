@@ -542,9 +542,9 @@ func TestWithJobLock_RenewalIntermittentFailureNoAbandon(t *testing.T) {
 	}
 
 	// Lock should be released.
-	store.fakeJobStore.mu.RLock()
-	_, locked := store.fakeJobStore.locks[jobLockKey("job-intermittent")]
-	store.fakeJobStore.mu.RUnlock()
+	store.mu.RLock()
+	_, locked := store.locks[jobLockKey("job-intermittent")]
+	store.mu.RUnlock()
 	if locked {
 		t.Fatal("expected lock to be released")
 	}

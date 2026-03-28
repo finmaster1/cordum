@@ -22,11 +22,11 @@ tenants:
 `
 
 func TestPolicySourceFromEnv(t *testing.T) {
-	os.Setenv("SAFETY_POLICY_URL", "http://example")
+	t.Setenv("SAFETY_POLICY_URL", "http://example")
 	if got := policySourceFromEnv("/tmp/policy.yaml"); got != "http://example" {
 		t.Fatalf("unexpected policy source: %s", got)
 	}
-	os.Unsetenv("SAFETY_POLICY_URL")
+	t.Setenv("SAFETY_POLICY_URL", "")
 	if got := policySourceFromEnv("/tmp/policy.yaml"); got != "/tmp/policy.yaml" {
 		t.Fatalf("unexpected policy source fallback: %s", got)
 	}
@@ -128,10 +128,8 @@ func TestVerifyPolicySignature(t *testing.T) {
 	}
 	sig := ed25519.Sign(priv, data)
 
-	os.Setenv("SAFETY_POLICY_PUBLIC_KEY", base64.StdEncoding.EncodeToString(pub))
-	os.Setenv("SAFETY_POLICY_SIGNATURE", base64.StdEncoding.EncodeToString(sig))
-	defer os.Unsetenv("SAFETY_POLICY_PUBLIC_KEY")
-	defer os.Unsetenv("SAFETY_POLICY_SIGNATURE")
+	t.Setenv("SAFETY_POLICY_PUBLIC_KEY", base64.StdEncoding.EncodeToString(pub))
+	t.Setenv("SAFETY_POLICY_SIGNATURE", base64.StdEncoding.EncodeToString(sig))
 
 	if err := verifyPolicySignature(data, "policy.yaml"); err != nil {
 		t.Fatalf("verify signature: %v", err)
