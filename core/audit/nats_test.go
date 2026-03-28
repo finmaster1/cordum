@@ -64,7 +64,7 @@ func TestNATSAuditPublisher_PublishesToSubject(t *testing.T) {
 	bus := &mockAuditBus{}
 	fallback := &mockExporter{}
 	bufExp := NewBufferedExporter(fallback, WithFlushInterval(10*time.Second))
-	defer bufExp.Close()
+	defer func() { _ = bufExp.Close() }()
 
 	pub := NewNATSAuditPublisher(bus, bufExp)
 	event := testEvent()
@@ -113,7 +113,7 @@ func TestNATSAuditPublisher_FallbackOnPublishFailure(t *testing.T) {
 	bus := &mockAuditBus{publishErr: errors.New("nats down")}
 	fallback := &mockExporter{}
 	bufExp := NewBufferedExporter(fallback, WithBatchSize(1), WithFlushInterval(50*time.Millisecond))
-	defer bufExp.Close()
+	defer func() { _ = bufExp.Close() }()
 
 	pub := NewNATSAuditPublisher(bus, bufExp)
 	pub.Send(testEvent())
@@ -139,7 +139,7 @@ func TestNATSAuditConsumer_ExportsEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNATSAuditConsumer: %v", err)
 	}
-	defer consumer.Close()
+	defer func() { _ = consumer.Close() }()
 
 	// Verify subscription was set up correctly.
 	bus.mu.Lock()

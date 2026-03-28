@@ -103,7 +103,7 @@ func ValidatePackManifest(manifest *PackManifest) error {
 			return errors.New("workflow id and path required")
 		}
 		if !strings.HasPrefix(res.ID, id+".") {
-			return fmt.Errorf("workflow id %q must be namespaced under %s.", res.ID, id)
+			return fmt.Errorf("workflow id %q must be namespaced under %s", res.ID, id)
 		}
 	}
 	return nil

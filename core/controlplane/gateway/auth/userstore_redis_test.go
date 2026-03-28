@@ -347,11 +347,12 @@ func TestCreateUserConcurrentRejectsDuplicates(t *testing.T) {
 			defer wg.Done()
 			user := &User{Username: "race-user", Tenant: "default", Email: "race@test.com"}
 			err := store.Create(ctx, user, "SecurePass1!")
-			if err == nil {
+			switch err {
+			case nil:
 				successes.Add(1)
-			} else if err == ErrUserAlreadyExists {
+			case ErrUserAlreadyExists:
 				duplicates.Add(1)
-			} else {
+			default:
 				t.Errorf("unexpected error: %v", err)
 			}
 		}()

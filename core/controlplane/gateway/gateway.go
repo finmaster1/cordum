@@ -45,10 +45,7 @@ import (
 	wf "github.com/cordum/cordum/core/workflow"
 )
 
-var (
-	maxJobPayloadBytes  = int64(env.IntOr("GATEWAY_MAX_JOB_PAYLOAD_BYTES", 2<<20))
-	defaultMaxBodyLimit = env.IntOr("GATEWAY_MAX_BODY_BYTES", 1<<20)
-)
+var maxJobPayloadBytes = int64(env.IntOr("GATEWAY_MAX_JOB_PAYLOAD_BYTES", 2<<20))
 
 const (
 	defaultGrpcAddr             = ":8080"

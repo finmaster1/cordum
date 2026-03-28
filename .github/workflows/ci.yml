@@ -101,7 +101,6 @@ jobs:
       with:
         version: v2.11.4
         args: --timeout=5m
-        only-new-issues: true
 
     - name: Lint shell scripts for secret leaks
       run: bash tools/scripts/lint_no_secret_log.sh

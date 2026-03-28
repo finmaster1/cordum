@@ -632,7 +632,7 @@ func loadPackBundle(src string, transport *http.Transport) (*packBundle, error) 
 		if err != nil {
 			return nil, fmt.Errorf("load pack bundle: %w", err)
 		}
-		defer os.Remove(tmpFile)
+		defer func() { _ = os.Remove(tmpFile) }()
 		return loadPackBundle(tmpFile, transport)
 	}
 	info, err := os.Stat(src)
@@ -1755,7 +1755,7 @@ func (c *restClient) doJSON(ctx context.Context, method, path string, body any, 
 	if err != nil {
 		return fmt.Errorf("rest %s %s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Limit error body read to 1 MiB to prevent OOM from oversized responses.
 		const maxErrBody = 1 << 20
@@ -1890,7 +1890,7 @@ func downloadToTemp(raw string, transport *http.Transport) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("download to temp: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("download failed: %s", resp.Status)
 	}
@@ -1898,7 +1898,7 @@ func downloadToTemp(raw string, transport *http.Transport) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("download to temp: %w", err)
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		return "", fmt.Errorf("download to temp: %w", err)
 	}
@@ -1916,12 +1916,12 @@ func extractTarGz(path, dest string) error {
 	if err != nil {
 		return fmt.Errorf("extract tar.gz: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	gz, err := gzip.NewReader(file)
 	if err != nil {
 		return fmt.Errorf("extract tar.gz: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	var (
 		files   int

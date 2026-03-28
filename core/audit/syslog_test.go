@@ -14,7 +14,7 @@ func TestSyslogExporter_RFC5424Format(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	// Capture messages sent to the listener.
 	received := make(chan string, 1)
@@ -23,7 +23,7 @@ func TestSyslogExporter_RFC5424Format(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			received <- scanner.Text()
@@ -34,7 +34,7 @@ func TestSyslogExporter_RFC5424Format(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	ev := SIEMEvent{
 		Timestamp: time.Date(2026, 2, 13, 10, 30, 0, 0, time.UTC),
@@ -111,7 +111,7 @@ func TestSyslogExporter_PriorityCalculation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listen: %v", err)
 			}
-			defer ln.Close()
+			defer func() { _ = ln.Close() }()
 
 			received := make(chan string, 1)
 			go func() {
@@ -119,7 +119,7 @@ func TestSyslogExporter_PriorityCalculation(t *testing.T) {
 				if err != nil {
 					return
 				}
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				scanner := bufio.NewScanner(conn)
 				if scanner.Scan() {
 					received <- scanner.Text()
@@ -130,7 +130,7 @@ func TestSyslogExporter_PriorityCalculation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewSyslogExporter: %v", err)
 			}
-			defer exp.Close()
+			defer func() { _ = exp.Close() }()
 
 			ev := SIEMEvent{
 				Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -159,7 +159,7 @@ func TestSyslogExporter_CustomFacility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	received := make(chan string, 1)
 	go func() {
@@ -167,7 +167,7 @@ func TestSyslogExporter_CustomFacility(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			received <- scanner.Text()
@@ -178,7 +178,7 @@ func TestSyslogExporter_CustomFacility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	ev := SIEMEvent{
 		Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -205,7 +205,7 @@ func TestSyslogExporter_CustomAppName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	received := make(chan string, 1)
 	go func() {
@@ -213,7 +213,7 @@ func TestSyslogExporter_CustomAppName(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			received <- scanner.Text()
@@ -224,7 +224,7 @@ func TestSyslogExporter_CustomAppName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	ev := SIEMEvent{
 		Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -254,13 +254,13 @@ func TestSyslogExporter_UDPTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	exp, err := NewSyslogExporter("udp", conn.LocalAddr().String())
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	ev := SIEMEvent{
 		Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -298,7 +298,7 @@ func TestSyslogExporter_SDEscaping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	received := make(chan string, 1)
 	go func() {
@@ -306,7 +306,7 @@ func TestSyslogExporter_SDEscaping(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			received <- scanner.Text()
@@ -317,7 +317,7 @@ func TestSyslogExporter_SDEscaping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	// Test structured data escaping for special chars: \, ", ]
 	ev := SIEMEvent{
@@ -345,7 +345,7 @@ func TestSyslogExporter_MessageFallsBackToAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	received := make(chan string, 1)
 	go func() {
@@ -353,7 +353,7 @@ func TestSyslogExporter_MessageFallsBackToAction(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			received <- scanner.Text()
@@ -364,7 +364,7 @@ func TestSyslogExporter_MessageFallsBackToAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	// When Reason is empty, message should fall back to Action.
 	ev := SIEMEvent{
@@ -392,7 +392,7 @@ func TestSyslogExporter_MultipleBatchEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	received := make(chan string, 3)
 	go func() {
@@ -400,7 +400,7 @@ func TestSyslogExporter_MultipleBatchEvents(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		for scanner.Scan() {
 			received <- scanner.Text()
@@ -411,7 +411,7 @@ func TestSyslogExporter_MultipleBatchEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	events := []SIEMEvent{
 		{Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Severity: SeverityInfo, Action: "event-1"},
@@ -502,7 +502,7 @@ func TestSyslogExporter_ReconnectOnWriteFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSyslogExporter: %v", err)
 	}
-	defer exp.Close()
+	defer func() { _ = exp.Close() }()
 
 	// Wait for the server to close the initial connection.
 	<-connClosed
@@ -514,7 +514,7 @@ func TestSyslogExporter_ReconnectOnWriteFailure(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			received <- scanner.Text()
@@ -552,7 +552,7 @@ func TestSyslogExporter_Close(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	go func() {
 		conn, _ := ln.Accept()

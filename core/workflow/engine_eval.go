@@ -147,7 +147,7 @@ func evalTemplateString(s string, scope map[string]any) (any, error) {
 			return nil, err
 		}
 		if val != nil {
-			b.WriteString(fmt.Sprint(val))
+			fmt.Fprint(&b, val)
 		}
 	}
 	return b.String(), nil

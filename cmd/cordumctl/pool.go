@@ -59,12 +59,12 @@ func poolList(args []string) {
 	check(err)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tWORKERS\tACTIVE JOBS\tCAPACITY\tUTILIZATION")
+	_, _ = fmt.Fprintln(w, "NAME\tWORKERS\tACTIVE JOBS\tCAPACITY\tUTILIZATION")
 	for _, p := range pools {
 		util := fmt.Sprintf("%.0f%%", p.Utilization*100)
-		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\n", p.Name, p.Workers, p.ActiveJobs, p.Capacity, util)
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\n", p.Name, p.Workers, p.ActiveJobs, p.Capacity, util)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func poolGet(args []string) {

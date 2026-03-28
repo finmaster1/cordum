@@ -91,7 +91,7 @@ func TestNewExporterFromEnv_Syslog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	t.Setenv("CORDUM_AUDIT_EXPORT_TYPE", "syslog")
 	t.Setenv("CORDUM_AUDIT_EXPORT_SYSLOG_ADDR", "tcp://"+ln.Addr().String())

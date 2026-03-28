@@ -32,7 +32,7 @@ func TestSyslogReconnectPastCloseError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	received := make(chan string, 1)
 	go func() {
@@ -40,7 +40,7 @@ func TestSyslogReconnectPastCloseError(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		buf := make([]byte, 4096)
 		n, _ := conn.Read(buf)
 		if n > 0 {

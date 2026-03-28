@@ -95,10 +95,7 @@ func (c *SafetyClient) loadInputContent(ctx context.Context, contextPtr string) 
 	if contextPtr == "" || c.contextClient == nil {
 		return nil, 0, nil
 	}
-	key := contextPtr
-	if strings.HasPrefix(key, inputPointerPrefix) {
-		key = strings.TrimPrefix(key, inputPointerPrefix)
-	}
+	key := strings.TrimPrefix(contextPtr, inputPointerPrefix)
 	if key == "" {
 		return nil, 0, nil
 	}

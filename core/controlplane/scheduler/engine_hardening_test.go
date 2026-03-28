@@ -326,7 +326,7 @@ func TestWithJobLockReleaseRetry(t *testing.T) {
 
 	// The lock should no longer be held.
 	store.fakeJobStore.mu.RLock()
-	_, locked := store.fakeJobStore.locks[jobLockKey("job-retry-release")]
+	_, locked := store.locks[jobLockKey("job-retry-release")]
 	store.fakeJobStore.mu.RUnlock()
 	if locked {
 		t.Fatal("expected lock to be released after retry")
@@ -491,9 +491,9 @@ func TestWithJobLock_RenewalAbandonAfterConsecutiveFailures(t *testing.T) {
 	}
 
 	// Lock should NOT be released after abandonment — we no longer own it.
-	store.fakeJobStore.mu.RLock()
-	_, locked := store.fakeJobStore.locks[jobLockKey("job-abandon")]
-	store.fakeJobStore.mu.RUnlock()
+	store.mu.RLock()
+	_, locked := store.locks[jobLockKey("job-abandon")]
+	store.mu.RUnlock()
 	if !locked {
 		t.Fatal("expected lock to remain (skip release after abandonment)")
 	}
