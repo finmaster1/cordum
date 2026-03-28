@@ -1,4 +1,5 @@
 import { cn } from "../../lib/utils";
+import { CodeBlock } from "../ui/CodeBlock";
 import { ProgressBar } from "../ProgressBar";
 import type { RetryAttempt } from "../../api/types";
 
@@ -95,9 +96,7 @@ export function RetryAttemptsPanel({
                           </span>
                         )}
                       </div>
-                      <pre className="whitespace-pre-wrap break-all rounded-lg bg-surface p-2.5 font-mono text-xs text-danger">
-                        {attempt.error}
-                      </pre>
+                      <CodeBlock title="Error" language="text" maxHeight={120}>{attempt.error}</CodeBlock>
                     </div>
                   </div>
                 );

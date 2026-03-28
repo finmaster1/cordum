@@ -27,6 +27,7 @@ import {
   Info,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { InstrumentCard } from "@/components/ui/InstrumentCard";
 import { MetricValue } from "@/components/ui/MetricValue";
@@ -385,9 +386,9 @@ function JsonDisclosure({
       <summary className="cursor-pointer list-none text-xs font-mono uppercase tracking-wide text-muted-foreground">
         {title}
       </summary>
-      <pre className="mt-3 overflow-auto rounded-xl bg-surface-1 p-3 text-xs text-foreground">
-        {renderJson(data)}
-      </pre>
+      <div className="mt-3">
+        <CodeBlock language="json" maxHeight={300}>{renderJson(data)}</CodeBlock>
+      </div>
     </details>
   );
 }

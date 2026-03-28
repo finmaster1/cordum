@@ -1,3 +1,6 @@
+// NOTE: BundleDiffView uses raw <pre> intentionally for colored diff rendering.
+// CodeBlock is for plain text display — diff views need per-line styling that
+// CodeBlock doesn't support.
 import { useMemo } from "react";
 import { usePolicyBundle } from "@/hooks/usePolicies";
 import { SkeletonCard } from "@/components/ui/Skeleton";

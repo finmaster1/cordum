@@ -26,6 +26,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { JobActions } from "@/components/jobs/JobActions";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 
 function jobStatusVariant(status: string) {
   switch (status) {
@@ -164,8 +165,8 @@ function BlobViewer({ label, pointer, data, emptyText }: {
         </div>
       )}
       {(expanded || !pointer) && displayText && (
-        <div className="surface-inset p-4 font-mono text-xs text-foreground overflow-auto max-h-[500px]">
-          <pre className="whitespace-pre-wrap break-all">{displayText}</pre>
+        <div>
+          <CodeBlock language="json" copyable maxHeight={500}>{displayText}</CodeBlock>
           {isTruncated && (
             <button
               type="button"
@@ -229,7 +230,7 @@ function JobTerminal({ job }: { job: Job }) {
         <>
           {hasEvents && <div className="border-t border-border my-3" />}
           <div className="text-muted-foreground mb-1">--- Result ---</div>
-          <pre className="whitespace-pre-wrap break-all">{typeof job.result === "string" ? job.result : JSON.stringify(job.result, null, 2)}</pre>
+          <CodeBlock title="Result" language="json">{typeof job.result === "string" ? job.result : JSON.stringify(job.result, null, 2)}</CodeBlock>
         </>
       )}
     </div>

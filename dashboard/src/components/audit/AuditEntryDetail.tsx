@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { X } from "lucide-react";
 import { Badge } from "../ui/Badge";
+import { CodeBlock } from "../ui/CodeBlock";
 import { auditResourceLink } from "../../api/transform";
 import type { AuditEntry } from "../../api/types";
 
@@ -109,9 +110,7 @@ export function AuditEntryDetail({ entry, onClose }: AuditEntryDetailProps) {
           {entry.payload && Object.keys(entry.payload).length > 0 && (
             <div className="space-y-1">
               <span className="text-xs font-semibold text-muted-foreground">Payload</span>
-              <pre className="max-h-64 overflow-auto rounded-lg border border-border bg-surface p-3 text-xs text-ink">
-                {JSON.stringify(entry.payload, null, 2)}
-              </pre>
+              <CodeBlock title="Payload" language="json" maxHeight={256}>{JSON.stringify(entry.payload, null, 2)}</CodeBlock>
             </div>
           )}
         </div>

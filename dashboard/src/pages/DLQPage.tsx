@@ -6,6 +6,7 @@ import { Fragment, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDLQ, useRetryDLQ, useDeleteDLQ, useBulkRetryDLQ, useBulkDeleteDLQ } from "@/hooks/useDLQ";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -276,10 +277,7 @@ export default function DLQPage() {
                               style={{ boxShadow: "inset 0 2px 4px rgba(0,0,0,0.04)" }}
                             >
                               <div>
-                                <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2">Entry Details</p>
-                                <pre className="text-xs font-mono text-foreground bg-surface-0 border border-border rounded-2xl p-3 max-h-40 overflow-auto">
-                                  {JSON.stringify(buildDLQEntryDetails(d), null, 2)}
-                                </pre>
+                                <CodeBlock title="Entry Details" language="json" maxHeight={160}>{JSON.stringify(buildDLQEntryDetails(d), null, 2)}</CodeBlock>
                               </div>
                               <div>
                                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-1">Full Error</p>

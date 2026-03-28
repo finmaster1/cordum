@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -476,6 +477,48 @@ func (s *server) handlePutPolicyBundle(w http.ResponseWriter, r *http.Request) {
 		"id":         bundleID,
 		"updated_at": now,
 	})
+}
+
+func (s *server) handleDeletePolicyBundle(w http.ResponseWriter, r *http.Request) {
+	if !s.requireStoreAndRole(w, r, []string{"admin"}, s.configSvc) {
+		return
+	}
+	bundleID := bundleIDFromRequest(r)
+	if bundleID == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "bundle id required")
+		return
+	}
+
+	doc, err := getConfigDoc(r.Context(), s.configSvc, policyConfigScope, policyConfigID)
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			writeErrorJSON(w, http.StatusNotFound, "bundle not found")
+			return
+		}
+		writeInternalError(w, r, "policy operation", err)
+		return
+	}
+	if doc.Data == nil {
+		writeErrorJSON(w, http.StatusNotFound, "bundle not found")
+		return
+	}
+	rawBundles := normalizeJSON(doc.Data[policyConfigKey])
+	bundles, _ := rawBundles.(map[string]any)
+	if bundles == nil || bundles[bundleID] == nil {
+		writeErrorJSON(w, http.StatusNotFound, "bundle not found")
+		return
+	}
+
+	delete(bundles, bundleID)
+	doc.Data[policyConfigKey] = bundles
+	if err := s.configSvc.Set(r.Context(), doc); err != nil {
+		writeInternalError(w, r, "policy operation", err)
+		return
+	}
+
+	slog.Info("policy bundle deleted", "bundle_id", bundleID, "actor", policyActorID(r))
+	s.appendAuditEntryNamed(r.Context(), "delete", "policy", bundleID, bundleID, policyActorID(r), policyRole(r), "delete policy bundle "+bundleID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) handleSimulatePolicyBundle(w http.ResponseWriter, r *http.Request) {

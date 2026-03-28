@@ -1,4 +1,5 @@
 import { Wrench, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { CodeBlock } from "../ui/CodeBlock";
 import { formatRelative } from "../../lib/format";
 import type { ActivityItem } from "../../types/activity";
 
@@ -33,9 +34,9 @@ export function ToolCallBlock({ activity }: Props) {
         </div>
       </div>
       {activity.payload?.tool_inputs ? (
-        <pre className="mt-3 rounded-xl bg-card/80 p-3 text-xs text-ink">
-          {JSON.stringify(activity.payload.tool_inputs, null, 2)}
-        </pre>
+        <div className="mt-3">
+          <CodeBlock language="json" maxHeight={200}>{JSON.stringify(activity.payload.tool_inputs, null, 2)}</CodeBlock>
+        </div>
       ) : null}
     </div>
   );

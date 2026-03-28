@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useOutputRuleAudit } from "../../hooks/useOutputRules";
 import type { OutputRule } from "../../types/policy";
 import { Badge } from "../ui/Badge";
+import { CodeBlock } from "../ui/CodeBlock";
 import { Drawer } from "../ui/Drawer";
 
 function decisionVariant(decision?: string): "governance" | "warning" | "success" | "default" {
@@ -162,12 +163,7 @@ export function OutputRuleDetail({
             </div>
           </div>
 
-          <div className="space-y-2 rounded-xl border border-border p-4">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rule Configuration</h4>
-            <pre className="max-h-64 overflow-auto rounded-md bg-surface2 p-3 text-xs text-ink">
-              {configJson}
-            </pre>
-          </div>
+          <CodeBlock title="Rule Configuration" language="json" maxHeight={256} copyable>{configJson}</CodeBlock>
         </div>
 
         <div className="space-y-3 rounded-xl border border-border p-4">

@@ -938,3 +938,84 @@ func TestPolicySnapshots_ViewerForbidden(t *testing.T) {
 		t.Fatalf("expected 403 for viewer on policy/snapshots, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestDeletePolicyBundle(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+
+	// Create a bundle first.
+	body, _ := json.Marshal(map[string]any{
+		"content": policyContent,
+		"enabled": true,
+		"author":  "tester",
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/policy/bundles/secops/delete-me", bytes.NewReader(body))
+	putReq.Header.Set("X-Tenant-ID", "default")
+	putReq.SetPathValue("id", "secops/delete-me")
+	putReq.Header.Set("X-Principal-Role", "admin")
+	putRec := httptest.NewRecorder()
+	s.handlePutPolicyBundle(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("put: expected 200, got %d %s", putRec.Code, putRec.Body.String())
+	}
+
+	// Verify it exists.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/policy/bundles/secops/delete-me", nil)
+	getReq.Header.Set("X-Tenant-ID", "default")
+	getReq.SetPathValue("id", "secops/delete-me")
+	getReq.Header.Set("X-Principal-Role", "admin")
+	getRec := httptest.NewRecorder()
+	s.handleGetPolicyBundle(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get before delete: expected 200, got %d", getRec.Code)
+	}
+
+	// Delete it.
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/policy/bundles/secops/delete-me", nil)
+	delReq.Header.Set("X-Tenant-ID", "default")
+	delReq.SetPathValue("id", "secops/delete-me")
+	delReq.Header.Set("X-Principal-Role", "admin")
+	delRec := httptest.NewRecorder()
+	s.handleDeletePolicyBundle(delRec, delReq)
+	if delRec.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d %s", delRec.Code, delRec.Body.String())
+	}
+
+	// Verify it's gone.
+	getReq2 := httptest.NewRequest(http.MethodGet, "/api/v1/policy/bundles/secops/delete-me", nil)
+	getReq2.Header.Set("X-Tenant-ID", "default")
+	getReq2.SetPathValue("id", "secops/delete-me")
+	getReq2.Header.Set("X-Principal-Role", "admin")
+	getRec2 := httptest.NewRecorder()
+	s.handleGetPolicyBundle(getRec2, getReq2)
+	if getRec2.Code != http.StatusNotFound {
+		t.Fatalf("get after delete: expected 404, got %d", getRec2.Code)
+	}
+}
+
+func TestDeletePolicyBundle_NotFound(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/policy/bundles/secops/nonexistent", nil)
+	delReq.Header.Set("X-Tenant-ID", "default")
+	delReq.SetPathValue("id", "secops/nonexistent")
+	delReq.Header.Set("X-Principal-Role", "admin")
+	delRec := httptest.NewRecorder()
+	s.handleDeletePolicyBundle(delRec, delReq)
+	if delRec.Code != http.StatusNotFound {
+		t.Fatalf("delete nonexistent: expected 404, got %d %s", delRec.Code, delRec.Body.String())
+	}
+}
+
+func TestDeletePolicyBundle_MissingID(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/policy/bundles/", nil)
+	delReq.Header.Set("X-Tenant-ID", "default")
+	delReq.SetPathValue("id", "")
+	delReq.Header.Set("X-Principal-Role", "admin")
+	delRec := httptest.NewRecorder()
+	s.handleDeletePolicyBundle(delRec, delReq)
+	if delRec.Code != http.StatusBadRequest {
+		t.Fatalf("delete empty id: expected 400, got %d %s", delRec.Code, delRec.Body.String())
+	}
+}

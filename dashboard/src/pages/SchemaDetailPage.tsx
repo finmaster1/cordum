@@ -17,6 +17,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { ArrowLeft, FileJson, Copy, Clock, Hash, Edit, Plus, Trash2 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 
 const FIELD_TYPES = ["string", "number", "boolean", "array", "object", "integer"] as const;
@@ -296,20 +297,7 @@ export default function SchemaDetailPage() {
 
       {/* JSON Tab */}
       {activeTab === "json" && currentVersion && (
-        <div className="instrument-card p-0 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 bg-surface-0 border-b border-border">
-            <span className="text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest">JSON Schema</span>
-            <button type="button"
-              onClick={() => { navigator.clipboard.writeText(JSON.stringify(currentVersion, null, 2)); toast.success("Copied"); }}
-              className="p-1 rounded hover:bg-surface-2 transition-colors"
-            >
-              <Copy className="w-3 h-3 text-muted-foreground" />
-            </button>
-          </div>
-          <pre className="p-4 text-xs font-mono text-foreground overflow-auto max-h-96">
-            {JSON.stringify(currentVersion, null, 2)}
-          </pre>
-        </div>
+        <CodeBlock title={schema?.name ?? "JSON Schema"} language="json" copyable maxHeight={384}>{JSON.stringify(currentVersion, null, 2)}</CodeBlock>
       )}
     </motion.div>
   );

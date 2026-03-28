@@ -1,5 +1,6 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { logger } from "../lib/logger";
+import { CodeBlock } from "./ui/CodeBlock";
 
 interface Props {
   children: ReactNode;
@@ -69,9 +70,9 @@ export class ErrorBoundary extends Component<Props, State> {
                 <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
                   Stack trace
                 </summary>
-                <pre className="mt-2 overflow-auto rounded-2xl bg-surface-2 p-4 font-mono text-xs text-muted-foreground">
-                  {error.stack}
-                </pre>
+                <div className="mt-2">
+                  <CodeBlock title="Error Details" language="text" maxHeight={200}>{error.stack ?? error.message}</CodeBlock>
+                </div>
               </details>
             )}
 
