@@ -459,8 +459,16 @@ export interface PolicyRuleMatch {
   actor_ids?: string[];
   actor_types?: string[];
   labels?: Record<string, string>;
+  label_allowlist?: Record<string, string[]>;
+  label_threshold?: Record<string, number>;
   secrets_present?: boolean;
   mcp?: McpMatchConfig;
+}
+
+export interface VelocityConfig {
+  max_requests: number;
+  window_seconds: number;
+  key: string;
 }
 
 export interface PolicyRule {
@@ -470,6 +478,7 @@ export interface PolicyRule {
   description?: string;
   bundle_id?: string;
   match: PolicyRuleMatch;
+  velocity?: VelocityConfig;
   decision: SafetyDecisionType;
   constraints?: PolicyConstraints;
   priority: number;

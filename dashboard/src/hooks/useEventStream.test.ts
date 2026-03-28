@@ -167,17 +167,16 @@ describe("useEventStream", () => {
     expect(events[0].type).toBe("job.submit");
   });
 
-  it("narrows cache invalidation to specific job ID for job events", () => {
+  it("invalidates job detail and all job list caches for job events", () => {
     useEventStream();
     MockWebSocket.instances[0].simulateOpen();
     MockWebSocket.instances[0].simulateMessage({
       jobRequest: { jobId: "j1" },
     });
-    // Specific job invalidated immediately
+    // Specific job detail invalidated
     expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["job", "j1"] });
-    // List marked stale but not refetched immediately
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["jobs"], refetchType: "none" });
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["dlq"], refetchType: "none" });
+    // All job list caches invalidated (broad match for filtered views)
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["jobs"] });
   });
 
   it("ignores non-JSON messages", () => {

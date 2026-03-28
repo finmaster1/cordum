@@ -32,6 +32,9 @@ function ruleToYaml(rule: PolicyRule): string {
     enabled: rule.enabled,
     match: { ...rule.match },
   };
+  if (rule.velocity) {
+    obj.velocity = rule.velocity;
+  }
   if (rule.constraints && Object.keys(rule.constraints).length > 0) {
     obj.constraints = rule.constraints;
   }
@@ -40,6 +43,26 @@ function ruleToYaml(rule: PolicyRule): string {
   }
   return YAML.stringify(obj, { lineWidth: 80 });
 }
+
+type RuleType = "velocity" | "allowlist" | "threshold" | "scope" | "scanner" | "standard";
+
+function detectRuleType(rule: PolicyRule): RuleType {
+  if (rule.velocity) return "velocity";
+  if (rule.match?.label_allowlist && Object.keys(rule.match.label_allowlist).length > 0) return "allowlist";
+  if (rule.match?.label_threshold && Object.keys(rule.match.label_threshold).length > 0) return "threshold";
+  // Check if this is a scope rule (has input rule with scope config) — heuristic: rule ID contains "scope"
+  if (rule.id?.includes("scope")) return "scope";
+  return "standard";
+}
+
+const RULE_TYPE_BADGE: Record<RuleType, { label: string; className: string }> = {
+  velocity: { label: "Velocity", className: "bg-[var(--color-warning)]/10 text-[var(--color-warning)] border-[var(--color-warning)]/20" },
+  allowlist: { label: "Allowlist", className: "bg-[var(--color-info)]/10 text-[var(--color-info)] border-[var(--color-info)]/20" },
+  threshold: { label: "Threshold", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  scope: { label: "Scope", className: "bg-[var(--color-governance)]/10 text-[var(--color-governance)] border-[var(--color-governance)]/20" },
+  scanner: { label: "Scanner", className: "bg-[var(--color-success)]/10 text-[var(--color-success)] border-[var(--color-success)]/20" },
+  standard: { label: "Standard", className: "bg-muted/50 text-muted-foreground border-border" },
+};
 
 function formatMatchValue(val: unknown): string {
   if (Array.isArray(val)) return val.join(", ");
@@ -58,6 +81,8 @@ interface RuleDetailRowProps {
 export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [showYaml, setShowYaml] = useState(false);
+  const ruleType = useMemo(() => detectRuleType(rule), [rule]);
+  const typeBadge = RULE_TYPE_BADGE[ruleType];
   const [copied, setCopied] = useState(false);
 
   const yamlStr = useMemo(() => ruleToYaml(rule), [rule]);
@@ -143,6 +168,9 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
               {rule.name}
             </span>
             <SafetyDecisionBadge decision={rule.decision} />
+            <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border", typeBadge.className)}>
+              {typeBadge.label}
+            </span>
             {!rule.enabled && (
               <StatusBadge variant="muted">Disabled</StatusBadge>
             )}
@@ -227,6 +255,72 @@ export function RuleDetailRow({ rule, index, className }: RuleDetailRowProps) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* Velocity config */}
+          {rule.velocity && (
+            <div>
+              <h4 className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Clock className="w-3 h-3" />
+                Velocity Limit
+              </h4>
+              <div className="flex gap-4 text-xs">
+                <div className="bg-[var(--color-warning)]/5 border border-[var(--color-warning)]/20 rounded-xl px-3 py-2">
+                  <span className="text-muted-foreground">Max requests</span>
+                  <span className="ml-2 font-mono font-semibold text-foreground">{rule.velocity.max_requests}</span>
+                </div>
+                <div className="bg-[var(--color-warning)]/5 border border-[var(--color-warning)]/20 rounded-xl px-3 py-2">
+                  <span className="text-muted-foreground">Window</span>
+                  <span className="ml-2 font-mono font-semibold text-foreground">{rule.velocity.window_seconds}s</span>
+                </div>
+                <div className="bg-[var(--color-warning)]/5 border border-[var(--color-warning)]/20 rounded-xl px-3 py-2">
+                  <span className="text-muted-foreground">Key</span>
+                  <span className="ml-2 font-mono font-semibold text-foreground">{rule.velocity.key}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Allowlist config */}
+          {rule.match?.label_allowlist && Object.keys(rule.match.label_allowlist).length > 0 && (
+            <div>
+              <h4 className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Shield className="w-3 h-3" />
+                Allowlist
+              </h4>
+              {Object.entries(rule.match.label_allowlist).map(([key, values]) => (
+                <div key={key} className="bg-[var(--color-info)]/5 border border-[var(--color-info)]/20 rounded-xl px-3 py-2 text-xs">
+                  <span className="text-muted-foreground font-mono">{key}:</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {values.map((v) => (
+                      <span key={v} className="bg-surface-2 border border-border/40 rounded-md px-1.5 py-0.5 font-mono text-foreground">
+                        {v}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Threshold config */}
+          {rule.match?.label_threshold && Object.keys(rule.match.label_threshold).length > 0 && (
+            <div>
+              <h4 className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Hash className="w-3 h-3" />
+                Threshold
+              </h4>
+              <div className="flex gap-4 text-xs">
+                {Object.entries(rule.match.label_threshold).map(([key, maxVal]) => (
+                  <div key={key} className="bg-destructive/5 border border-destructive/20 rounded-xl px-3 py-2">
+                    <span className="text-muted-foreground font-mono">{key}</span>
+                    <span className="ml-2 text-muted-foreground">&gt;</span>
+                    <span className="ml-1 font-mono font-semibold text-foreground">{maxVal}</span>
+                    <span className="ml-1 text-muted-foreground">triggers deny</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
