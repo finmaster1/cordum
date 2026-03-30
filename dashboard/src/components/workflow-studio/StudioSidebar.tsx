@@ -57,10 +57,13 @@ const RUN_STATUS_BORDER: Record<string, string> = {
   running: "border-l-[var(--color-info)]",
   failed: "border-l-destructive",
   denied: "border-l-[var(--color-governance)]",
+  blocked: "border-l-[var(--color-governance)]",
   waiting: "border-l-[var(--color-warning)]",
   cancelled: "border-l-muted-foreground",
   timed_out: "border-l-destructive",
   pending: "border-l-muted",
+  queued: "border-l-muted",
+  completed: "border-l-[var(--color-success)]",
 };
 
 function RunListItem({

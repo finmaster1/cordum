@@ -20,7 +20,7 @@ import {
 } from "recharts";
 import {
   Activity, Cpu, UserCheck, ArrowRight,
-  Zap, ShieldCheck,
+  Zap, ShieldCheck, Radio,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useStatus } from "@/hooks/useStatus";
@@ -37,6 +37,7 @@ export default function HomePage() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem("onboarding-dismissed"),
   );
+  const [liveMode, setLiveMode] = useState(false);
 
   const { data: jobsData, isLoading: jobsLoading, isError: jobsError, error: jobsErr, refetch: refetchJobs } = useQuery({
     queryKey: ["jobs", "home"],
@@ -144,24 +145,48 @@ export default function HomePage() {
   }, [jobs]);
 
   const activityData = useMemo(() => {
-    const buckets = new Map<string, { allowed: number; denied: number; approval: number; failed: number }>();
-    for (let i = 0; i < 12; i++) {
-      const label = String(i * 2).padStart(2, "0") + ":00";
-      buckets.set(label, { allowed: 0, denied: 0, approval: 0, failed: 0 });
-    }
-    for (const j of jobs) {
-      const hour = new Date(j.createdAt).getHours();
-      const bucket = String(Math.floor(hour / 2) * 2).padStart(2, "0") + ":00";
-      const b = buckets.get(bucket);
-      if (b) {
-        if (j.status === "failed") b.failed++;
-        else if (j.safetyDecision?.type === "deny") b.denied++;
-        else if (j.safetyDecision?.type === "require_approval") b.approval++;
-        else b.allowed++;
+    type Bucket = { allowed: number; denied: number; approval: number; failed: number };
+    const buckets = new Map<string, Bucket>();
+    const classify = (j: Job, b: Bucket) => {
+      if (j.status === "failed") b.failed++;
+      else if (j.safetyDecision?.type === "deny") b.denied++;
+      else if (j.safetyDecision?.type === "require_approval") b.approval++;
+      else b.allowed++;
+    };
+
+    if (liveMode) {
+      // Live: last 30 min, 2-minute buckets
+      const now = Date.now();
+      const windowMs = 30 * 60 * 1000;
+      for (let i = 0; i < 15; i++) {
+        const t = new Date(now - windowMs + i * 2 * 60 * 1000);
+        const label = String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+        buckets.set(label, { allowed: 0, denied: 0, approval: 0, failed: 0 });
+      }
+      for (const j of jobs) {
+        const ts = new Date(j.createdAt).getTime();
+        if (ts < now - windowMs) continue;
+        const offset = ts - (now - windowMs);
+        const idx = Math.min(14, Math.floor(offset / (2 * 60 * 1000)));
+        const keys = Array.from(buckets.keys());
+        const b = buckets.get(keys[idx]);
+        if (b) classify(j, b);
+      }
+    } else {
+      // Default: 24h, 2-hour buckets
+      for (let i = 0; i < 12; i++) {
+        const label = String(i * 2).padStart(2, "0") + ":00";
+        buckets.set(label, { allowed: 0, denied: 0, approval: 0, failed: 0 });
+      }
+      for (const j of jobs) {
+        const hour = new Date(j.createdAt).getHours();
+        const bucket = String(Math.floor(hour / 2) * 2).padStart(2, "0") + ":00";
+        const b = buckets.get(bucket);
+        if (b) classify(j, b);
       }
     }
     return Array.from(buckets, ([time, v]) => ({ time, ...v }));
-  }, [jobs]);
+  }, [jobs, liveMode]);
 
   // Decision Distribution donut — 5 safety decisions
   const decisionData = [
@@ -298,13 +323,30 @@ export default function HomePage() {
           <div className="flex items-start justify-between mb-5">
             <div className="min-w-0">
               <h2 className="font-display font-semibold text-sm text-foreground tracking-tight">Job Activity</h2>
-              <p className="text-xs text-muted-foreground mt-1 leading-none">Safety overlay — allowed vs denied vs approval</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-none">
+                {liveMode ? "Live — last 30 min, 2-min resolution" : "Safety overlay — allowed vs denied vs approval"}
+              </p>
             </div>
-            <div className="flex items-center gap-4 text-xs font-mono shrink-0">
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-success)]" />Allowed</span>
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-governance)]" />Denied</span>
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-warning)]" />Approval</span>
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-destructive" />Failed</span>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setLiveMode((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium transition-all",
+                  liveMode
+                    ? "bg-[var(--color-success)]/15 text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30"
+                    : "bg-surface-2 text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Radio className={cn("w-3 h-3", liveMode && "animate-pulse")} />
+                Live
+              </button>
+              <div className="flex items-center gap-3 text-xs font-mono">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-success)]" />Allowed</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-governance)]" />Denied</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--color-warning)]" />Approval</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-destructive" />Failed</span>
+              </div>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={260}>

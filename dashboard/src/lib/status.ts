@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   ShieldOff,
 } from "lucide-react";
+import { toRunVisibilityState } from "./runVisibility";
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
 
@@ -21,22 +22,18 @@ export interface StatusMeta {
 }
 
 export function runStatusMeta(status?: string): StatusMeta {
-  switch (status) {
-    case "succeeded":
-      return { label: status, tone: "success", shape: "circle", icon: CheckCircle };
-    case "waiting":
-      return { label: status, tone: "warning", shape: "circle", icon: Clock };
+  const visibility = toRunVisibilityState(status);
+  switch (visibility) {
+    case "completed":
+      return { label: "completed", tone: "success", shape: "circle", icon: CheckCircle };
     case "running":
-      return { label: status, tone: "accent", shape: "circle", icon: Loader };
+      return { label: "running", tone: "accent", shape: "circle", icon: Loader };
     case "failed":
-    case "timed_out":
-      return { label: status, tone: "danger", shape: "circle", icon: XCircle };
-    case "denied":
-      return { label: status, tone: "governance", shape: "shield", icon: ShieldAlert };
-    case "pending":
-      return { label: status, tone: "warning", shape: "circle", icon: Clock };
-    case "cancelled":
-      return { label: status, tone: "muted", shape: "circle", icon: XCircle };
+      return { label: "failed", tone: "danger", shape: "circle", icon: XCircle };
+    case "blocked":
+      return { label: "blocked", tone: "governance", shape: "shield", icon: ShieldAlert };
+    case "queued":
+      return { label: "queued", tone: "warning", shape: "circle", icon: Clock };
     default:
       return { label: status ?? "unknown", tone: "muted", shape: "circle", icon: Circle };
   }

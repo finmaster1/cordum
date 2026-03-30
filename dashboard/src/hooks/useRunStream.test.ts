@@ -79,6 +79,18 @@ describe("useRunStream internals", () => {
     expect(__runStreamInternal.extractJobId(e)).toBe("job-1");
   });
 
+  it("extractStatus normalizes queued/completed/blocked aliases", () => {
+    expect(
+      __runStreamInternal.extractStatus(event({ payload: { status: "queued" } })),
+    ).toBe("pending");
+    expect(
+      __runStreamInternal.extractStatus(event({ payload: { status: "completed" } })),
+    ).toBe("succeeded");
+    expect(
+      __runStreamInternal.extractStatus(event({ payload: { status: "blocked" } })),
+    ).toBe("denied");
+  });
+
   it("patchRunInCache updates individual, array, and active response caches", () => {
     const queryClient = createTestQueryClient();
     const run = baseRun();
@@ -148,6 +160,45 @@ describe("useRunStream hook", () => {
       expect(queryClient.getQueryData<WorkflowRun>(["workflow-run", "run-1"])?.status).toBe("succeeded");
     });
     expect(queryClient.getQueryData<WorkflowRun>(["workflow-run", "run-1"])?.completedAt).toBe("2026-02-13T10:05:00.000Z");
+
+    hook.unmount();
+  });
+
+  it("normalizes run-level lifecycle aliases", async () => {
+    const queryClient = createTestQueryClient();
+    setRunCaches(queryClient, baseRun());
+    const hook = renderWithQueryClient(() => useRunStream("run-1"), queryClient);
+
+    act(() => {
+      useEventStore.getState().addEvent(
+        event({
+          id: "ev-completed-alias",
+          type: "run.status_changed",
+          timestamp: "2026-02-13T10:07:00.000Z",
+          payload: { runId: "run-1", status: "completed" },
+        }),
+      );
+    });
+
+    await hook.waitFor(() => {
+      expect(queryClient.getQueryData<WorkflowRun>(["workflow-run", "run-1"])?.status).toBe("succeeded");
+    });
+
+    act(() => {
+      useEventStore.getState().addEvent(
+        event({
+          id: "ev-blocked-alias",
+          type: "run.status_changed",
+          timestamp: "2026-02-13T10:08:00.000Z",
+          payload: { runId: "run-1", status: "blocked" },
+        }),
+      );
+    });
+
+    await hook.waitFor(() => {
+      expect(queryClient.getQueryData<WorkflowRun>(["workflow-run", "run-1"])?.status).toBe("denied");
+    });
+    expect(queryClient.getQueryData<WorkflowRun>(["workflow-run", "run-1"])?.completedAt).toBe("2026-02-13T10:08:00.000Z");
 
     hook.unmount();
   });

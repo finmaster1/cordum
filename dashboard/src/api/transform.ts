@@ -1,5 +1,6 @@
 import YAML from "yaml";
 import { logger } from "../lib/logger";
+import { normalizeRunStatusValue } from "../lib/runVisibility";
 import type {
   Job,
   JobStatus,
@@ -745,17 +746,8 @@ export function mapWorkflow(def: BackendWorkflow): Workflow {
   };
 }
 
-const VALID_RUN_STATUSES = new Set<string>(["pending", "running", "waiting", "succeeded", "failed", "denied", "timed_out", "cancelled"]);
-
 function normalizeRunStatus(raw?: string): WorkflowStep["status"] {
-  const lower = (raw || "").toLowerCase();
-  if (VALID_RUN_STATUSES.has(lower)) return lower as WorkflowStep["status"];
-  // Map common backend variants
-  if (lower === "completed" || lower === "success") return "succeeded";
-  if (lower === "error" || lower === "errored") return "failed";
-  if (lower === "timeout" || lower === "timedout") return "timed_out";
-  if (lower === "canceled") return "cancelled";
-  return "pending";
+  return normalizeRunStatusValue(raw) ?? "pending";
 }
 
 export function mapWorkflowRunStep(step: BackendStepRun, fallbackId: string): WorkflowStep {
@@ -824,6 +816,7 @@ export function deriveApprovalStatus(
     return "denied";
   if (s === "denied") return "denied";
   if (s === "output_quarantined") return "quarantined";
+  if (s === "timeout") return "expired";
   if (s === "approval_required") return "pending";
   // Job resolved through approval flow — derive from post-approval state.
   if (resolvedBy) {

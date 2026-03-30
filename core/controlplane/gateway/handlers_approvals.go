@@ -344,7 +344,7 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 		for _, j := range jobs {
 			seenIDs[j.ID] = true
 		}
-		for _, state := range []model.JobState{model.JobStatePending, model.JobStateDenied, model.JobStateSucceeded, model.JobStateFailed} {
+		for _, state := range []model.JobState{model.JobStatePending, model.JobStateDenied, model.JobStateSucceeded, model.JobStateFailed, model.JobStateTimeout} {
 			if resolvedLimit <= 0 {
 				break
 			}
@@ -366,7 +366,16 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				if approval.ApprovedBy == "" {
-					continue
+					// TIMEOUT jobs were never resolved — include them if
+					// they had approval_required set (expired approval gates).
+					if state == model.JobStateTimeout {
+						sd, sdErr := s.jobStore.GetSafetyDecision(r.Context(), rj.ID)
+						if sdErr != nil || !sd.ApprovalRequired {
+							continue
+						}
+					} else {
+						continue
+					}
 				}
 				jobs = append(jobs, rj)
 				seenIDs[rj.ID] = true
@@ -423,7 +432,7 @@ func (s *server) handleListApprovals(w http.ResponseWriter, r *http.Request) {
 				// skip only items that have not been resolved yet.
 				if runID := strings.TrimSpace(req.Labels["run_id"]); runID != "" && s.workflowStore != nil {
 					if run, runErr := s.workflowStore.GetRun(r.Context(), runID); runErr == nil && run != nil {
-						if wf.IsTerminalRunStatus(run.Status) && !hasResolvedApproval {
+						if wf.IsTerminalRunStatus(run.Status) && !hasResolvedApproval && job.State != model.JobStateTimeout {
 							continue
 						}
 					}

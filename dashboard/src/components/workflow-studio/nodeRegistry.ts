@@ -279,6 +279,14 @@ const STATUS_VISUALS: Record<string, StatusVisual> = {
     strikethrough: false,
     label: "Pending",
   },
+  queued: {
+    bg: "bg-muted/30",
+    border: "border-border",
+    pulse: false,
+    dimmed: true,
+    strikethrough: false,
+    label: "Queued",
+  },
   waiting: {
     bg: "bg-[var(--color-warning)]/8",
     border: "border-[var(--color-warning)]/50 ring-2 ring-[var(--color-warning)]/15",
@@ -303,6 +311,14 @@ const STATUS_VISUALS: Record<string, StatusVisual> = {
     strikethrough: false,
     label: "Denied",
   },
+  blocked: {
+    bg: "bg-[var(--color-governance)]/8",
+    border: "border-[var(--color-governance)]/50",
+    pulse: false,
+    dimmed: false,
+    strikethrough: false,
+    label: "Blocked",
+  },
   timed_out: {
     bg: "bg-destructive/8",
     border: "border-destructive/40",
@@ -326,6 +342,14 @@ const STATUS_VISUALS: Record<string, StatusVisual> = {
     dimmed: false,
     strikethrough: false,
     label: "Quarantined",
+  },
+  completed: {
+    bg: "bg-[var(--color-success)]/8",
+    border: "border-[var(--color-success)]/50",
+    pulse: false,
+    dimmed: false,
+    strikethrough: false,
+    label: "Completed",
   },
 };
 
@@ -387,9 +411,12 @@ const STATUS_TO_BADGE: Record<string, BadgeVariant> = {
   quarantined: "governance",
   output_quarantined: "governance",
   pending: "muted",
+  queued: "muted",
   waiting: "warning",
+  blocked: "governance",
   cancelled: "muted",
   timed_out: "danger",
+  completed: "healthy",
 };
 
 export function statusToBadgeVariant(status?: string): BadgeVariant {

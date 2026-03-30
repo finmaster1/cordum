@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Timer,
   X,
   ArrowRight,
   Info,
@@ -460,6 +461,7 @@ export default function ApprovalsPage() {
   const pending = all.filter((a) => a.status === "pending");
   const approved = all.filter((a) => a.status === "approved");
   const denied = all.filter((a) => a.status === "denied");
+  const expired = all.filter((a) => a.status === "expired");
 
   const filtered = useMemo(
     () =>
@@ -498,10 +500,10 @@ export default function ApprovalsPage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="grid gap-4 md:grid-cols-3"
+        className="grid gap-4 md:grid-cols-4"
       >
         {isLoading ? (
-          Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)
+          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
           <>
             <InstrumentCard accent={pending.length > 0 ? "warning" : "muted"}>
@@ -545,6 +547,14 @@ export default function ApprovalsPage() {
                 }
               />
             </InstrumentCard>
+
+            <InstrumentCard accent="muted">
+              <MetricValue
+                label="Expired"
+                value={expired.length}
+                icon={<Timer className="h-4 w-4 text-muted-foreground" />}
+              />
+            </InstrumentCard>
           </>
         )}
       </motion.div>
@@ -566,6 +576,7 @@ export default function ApprovalsPage() {
             { id: "pending", label: "Pending", count: pending.length },
             { id: "approved", label: "Approved", count: approved.length },
             { id: "denied", label: "Denied", count: denied.length },
+            { id: "expired", label: "Expired", count: expired.length },
             { id: "all", label: "All", count: all.length },
           ].map((tab) => (
             <button

@@ -399,5 +399,9 @@ func connectNATSWithTLS(natsURL string) (*nats.Conn, error) {
 		opts = append(opts, nats.Secure(tlsCfg))
 		log.Println("[mock-bank] NATS TLS enabled")
 	}
+	if token := os.Getenv("NATS_TOKEN"); token != "" {
+		opts = append(opts, nats.Token(token))
+		log.Println("[mock-bank] NATS token auth configured")
+	}
 	return nats.Connect(natsURL, opts...)
 }

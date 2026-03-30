@@ -737,3 +737,62 @@ func TestRejectJobNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
+
+func TestListApprovalsIncludesTimedOutApprovals(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-timeout-approval"
+	// Create a job in APPROVAL state with approval_required safety decision.
+	setupApprovalJob(t, s, jobID, "", model.SafetyDecisionRecord{
+		Decision:         model.SafetyRequireApproval,
+		ApprovalRequired: true,
+		PolicySnapshot:   "snap-test",
+		JobHash:          "hash-" + jobID,
+	})
+	// Transition to TIMEOUT (simulating reconciler deadline expiration).
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateTimeout))
+
+	req := httptest.NewRequest("GET", "/api/v1/approvals", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	assert.Len(t, items, 1, "timed-out approval job should appear in the list")
+
+	item := items[0].(map[string]any)
+	job := item["job"].(map[string]any)
+	assert.Equal(t, "TIMEOUT", job["state"])
+}
+
+func TestListApprovalsExcludesNonApprovalTimeoutJobs(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+
+	jobID := "job-worker-timeout"
+	// Create a plain worker job (not approval-gated) and transition it to TIMEOUT
+	// through a valid state path: "" -> PENDING -> SCHEDULED -> DISPATCHED -> TIMEOUT.
+	pbReq := &pb.JobRequest{JobId: jobID, Topic: "test.worker.topic"}
+	require.NoError(t, s.jobStore.SetJobMeta(ctx, pbReq))
+	require.NoError(t, s.jobStore.SetJobRequest(ctx, pbReq))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStatePending))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateScheduled))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateDispatched))
+	require.NoError(t, s.jobStore.SetState(ctx, jobID, model.JobStateTimeout))
+	require.NoError(t, s.jobStore.SetSafetyDecision(ctx, jobID, model.SafetyDecisionRecord{
+		Decision: model.SafetyAllow,
+	}))
+
+	req := httptest.NewRequest("GET", "/api/v1/approvals", nil)
+	rr := httptest.NewRecorder()
+	s.handleListApprovals(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	items := resp["items"].([]any)
+	assert.Len(t, items, 0, "non-approval timeout job should NOT appear")
+}
