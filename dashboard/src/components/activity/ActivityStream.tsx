@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { Activity, Loader2, Send, CheckCircle2, XCircle } from "lucide-react";
+import { Activity, Loader2, Send, CheckCircle2, ShieldAlert, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isRunVisibilityActive, isRunVisibilityTerminal, toRunVisibilityState } from "@/lib/runVisibility";
 import { Button } from "../ui/Button";
 import { Textarea } from "../ui/Textarea";
 import { ActivityBlock } from "./ActivityBlock";
 import type { ActivityItem } from "../../types/activity";
 
-const ACTIVE_RUN_STATUSES = ["running", "pending", "waiting", "blocked"];
 const MAX_ACTIVITY_ITEMS = 100;
-const TERMINAL_STATUSES = ["succeeded", "failed", "denied", "cancelled", "timed_out"];
 
 type FilterTab = "all" | "errors" | "safety" | "progress";
 
@@ -50,8 +49,9 @@ export function ActivityStream({
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const isRunActive = ACTIVE_RUN_STATUSES.includes(runStatus);
-  const isTerminal = TERMINAL_STATUSES.includes(runStatus);
+  const runVisibility = toRunVisibilityState(runStatus);
+  const isRunActive = isRunVisibilityActive(runStatus);
+  const isTerminal = isRunVisibilityTerminal(runStatus);
 
   const filteredItems = useMemo(
     () => items.filter((item) => matchesFilter(item, activeFilter)),
@@ -99,7 +99,7 @@ export function ActivityStream({
         </div>
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${isRunActive ? "bg-success animate-pulse" : "bg-muted"}`} />
-          <span className="text-xs text-muted-foreground capitalize">{runStatus}</span>
+          <span className="text-xs text-muted-foreground capitalize">{runVisibility ?? runStatus}</span>
         </div>
       </div>
 
@@ -157,16 +157,20 @@ export function ActivityStream({
             {isTerminal && (
               <div className={cn(
                 "flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium",
-                runStatus === "succeeded"
+                runVisibility === "completed"
                   ? "bg-[var(--color-success)]/10 text-[var(--color-success)]"
-                  : "bg-destructive/10 text-destructive",
+                  : runVisibility === "blocked"
+                    ? "bg-[var(--color-governance)]/10 text-[color:rgba(139,92,186,1)]"
+                    : "bg-destructive/10 text-destructive",
               )}>
-                {runStatus === "succeeded" ? (
+                {runVisibility === "completed" ? (
                   <CheckCircle2 className="w-4 h-4" />
+                ) : runVisibility === "blocked" ? (
+                  <ShieldAlert className="w-4 h-4" />
                 ) : (
                   <XCircle className="w-4 h-4" />
                 )}
-                Run {runStatus}
+                Run {runVisibility ?? runStatus}
               </div>
             )}
           </>

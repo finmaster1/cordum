@@ -17,6 +17,7 @@ import {
   ChevronDown, Copy, RotateCcw, Hand,
 } from "lucide-react";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
+import { isRunVisibilityActive, isRunVisibilityTerminal, toRunVisibilityState } from "@/lib/runVisibility";
 import { toast } from "sonner";
 import { get, post } from "@/api/client";
 import {
@@ -26,7 +27,6 @@ import {
   useRerunRun,
   type RunTimelineEvent,
 } from "@/hooks/useWorkflows";
-import type { RunStatus } from "@/api/types";
 
 interface ChatMessage {
   id: string;
@@ -56,11 +56,15 @@ function mapStepType(type: string): RunStep["type"] {
 
 function mapStepStatus(status?: string): RunStep["status"] {
   switch (status) {
+    case "completed": return "succeeded";
     case "succeeded": return "succeeded";
+    case "queued": return "pending";
     case "running": return "running";
     case "waiting": return "waiting";
     case "quarantined":
     case "output_quarantined": return "quarantined";
+    case "denied":
+    case "blocked":
     case "failed":
     case "timed_out": return "failed";
     case "cancelled": return "skipped";
@@ -69,16 +73,12 @@ function mapStepStatus(status?: string): RunStep["status"] {
 }
 
 function runStatusVariant(status?: string): "healthy" | "warning" | "danger" | "info" | "muted" | "governance" {
-  switch (status) {
-    case "succeeded": return "healthy";
+  switch (toRunVisibilityState(status)) {
+    case "completed": return "healthy";
     case "running": return "info";
-    case "waiting": return "warning";
-    case "quarantined":
-    case "output_quarantined":
-    case "denied": return "governance";
-    case "failed":
-    case "timed_out": return "danger";
-    case "cancelled": return "muted";
+    case "queued": return "warning";
+    case "blocked": return "governance";
+    case "failed": return "danger";
     default: return "muted";
   }
 }
@@ -295,7 +295,9 @@ export default function WorkflowRunDetailPage() {
     );
   }
 
-  const isRunning = run?.status === "running" || run?.status === "pending" || run?.status === "waiting";
+  const runVisibility = toRunVisibilityState(run?.status);
+  const isRunActive = isRunVisibilityActive(run?.status);
+  const isRunTerminal = isRunVisibilityTerminal(run?.status);
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col -m-6">
@@ -311,23 +313,27 @@ export default function WorkflowRunDetailPage() {
               <StatusBadge
                 variant={runStatusVariant(run?.status ?? "pending")}
                 dot
-                pulse={run?.status === "running"}
+                pulse={runVisibility === "running"}
               >
-                {run?.status ?? "unknown"}
+                {runVisibility ?? run?.status ?? "unknown"}
               </StatusBadge>
               <span className="text-xs font-mono text-muted-foreground">{completedCount}/{totalSteps} steps</span>
-              {isRunning ? (
+              {isRunActive ? (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-[var(--color-success)]/15 text-[var(--color-success)]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" />
                   LIVE
                 </span>
-              ) : run?.status && ["succeeded", "failed", "denied", "cancelled", "timed_out"].includes(run.status) ? (
+              ) : isRunTerminal ? (
                 <span className={cn(
                   "text-xs font-mono",
-                  run.status === "succeeded" ? "text-[var(--color-success)]" : run.status === "denied" ? "text-[color:rgba(139,92,186,1)]" : "text-destructive",
+                  runVisibility === "completed"
+                    ? "text-[var(--color-success)]"
+                    : runVisibility === "blocked"
+                      ? "text-[color:rgba(139,92,186,1)]"
+                      : "text-destructive",
                 )}>
-                  {run.status === "succeeded" ? "Completed" : run.status === "failed" ? "Failed" : run.status === "denied" ? "Denied" : run.status === "cancelled" ? "Cancelled" : "Timed out"}
-                  {run.updatedAt ? ` ${formatRelativeTime(run.updatedAt)}` : ""}
+                  {runVisibility === "completed" ? "Completed" : runVisibility === "blocked" ? "Blocked" : "Failed"}
+                  {run?.updatedAt ? ` ${formatRelativeTime(run.updatedAt)}` : ""}
                 </span>
               ) : null}
             </div>
@@ -348,7 +354,7 @@ export default function WorkflowRunDetailPage() {
             variant="danger"
             size="sm"
             onClick={() => setCancelOpen(true)}
-            disabled={!isRunning || cancelMutation.isPending}
+            disabled={!isRunActive || cancelMutation.isPending}
           >
             <XCircle className="w-3 h-3 mr-1" />
             Cancel Run

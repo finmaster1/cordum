@@ -294,14 +294,15 @@ output_rules:
     reason: "Potential secret material detected in output."
 
   - id: output-pii-leak
-    description: "PII detection rule — excludes mkt-signal (internal scanning produces names/orgs from public sources)."
+    description: "PII detection on outbound channels only — internal agents (HR, orchestrator) are exempt."
     enabled: true
     match:
       topics:
         - "job.mkt-authority.*"
         - "job.mkt-pipeline.*"
         - "job.demo-*"
-        - "job.b2b.*"
+        - "job.b2b.vendor-email"
+        - "job.b2b.procurement-pay"
       scanners:
         - "pii"
     decision: quarantine

@@ -465,6 +465,8 @@ describe("transform contract hardening", () => {
       expect(mapWorkflowRunStep({ step_id: "s1", status: "error" }, "f").status).toBe("failed");
       expect(mapWorkflowRunStep({ step_id: "s1", status: "timeout" }, "f").status).toBe("timed_out");
       expect(mapWorkflowRunStep({ step_id: "s1", status: "canceled" }, "f").status).toBe("cancelled");
+      expect(mapWorkflowRunStep({ step_id: "s1", status: "queued" }, "f").status).toBe("pending");
+      expect(mapWorkflowRunStep({ step_id: "s1", status: "blocked" }, "f").status).toBe("denied");
     });
 
     it("defaults unknown statuses to pending instead of passing through raw strings", () => {
@@ -573,6 +575,22 @@ describe("transform contract hardening", () => {
         status: "completed",
       });
       expect(run.status).toBe("succeeded");
+    });
+
+    it("normalizes queued/blocked run-level aliases", () => {
+      const queuedRun = mapWorkflowRun({
+        id: "run-queued",
+        workflow_id: "wf-1",
+        status: "queued",
+      });
+      expect(queuedRun.status).toBe("pending");
+
+      const blockedRun = mapWorkflowRun({
+        id: "run-blocked",
+        workflow_id: "wf-1",
+        status: "blocked",
+      });
+      expect(blockedRun.status).toBe("denied");
     });
 
     it("handles missing steps gracefully", () => {

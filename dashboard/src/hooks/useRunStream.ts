@@ -4,6 +4,7 @@ import { useEventStore } from "../state/events";
 import type { StreamEvent, WorkflowRun, RunStatus } from "../api/types";
 import type { WorkflowRunListResponse } from "./useWorkflows";
 import { logger } from "../lib/logger";
+import { isTerminalRunStatus, normalizeRunStatusValue } from "../lib/runVisibility";
 
 // ---------------------------------------------------------------------------
 // Event type detection
@@ -39,20 +40,10 @@ function extractStepId(event: StreamEvent): string | undefined {
   return (p.stepId ?? p.step_id) as string | undefined;
 }
 
-const VALID_RUN_STATUSES = new Set<string>(["pending", "running", "waiting", "succeeded", "failed", "denied", "timed_out", "cancelled"]);
-
 function extractStatus(event: StreamEvent): RunStatus | undefined {
   const p = event.payload ?? {};
   const raw = (p.status ?? p.newStatus ?? p.new_status) as string | undefined;
-  if (!raw) return undefined;
-  const lower = raw.toLowerCase();
-  if (VALID_RUN_STATUSES.has(lower)) return lower as RunStatus;
-  // Map common variants
-  if (lower === "completed" || lower === "success") return "succeeded";
-  if (lower === "error" || lower === "errored") return "failed";
-  if (lower === "timeout" || lower === "timedout") return "timed_out";
-  if (lower === "canceled") return "cancelled";
-  return undefined;
+  return normalizeRunStatusValue(raw);
 }
 
 function extractJobId(event: StreamEvent): string | undefined {
@@ -163,7 +154,7 @@ export function useRunStream(runId: string | null | undefined): void {
               ...s,
               status: newStatus,
               completedAt:
-                newStatus === "succeeded" || newStatus === "failed" || newStatus === "denied" || newStatus === "timed_out" || newStatus === "cancelled"
+                isTerminalRunStatus(newStatus)
                   ? latest.timestamp
                   : s.completedAt,
               error:
@@ -191,7 +182,7 @@ export function useRunStream(runId: string | null | undefined): void {
               ...s,
               status: newStatus,
               completedAt:
-                newStatus === "succeeded" || newStatus === "failed" || newStatus === "denied" || newStatus === "timed_out" || newStatus === "cancelled"
+                isTerminalRunStatus(newStatus)
                   ? latest.timestamp
                   : s.completedAt,
               error:
@@ -211,7 +202,7 @@ export function useRunStream(runId: string | null | undefined): void {
           status: newStatus,
           updatedAt: latest.timestamp,
           completedAt:
-            newStatus === "succeeded" || newStatus === "failed" || newStatus === "denied" || newStatus === "cancelled" || newStatus === "timed_out"
+            isTerminalRunStatus(newStatus)
               ? latest.timestamp
               : run.completedAt,
         }));

@@ -1,18 +1,16 @@
 import { describe, it, expect } from "vitest";
+import { isRunVisibilityActive, isRunVisibilityTerminal, toRunVisibilityState } from "../lib/runVisibility";
 
 /**
  * Tests for RunDetailPage logic: skipped step detection, live vs historical indicator.
  */
 
-const TERMINAL_STATUSES = ["succeeded", "failed", "denied", "cancelled", "timed_out"];
-const ACTIVE_STATUSES = ["running", "pending", "waiting"];
-
 function isRunning(status: string): boolean {
-  return ACTIVE_STATUSES.includes(status);
+  return isRunVisibilityActive(status);
 }
 
 function isTerminal(status: string): boolean {
-  return TERMINAL_STATUSES.includes(status);
+  return isRunVisibilityTerminal(status);
 }
 
 function stepClasses(status: string): string[] {
@@ -50,13 +48,17 @@ describe("Live vs historical indicator", () => {
     expect(isTerminal("running")).toBe(false);
   });
 
-  it("pending is live", () => {
+  it("pending/queued are live", () => {
     expect(isRunning("pending")).toBe(true);
+    expect(isRunning("queued")).toBe(true);
+    expect(toRunVisibilityState("pending")).toBe("queued");
   });
 
-  it("succeeded is terminal (historical)", () => {
+  it("succeeded/completed are terminal (historical)", () => {
     expect(isRunning("succeeded")).toBe(false);
     expect(isTerminal("succeeded")).toBe(true);
+    expect(isTerminal("completed")).toBe(true);
+    expect(toRunVisibilityState("succeeded")).toBe("completed");
   });
 
   it("failed is terminal", () => {
@@ -71,14 +73,17 @@ describe("Live vs historical indicator", () => {
     expect(isTerminal("timed_out")).toBe(true);
   });
 
-  it("denied is terminal (governance outcome, distinct from failed)", () => {
+  it("denied/blocked are terminal governance outcomes", () => {
     expect(isTerminal("denied")).toBe(true);
+    expect(isTerminal("blocked")).toBe(true);
     expect(isRunning("denied")).toBe(false);
+    expect(toRunVisibilityState("denied")).toBe("blocked");
   });
 
-  it("waiting is active, not terminal", () => {
-    expect(isRunning("waiting")).toBe(true);
-    expect(isTerminal("waiting")).toBe(false);
+  it("waiting maps to blocked (not live)", () => {
+    expect(isRunning("waiting")).toBe(false);
+    expect(isTerminal("waiting")).toBe(true);
+    expect(toRunVisibilityState("waiting")).toBe("blocked");
   });
 });
 
@@ -88,11 +93,15 @@ describe("Live vs historical indicator", () => {
 
 function mapStepStatus(status?: string): string {
   switch (status) {
+    case "completed": return "succeeded";
     case "succeeded": return "succeeded";
+    case "queued": return "pending";
     case "running": return "running";
     case "waiting": return "waiting";
     case "quarantined":
     case "output_quarantined": return "quarantined";
+    case "denied":
+    case "blocked":
     case "failed":
     case "timed_out": return "failed";
     case "cancelled": return "skipped";
@@ -110,8 +119,15 @@ describe("mapStepStatus — approval-waiting preservation", () => {
   it("maps succeeded, failed, cancelled correctly", () => {
     expect(mapStepStatus("succeeded")).toBe("succeeded");
     expect(mapStepStatus("failed")).toBe("failed");
+    expect(mapStepStatus("denied")).toBe("failed");
+    expect(mapStepStatus("blocked")).toBe("failed");
     expect(mapStepStatus("cancelled")).toBe("skipped");
     expect(mapStepStatus("timed_out")).toBe("failed");
+  });
+
+  it("maps queued/completed aliases", () => {
+    expect(mapStepStatus("queued")).toBe("pending");
+    expect(mapStepStatus("completed")).toBe("succeeded");
   });
 
   it("maps quarantined states", () => {
