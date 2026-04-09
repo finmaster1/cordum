@@ -193,7 +193,7 @@ jobs:
           context: ./dashboard
           file: ./dashboard/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           sbom: true
           provenance: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -233,8 +233,10 @@ jobs:
       - name: Update image tags in Artifact Hub annotations
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i "s/v0\.[0-9]*\.[0-9]*/${VERSION}/g" cordum-helm/Chart.yaml
+          # Update image tags in artifacthub.io/images annotations (format: image:TAG)
+          sed -i -E "s|(ghcr\.io/cordum-io/cordum/[a-z-]+:)[0-9]+\.[0-9]+\.[0-9]+|\1${VERSION}|g" cordum-helm/Chart.yaml
           echo "Image tags updated to ${VERSION}"
+          grep "image:" cordum-helm/Chart.yaml
 
       - name: Lint chart
         run: helm lint cordum-helm/
