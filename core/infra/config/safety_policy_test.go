@@ -403,3 +403,177 @@ func TestMatchRuleEmptyMatchMatchesEverything(t *testing.T) {
 		t.Fatalf("expected empty match to match any input")
 	}
 }
+
+func TestMatchRuleLabels_InternalLabel(t *testing.T) {
+	// Rule requires _internal=true label.
+	match := PolicyMatch{
+		Topics: []string{"job.default"},
+		Labels: map[string]string{"_internal": "true"},
+	}
+
+	// With label → match.
+	withLabel := PolicyInput{
+		Topic:  "job.default",
+		Labels: map[string]string{"_internal": "true"},
+	}
+	if !matchRule(match, withLabel) {
+		t.Fatal("expected match when _internal label present")
+	}
+
+	// Without label → no match.
+	withoutLabel := PolicyInput{
+		Topic:  "job.default",
+		Labels: map[string]string{},
+	}
+	if matchRule(match, withoutLabel) {
+		t.Fatal("expected no match when _internal label missing")
+	}
+
+	// Wrong value → no match.
+	wrongValue := PolicyInput{
+		Topic:  "job.default",
+		Labels: map[string]string{"_internal": "false"},
+	}
+	if matchRule(match, wrongValue) {
+		t.Fatal("expected no match when _internal label has wrong value")
+	}
+
+	// Nil labels → no match.
+	nilLabels := PolicyInput{Topic: "job.default"}
+	if matchRule(match, nilLabels) {
+		t.Fatal("expected no match when labels are nil")
+	}
+}
+
+func TestEvaluate_DefaultTopicRestriction(t *testing.T) {
+	// Red-team scenario #2: job.default with internal label → allow,
+	// without label → require_approval.
+	policy := &SafetyPolicy{
+		DefaultDecision: "deny",
+		Rules: []PolicyRule{
+			{
+				ID:       "default-topic-internal-allow",
+				Decision: "allow",
+				Reason:   "Internal probe on default topic.",
+				Match: PolicyMatch{
+					Topics: []string{"job.default"},
+					Labels: map[string]string{"_internal": "true"},
+				},
+			},
+			{
+				ID:       "default-topic-external-review",
+				Decision: "require_approval",
+				Reason:   "External use of job.default requires approval.",
+				Match: PolicyMatch{
+					Topics: []string{"job.default"},
+				},
+			},
+		},
+	}
+
+	// Internal probe with label → allow.
+	internal := policy.Evaluate(PolicyInput{
+		Tenant: "default",
+		Topic:  "job.default",
+		Labels: map[string]string{"_internal": "true"},
+	})
+	if internal.Decision != "allow" {
+		t.Fatalf("internal probe: expected allow, got %q", internal.Decision)
+	}
+	if internal.RuleID != "default-topic-internal-allow" {
+		t.Fatalf("expected rule default-topic-internal-allow, got %q", internal.RuleID)
+	}
+
+	// External caller without label → require_approval.
+	external := policy.Evaluate(PolicyInput{
+		Tenant: "default",
+		Topic:  "job.default",
+	})
+	if external.Decision != "require_approval" {
+		t.Fatalf("RED-TEAM BYPASS: external job.default without label: expected require_approval, got %q",
+			external.Decision)
+	}
+	if external.RuleID != "default-topic-external-review" {
+		t.Fatalf("expected rule default-topic-external-review, got %q", external.RuleID)
+	}
+
+	// External caller with wrong label → require_approval (NOT allow).
+	wrongLabel := policy.Evaluate(PolicyInput{
+		Tenant: "default",
+		Topic:  "job.default",
+		Labels: map[string]string{"_internal": "false"},
+	})
+	if wrongLabel.Decision != "require_approval" {
+		t.Fatalf("wrong label value: expected require_approval, got %q", wrongLabel.Decision)
+	}
+}
+
+func TestEvaluate_SourceRestriction(t *testing.T) {
+	// Red-team scenarios #17/#18: blanket-allow topics must be restricted
+	// to workflow/pack sources. Direct API callers get require_approval.
+	policy := &SafetyPolicy{
+		DefaultDecision: "deny",
+		Rules: []PolicyRule{
+			{
+				ID:       "b2b-internal-allow",
+				Decision: "allow",
+				Match: PolicyMatch{
+					Topics: []string{"job.b2b.orchestrate"},
+					Labels: map[string]string{"_source": "workflow"},
+				},
+			},
+			{
+				ID:       "b2b-pack-allow",
+				Decision: "allow",
+				Match: PolicyMatch{
+					Topics: []string{"job.b2b.orchestrate"},
+					Labels: map[string]string{"_source": "pack"},
+				},
+			},
+			{
+				ID:       "b2b-api-review",
+				Decision: "require_approval",
+				Match:    PolicyMatch{Topics: []string{"job.b2b.orchestrate"}},
+			},
+		},
+	}
+
+	// Workflow source → allow.
+	wfResult := policy.Evaluate(PolicyInput{
+		Topic:  "job.b2b.orchestrate",
+		Labels: map[string]string{"_source": "workflow"},
+	})
+	if wfResult.Decision != "allow" {
+		t.Fatalf("workflow source: expected allow, got %q", wfResult.Decision)
+	}
+
+	// Pack source → allow.
+	packResult := policy.Evaluate(PolicyInput{
+		Topic:  "job.b2b.orchestrate",
+		Labels: map[string]string{"_source": "pack"},
+	})
+	if packResult.Decision != "allow" {
+		t.Fatalf("pack source: expected allow, got %q", packResult.Decision)
+	}
+
+	// Direct API source → require_approval.
+	apiResult := policy.Evaluate(PolicyInput{
+		Topic:  "job.b2b.orchestrate",
+		Labels: map[string]string{"_source": "api"},
+	})
+	if apiResult.Decision != "require_approval" {
+		t.Fatalf("RED-TEAM BYPASS: API source on b2b.orchestrate: expected require_approval, got %q",
+			apiResult.Decision)
+	}
+	if apiResult.RuleID != "b2b-api-review" {
+		t.Fatalf("expected b2b-api-review rule, got %q", apiResult.RuleID)
+	}
+
+	// No source label → require_approval (catch-all).
+	noSource := policy.Evaluate(PolicyInput{
+		Topic: "job.b2b.orchestrate",
+	})
+	if noSource.Decision != "require_approval" {
+		t.Fatalf("no source: expected require_approval, got %q", noSource.Decision)
+	}
+}
