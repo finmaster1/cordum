@@ -971,9 +971,20 @@ func startHTTPServer(s *server, httpAddr, metricsAddr string, grpcServer *grpc.S
 	mux.HandleFunc("GET /api/v1/admin/locks", s.instrumented("/api/v1/admin/locks", s.handleAdminLocks))
 
 	// 2.7 Audit export management (admin only, entitlement-gated)
+	// 2.7 Audit export — main endpoint plus operational sub-routes.
+	// The top-level GET /api/v1/audit/export was missing despite the
+	// handler being fully implemented in handlers_audit_compliance.go:61
+	// (same wire-up gap class as /api/v1/audit/verify below).
+	mux.HandleFunc("GET /api/v1/audit/export", s.instrumented("/api/v1/audit/export", s.handleAuditExport))
 	mux.HandleFunc("GET /api/v1/audit/export/health", s.instrumented("/api/v1/audit/export/health", s.handleAuditExportHealth))
 	mux.HandleFunc("GET /api/v1/audit/export/config", s.instrumented("/api/v1/audit/export/config", s.handleAuditExportConfig))
 	mux.HandleFunc("POST /api/v1/audit/export/test", s.instrumented("/api/v1/audit/export/test", s.handleAuditExportTest))
+
+	// 2.7.1 Audit chain verify (admin only) — handler lives in
+	// handlers_audit_verify.go; missing this line was a wire-up regression
+	// that had /api/v1/audit/verify 404ing on fresh deploys despite the
+	// handler being fully implemented and unit-tested.
+	mux.HandleFunc("GET /api/v1/audit/verify", s.instrumented("/api/v1/audit/verify", s.handleAuditVerify))
 
 	// 2.8 Legal hold management (admin only, entitlement-gated)
 	mux.HandleFunc("POST /api/v1/audit/legal-hold", s.instrumented("/api/v1/audit/legal-hold", s.handleCreateLegalHold))
