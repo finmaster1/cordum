@@ -108,7 +108,7 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
     - uses: actions/checkout@v4
@@ -300,3 +300,50 @@ jobs:
     - name: Tear down services
       if: always()
       run: docker compose down -v
+
+  openapi:
+    name: OpenAPI Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install oasdiff
+      run: go install github.com/oasdiff/oasdiff@v1.11.7
+
+    - name: Mark allow-breaking if commit message requests it
+      id: allow_breaking
+      # On pull_request events, checkout@v4 creates a synthetic merge commit
+      # so `git log -1` reads the merge message rather than the contributor's
+      # commit. Inspect the contributor commit (HEAD^2 on PR merges, HEAD
+      # otherwise) so the allow-breaking-openapi marker actually takes effect.
+      run: |
+        TARGET_REF="HEAD"
+        if [[ "${{ github.event_name }}" == "pull_request" ]] && git rev-parse --verify HEAD^2 >/dev/null 2>&1; then
+          TARGET_REF="HEAD^2"
+        fi
+        if git log -1 --pretty=%B "$TARGET_REF" | grep -q 'allow-breaking-openapi'; then
+          echo "OPENAPI_ALLOW_BREAKING=1" >> "$GITHUB_ENV"
+          echo "::notice::allow-breaking-openapi marker found on $TARGET_REF; oasdiff will not fail on breaking changes"
+        fi
+
+    - name: Validate OpenAPI
+      run: make openapi-validate
+      env:
+        OPENAPI_BASE_REF: origin/${{ github.base_ref || 'main' }}
