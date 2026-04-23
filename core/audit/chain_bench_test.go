@@ -89,13 +89,20 @@ func TestChainer_Append10kLatency(t *testing.T) {
 	t.Logf("append latency over %d events: p50=%s p95=%s p99=%s max=%s",
 		iterations, p50, p95, p99, latencies[len(latencies)-1])
 
-	// Ceiling chosen to fail on egregious regressions (25ms p99 in a
-	// pure-Go miniredis loop, even under CI -race instrumentation, would
-	// indicate a pathological Lua retry storm or a new allocation on the hot
-	// path). The plan's <1ms target applies to real Redis; asserting it
-	// against miniredis would be flaky on slow CI.
-	const p99Ceiling = 25 * time.Millisecond
-	if p99 > p99Ceiling {
-		t.Errorf("p99 append latency %s exceeds %s ceiling", p99, p99Ceiling)
+	// Ceiling chosen to fail on egregious regressions (10ms p99 in a
+	// pure-Go miniredis loop would indicate a pathological Lua retry
+	// storm or a new allocation on the hot path). The plan's <1ms
+	// target applies to real Redis; asserting it against miniredis
+	// would be flaky on slow CI.
+	ceiling := 10 * time.Millisecond
+	if raceDetectorEnabled {
+		// The required CI test job runs `go test -race ./...`; the race
+		// detector instruments every miniredis/Lua round trip and can push
+		// p99 slightly above the non-race ceiling without indicating a
+		// production hot-path regression.
+		ceiling = 50 * time.Millisecond
+	}
+	if p99 > ceiling {
+		t.Errorf("p99 append latency %s exceeds %s ceiling", p99, ceiling)
 	}
 }

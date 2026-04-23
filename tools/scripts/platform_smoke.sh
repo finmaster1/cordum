@@ -41,6 +41,38 @@ log() {
   echo "[platform_smoke] $*"
 }
 
+probe_json_field() {
+  local method=$1
+  local path=$2
+  local expected_status=$3
+  local jq_expr=$4
+  local label=$5
+
+  local body_file
+  body_file=$(mktemp)
+  trap 'rm -f "${body_file}"' RETURN
+
+  log "probing ${label}: ${method} ${path}"
+  local status
+  status=$(curl -sS "${CURL_TLS_OPTS[@]}" "${auth_header[@]}" \
+    -o "${body_file}" -w "%{http_code}" \
+    -X "${method}" "${API_BASE}${path}")
+
+  if [[ "${status}" != "${expected_status}" ]]; then
+    echo "${label} returned HTTP ${status}, want ${expected_status}" >&2
+    cat "${body_file}" >&2
+    exit 1
+  fi
+  if ! jq -e "${jq_expr}" "${body_file}" >/dev/null; then
+    echo "${label} response missing expected field check: ${jq_expr}" >&2
+    cat "${body_file}" >&2
+    exit 1
+  fi
+
+  rm -f "${body_file}"
+  trap - RETURN
+}
+
 log "creating workflow"
 workflow_payload=$(cat <<JSON
 {
@@ -134,6 +166,8 @@ if [[ -z "${audit_ok}" ]]; then
   exit 1
 fi
 log "audit verify passed"
+probe_json_field "GET" "/api/v1/governance/health?tenant=${TENANT_ID}" "200" '(.grade | test("^[ABCDF]$")) and (.factors | has("denial_rate") and has("approval_latency_p95") and has("policy_coverage") and has("chain_integrity"))' "governance health"
+
 
 log "deleting run"
 curl -sS "${CURL_TLS_OPTS[@]}" "${auth_header[@]}" -X DELETE "${API_BASE}/api/v1/workflow-runs/${run_id}" >/dev/null

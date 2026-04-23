@@ -210,6 +210,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.25'
+        cache: false
 
     - name: Drop local replace directives (CI uses published modules)
       run: |
@@ -289,6 +290,11 @@ jobs:
       env:
         CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
         REDIS_PASSWORD: ${{ env.REDIS_PASSWORD }}
+
+    - name: Run platform smoke
+      run: make smoke
+      env:
+        CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
 
     - name: Run Go integration tests
       run: go test -v -tags=integration -timeout 5m ./...

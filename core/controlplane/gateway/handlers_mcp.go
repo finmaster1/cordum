@@ -57,9 +57,9 @@ func (s *server) registerMCPRoutes(mux *http.ServeMux) error {
 
 	// Always expose MCP routes so clients get explicit disabled/unavailable responses
 	// instead of startup-time 404s when MCP config loads after route registration.
-	mux.HandleFunc("GET /mcp/sse", s.instrumented("/mcp/sse", s.mcpAuth(s.handleMCPSSE)))
-	mux.HandleFunc("POST /mcp/message", s.instrumented("/mcp/message", s.mcpAuth(s.handleMCPMessage)))
-	mux.HandleFunc("GET /mcp/status", s.instrumented("/mcp/status", s.mcpAuth(s.handleMCPStatus)))
+	s.registerRoute(mux, "GET /mcp/sse", s.instrumented("/mcp/sse", s.mcpAuth(s.handleMCPSSE)))
+	s.registerRoute(mux, "POST /mcp/message", s.instrumented("/mcp/message", s.mcpAuth(s.handleMCPMessage)))
+	s.registerRoute(mux, "GET /mcp/status", s.instrumented("/mcp/status", s.mcpAuth(s.handleMCPStatus)))
 
 	cfg := s.loadMCPConfig(context.Background())
 	if !cfg.Enabled {
