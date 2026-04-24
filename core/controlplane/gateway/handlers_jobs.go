@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
+	"github.com/cordum/cordum/core/controlplane/gateway/policybundles"
 	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/controlplane/topicregistry"
 	"github.com/cordum/cordum/core/infra/artifacts"
@@ -29,11 +30,11 @@ import (
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/protoutil"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -1253,7 +1254,7 @@ func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cancelTopic, _ := s.jobStore.GetTopic(r.Context(), id)
-	s.appendAuditEntryNamed(r.Context(), "cancel", "job", id, cancelTopic, policyActorID(r), policyRole(r), "cancel job "+id)
+	s.appendAuditEntryNamed(r.Context(), "cancel", "job", id, cancelTopic, policybundles.PolicyActorID(r), policybundles.PolicyRole(r), "cancel job "+id)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]any{
 		"id":    id,
@@ -1335,8 +1336,8 @@ func (s *server) handleRemediateJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	newReq, ok := proto.Clone(origReq).(*pb.JobRequest)
-	if !ok || newReq == nil {
+	newReq, err := protoutil.CloneJobRequest(origReq)
+	if err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to clone job request")
 		return
 	}
@@ -1422,7 +1423,7 @@ func (s *server) handleRemediateJob(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to enqueue job")
 		return
 	}
-	s.appendAuditEntryNamed(r.Context(), "remediate", "job", newJobID, newReq.GetTopic(), policyActorID(r), policyRole(r), "remediate job "+newJobID)
+	s.appendAuditEntryNamed(r.Context(), "remediate", "job", newJobID, newReq.GetTopic(), policybundles.PolicyActorID(r), policybundles.PolicyRole(r), "remediate job "+newJobID)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{"job_id": newJobID, "trace_id": traceID})
 }
@@ -1746,8 +1747,56 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 		if policyResult.Reason != "" {
 			reason = policyResult.Reason
 		}
-		s.appendSubmitSafetyDecisionAudit(r.Context(), "submit_denied", jobID, req.Topic, policyActorID(r), policyRole(r), "submit-time policy denied: "+reason, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
-		writeErrorJSON(w, http.StatusForbidden, reason)
+
+		// Reserve idempotency key so a client retry with the same key
+		// replays the original 403 + job_id instead of minting a second
+		// denied job + DLQ entry. Mirrors the approval_required pattern
+		// below. The top-of-handler idempotency short-circuit (line
+		// ~1549) only hits on the SECOND POST — we must persist the
+		// reservation on the FIRST denied POST for that short-circuit
+		// to fire.
+		if key != "" && s.jobStore != nil {
+			reserved, existingID, err := s.jobStore.TrySetIdempotencyKeyScoped(r.Context(), orgID, key, jobID)
+			if err != nil {
+				slog.Error("denied-submit idempotency reservation failed", "job_id", jobID, "error", err)
+				writeErrorJSON(w, http.StatusServiceUnavailable, "idempotency reservation failed")
+				return
+			}
+			if !reserved {
+				if existingID == "" {
+					existingID, _ = s.jobStore.GetJobByIdempotencyKeyScoped(r.Context(), orgID, key)
+				}
+				if existingID != "" {
+					existingTrace, _ := s.jobStore.GetTraceID(r.Context(), existingID)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					writeJSON(w, map[string]any{
+						"error":    reason,
+						"status":   http.StatusForbidden,
+						"job_id":   existingID,
+						"trace_id": existingTrace,
+					})
+					return
+				}
+				writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
+				return
+			}
+		}
+
+		if err := s.persistSubmitDeniedJob(r.Context(), r, req, meta, jobID, traceID, orgID, principalID, teamID, projectID, memoryID, delegationExpectedAudience, policyResult, reason); err != nil {
+			slog.Error("failed to persist denied submit job", "job_id", jobID, "error", err)
+			writeErrorJSON(w, http.StatusServiceUnavailable, "failed to persist denied job state")
+			return
+		}
+		s.appendSubmitSafetyDecisionAudit(r.Context(), "submit_denied", jobID, req.Topic, policybundles.PolicyActorID(r), policybundles.PolicyRole(r), "submit-time policy denied: "+reason, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]any{
+			"error":    reason,
+			"status":   http.StatusForbidden,
+			"job_id":   jobID,
+			"trace_id": traceID,
+		})
 		return
 	}
 	if policyResult.Throttled {
@@ -1755,7 +1804,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 		if policyResult.Reason != "" {
 			reason = policyResult.Reason
 		}
-		s.appendSubmitSafetyDecisionAudit(r.Context(), "submit_throttled", jobID, req.Topic, policyActorID(r), policyRole(r), "submit-time policy throttled: "+reason, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
+		s.appendSubmitSafetyDecisionAudit(r.Context(), "submit_throttled", jobID, req.Topic, policybundles.PolicyActorID(r), policybundles.PolicyRole(r), "submit-time policy throttled: "+reason, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
 		w.Header().Set("Retry-After", "30")
 		writeErrorJSON(w, http.StatusTooManyRequests, reason)
 		return
@@ -1876,7 +1925,10 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 
 			// Persist safety decision record so the approval endpoint can
 			// validate policy snapshot stability and job request integrity.
-			jobHash, _ := scheduler.HashJobRequest(jobReq)
+			jobHash, hashErr := scheduler.HashJobRequest(jobReq)
+			if hashErr != nil {
+				slog.Warn("failed to compute job hash for approval safety record", "job_id", jobID, "error", hashErr)
+			}
 			safetyRecord := model.SafetyDecisionRecord{
 				Decision:         model.SafetyRequireApproval,
 				Reason:           policyResult.Reason,
@@ -1894,7 +1946,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			s.syncApprovalQueueDepth(r.Context())
 		}
-		s.appendSubmitSafetyDecisionAudit(r.Context(), "submit_approval_required", jobID, req.Topic, policyActorID(r), policyRole(r), "submit-time policy requires approval: "+policyResult.Reason, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
+		s.appendSubmitSafetyDecisionAudit(r.Context(), "submit_approval_required", jobID, req.Topic, policybundles.PolicyActorID(r), policybundles.PolicyRole(r), "submit-time policy requires approval: "+policyResult.Reason, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
 
 		w.Header().Set("X-Trace-Id", traceID)
 		w.Header().Set("Content-Type", "application/json")
@@ -2067,7 +2119,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 		"topic", req.Topic,
 	)
 
-	s.appendSubmitSafetyDecisionAudit(r.Context(), "submit", jobID, req.Topic, policyActorID(r), policyRole(r), "submit job "+jobID, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
+	s.appendSubmitSafetyDecisionAudit(r.Context(), "submit", jobID, req.Topic, policybundles.PolicyActorID(r), policybundles.PolicyRole(r), "submit job "+jobID, policyResult, req.Labels, submitAgentID, submitAgentName, submitAgentRiskTier)
 	w.Header().Set("X-Trace-Id", traceID)
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{
@@ -2116,6 +2168,178 @@ func marshalSubmitJobPayload(req submitJobRequest, tenantID string, createdAt ti
 		payload["context"] = req.Context
 	}
 	return json.Marshal(payload)
+}
+
+func (s *server) persistSubmitDeniedJob(
+	ctx context.Context,
+	r *http.Request,
+	req submitJobRequest,
+	meta *pb.JobMetadata,
+	jobID, traceID, orgID, principalID, teamID, projectID, memoryID, delegationExpectedAudience string,
+	policyResult submitPolicyDecision,
+	reason string,
+) error {
+	if s == nil || s.jobStore == nil {
+		return errors.New("job store unavailable")
+	}
+
+	payloadBytes, err := marshalSubmitJobPayload(req, orgID, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("encode denied job payload: %w", err)
+	}
+
+	ctxKey := store.MakeContextKey(jobID)
+	var ctxPtr string
+	if s.memStore != nil {
+		if err := s.memStore.PutContext(ctx, ctxKey, payloadBytes); err != nil {
+			// Skip persisting the context pointer on write failure so
+			// downstream readers don't dereference a dangling key.
+			slog.Warn("failed to persist denied job context", "job_id", jobID, "error", err)
+		} else {
+			ctxPtr = store.PointerForKey(ctxKey)
+		}
+	}
+
+	jobPriority := parsePriority(req.Priority)
+	envVars := map[string]string{
+		"tenant_id":         orgID,
+		"max_input_tokens":  fmt.Sprintf("%d", req.MaxInputTokens),
+		"max_output_tokens": fmt.Sprintf("%d", req.MaxOutputTokens),
+	}
+	if teamID != "" {
+		envVars["team_id"] = teamID
+	}
+	if projectID != "" {
+		envVars["project_id"] = projectID
+	}
+	if memoryID != "" {
+		envVars["memory_id"] = memoryID
+	}
+	if req.Mode != "" {
+		envVars["context_mode"] = req.Mode
+	}
+
+	jobReq := &pb.JobRequest{
+		JobId: jobID, Topic: req.Topic, Priority: jobPriority,
+		ContextPtr: ctxPtr, AdapterId: req.AdapterId, Env: envVars,
+		MemoryId: memoryID, TenantId: orgID, PrincipalId: principalID,
+		Labels: req.Labels, Meta: meta,
+		ContextHints: &pb.ContextHints{
+			MaxInputTokens: req.MaxInputTokens, AllowSummarization: req.AllowSummarization,
+			AllowRetrieval: req.AllowRetrieval, Tags: req.Tags,
+		},
+		Budget: &pb.Budget{
+			MaxInputTokens: int64(req.MaxInputTokens), MaxOutputTokens: req.MaxOutputTokens,
+			MaxTotalTokens: req.MaxTotalTokens, DeadlineMs: req.DeadlineMs,
+		},
+	}
+
+	if err := s.jobStore.SetState(ctx, jobID, model.JobStatePending); err != nil {
+		return fmt.Errorf("set initial denied-job state: %w", err)
+	}
+	if err := s.jobStore.SetTopic(ctx, jobID, req.Topic); err != nil {
+		return fmt.Errorf("set denied job topic: %w", err)
+	}
+	if err := s.jobStore.SetTenant(ctx, jobID, orgID); err != nil {
+		return fmt.Errorf("set denied job tenant: %w", err)
+	}
+	if err := s.jobStore.AddJobToTrace(ctx, traceID, jobID); err != nil {
+		return fmt.Errorf("add denied job to trace: %w", err)
+	}
+	if err := s.jobStore.SetJobMeta(ctx, jobReq); err != nil {
+		return fmt.Errorf("persist denied job metadata: %w", err)
+	}
+	if err := s.jobStore.SetJobRequest(ctx, jobReq); err != nil {
+		return fmt.Errorf("persist denied job request: %w", err)
+	}
+	if err := s.persistSubmitDelegationToken(ctx, jobID, req.DelegationToken, delegationExpectedAudience); err != nil {
+		_ = s.jobStore.SetState(ctx, jobID, model.JobStateFailed)
+		return fmt.Errorf("persist denied delegation metadata: %w", err)
+	}
+	if identity := submitterIdentity(r); identity != "" {
+		if err := s.jobStore.SetSubmittedBy(ctx, jobID, identity); err != nil {
+			slog.Warn("failed to persist submitter identity for denied job", "job_id", jobID, "error", err)
+		}
+	}
+
+	jobHash, hashErr := scheduler.HashJobRequest(jobReq)
+	if hashErr != nil {
+		slog.Warn("failed to compute job hash for denied safety record", "job_id", jobID, "error", hashErr)
+	}
+	safetyRecord := model.SafetyDecisionRecord{
+		Decision:       model.SafetyDeny,
+		Reason:         reason,
+		RuleID:         policyResult.RuleId,
+		PolicySnapshot: policyResult.PolicySnapshot,
+		Constraints:    policyResult.Constraints,
+		JobHash:        jobHash,
+		Remediations:   policyResult.Remediations,
+		CheckedAt:      time.Now().UnixMicro(),
+	}
+	if err := s.jobStore.SetSafetyDecision(ctx, jobID, safetyRecord); err != nil {
+		return fmt.Errorf("persist denied safety decision: %w", err)
+	}
+	if err := s.jobStore.SetState(ctx, jobID, model.JobStateDenied); err != nil {
+		return fmt.Errorf("set denied state: %w", err)
+	}
+
+	packet := &pb.BusPacket{
+		TraceId:         traceID,
+		SenderId:        "api-gateway",
+		CreatedAt:       timestamppb.Now(),
+		ProtocolVersion: capsdk.DefaultProtocolVersion,
+		Payload: &pb.BusPacket_JobResult{
+			JobResult: &pb.JobResult{
+				JobId:         jobID,
+				Status:        pb.JobStatus_JOB_STATUS_DENIED,
+				ErrorCode:     "policy_denied",
+				ErrorCodeEnum: pb.ErrorCode_ERROR_CODE_SAFETY_DENIED,
+				ErrorMessage:  reason,
+			},
+		},
+	}
+	if s.bus != nil {
+		if err := s.bus.Publish(capsdk.SubjectDLQ, packet); err != nil {
+			slog.Warn("publish dlq on submit deny failed", "job_id", jobID, "error", err)
+		}
+	}
+	if s.dlqStore != nil {
+		if err := s.dlqStore.Add(ctx, store.DLQEntry{
+			JobID:      jobID,
+			Topic:      req.Topic,
+			Status:     pb.JobStatus_JOB_STATUS_DENIED.String(),
+			Reason:     reason,
+			ReasonCode: "policy_denied",
+			LastState:  string(model.JobStateDenied),
+			Attempts:   0,
+			CreatedAt:  time.Now().UTC(),
+		}); err != nil {
+			return fmt.Errorf("persist denied dlq entry: %w", err)
+		}
+	}
+	if s.memStore != nil {
+		resKey := store.MakeResultKey(jobID)
+		resPtr := store.PointerForKey(resKey)
+		body := map[string]any{
+			"job_id":       jobID,
+			"status":       pb.JobStatus_JOB_STATUS_DENIED.String(),
+			"error":        map[string]any{"message": reason},
+			"processed_by": "api-gateway",
+			"completed_at": time.Now().UTC().Format(time.RFC3339),
+		}
+		if data, err := json.Marshal(body); err == nil {
+			if err := s.memStore.PutResult(ctx, resKey, data); err != nil {
+				slog.Warn("failed to persist denied job result", "job_id", jobID, "error", err)
+			}
+		}
+		if existing, err := s.jobStore.GetResultPtr(ctx, jobID); err != nil || strings.TrimSpace(existing) == "" {
+			if err := s.jobStore.SetResultPtr(ctx, jobID, resPtr); err != nil {
+				return fmt.Errorf("set denied result pointer: %w", err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *server) handleGetTrace(w http.ResponseWriter, r *http.Request) {

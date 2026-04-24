@@ -4,6 +4,333 @@ This file captures user-visible changes that have landed on `main` but
 have not yet been cut into a release. When a release is tagged, copy
 these entries into a versioned release note and reset this file.
 
+## Changed
+
+- **core: extracted the Unix-timestamp → RFC3339 formatter into
+  `core/infra/timeutil`.** Five inline formatters across the
+  dashboard-facing handler layer (`handlers_chat.go` auto-detect,
+  `handlers_governance.go` + `handlers_governance_approvals.go` millis,
+  `handlers_policy_bundles.go` micros, `handlers_velocity.go` seconds)
+  each carried their own copy of `time.Unix*(ts).UTC().Format(RFC3339)`
+  plus a `ts <= 0` guard. A schema change flipping an endpoint's unit
+  used to update only the one matching formatter with no mechanical
+  way to catch drift across siblings. `core/infra/timeutil/format.go`
+  now exports `FormatUnixAuto` (magnitude cascade matching
+  handlers_chat.go byte-for-byte, 1e18/1e15/1e12 cutoffs) plus four
+  typed variants `FromSeconds` / `FromMillis` / `FromMicros` /
+  `FromNanos` for callers that know the unit at compile time. All
+  five helpers return empty string on `ts <= 0`, matching the
+  pre-refactor guards. Output strings are byte-for-byte identical to
+  the inline versions on the same input; no dashboard change
+  required. The named wrappers in each handler (`chatCreatedAt`,
+  `governanceTimestamp`, `millisToRFC3339`, `timestampFromMicros`)
+  stay as 1-line forwarders so their call sites don't change. Closes
+  task-e396a874.
+
+- **core: extracted `proto.Clone((*pb.JobRequest))` guard-pattern into
+  `core/protocol/protoutil/CloneJobRequest`.** Consolidates 4 inline
+  call sites (`handlers_jobs.go`, `scheduler/engine.go`,
+  `scheduler/saga.go`, `reqhash/reqhash.go`) onto one helper with
+  a typed ok-check and nil guard. The saga.go site was missing the
+  ok-check entirely before this migration — see the paired `Fixed`
+  entry for the latent nil-deref that closed. The other 2
+  `proto.Clone(JobMetadata)` sites in saga.go (different type) are
+  NOT migrated here — a separate `CloneJobMetadata` helper can be
+  added later if drift emerges there. Closes task-625b2ed1.
+
+- **gateway: removed `packs_compat.go` and `policy_compat.go` (233 lines
+  of pure-alias shims).** Both files existed only to re-export
+  types/consts/functions from the `core/controlplane/gateway/packs` and
+  `core/controlplane/gateway/policybundles` sub-packages back into the
+  gateway package so older call sites could use unqualified names
+  (`packManifest`, `policyBundleSnapshot`, etc.) without importing the
+  sub-packages directly. Every one of the ~40 callers now imports
+  `packs` and/or `policybundles` and references the fully-qualified
+  `packs.PackManifest` / `policybundles.PolicyBundleSnapshot` shape.
+  `resolveAgentForAudit` (the one real method that lived in
+  `policy_compat.go`, not an alias) moved to `handlers_agents.go` near
+  the other agent-identity helpers. Internal refactor only — no public
+  API change, no JSON-on-the-wire change, no behavior change.
+  Closes task-a828e179.
+
+- **core: extracted the Redis CAS retry loop into
+  `core/infra/redisutil/Retry`.** Four production call sites across
+  `gateway/auth/keystore_redis.go` (RevokeKey) and `gateway/mcp_approvals.go`
+  (Consume, Resolve, SweepExpired) used to carry a hand-rolled
+  `for attempt := 0; attempt < N; attempt++ { client.Watch(...) ; continue on
+  TxFailedErr ; return on other }` loop. Each copy could drift on its own
+  (off-by-one budget, missing `continue`, wrong error class) — a prior
+  production incident (task-035cdc8e) was exactly this retry-loop edge
+  case. Behavior preserved exactly: default 3-attempt budget (overridable
+  via `WithMaxAttempts(n)`; mcp_approvals keeps its `mcpCASMaxAttempts=5`),
+  retry only on `redis.TxFailedErr`, bubble any other error on the first
+  attempt that sees it, honour `ctx.Done()` between attempts. Closures that
+  capture outer variables (e.g. `consumed`, `final`, `result`, `expired`)
+  keep working unchanged because `fn` is still passed directly to
+  `client.Watch`. New `redisutil.ErrMaxAttemptsExceeded` sentinel wraps the
+  last TxFailedErr via `%w` so callers that want to distinguish budget
+  exhaustion from other errors can do so with `errors.Is`. Two call sites
+  originally suggested by the audit (`configsvc/service.go:128`,
+  `core/infra/store/job_store.go:2711`) are left inline: both are
+  single-Watch with typed error translation (→`ErrRevisionConflict` and
+  →`ApprovalConflictError`), not retry loops, so the helper does not apply.
+  Closes task-c7e419d8.
+
+- **core: extracted JobRequest canonicalisation into a single shared
+  helper at `core/protocol/reqhash`.** The scheduler, gateway, and
+  infra/store packages each used to carry their own copy of the same
+  strip-labels + protojson-roundtrip + deterministic-marshal + sha256
+  routine; task-fa783d7a landed a reconciliation inside
+  `store.hashApprovalJobRequest` to close a divergence that was
+  auto-DENYing benign approvals. task-090ab6af finishes the
+  unification: the canonicalisation logic now lives in exactly one
+  place (`reqhash.Canonical` + `reqhash.Hash`); the public
+  `scheduler.HashJobRequest` and `store.hashApprovalJobRequest` are
+  preserved as two-line forwarders so the 20+ call sites across
+  handlers, tests, and the reconciler keep compiling transparently,
+  while the previously-duplicated private helpers are deleted
+  outright. Also fixed five bare
+  `protojson.Unmarshal` call sites in `core/infra/store/job_store.go`
+  (`GetJobRequest`, `ApplyApprovalRepair`, `ResolveApproval`, and the
+  two `PolicyConstraints` loaders) to pass
+  `UnmarshalOptions{DiscardUnknown: true}`, so forward-compat proto
+  fields from a newer SDK no longer break the read path or leak into
+  the in-memory proto. New regression test
+  `TestGetJobRequest_DiscardsUnknownJSONFields` pins the invariant at
+  the store boundary. Redis WATCH/MULTI atomic store-and-hash was
+  evaluated and explicitly rejected for this release; see
+  [`docs/decisions/2026-04-atomic-store-and-hash.md`](../decisions/2026-04-atomic-store-and-hash.md)
+  for the trade-off analysis and re-visit triggers. Closes
+  task-090ab6af.
+
+## Security
+
+- **WebSocket quarantine-redaction fail-closed**
+  (`core/controlplane/gateway/handlers_stream.go`) — the filter that strips
+  `ResultPtr` + `ArtifactPtrs` from DENIED `JobResult` packets before
+  broadcasting to WebSocket subscribers previously FAILED OPEN on
+  `proto.Clone` type-assertion failure AND on the defensive
+  `cloned.GetJobResult() == nil` branch, returning the ORIGINAL packet with
+  sensitive content intact. Redis-stored result payloads may contain PII,
+  user prompts, secrets, or model outputs; leaking them to any WS subscriber
+  (including cross-tenant subscribers with `allowCrossTenant` granted) is a
+  data-exposure bug. The filter now fails CLOSED: on any clone or
+  sanitisation failure it returns nil, `enqueueBusPacket` drops the
+  broadcast, `cordum_gateway_ws_quarantine_redaction_drops_total` increments,
+  and an error is logged with `job_id` + `trace_id`. The next state-change
+  event will follow in the normal stream cadence, so dashboards recover
+  without operator intervention. See task-1d4e6b4c.
+
+## Fixed
+
+- **scheduler/saga.go: fixed a latent nil-deref in the JobRequest
+  clone path at `buildCompensationRequest`.** The inline
+  `req := proto.Clone(base).(*pb.JobRequest)` lacked the ok-check that
+  every other `proto.Clone(x).(*pb.JobRequest)` site in the codebase
+  already had. On a proto.Clone type-assertion failure (vanishingly
+  rare, but reachable on library upgrade or memory-pressure
+  corruption), the next line would dereference nil and panic the
+  scheduler mid-compensation. The migration to the new
+  `core/protocol/protoutil.CloneJobRequest` helper enforces the
+  ok-check at every call site, so this class of drift cannot recur.
+  Operator impact: none in the happy path; on the impossible-to-
+  observe failure path the scheduler now returns a wrapped error
+  (`compensation: clone base job request: ...`) instead of crashing
+  the worker goroutine. Closes task-625b2ed1.
+
+- **audit: `SyslogExporter.Close` now logs at Warn when the underlying
+  `net.Conn.Close` returns an error.** Previously the failure was
+  returned opaquely to the `BufferedExporter` close cascade, where
+  generic close-cascade handling could absorb it silently — masking
+  half-open sockets and TCP-stack fsync failures that left buffered
+  audit events unflushed. The returned-error contract is unchanged
+  (`BufferedExporter` still observes the error); operators now also
+  see a `syslog: close failed` Warn line with `network`, `address`,
+  and `error` fields. Closes task-8db173c5.
+
+- **Investigated and dismissed (not a bug).** The 2026-04-23 bug-hunt
+  agent flagged two additional sites that on verification are
+  already correctly handled; documented here so future audits don't
+  re-litigate them:
+  - `core/controlplane/gateway/handlers_jobs.go:201`
+    `statusCacheObj.Get()` was flagged as returning `any` without a
+    type guard. False positive: `statusCache.Get()` returns a typed
+    `map[string]any`, not `any`; `writeJSON(w, cached)` is
+    type-safe at compile time and `map[string]any` always marshals
+    to valid JSON.
+  - `core/auth/delegation/token.go` `NewTokenService` wrong-size
+    signing-key handling was re-flagged as a silent drop. Current
+    code (since the original delegation feature commit `09f4838a`)
+    already returns `(*TokenService, error)` with
+    `ErrInvalidSigningKey` when the signing key's own public key is
+    not `ed25519.PublicKeySize`. No fix needed.
+
+- **gateway: WebSocket `SetReadDeadline` errors at connection setup are now
+  propagated instead of silently discarded.** `handleStream` and
+  `handleJobStream` both called `_ = ws.SetReadDeadline(...)` on the just-
+  accepted connection; if the underlying socket was already compromised
+  (race with client disconnect, tcp reset) the error was dropped and the
+  read loop entered with no deadline, so the server waited indefinitely for
+  a frame that would never arrive. Extracted a small `wsReadDeadliner`
+  interface plus a `setReadDeadlineOrError` helper so both call sites now
+  log at `Warn`, set the disconnect state, `ws.Close()`, and return. The
+  `SetPongHandler` callback already propagated its SetReadDeadline error
+  and is unchanged. See task-1d4e6b4c bug #2.
+
+- **gateway: `revalidateWSAuthWithRetry` now surfaces the last transient
+  error after 3 exhausted retries instead of returning nil (fail-silent).**
+  A NATS timeout or Redis outage during credential revalidation would
+  previously keep a potentially-revoked session alive for the full
+  2-minute revalidation window. The retry loop now returns a wrapped error
+  after exhaustion; the two callers already branch on `err != nil` to close
+  the connection, so the dashboard auto-reconnects and re-authenticates
+  within the revalidation budget rather than running on stale auth. The
+  `ctx.Done()` branch still returns nil — caller-initiated shutdown is not
+  a failure. See task-1d4e6b4c bug #3.
+
+- **safety-kernel: `shadowTimeout` now actually bounds the per-submission
+  shadow evaluation loop.** Previously the bounded context returned by
+  `context.WithTimeout` in `core/controlplane/safetykernel/shadow_eval.go`
+  was discarded (`_, cancel := ...`), so the timeout never applied and a
+  slow shadow-policy eval (or a slow audit emit) could extend loop
+  duration indefinitely, contradicting the documented "absolute wall-clock
+  budget for processing every shadow for this submission". The fix
+  captures the bounded ctx, plumbs it through `evalShadowSafely`, and
+  adds a `ctx.Err()` check at the top of each bundle iteration.
+  Granularity is per-bundle: one bundle may still exceed the timeout by
+  its own eval time, but subsequent bundles are skipped, and partial
+  shadow-event counts are expected behavior on timeout (observability
+  dashboards filtering by tenant may see fewer `shadow_eval` events on
+  submissions that hit the bound). Operators tuning `shadowTimeout` via
+  `ShadowEvaluatorOptions.ShadowTimeout` will see the expected wall-clock
+  bound going forward. Closes task-681f83cd.
+
+- **policy shadow: registered the six shadow-policy gateway routes so the
+  dashboard's PromoteShadowDialog works end-to-end.** The handlers
+  (`handlePutPolicyShadow`, `handleGetPolicyShadow`, `handleDeletePolicyShadow`
+  in `core/controlplane/gateway/handlers_policy_shadow.go`; the three
+  `handleShadowResults*` handlers in `handlers_shadow_results.go`) existed
+  with direct-call tests but were never wired into `registerRoutes`, so every
+  network call from the dashboard — activate, fetch, deactivate, plus the
+  summary / comparisons / timeseries analytics — 404'd at the mux.
+
+  Wired as:
+  - `PUT    /api/v1/policy/shadows/{id}` — activate/replace (idempotent upsert).
+  - `GET    /api/v1/policy/shadows/{id}` — fetch (404 when no shadow active).
+  - `DELETE /api/v1/policy/shadows/{id}` — deactivate.
+  - `GET    /api/v1/policy/shadows/{id}/results/summary?from=&to=`
+  - `GET    /api/v1/policy/shadows/{id}/results/comparisons?from=&to=[&diff=&cursor=&limit=]`
+  - `GET    /api/v1/policy/shadows/{id}/results/timeseries?from=&to=&bucket={1m|5m|15m|1h|1d}`
+
+  The top-level `/policy/shadows/{id}` URL replaces the originally proposed
+  `/policy/bundles/{id}/shadow`: that pattern overlaps
+  `/api/v1/policy/bundles/snapshots/{id}` at `/bundles/snapshots/shadow` and
+  Go 1.22+ ServeMux rejects the conflict at registration (neither pattern is
+  strictly more specific; disambiguator routes are not honored). The new
+  path mirrors the existing `/api/v1/policy/snapshots/{id}` shape so operator
+  muscle memory carries across the two features.
+
+  Also corrected three dashboard wire bugs in
+  `dashboard/src/hooks/useShadowPolicy.ts` that would have prevented a clean
+  end-to-end flow even after registration:
+  - `useActivateShadow` now sends `PUT` (was `POST`) — matches the backend's
+    idempotent-upsert semantics.
+  - Summary / comparisons / timeseries query strings now emit `to=` (was
+    `until=`) to match `parseShadowResultsRange` in
+    `handlers_shadow_results.go`.
+  - All six hooks target the new `/policy/shadows/{id}[/results/*]` paths.
+
+  While touching the results handlers, unified tilde decoding:
+  `extractBundleIDFromPath` in `handlers_shadow_results.go` now decodes
+  `~` → `/` the same way `policybundles.BundleIDFromRequest` does, so the
+  `/shadow` and `/shadow/results/*` surfaces resolve identical canonical
+  bundle IDs for the same wire path. Closes task-44807b2c.
+
+- **audit: chain is now instantiated unconditionally at gateway boot.**
+  Previously the Redis-backed Merkle audit chain silently disabled when
+  (a) the plan's SIEM export entitlement was blocked for a non-discard
+  `CORDUM_AUDIT_EXPORT_TYPE` — `initAuditPipeline` returned
+  `(nil, nil, nil)` after `NewExporterFromEnvWithEntitlements` returned
+  a nil buffered exporter, or (b) direct transport (`AUDIT_TRANSPORT`
+  unset) was used without routing through the NATS consumer —
+  `auditSender` was assigned the raw buffered exporter on the direct
+  path with no chain wrapper, so `/api/v1/audit/verify` reported
+  `total_events=0` even though audit writes appeared healthy at the API
+  boundary. After this change the chainer is created first and wired
+  through `newAuditChainSender` on every write path, so neither
+  scenario can disable the chain. The `null`/`discard`/`chain-only`
+  backends are no longer required just to keep the chain alive; they
+  remain supported for operators who want a measured no-op SIEM target.
+  Operators who set `CORDUM_AUDIT_EXPORT_TYPE=null` explicitly continue
+  to work unchanged — the compose default moved from `null` to unset,
+  but `${VAR:-default}` respects an explicit value. See
+  [`docs/deployment/audit-chain.md`](../deployment/audit-chain.md) for
+  the updated backend-type table and 503 runbook. Cross-ref:
+  task-e1d54a75 (the DiscardExporter hotfix this supersedes).
+  Closes task-096de016.
+
+- **scheduler: worker online transitions now trigger an immediate
+  flush of pending dispatch for that pool,** eliminating the first-run
+  latency that previously made scale-from-zero deployments wait up to
+  5 minutes before the first pending job left its queue. The
+  `MemoryRegistry` now exposes `UpdateHeartbeatWithTransition`, the
+  engine's heartbeat handler type-asserts that method and schedules a
+  non-blocking `scheduleFlushOnWorkerOnline` on transition, a
+  per-pool `flushLatch` collapses concurrent heartbeats from a
+  freshly-scaled fleet into a single flush per pool, and
+  `defaultFlushDispatchForPool` reuses the existing
+  `handleJobRequest` dispatch path — no forked dispatch logic. New
+  metric `cordum_scheduler_dispatch_flush_on_worker_online_total{pool}`
+  counts flushes that moved at least one pending job. See
+  [`docs/scheduler.md`](../scheduler.md) §Flush-on-worker-online for
+  the full design. Closes task-7a2514ae.
+
+## Corrections
+
+- `task-fa783d7a` description references a "three-layer hotfix" (60s
+  grace period in `ClassifyApprovalRepair` + `preMutationHash`
+  threading through `checkSafetyDecisionTracedWithHash` + gateway
+  approve lock) supposedly applied on 2026-04-19. That implementation
+  was explored in a local commit on `super/all-local-work-2026-04-20`
+  but was **never merged to `main`**; the team abandoned it in favor
+  of the canonicaliser-based "proper fix" that currently ships on
+  `main` (commit `b06c22fe`) and on the follow-up branch. The DoD
+  items are superseded as follows:
+  - DoD #1 (cherry-pick the hotfix) — **SUPERSEDED.** Re-introducing
+    the 60s grace period in `ClassifyApprovalRepair` would mask the
+    real bug and is a regression; see the file-header comment in
+    `core/infra/store/approval_repair_regression_test.go` which
+    explicitly states the grace period "is gone; it masked the real
+    bug".
+  - DoD #2 (regression test for the grace period in
+    `core/infra/store/job_store_test.go`) — **NOT APPLICABLE.** No
+    grace period to cover.
+  - DoD #3 (regression test for `preMutationHash` in
+    `core/controlplane/scheduler/engine_test.go`) — **NOT APPLICABLE.**
+    The canonicaliser (`scheduler.HashJobRequest` in
+    `core/controlplane/scheduler/job_hash.go`) strips `approval_*`
+    labels, `bus.LabelBusMsgID`, and `config.EffectiveConfigEnvVar`
+    and protojson-roundtrips the request, so the post-mutation hash
+    equals the pre-mutation hash by construction — no separate
+    pre-mutation capture is needed. Existing coverage in
+    `core/controlplane/scheduler/job_hash_stale_request_test.go`
+    (6 tests) pins this contract.
+  - DoD #4 (mock-bank $200 smoke reaches `succeeded`) — covered by
+    this task's Phase 5 smoke run.
+  - DoD #5 (architectural followup filed) — covered by this task's
+    Phase 6 follow-up Moe task (unify canonical hash into a shared
+    package + evaluate atomic Redis store-and-hash).
+  - DoD #6 (no regression in legitimate stale detection) — covered by
+    the existing
+    `TestClassifyApprovalRepair_RealPayloadDrift_StillTripsStaleRequest`
+    regression in
+    `core/infra/store/approval_repair_regression_test.go`.
+
+  This task's scope is therefore *verify-and-harden* the shipped
+  canonicaliser, close one latent cross-package divergence
+  (`store.hashApprovalJobRequest` did not protojson-roundtrip), and
+  file the architectural follow-up.
+
 ## Chore
 
 - Dashboard bug fixes across five hooks/components plus one test-file
@@ -104,7 +431,36 @@ these entries into a versioned release note and reset this file.
   trusted keys with `--trusted-keys <dir>`. Full operator guide at
   [`docs/packs/signing.md`](../packs/signing.md).
 
+## Retired
+
+- **cordum-enterprise repo retired.** All enterprise features — SAML/OIDC SSO,
+  SCIM provisioning, advanced RBAC, SIEM export (webhook/syslog/Datadog/
+  CloudWatch), legal hold, velocity rules, agent identity — now live in cordum
+  core behind license entitlements per epic-4da6e4f8. The separate repo is
+  archived on GitHub; historical commits and security advisories remain
+  readable. Operators upgrading from a cordum-enterprise binary must switch to
+  the core gateway with an appropriate license; see
+  [`docs/enterprise.md`](../enterprise.md). Workspace wiring removed in the
+  same PR: the `cordum-tools/go.mod` `replace ../cordum-enterprise` directive
+  is gone, and workspace docs (`CLAUDE.md`, `REPOSITORY_MAP.md`,
+  `cordum-tools/CLAUDE.md` + `AGENTS.md` + `docs/enterprise.md` +
+  `docs/dev_sync.md`, this repo's `docs/repo_split.md` + `docs/enterprise.md` +
+  `deploy/k8s/README.md` + `README.md` + `docs-site/docs/concepts/
+  enterprise.md`) all point at the in-core surface and call out the
+  retirement. Closes task-b7c6c2f1.
+
 ## Removed
+
+- **docs-site: removed `versioned_docs/version-2.9/` and
+  `versioned_sidebars/version-2.9-sidebars.json`.** The 2.9 docs snapshot
+  was never published to an external release (`docs-site/versions.json`
+  remains `[]` — no public version cut has ever happened). The
+  precursor sweep under task-e8a0ff88 was supposed to catch this but
+  the directory either slipped past the original pass or was re-added
+  afterward; this task closes the gap. `npm run build` succeeds after
+  the deletion with only pre-existing broken-link warnings (documented
+  in mem-c4de6900) that are unrelated to version-2.9. Closes
+  task-ec3fce1e.
 
 - Removed the legacy OpenAPI sidecars `docs/api/openapi/cordum-rest.yaml`
   and `docs/api/openapi/cordum.swagger.json`. `docs/api/openapi/cordum-api.yaml`
@@ -236,6 +592,26 @@ these entries into a versioned release note and reset this file.
   `invalidate_stale_request` path should now see the benign approval
   succeed again. Follow-up to commit `297937c7` and guard task
   `task-035cdc8e`.
+- **Approvals — canonical hash parity
+  (`core/infra/store/job_store.go`):** the store-side
+  `hashApprovalJobRequest` now protojson-roundtrips the cloned
+  `JobRequest` (via `protojson.MarshalOptions{EmitUnpopulated: true}`
+  → `protojson.UnmarshalOptions{DiscardUnknown: true}`) after
+  stripping `approval_*` labels, `bus.LabelBusMsgID`, and
+  `config.EffectiveConfigEnvVar`, matching
+  `core/controlplane/scheduler/HashJobRequest` byte-for-byte. Closes
+  a latent hash-divergence risk where an in-memory `JobRequest` proto
+  carrying forward-compat unknown fields (e.g. from a newer SDK)
+  would hash differently on the store side than the scheduler side,
+  tripping the reconciler's `invalidate_stale_request` classifier on
+  a benign approval. No production behavior change in the common
+  path (`SetJobRequest` already persists via protojson, which drops
+  unknowns before the reconciler reads the request), but the store's
+  canonical hash is now identical to the scheduler's canonical hash
+  on every logical input — not just on the Redis-read subset of
+  inputs. Follow-up task filed for canonical-hash unification into a
+  single shared package + atomic `SetJobRequest`-and-hash write. See
+  `task-fa783d7a`.
 - **Session token entropy failure surface
   (`core/controlplane/gateway/handlers_auth.go`):** `buildUserLoginResponse`
   now returns the opaque `errSessionTokenEntropy` sentinel instead of a

@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,15 +12,14 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/infra/bus"
-	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -164,37 +161,14 @@ func normalizeTimestampMicrosUpper(ts int64) int64 {
 	}
 }
 
+// hashApprovalJobRequest forwards to reqhash.Hash, the repo-wide
+// canonicaliser for JobRequest. Retained as a package-local alias so
+// store callers and the existing store_test.go suite keep compiling
+// without churn. Behaviour is byte-identical to scheduler.HashJobRequest
+// by construction (both forward to reqhash.Hash). See task-090ab6af
+// for the unification history.
 func hashApprovalJobRequest(req *pb.JobRequest) (string, error) {
-	if req == nil {
-		return "", fmt.Errorf("job request required")
-	}
-	clone, ok := proto.Clone(req).(*pb.JobRequest)
-	if !ok || clone == nil {
-		return "", fmt.Errorf("job request clone failed")
-	}
-	if clone.Labels != nil {
-		for key := range clone.Labels {
-			lower := strings.ToLower(key)
-			if strings.HasPrefix(lower, "approval_") || key == bus.LabelBusMsgID {
-				delete(clone.Labels, key)
-			}
-		}
-		if len(clone.Labels) == 0 {
-			clone.Labels = nil
-		}
-	}
-	if clone.Env != nil {
-		delete(clone.Env, config.EffectiveConfigEnvVar)
-		if len(clone.Env) == 0 {
-			clone.Env = nil
-		}
-	}
-	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(clone)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	return reqhash.Hash(req)
 }
 
 // RedisJobStore implements model.JobStore backed by Redis.
@@ -1001,7 +975,7 @@ func (s *RedisJobStore) GetJobRequest(ctx context.Context, jobID string) (*pb.Jo
 		return nil, fmt.Errorf("job store get job request %s: %w", jobID, err)
 	}
 	var req pb.JobRequest
-	if err := protojson.Unmarshal(data, &req); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, &req); err != nil {
 		return nil, fmt.Errorf("unmarshal job request: %w", err)
 	}
 	return &req, nil
@@ -2176,7 +2150,7 @@ func (s *RedisJobStore) ApplyApprovalRepair(ctx context.Context, params Approval
 		var req *pb.JobRequest
 		if len(reqBytes) > 0 {
 			var decoded pb.JobRequest
-			if err := protojson.Unmarshal(reqBytes, &decoded); err != nil {
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(reqBytes, &decoded); err != nil {
 				return fmt.Errorf("unmarshal job request: %w", err)
 			}
 			req = &decoded
@@ -2565,7 +2539,7 @@ func (s *RedisJobStore) ResolveApproval(ctx context.Context, params ApprovalReso
 			return fmt.Errorf("job store resolve approval %s request: %w", jobID, err)
 		}
 		var req pb.JobRequest
-		if err := protojson.Unmarshal(reqBytes, &req); err != nil {
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(reqBytes, &req); err != nil {
 			return fmt.Errorf("unmarshal job request: %w", err)
 		}
 		if params.Decision == model.ApprovalDecisionApprove {
@@ -2798,7 +2772,7 @@ func (s *RedisJobStore) GetSafetyDecision(ctx context.Context, jobID string) (mo
 	}
 	if raw := data[metaFieldSafetyConstraints]; raw != "" {
 		var constraints pb.PolicyConstraints
-		if err := protojson.Unmarshal([]byte(raw), &constraints); err == nil {
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(raw), &constraints); err == nil {
 			record.Constraints = &constraints
 		}
 	}
@@ -2853,7 +2827,7 @@ func (s *RedisJobStore) ListSafetyDecisions(ctx context.Context, jobID string, l
 		if rawConstraints, ok := entry["constraints"].(map[string]any); ok && rawConstraints != nil {
 			if data, err := json.Marshal(rawConstraints); err == nil {
 				var constraints pb.PolicyConstraints
-				if err := protojson.Unmarshal(data, &constraints); err == nil {
+				if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, &constraints); err == nil {
 					record.Constraints = &constraints
 				}
 			}

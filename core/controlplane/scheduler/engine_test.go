@@ -23,6 +23,7 @@ import (
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -114,6 +115,7 @@ type fakeJobStore struct {
 	attempts       map[string]int
 	locks          map[string]time.Time
 	failureReasons map[string]string
+	reqs           map[string]*pb.JobRequest
 }
 
 type sagaJobStore struct {
@@ -177,7 +179,36 @@ func newFakeJobStore() *fakeJobStore {
 		attempts:       make(map[string]int),
 		locks:          make(map[string]time.Time),
 		failureReasons: make(map[string]string),
+		reqs:           make(map[string]*pb.JobRequest),
 	}
+}
+
+func (s *fakeJobStore) SetJobRequest(_ context.Context, req *pb.JobRequest) error {
+	if req == nil {
+		return fmt.Errorf("job request required")
+	}
+	clone, ok := proto.Clone(req).(*pb.JobRequest)
+	if !ok || clone == nil {
+		return fmt.Errorf("job request clone failed")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reqs[req.GetJobId()] = clone
+	return nil
+}
+
+func (s *fakeJobStore) GetJobRequest(_ context.Context, jobID string) (*pb.JobRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	req, ok := s.reqs[jobID]
+	if !ok {
+		return nil, fmt.Errorf("job request not found: %s", jobID)
+	}
+	clone, ok := proto.Clone(req).(*pb.JobRequest)
+	if !ok || clone == nil {
+		return nil, fmt.Errorf("job request clone failed")
+	}
+	return clone, nil
 }
 
 func (s *failingSafetyDecisionStore) SetSafetyDecision(_ context.Context, jobID string, record SafetyDecisionRecord) error {
@@ -267,6 +298,15 @@ func (s *fakeJobStore) ListExpiredDeadlines(_ context.Context, _ int64, _ int64)
 }
 
 func (s *fakeJobStore) ListJobsByState(_ context.Context, state JobState, _ int64, _ int64) ([]JobRecord, error) {
+	// RLock the s.states map iteration to match every other reader
+	// on this fake (GetState, GetJobRequest, GetTopic, ...). Without
+	// the lock, the race detector fires on
+	// TestProcessJobReadinessRequiredFiltersUnreadyWorkers because
+	// the new flush-on-worker-online goroutine spawned from
+	// HandlePacket (task-7a2514ae) reads s.states concurrently with
+	// SetState writes on the main test goroutine. See task-6f10d4e5.
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var out []JobRecord
 	for id, st := range s.states {
 		if st == state {
@@ -2196,6 +2236,7 @@ func (m *cancelMetricsSpy) IncInputFailOpen(string)                           {}
 func (m *cancelMetricsSpy) IncJobLockAbandoned()                              {}
 func (m *cancelMetricsSpy) IncResultPtrWriteFailure()                         {}
 func (m *cancelMetricsSpy) IncDispatchRollback(string)                        {}
+func (m *cancelMetricsSpy) IncDispatchFlushOnWorkerOnline(string)             {}
 
 func TestHandlePacket_CancelJob_ErrorPropagates(t *testing.T) {
 	store := &failCancelJobStore{

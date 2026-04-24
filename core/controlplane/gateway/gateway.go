@@ -23,6 +23,7 @@ import (
 	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/configsvc"
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
+	"github.com/cordum/cordum/core/controlplane/gateway/packs"
 	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/controlplane/topicregistry"
 	"github.com/cordum/cordum/core/controlplane/workercredentials"
@@ -189,9 +190,9 @@ type server struct {
 	instanceRegistry *registry.InstanceRegistry
 	instanceID       string
 
-	marketplaceMu    sync.Mutex
-	marketplaceCache marketplaceCache
-	stopBusTapsOnce  sync.Once
+	marketplaceMu      sync.Mutex
+	marketplaceCache   packs.MarketplaceCache
+	stopBusTapsOnce    sync.Once
 	eventsStopped    atomic.Bool
 	shutdownCh       chan struct{}
 
@@ -507,7 +508,7 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 		return fmt.Errorf("connect redis config service: %w", err)
 	}
 	defer func() { _ = configSvc.Close() }()
-	if err := seedDefaultPackCatalogs(context.Background(), configSvc); err != nil {
+	if err := packs.SeedDefaultPackCatalogs(context.Background(), configSvc); err != nil {
 		slog.Error("seed pack catalogs failed", "error", err)
 	}
 	if err := configSvc.EnsureDefault(context.Background()); err != nil {
@@ -650,10 +651,10 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 	s.telemetry.Start(context.Background())
 	if legacyPolicyBundlesMigrated {
 		s.publishConfigChanged(string(configsvc.ScopeSystem), "default")
-		s.publishConfigChanged(string(configsvc.ScopeSystem), policyConfigID)
+		s.publishConfigChanged(string(configsvc.ScopeSystem), packs.PolicyConfigID)
 		slog.Info("gateway startup migrated legacy policy bundles",
 			"from_scope", "system/default",
-			"to_scope", "system/"+policyConfigID,
+			"to_scope", "system/"+packs.PolicyConfigID,
 			"bundle_count", legacyPolicyBundleCount,
 		)
 	}
@@ -852,22 +853,12 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func initAuditPipeline(client redis.UniversalClient, natsBus audit.AuditBus, entitlementResolver *licensing.EntitlementResolver) (audit.AuditSender, *audit.Chainer, error) {
-	var auditSender audit.AuditSender
-	var auditChainer *audit.Chainer
-
-	bufExporter, err := audit.NewExporterFromEnvWithEntitlements(entitlementResolver)
-	if err != nil {
-		return nil, nil, err
-	}
-	if bufExporter == nil {
-		return nil, nil, nil
-	}
-
-	// Keep the audit chain live whenever the exporter layer is active —
-	// including the null/discard backend used by task-e1d54a75. Without this
-	// the verify endpoint reports total_events=0 even though audit sends
-	// appear healthy at the API boundary.
-	auditChainer = audit.NewChainer(client, "")
+	// The Redis-backed audit chain is the tamper-evident primary record. It
+	// runs unconditionally at boot so a blocked SIEM entitlement or an
+	// operator who explicitly opts out of external SIEM export cannot
+	// silently disable the chain — exporters are consumers of the chain, not
+	// a prerequisite for it.
+	auditChainer := audit.NewChainer(client, "")
 	chainFailMode := audit.ParseChainFailMode(os.Getenv(audit.EnvChainFailMode))
 	slog.Info("audit chain enabled",
 		"stream_prefix", audit.ChainKeyPrefix,
@@ -875,11 +866,25 @@ func initAuditPipeline(client redis.UniversalClient, natsBus audit.AuditBus, ent
 		"tenant_isolation", "per-tenant stream audit:chain:<tenant>",
 	)
 
+	bufExporter, err := audit.NewExporterFromEnvWithEntitlements(entitlementResolver)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if bufExporter == nil {
+		slog.Info("audit chain active, no external SIEM export",
+			"reason", "export type empty/none or SIEM entitlement blocked for plan",
+		)
+		return newAuditChainSender(auditChainer, nil), auditChainer, nil
+	}
+
 	transport := strings.ToLower(strings.TrimSpace(os.Getenv("AUDIT_TRANSPORT")))
 	if transport == "nats" && natsBus != nil {
-		auditSender = audit.NewNATSAuditPublisher(natsBus, bufExporter)
-		// Start consumer in the same process — queue group ensures only one
-		// replica across the cluster handles each event.
+		// The NATS consumer (queue-grouped across replicas) performs the
+		// chain append via audit.WithChainer. Do NOT wrap the publisher
+		// with newAuditChainSender here — that would double-append events
+		// to the chain at publish time and again at consume time.
+		auditSender := audit.NewNATSAuditPublisher(natsBus, bufExporter)
 		if _, err := audit.NewNATSAuditConsumer(
 			natsBus,
 			bufExporter.Backend(),
@@ -891,8 +896,11 @@ func initAuditPipeline(client redis.UniversalClient, natsBus audit.AuditBus, ent
 		return auditSender, auditChainer, nil
 	}
 
-	auditSender = bufExporter
-	return auditSender, auditChainer, nil
+	// Direct transport: chain the event synchronously at the gateway, then
+	// forward to the buffered exporter. This fixes a latent bug where
+	// direct-mode gateways only saw chain appends when a NATS consumer
+	// happened to be reading the stream.
+	return newAuditChainSender(auditChainer, bufExporter), auditChainer, nil
 }
 
 func newHTTPHandler(s *server) (http.Handler, error) {
@@ -1285,6 +1293,26 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	s.registerRoute(mux, "PUT /api/v1/policy/bundles/{id}", s.instrumented("/api/v1/policy/bundles/{id}", s.handlePutPolicyBundle))
 	s.registerRoute(mux, "DELETE /api/v1/policy/bundles/{id}", s.instrumented("/api/v1/policy/bundles/{id}", s.handleDeletePolicyBundle))
 	s.registerRoute(mux, "POST /api/v1/policy/bundles/{id}/simulate", s.instrumented("/api/v1/policy/bundles/{id}/simulate", s.handleSimulatePolicyBundle))
+	// Policy shadow (task-44807b2c) — shadow-evaluation surface for a bundle.
+	// PUT upserts the shadow policy, GET fetches current status, DELETE removes it.
+	// The three results endpoints expose dashboard analytics (summary counters,
+	// paginated comparisons, and a bucketed timeseries) over the same window.
+	//
+	// URL layout: `/api/v1/policy/shadows/{id}` rather than nesting under
+	// `/bundles/{id}/shadow`. Nesting would overlap with the existing
+	// `/api/v1/policy/bundles/snapshots/{id}` at path
+	// `/api/v1/policy/bundles/snapshots/shadow` — Go 1.22+ ServeMux treats
+	// both patterns as equally specific and panics at registration. Go does
+	// not honor third-pattern disambiguators for this case (verified on go
+	// 1.25.9). The top-level `/shadows/{id}` collection also mirrors the
+	// sibling `/api/v1/policy/snapshots/{id}` pattern so operator muscle
+	// memory carries across the two features.
+	s.registerRoute(mux, "PUT /api/v1/policy/shadows/{id}", s.instrumented("/api/v1/policy/shadows/{id}", s.handlePutPolicyShadow))
+	s.registerRoute(mux, "GET /api/v1/policy/shadows/{id}", s.instrumented("/api/v1/policy/shadows/{id}", s.handleGetPolicyShadow))
+	s.registerRoute(mux, "DELETE /api/v1/policy/shadows/{id}", s.instrumented("/api/v1/policy/shadows/{id}", s.handleDeletePolicyShadow))
+	s.registerRoute(mux, "GET /api/v1/policy/shadows/{id}/results/summary", s.instrumented("/api/v1/policy/shadows/{id}/results/summary", s.handleShadowResultsSummary))
+	s.registerRoute(mux, "GET /api/v1/policy/shadows/{id}/results/comparisons", s.instrumented("/api/v1/policy/shadows/{id}/results/comparisons", s.handleShadowResultsComparisons))
+	s.registerRoute(mux, "GET /api/v1/policy/shadows/{id}/results/timeseries", s.instrumented("/api/v1/policy/shadows/{id}/results/timeseries", s.handleShadowResultsTimeseries))
 	s.registerRoute(mux, "GET /api/v1/policy/bundles/snapshots", s.instrumented("/api/v1/policy/bundles/snapshots", s.handleListPolicyBundleSnapshots))
 	s.registerRoute(mux, "POST /api/v1/policy/bundles/snapshots", s.instrumented("/api/v1/policy/bundles/snapshots", s.handleCapturePolicyBundleSnapshot))
 	s.registerRoute(mux, "GET /api/v1/policy/bundles/snapshots/{id}", s.instrumented("/api/v1/policy/bundles/snapshots/{id}", s.handleGetPolicyBundleSnapshot))
@@ -1513,16 +1541,16 @@ func migrateLegacyPolicyBundles(ctx context.Context, svc *configsvc.Service) (bo
 	if defaultDoc.Data == nil {
 		return false, 0, nil
 	}
-	rawLegacyBundles := normalizeJSON(defaultDoc.Data[policyConfigKey])
+	rawLegacyBundles := packs.NormalizeJSON(defaultDoc.Data[packs.PolicyConfigKey])
 	legacyBundles, ok := rawLegacyBundles.(map[string]any)
 	if !ok || len(legacyBundles) == 0 {
 		return false, 0, nil
 	}
-	if err := svc.SetWithRetry(ctx, configsvc.ScopeSystem, policyConfigID, 3, func(doc *configsvc.Document) error {
+	if err := svc.SetWithRetry(ctx, configsvc.ScopeSystem, packs.PolicyConfigID, 3, func(doc *configsvc.Document) error {
 		if doc.Data == nil {
 			doc.Data = map[string]any{}
 		}
-		rawPolicyBundles := normalizeJSON(doc.Data[policyConfigKey])
+		rawPolicyBundles := packs.NormalizeJSON(doc.Data[packs.PolicyConfigKey])
 		policyBundles, _ := rawPolicyBundles.(map[string]any)
 		if policyBundles == nil {
 			policyBundles = map[string]any{}
@@ -1531,14 +1559,14 @@ func migrateLegacyPolicyBundles(ctx context.Context, svc *configsvc.Service) (bo
 			if _, exists := policyBundles[fragmentID]; exists {
 				continue
 			}
-			policyBundles[fragmentID] = deepCopy(bundle)
+			policyBundles[fragmentID] = packs.DeepCopy(bundle)
 		}
-		doc.Data[policyConfigKey] = policyBundles
+		doc.Data[packs.PolicyConfigKey] = policyBundles
 		return nil
 	}); err != nil {
-		return false, 0, fmt.Errorf("merge legacy bundles into system/%s: %w", policyConfigID, err)
+		return false, 0, fmt.Errorf("merge legacy bundles into system/%s: %w", packs.PolicyConfigID, err)
 	}
-	if err := deleteSystemDefaultKeyWithRetry(ctx, svc, policyConfigKey, 3); err != nil {
+	if err := deleteSystemDefaultKeyWithRetry(ctx, svc, packs.PolicyConfigKey, 3); err != nil {
 		return false, 0, fmt.Errorf("remove legacy bundles from system/default: %w", err)
 	}
 	return true, len(legacyBundles), nil

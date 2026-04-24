@@ -66,6 +66,56 @@ func (r *MemoryRegistry) UpdateHeartbeat(hb *pb.Heartbeat) {
 	r.workers[hb.WorkerId] = &workerEntry{hb: hb, lastSeen: now}
 }
 
+// UpdateHeartbeatWithTransition upserts the heartbeat and reports whether
+// this heartbeat marks an OFFLINE→ONLINE transition for the worker's POOL
+// — true iff, prior to this heartbeat, no other worker in the pool was
+// fresh (lastSeen within TTL). A brand-new worker joining a pool that
+// already has live workers does NOT report a transition, because the
+// pool's dispatch pipeline is already draining. A live worker switching
+// pools correctly reports a transition if the new pool had no fresh
+// workers. Callers use this signal to flush pending dispatch on
+// scale-from-zero or fleet-rolling-restart without waiting for the next
+// poll tick.
+//
+// The method is intentionally scoped to the concrete MemoryRegistry
+// type rather than the WorkerRegistry interface. The engine type-
+// asserts at the call site so existing test mocks (panicRegistry et al.)
+// that only implement the legacy interface keep compiling.
+func (r *MemoryRegistry) UpdateHeartbeatWithTransition(hb *pb.Heartbeat) bool {
+	if hb == nil {
+		return false
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	pool := hb.GetPool()
+	poolWasOnline := false
+	// Check if the pool had ANY fresh worker (including this one, if it
+	// was refreshing rather than joining/returning). A worker refreshing
+	// its heartbeat within the TTL keeps the pool online — that's NOT a
+	// transition. A worker whose prior entry was stale, or a brand-new
+	// worker in an empty pool, IS a transition.
+	for _, candidate := range r.workers {
+		if candidate == nil || candidate.hb == nil || candidate.hb.GetPool() != pool {
+			continue
+		}
+		if now.Sub(candidate.lastSeen) <= r.ttl {
+			poolWasOnline = true
+			break
+		}
+	}
+
+	entry, ok := r.workers[hb.WorkerId]
+	if ok {
+		entry.hb = hb
+		entry.lastSeen = now
+	} else {
+		r.workers[hb.WorkerId] = &workerEntry{hb: hb, lastSeen: now}
+	}
+	return !poolWasOnline
+}
+
 func (r *MemoryRegistry) UpdateHandshake(hs *pb.Handshake) {
 	if hs == nil || hs.ComponentId == "" {
 		return
