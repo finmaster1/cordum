@@ -108,12 +108,24 @@ func (r *ApprovalResumer) handleEvent(ctx context.Context, ev ApprovalEvent) err
 		r.mu.Unlock()
 		return nil
 	}
-	if ev.AgentID != "" && pending.AgentID != "" && ev.AgentID != pending.AgentID {
+	// Ownership check is fail-CLOSED: when the pending registration carries
+	// agent_id / session_id, the inbound event MUST also carry the matching
+	// value. Empty / missing on the event is treated as a mismatch — a
+	// spoofed publisher can't drop the field to bypass the check.
+	if pending.AgentID != "" && ev.AgentID != pending.AgentID {
 		r.mu.Unlock()
+		slog.Warn("llmchat/approvals: dropping event with non-matching agent_id",
+			"approval_id", approvalID,
+			"pending_agent_id", pending.AgentID,
+			"event_agent_id_present", ev.AgentID != "")
 		return nil
 	}
-	if ev.SessionID != "" && pending.Session != nil && pending.Session.ID != "" && ev.SessionID != pending.Session.ID {
+	if pending.Session != nil && pending.Session.ID != "" && ev.SessionID != pending.Session.ID {
 		r.mu.Unlock()
+		slog.Warn("llmchat/approvals: dropping event with non-matching session_id",
+			"approval_id", approvalID,
+			"pending_session_id", pending.Session.ID,
+			"event_session_id_present", ev.SessionID != "")
 		return nil
 	}
 	delete(r.pending, approvalID)

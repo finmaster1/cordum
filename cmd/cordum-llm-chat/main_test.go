@@ -1,9 +1,13 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	gatewayauth "github.com/cordum/cordum/core/controlplane/gateway/auth"
 )
 
 func fakeEnv(values map[string]string) func(string) string {
@@ -228,5 +232,149 @@ func TestEnvHelpersFallback(t *testing.T) {
 	}
 	if got, err := envDurationOrDefault(get, "MISSING", 3*time.Second); err != nil || got != 3*time.Second {
 		t.Fatalf("envDurationOrDefault(MISSING) = %v, %v, want 3s, nil", got, err)
+	}
+}
+
+// QA reopen #2 regression: chat / admin routes MUST go through a
+// trusted-forwarder middleware that gates spoofed identity headers
+// behind a valid X-API-Key. Without the API key, no AuthContext is
+// populated and the request is rejected at the boundary, NOT at the
+// handler.
+func TestRequireTrustedForwarder(t *testing.T) {
+	const goodKey = "svc-test-key"
+
+	t.Run("missing X-API-Key returns 401 without invoking handler", func(t *testing.T) {
+		invoked := false
+		next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { invoked = true })
+		mw := requireTrustedForwarder(goodKey)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{}`))
+		req.Header.Set("X-Cordum-Principal", "admin")
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+		if invoked {
+			t.Fatal("inner handler invoked despite missing API key — middleware fail-open")
+		}
+		if !strings.Contains(rec.Body.String(), "invalid_api_key") {
+			t.Errorf("body = %q, want code=invalid_api_key", rec.Body.String())
+		}
+	})
+
+	t.Run("wrong X-API-Key returns 401 (constant-time)", func(t *testing.T) {
+		invoked := false
+		next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { invoked = true })
+		mw := requireTrustedForwarder(goodKey)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{}`))
+		req.Header.Set("X-API-Key", "attacker-guess")
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+		if invoked {
+			t.Fatal("inner handler invoked despite wrong API key")
+		}
+	})
+
+	t.Run("spoofed identity headers without API key fail closed", func(t *testing.T) {
+		var seenAuth *gatewayauth.AuthContext
+		next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			seenAuth = gatewayauth.FromRequest(r)
+		})
+		mw := requireTrustedForwarder(goodKey)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{}`))
+		req.Header.Set("X-Cordum-Principal", "admin")
+		req.Header.Set("X-Cordum-Tenant", "tenant-victim")
+		req.Header.Set("X-Cordum-Role", "admin")
+		// no X-API-Key
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401 (spoofed identity must fail without API key)", rec.Code)
+		}
+		if seenAuth != nil {
+			t.Fatal("AuthContext populated despite missing API key — boundary leaked")
+		}
+	})
+
+	t.Run("valid X-API-Key sets AuthContext from forwarder headers", func(t *testing.T) {
+		var seenAuth *gatewayauth.AuthContext
+		next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			seenAuth = gatewayauth.FromRequest(r)
+		})
+		mw := requireTrustedForwarder(goodKey)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{}`))
+		req.Header.Set("X-API-Key", goodKey)
+		req.Header.Set("X-Cordum-Principal", "alice@example.com")
+		req.Header.Set("X-Cordum-Tenant", "tenant-a")
+		req.Header.Set("X-Cordum-Role", "operator")
+		req.Header.Set("X-Cordum-Allow-Cross-Tenant", "true")
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if seenAuth == nil {
+			t.Fatalf("AuthContext nil, want populated; resp=%d body=%q", rec.Code, rec.Body.String())
+		}
+		if seenAuth.PrincipalID != "alice@example.com" {
+			t.Errorf("PrincipalID = %q, want alice@example.com", seenAuth.PrincipalID)
+		}
+		if seenAuth.Tenant != "tenant-a" {
+			t.Errorf("Tenant = %q, want tenant-a", seenAuth.Tenant)
+		}
+		if seenAuth.Role != "operator" {
+			t.Errorf("Role = %q, want operator", seenAuth.Role)
+		}
+		if !seenAuth.AllowCrossTenant {
+			t.Errorf("AllowCrossTenant = false, want true")
+		}
+	})
+
+	t.Run("Authorization: Bearer fallback is honored", func(t *testing.T) {
+		var seenAuth *gatewayauth.AuthContext
+		next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			seenAuth = gatewayauth.FromRequest(r)
+		})
+		mw := requireTrustedForwarder(goodKey)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+goodKey)
+		req.Header.Set("X-Cordum-Principal", "bob@example.com")
+		rec := httptest.NewRecorder()
+		mw(next).ServeHTTP(rec, req)
+		if seenAuth == nil || seenAuth.PrincipalID != "bob@example.com" {
+			t.Fatalf("Authorization Bearer fallback failed; auth=%+v code=%d", seenAuth, rec.Code)
+		}
+	})
+
+	t.Run("empty configured key fails closed with 503", func(t *testing.T) {
+		mw := requireTrustedForwarder("")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{}`))
+		req.Header.Set("X-API-Key", "anything")
+		rec := httptest.NewRecorder()
+		mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503 (misconfigured service must fail closed)", rec.Code)
+		}
+	})
+}
+
+// constantTimeEqualString is a security primitive — verify it doesn't
+// short-circuit on length differences and rejects empty strings.
+func TestConstantTimeEqualString(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"", "", false},        // both empty → fail-closed (not authenticated)
+		{"x", "", false},       // one empty → fail-closed
+		{"", "x", false},       // one empty → fail-closed
+		{"abc", "abc", true},   // equal
+		{"abc", "abd", false},  // last byte diff
+		{"abc", "abcd", false}, // length diff
+	}
+	for _, tc := range cases {
+		if got := constantTimeEqualString(tc.a, tc.b); got != tc.want {
+			t.Errorf("constantTimeEqualString(%q,%q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
 	}
 }

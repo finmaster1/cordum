@@ -210,13 +210,30 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handlers.Healthz)
 	mux.HandleFunc("/readyz", handlers.Readyz)
-	mux.HandleFunc("/api/v1/chat", chatHandlers.HandleChatPost)
-	mux.HandleFunc("/api/v1/chat/stream", chatHandlers.HandleChatStream)
-	mux.HandleFunc("/api/v1/chat/ws", chatHandlers.HandleChatWS)
-	mux.HandleFunc("/api/v1/chat/sessions", chatHandlers.HandleListSessions)
-	mux.HandleFunc("/api/v1/chat/sessions/", func(w http.ResponseWriter, r *http.Request) {
+
+	// Trusted-forwarder auth middleware. Every chat / admin route MUST
+	// go through this so handlers see a populated gatewayauth.AuthContext
+	// rather than reading from spoofable request headers directly.
+	//
+	// Trust model: this service runs BEHIND the cordum gateway, which is
+	// the auth boundary. The gateway authenticates the end user (JWT /
+	// session cookie / API key), then forwards the request to llm-chat
+	// with `X-API-Key` matching cfg.CordumAPIKey (proves the caller is
+	// the gateway, not a malicious client) plus identity-attributing
+	// headers (`X-Cordum-Principal`, `X-Cordum-Tenant`, `X-Cordum-Role`,
+	// `X-Cordum-Allow-Cross-Tenant`).
+	//
+	// Without a valid X-API-Key the request is rejected — spoofed
+	// `X-Cordum-Principal: admin` from a direct caller fails closed.
+	authedChat := requireTrustedForwarder(cfg.CordumAPIKey)
+
+	mux.Handle("/api/v1/chat", authedChat(http.HandlerFunc(chatHandlers.HandleChatPost)))
+	mux.Handle("/api/v1/chat/stream", authedChat(http.HandlerFunc(chatHandlers.HandleChatStream)))
+	mux.Handle("/api/v1/chat/ws", authedChat(http.HandlerFunc(chatHandlers.HandleChatWS)))
+	mux.Handle("/api/v1/chat/sessions", authedChat(http.HandlerFunc(chatHandlers.HandleListSessions)))
+	mux.Handle("/api/v1/chat/sessions/", authedChat(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chatHandlers.HandleGetSession(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/chat/sessions/"))
-	})
+	})))
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -447,4 +464,91 @@ func (a mcpAdapter) CallTool(ctx context.Context, name string, args map[string]a
 		return nil, fmt.Errorf("mcpAdapter: marshal args: %w", err)
 	}
 	return a.client.CallTool(ctx, name, raw, "")
+}
+
+// requireTrustedForwarder builds the auth middleware for chat / admin
+// routes. The cordum-llm-chat service runs behind the cordum gateway,
+// which is the auth boundary; the gateway forwards requests with
+// `X-API-Key` matching `CORDUM_API_KEY` plus identity-attributing
+// headers. This middleware:
+//
+//  1. Compares `X-API-Key` (or `Authorization: ApiKey <key>` /
+//     `Authorization: Bearer <key>`) against the configured service
+//     key in constant time. Mismatch → 401.
+//  2. On match, populates `gatewayauth.AuthContext` from the trusted
+//     forwarder headers `X-Cordum-Principal`, `X-Cordum-Tenant`,
+//     `X-Cordum-Role`, `X-Cordum-Allow-Cross-Tenant`. These headers
+//     are trusted ONLY because step 1 proved the caller is the gateway.
+//  3. Passes the augmented request down to the handler chain.
+//
+// Without a valid X-API-Key, identity headers are ignored — a direct
+// caller cannot spoof `X-Cordum-Principal: admin` to bypass admin
+// gates.
+//
+// If apiKey is empty (misconfiguration), the middleware refuses every
+// request with 503 to fail closed rather than silently allowing
+// unauthenticated traffic.
+func requireTrustedForwarder(apiKey string) func(http.Handler) http.Handler {
+	expected := []byte(strings.TrimSpace(apiKey))
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(expected) == 0 {
+				slog.Error("cordum-llm-chat: refusing request — CORDUM_API_KEY is unset; service is misconfigured")
+				writeAuthError(w, http.StatusServiceUnavailable, "service_misconfigured", "service is missing required CORDUM_API_KEY")
+				return
+			}
+			provided := strings.TrimSpace(r.Header.Get("X-API-Key"))
+			if provided == "" {
+				if hdr := r.Header.Get("Authorization"); hdr != "" {
+					switch {
+					case strings.HasPrefix(hdr, "ApiKey "):
+						provided = strings.TrimSpace(strings.TrimPrefix(hdr, "ApiKey "))
+					case strings.HasPrefix(hdr, "Bearer "):
+						provided = strings.TrimSpace(strings.TrimPrefix(hdr, "Bearer "))
+					}
+				}
+			}
+			if !constantTimeEqualString(provided, string(expected)) {
+				writeAuthError(w, http.StatusUnauthorized, "invalid_api_key", "missing or invalid X-API-Key")
+				return
+			}
+			authCtx := &gatewayauth.AuthContext{
+				APIKey:           string(expected),
+				PrincipalID:      strings.TrimSpace(r.Header.Get("X-Cordum-Principal")),
+				Tenant:           strings.TrimSpace(r.Header.Get("X-Cordum-Tenant")),
+				Role:             strings.TrimSpace(r.Header.Get("X-Cordum-Role")),
+				AllowCrossTenant: strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cordum-Allow-Cross-Tenant")), "true"),
+			}
+			ctx := context.WithValue(r.Context(), gatewayauth.ContextKey{}, authCtx)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// constantTimeEqualString avoids timing leaks when comparing the
+// X-API-Key against the configured service key. Length-mismatch is
+// also constant-time relative to itself.
+func constantTimeEqualString(a, b string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	var diff byte
+	for i := 0; i < len(a); i++ {
+		diff |= a[i] ^ b[i]
+	}
+	return diff == 0
+}
+
+func writeAuthError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":   "request_failed",
+		"code":    code,
+		"message": msg,
+		"status":  status,
+	})
 }
