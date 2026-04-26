@@ -1208,7 +1208,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 
 	// 3. Jobs (Redis ZSet)
 	s.registerRoute(mux, "GET /api/v1/jobs", s.instrumented("/api/v1/jobs", s.handleListJobs))
-	s.registerRoute(mux, "GET /api/v1/copilot/sessions/{sessionId}", s.instrumented("/api/v1/copilot/sessions/:sessionId", s.handleGetCopilotSession))
+	s.registerRoute(mux, "GET /api/v1/copilot/sessions/{sessionId}", s.instrumented("/api/v1/copilot/sessions/{sessionId}", s.handleGetCopilotSession))
 
 	// 4. Job Details
 	s.registerRoute(mux, "GET /api/v1/jobs/{id}", s.instrumented("/api/v1/jobs/{id}", s.handleGetJob))
