@@ -99,6 +99,7 @@ type ChatHandlers struct {
 	audit        chatAuditSender
 	approvals    *ApprovalResumer
 	redactor     Redactor
+	metrics      *Metrics
 
 	upgrader websocket.Upgrader
 	agentID  string
@@ -120,6 +121,7 @@ type ChatHandlersConfig struct {
 	Audit           chatAuditSender
 	Approvals       *ApprovalResumer
 	Redactor        Redactor
+	Metrics         *Metrics
 	AgentID         string
 	UserPrincipalFn func(r *http.Request) string
 	TenantFn        func(r *http.Request) string
@@ -136,6 +138,9 @@ func NewChatHandlers(cfg ChatHandlersConfig) *ChatHandlers {
 	if cfg.Redactor == nil {
 		cfg.Redactor = NewRedactor()
 	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = NewNopMetrics()
+	}
 	return &ChatHandlers{
 		agent:           cfg.Agent,
 		sessions:        cfg.Sessions,
@@ -145,6 +150,7 @@ func NewChatHandlers(cfg ChatHandlersConfig) *ChatHandlers {
 		audit:           cfg.Audit,
 		approvals:       cfg.Approvals,
 		redactor:        cfg.Redactor,
+		metrics:         cfg.Metrics,
 		agentID:         cfg.AgentID,
 		userPrincipalFn: cfg.UserPrincipalFn,
 		tenantFn:        cfg.TenantFn,
@@ -166,16 +172,19 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required")
 		return
 	}
 	var req chatPostRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxWSMessageBytes)).Decode(&req); err != nil {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusBadRequest, "invalid_json", "request body must be JSON {session_id?, message}")
 		return
 	}
 	msg := req.userMessage()
 	if msg == "" {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusBadRequest, "empty_message", "message is required")
 		return
 	}
@@ -184,9 +193,12 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 	}
 	session, bearer, err := h.sessionAndDelegation(r.Context(), r, req.SessionID)
 	if err != nil {
+		h.metrics.IncError(errorKindForChatError(err))
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
+	h.metrics.IncSessions()
+	defer h.metrics.DecSessions()
 	frames := h.collectTurnFrames(r.Context(), session, msg, bearer)
 	resp := chatPostResponse{SessionID: session.ID, Frames: frames}
 	for _, frame := range frames {
@@ -208,20 +220,25 @@ func (h *ChatHandlers) HandleChatStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method != http.MethodGet {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required")
 		return
 	}
 	msg := strings.TrimSpace(r.URL.Query().Get("message"))
 	if msg == "" {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusBadRequest, "empty_message", "message query parameter is required")
 		return
 	}
 	sessionID := firstNonEmpty(r.URL.Query().Get("session_id"), r.Header.Get(HeaderChatSessionID))
 	session, bearer, err := h.sessionAndDelegation(r.Context(), r, sessionID)
 	if err != nil {
+		h.metrics.IncError(errorKindForChatError(err))
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
+	h.metrics.IncSessions()
+	defer h.metrics.DecSessions()
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
@@ -245,16 +262,19 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required for WS upgrade")
 		return
 	}
 	sessionID := firstNonEmpty(r.URL.Query().Get("session_id"), r.Header.Get(HeaderChatSessionID))
 	session, bearer, err := h.sessionAndDelegation(r.Context(), r, sessionID)
 	if err != nil {
+		h.metrics.IncError(errorKindForChatError(err))
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
 	if !h.markSessionActive(session.ID) {
+		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusConflict, "session_already_active", "session already has an active websocket")
 		return
 	}
@@ -291,16 +311,19 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if len(payload) > maxWSMessageBytes {
+			h.metrics.IncError(ErrorKindOther)
 			h.emitToWS(out, Frame{Type: FrameError, ErrorCode: "message_too_large", ErrorMsg: "message exceeds 64KiB", SessionID: session.ID})
 			break
 		}
 		var msg chatPostRequest
 		if err := json.Unmarshal(payload, &msg); err != nil {
+			h.metrics.IncError(ErrorKindOther)
 			h.emitToWS(out, Frame{Type: FrameError, ErrorCode: "invalid_json", ErrorMsg: "message must be JSON", SessionID: session.ID})
 			continue
 		}
 		userMsg := msg.userMessage()
 		if userMsg == "" {
+			h.metrics.IncError(ErrorKindOther)
 			h.emitToWS(out, Frame{Type: FrameError, ErrorCode: "empty_message", ErrorMsg: "message is required", SessionID: session.ID})
 			continue
 		}
@@ -346,10 +369,23 @@ func (h *ChatHandlers) decorateFrame(session *Session, frame Frame) Frame {
 	if frame.SessionID == "" && session != nil {
 		frame.SessionID = session.ID
 	}
+	h.recordFrameMetrics(frame)
 	if frame.Type == FrameToolResult && h.redactor != nil && frame.ToolResult != "" {
 		frame.ToolResult = string(h.redactor.RedactToolResult([]byte(frame.ToolResult)))
 	}
 	return frame
+}
+
+func (h *ChatHandlers) recordFrameMetrics(frame Frame) {
+	if h == nil || h.metrics == nil {
+		return
+	}
+	switch frame.Type {
+	case FrameApprovalRequired:
+		h.metrics.IncApprovalRequired()
+	case FrameError:
+		h.metrics.IncError(errorKindForFrameError(frame.ErrorCode))
+	}
 }
 
 func (h *ChatHandlers) emitToWS(out chan<- Frame, frame Frame) bool {
@@ -459,6 +495,9 @@ func (h *ChatHandlers) requireChatEntitlement(w http.ResponseWriter) bool {
 			return true
 		}
 	}
+	if h != nil && h.metrics != nil {
+		h.metrics.IncError(ErrorKindAuthRejected)
+	}
 	writeChatError(w, http.StatusPaymentRequired, "feature_unavailable", "chat requires Enterprise")
 	return false
 }
@@ -495,12 +534,16 @@ func (h *ChatHandlers) markSessionActive(id string) bool {
 		return false
 	}
 	h.activeSessions[id] = struct{}{}
+	h.metrics.IncSessions()
 	return true
 }
 
 func (h *ChatHandlers) unmarkSessionActive(id string) {
 	h.activeMu.Lock()
-	delete(h.activeSessions, id)
+	if _, exists := h.activeSessions[id]; exists {
+		delete(h.activeSessions, id)
+		h.metrics.DecSessions()
+	}
 	h.activeMu.Unlock()
 }
 
@@ -546,6 +589,40 @@ func chatErrorCode(err error) string {
 		return "not_found"
 	}
 	return "chat_failed"
+}
+
+func errorKindForChatError(err error) string {
+	if err == nil {
+		return ErrorKindOther
+	}
+	if errors.Is(err, errChatAuthRequired) || errors.Is(err, errChatSessionNotFound) || errors.Is(err, errChatSessionForbidden) {
+		return ErrorKindAuthRejected
+	}
+	if errors.Is(err, errSessionMissing) {
+		return ErrorKindRedisFailed
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "delegation"):
+		return ErrorKindDelegationMintFailed
+	case strings.Contains(msg, "session") || strings.Contains(msg, "redis") || strings.Contains(msg, "persist"):
+		return ErrorKindRedisFailed
+	default:
+		return ErrorKindOther
+	}
+}
+
+func errorKindForFrameError(code string) string {
+	switch code {
+	case ErrorCodeProviderFailed:
+		return ErrorKindVLLMCallFailed
+	case ErrorCodeToolCallFailed, ErrorCodeListToolsFailed:
+		return ErrorKindMCPCallFailed
+	case ErrorCodeRepeatToolCall:
+		return ErrorKindRepeatCallDetected
+	default:
+		return ErrorKindOther
+	}
 }
 
 func firstNonEmpty(vals ...string) string {

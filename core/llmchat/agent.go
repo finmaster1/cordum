@@ -178,6 +178,7 @@ type Agent struct {
 	promptLoader PromptLoader
 	sessions     SessionStorer
 	budgets      agentBudgets
+	metrics      *Metrics
 }
 
 // AgentConfig wires the Agent's collaborators. NewAgent applies
@@ -188,6 +189,7 @@ type AgentConfig struct {
 	Redactor     Redactor
 	PromptLoader PromptLoader
 	Sessions     SessionStorer
+	Metrics      *Metrics
 	// Budgets, when zero-valued, are filled from env (or the
 	// hard-coded defaults if env is unset).
 	Budgets *agentBudgets
@@ -202,6 +204,9 @@ func NewAgent(cfg AgentConfig) *Agent {
 	} else {
 		budgets = loadBudgetsFromEnv()
 	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = NewNopMetrics()
+	}
 	return &Agent{
 		provider:     cfg.Provider,
 		mcp:          cfg.MCP,
@@ -209,6 +214,7 @@ func NewAgent(cfg AgentConfig) *Agent {
 		promptLoader: cfg.PromptLoader,
 		sessions:     cfg.Sessions,
 		budgets:      budgets,
+		metrics:      cfg.Metrics,
 	}
 }
 
@@ -315,7 +321,7 @@ toolLoop:
 		}
 
 		req := buildCompleteRequest(systemPrompt, in.Session.Messages, tools)
-		stream, err := a.provider.Complete(ctx, req, SamplingModeToolCalls)
+		stream, err, observeProvider := a.completeWithMetrics(ctx, req, SamplingModeToolCalls)
 		if err != nil {
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: err.Error()})
 			return
@@ -325,17 +331,21 @@ toolLoop:
 		finishReason = ""
 		for chunk := range stream {
 			if chunk.Err != nil {
+				observeProvider()
 				emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: chunk.Err.Error()})
 				return
 			}
 			if elapsed := time.Since(startedAt); elapsed > a.budgets.MaxWallClock {
+				observeProvider()
 				slog.Warn("llmchat/agent: budget_tripped", "kind", "wall_clock", "elapsed", elapsed)
 				emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeWallClockBudgetTripped, ErrorMsg: fmt.Sprintf("turn exceeded %s", a.budgets.MaxWallClock)})
 				return
 			}
 			if chunk.Delta != "" {
 				bytesSeen += len(chunk.Delta)
+				a.metrics.IncTokenBudgetUsed(float64(len(chunk.Delta)))
 				if bytesSeen > a.budgets.MaxAssistantBytes {
+					observeProvider()
 					slog.Warn("llmchat/agent: budget_tripped", "kind", "assistant_bytes", "seen", bytesSeen)
 					emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeAssistantBytesBudget, ErrorMsg: fmt.Sprintf("assistant output exceeded %d bytes", a.budgets.MaxAssistantBytes)})
 					return
@@ -352,6 +362,7 @@ toolLoop:
 				finishReason = chunk.FinishReason
 			}
 		}
+		observeProvider()
 
 		// Dispatch any tool calls accumulated this iteration.
 		if len(toolCalls) == 0 {
@@ -377,6 +388,7 @@ toolLoop:
 				"session_id", in.Session.ID,
 				"tool", tc.Name,
 			)
+			a.metrics.IncToolCall(tc.Name)
 			result, err := a.mcp.CallTool(ctx, tc.Name, tc.Arguments, in.BearerToken)
 			if err != nil {
 				var ae *ApprovalRequiredError
@@ -467,7 +479,7 @@ toolLoop:
 	)
 
 	summaryReq := buildCompleteRequest(systemPrompt, in.Session.Messages, tools)
-	summaryStream, err := a.provider.Complete(ctx, summaryReq, SamplingModeSummary)
+	summaryStream, err, observeProvider := a.completeWithMetrics(ctx, summaryReq, SamplingModeSummary)
 	if err != nil {
 		emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: err.Error()})
 		return
@@ -476,12 +488,15 @@ toolLoop:
 	var consolidated string
 	for chunk := range summaryStream {
 		if chunk.Err != nil {
+			observeProvider()
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: chunk.Err.Error()})
 			return
 		}
 		if chunk.Delta != "" {
 			bytesSeen += len(chunk.Delta)
+			a.metrics.IncTokenBudgetUsed(float64(len(chunk.Delta)))
 			if bytesSeen > a.budgets.MaxAssistantBytes {
+				observeProvider()
 				slog.Warn("llmchat/agent: budget_tripped", "kind", "assistant_bytes", "seen", bytesSeen)
 				emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeAssistantBytesBudget, ErrorMsg: fmt.Sprintf("assistant output exceeded %d bytes", a.budgets.MaxAssistantBytes)})
 				return
@@ -490,6 +505,7 @@ toolLoop:
 			emitFrame(ctx, out, Frame{Type: FrameAssistantDelta, Text: chunk.Delta})
 		}
 	}
+	observeProvider()
 
 	in.Session.Messages = append(in.Session.Messages, SessionMessage{Role: "assistant", Text: consolidated, At: time.Now().UTC()})
 	if a.sessions != nil {
@@ -506,6 +522,26 @@ toolLoop:
 		"duration_ms", time.Since(startedAt).Milliseconds(),
 	)
 	emitFrame(ctx, out, Frame{Type: FrameFinal, Text: consolidated})
+}
+
+func (a *Agent) completeWithMetrics(ctx context.Context, req CompleteRequest, mode SamplingMode) (<-chan Chunk, error, func()) {
+	startedAt := time.Now()
+	observed := false
+	observe := func() {
+		if observed {
+			return
+		}
+		observed = true
+		if a != nil && a.metrics != nil {
+			a.metrics.ObserveVLLMLatency(time.Since(startedAt))
+		}
+	}
+	stream, err := a.provider.Complete(ctx, req, mode)
+	if err != nil {
+		observe()
+		return nil, err, func() {}
+	}
+	return stream, nil, observe
 }
 
 // buildCompleteRequest assembles the provider request envelope from

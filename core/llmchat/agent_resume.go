@@ -55,6 +55,7 @@ func (a *Agent) runApprovalResume(ctx context.Context, in ApprovalResumeInput, o
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeToolCallFailed, ErrorMsg: "mcp client not configured"})
 			return
 		}
+		a.metrics.IncToolCall(ref.Name)
 		result, err := a.mcp.CallTool(ctx, ref.Name, json.RawMessage(ref.Arguments), in.BearerToken)
 		if err != nil {
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeToolCallFailed, ErrorMsg: err.Error()})
@@ -148,7 +149,7 @@ func (a *Agent) runSummaryOnly(ctx context.Context, sess *Session, systemPrompt 
 		emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: "provider not configured"})
 		return
 	}
-	stream, err := a.provider.Complete(ctx, buildCompleteRequest(systemPrompt, sess.Messages, tools), SamplingModeSummary)
+	stream, err, observeProvider := a.completeWithMetrics(ctx, buildCompleteRequest(systemPrompt, sess.Messages, tools), SamplingModeSummary)
 	if err != nil {
 		emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: err.Error()})
 		return
@@ -157,6 +158,7 @@ func (a *Agent) runSummaryOnly(ctx context.Context, sess *Session, systemPrompt 
 	bytesSeen := 0
 	for chunk := range stream {
 		if chunk.Err != nil {
+			observeProvider()
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: chunk.Err.Error()})
 			return
 		}
@@ -164,13 +166,16 @@ func (a *Agent) runSummaryOnly(ctx context.Context, sess *Session, systemPrompt 
 			continue
 		}
 		bytesSeen += len(chunk.Delta)
+		a.metrics.IncTokenBudgetUsed(float64(len(chunk.Delta)))
 		if bytesSeen > a.budgets.MaxAssistantBytes {
+			observeProvider()
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeAssistantBytesBudget, ErrorMsg: fmt.Sprintf("assistant output exceeded %d bytes", a.budgets.MaxAssistantBytes)})
 			return
 		}
 		consolidated += chunk.Delta
 		emitFrame(ctx, out, Frame{Type: FrameAssistantDelta, Text: chunk.Delta})
 	}
+	observeProvider()
 	msg := SessionMessage{Role: "assistant", Text: consolidated, At: time.Now().UTC()}
 	sess.Messages = append(sess.Messages, msg)
 	if a.sessions != nil {

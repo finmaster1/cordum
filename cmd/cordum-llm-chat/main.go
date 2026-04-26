@@ -32,6 +32,8 @@ import (
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/cordum/cordum/core/licensing"
 	"github.com/cordum/cordum/core/llmchat"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -208,12 +210,14 @@ func main() {
 	permissionChecker := gatewayauth.NewPermissionChecker(gatewayauth.NewRBACStoreFromClient(redisClient), func() licensing.Entitlements {
 		return entitlementResolver.Entitlements()
 	})
+	metrics := llmchat.NewMetrics(prometheus.DefaultRegisterer)
 	agent := llmchat.NewAgent(llmchat.AgentConfig{
 		Provider:     provider,
 		MCP:          mcpClient,
 		Redactor:     llmchat.NewRedactor(),
 		PromptLoader: promptLoader,
 		Sessions:     sessionStore,
+		Metrics:      metrics,
 	})
 	var approvalBus llmchat.ApprovalEventBus
 	if strings.TrimSpace(cfg.NATSURL) != "" {
@@ -243,12 +247,14 @@ func main() {
 		Audit:        auditSender,
 		Approvals:    approvalResumer,
 		AgentID:      resolvedAgentID,
+		Metrics:      metrics,
 	})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handlers.Healthz)
 	mux.HandleFunc("/readyz", handlers.Readyz)
 	mux.HandleFunc("/api/v1/chat/healthz", handlers.Readyz)
+	registerMetricsHandler(mux, prometheus.DefaultGatherer)
 
 	// Trusted-forwarder auth middleware. Every chat / admin route MUST
 	// go through this so handlers see a populated gatewayauth.AuthContext
@@ -321,6 +327,18 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func registerMetricsHandler(mux *http.ServeMux, gatherer prometheus.Gatherer) {
+	if gatherer == nil {
+		gatherer = prometheus.DefaultGatherer
+	}
+	// Co-locate /metrics with /healthz and /readyz on the llm-chat main
+	// port. Scheduler/context-engine use separate metrics ports, but this
+	// bug-fix keeps the surface at the DoD-required 127.0.0.1:8090/metrics
+	// endpoint and avoids adding a compose/Helm port while the service is
+	// already deployed behind the trusted gateway boundary.
+	mux.Handle("/metrics", promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}))
 }
 
 // loadConfigFromEnv resolves every boot env var into a validated

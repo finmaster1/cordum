@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,11 +12,56 @@ import (
 	"time"
 
 	gatewayauth "github.com/cordum/cordum/core/controlplane/gateway/auth"
+	"github.com/cordum/cordum/core/llmchat"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func fakeEnv(values map[string]string) func(string) string {
 	return func(key string) string {
 		return values[key]
+	}
+}
+
+func TestRegisterMetricsHandlerExposesPrometheusEndpoint(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := llmchat.NewMetrics(reg)
+	metrics.IncSessions()
+	metrics.IncApprovalRequired()
+	metrics.ObserveVLLMLatency(250 * time.Millisecond)
+	metrics.IncTokenBudgetUsed(42)
+	metrics.IncToolCall("cordum_list_jobs")
+	metrics.IncError("vllm_call_failed")
+
+	mux := http.NewServeMux()
+	registerMetricsHandler(mux, reg)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	resp, err := server.Client().Get(server.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want 200", resp.StatusCode)
+	}
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /metrics body: %v", err)
+	}
+	body := string(rawBody)
+	for _, name := range []string{
+		"chat_sessions_active",
+		"chat_tool_calls_total",
+		"chat_approval_required_total",
+		"chat_vllm_latency_seconds_bucket",
+		"chat_token_budget_used_total",
+		"chat_errors_total",
+	} {
+		if !strings.Contains(body, name) {
+			t.Fatalf("/metrics body missing %q:\n%s", name, body)
+		}
 	}
 }
 
