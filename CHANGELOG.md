@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### LLM Chat Assistant — Phase 3 (session store + delegation tokens + agent bootstrap)
+- **Redis session store** (`core/llmchat/session.go`) — chat sessions persisted at `chat:session:{id}` with 24h sliding TTL refreshed on every AppendMessage. FIFO cap at 50 messages bounds memory under long-lived "Gmail-style" sessions where users return for days. Pinned key format consumed by phase-5 WS handler + admin session viewer.
+- **Per-session delegation tokens** (`core/llmchat/delegation.go`) — every chat session mints a child EdDSA JWT (chain depth 1, 15-minute default TTL) via `POST /api/v1/agents/{id}/delegate`. CallTool then carries the JWT in `Authorization: Bearer ...`; the service-account `X-API-Key` is OMITTED on those paths so it never leaks into the per-user tool-call audit trail. `ForSession` auto-refreshes when a token is within 60s of expiry. `Revoke` calls `POST /api/v1/agents/revoke-delegation` with the JTI on session close.
+- **Idempotent chat-assistant bootstrap** (`core/llmchat/bootstrap.go`) — first-boot: `cordum_list_agents` filtered by `name=chat-assistant` + tenant. Hit → reuse + verify scope match (rejects divergent identities, never silently accepts). Miss → `cordum_register_agent` with the canonical AllowedTools surface (8 read tools + cordum_query_policy + 5 mutating tools), then `cordum_set_agent_scope` with PreapprovedMutatingTools=[cordum_submit_job] EXACTLY (widening requires policy-bundle update post-ship per epic rail #4). Refuses to proceed when multiple chat-assistant registrations are queued.
+- New env vars on `cordum-llm-chat`: `LLMCHAT_CHAT_ASSISTANT_AGENT_ID` (REQUIRED), `LLMCHAT_TENANT` (optional), `LLMCHAT_DELEGATION_TTL_SECONDS=900` (default 15min).
+- Bootstrap runs synchronously on startup under a 30s deadline; failure → exit 1 with structured error log (no silent partial registrations).
+- Note: `cap/sdk/go/agent.go` does NOT yet exist; bootstrap uses MCP `cordum_register_agent` + `cordum_set_agent_scope`. Followup task filed in cap repo to add native CAP wrappers; the cordum-side bootstrap will switch over without changing its public surface once those land.
+
 #### Control Plane Boundary Hardening
 - **Topic registry** (`GET/POST/DELETE /api/v1/topics`) — canonical source of truth for registered topics with pool, schema, pack, and status metadata
 - **Submit-time topic validation** — unknown topics rejected with 400 at both gateway and scheduler boundaries; known topics with zero workers stay valid (degraded, `ErrNoWorkers` retry)

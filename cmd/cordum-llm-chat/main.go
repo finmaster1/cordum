@@ -1,12 +1,14 @@
 // Command cordum-llm-chat is the scaffold for the self-hosted Cordum LLM
-// Chat Assistant service. Phase 1 of epic-ac495830 delivers the process
-// boot — logger, buildinfo, env parsing, OpenAI-compat provider wiring,
-// and /healthz + /readyz. MCP client, session store, and /api/v1/chat
-// handlers land in follow-up tasks.
+// Chat Assistant service. Phase 1 delivered logger + buildinfo + env
+// parsing + OpenAI-compat provider + /healthz + /readyz. Phase 3 wires
+// the identity + persistence layer: Redis session store, per-session
+// delegation tokens via the gateway, and idempotent chat-assistant
+// agent bootstrap via MCP. /api/v1/chat WS handlers land in phase 5.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +23,7 @@ import (
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/llmchat"
+	"github.com/cordum/cordum/core/mcp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,6 +39,8 @@ const (
 	defaultMaxToolCallsPerTurn = 12
 	defaultMaxWallClockPerTurn = 60 * time.Second
 	defaultMaxAssistantBytes   = 32768
+	defaultDelegationTTL       = 15 * time.Minute
+	bootstrapTimeout           = 30 * time.Second
 	readyzProbeTimeout         = 2 * time.Second
 	shutdownGrace              = 10 * time.Second
 )
@@ -45,15 +50,18 @@ const (
 // stays in the process binary, not leaked into the reusable provider
 // package.
 type runtimeConfig struct {
-	HTTPAddr     string
-	TLSCertFile  string
-	TLSKeyFile   string
-	RedisURL     string
-	Provider     llmchat.ProviderConfig
-	Budget       llmchat.BudgetConfig
-	CordumAPIKey string
-	GatewayURL   string
-	NATSURL      string
+	HTTPAddr             string
+	TLSCertFile          string
+	TLSKeyFile           string
+	RedisURL             string
+	Provider             llmchat.ProviderConfig
+	Budget               llmchat.BudgetConfig
+	CordumAPIKey         string
+	GatewayURL           string
+	NATSURL              string
+	ChatAssistantAgentID string
+	Tenant               string
+	DelegationTTL        time.Duration
 }
 
 func main() {
@@ -82,6 +90,42 @@ func main() {
 			slog.Warn("cordum-llm-chat: redis close failed", "error", err)
 		}
 	}()
+
+	sessionStore := llmchat.NewSessionStoreFromClient(redisClient)
+	_ = sessionStore // consumed by phase-5 WS handler
+
+	delegationClient := llmchat.NewDelegationClient(llmchat.DelegationConfig{
+		BaseURL:    cfg.GatewayURL,
+		AgentID:    cfg.ChatAssistantAgentID,
+		APIKey:     cfg.CordumAPIKey,
+		Tenant:     cfg.Tenant,
+		IssueTTL:   cfg.DelegationTTL,
+		RetryDelay: 100 * time.Millisecond,
+	})
+	_ = delegationClient // consumed by phase-5 WS handler
+
+	mcpClient, err := llmchat.NewMCPClient(llmchat.MCPClientConfig{
+		BaseURL:       cfg.GatewayURL,
+		APIKey:        cfg.CordumAPIKey,
+		TenantID:      cfg.Tenant,
+		AgentID:       cfg.ChatAssistantAgentID,
+		ClientName:    "cordum-llm-chat",
+		ClientVersion: "0.1.0",
+	})
+	if err != nil {
+		slog.Error("cordum-llm-chat: mcp client construction failed", "error", err)
+		os.Exit(1)
+	}
+	defer mcpClient.Close()
+
+	bootstrapper := llmchat.NewBootstrapper(mcpAdapter{client: mcpClient}, cfg.Tenant)
+	bootCtx, cancelBoot := context.WithTimeout(context.Background(), bootstrapTimeout)
+	if _, err := bootstrapper.Boot(bootCtx); err != nil {
+		cancelBoot()
+		slog.Error("cordum-llm-chat: chat-assistant bootstrap failed", "error", err)
+		os.Exit(1)
+	}
+	cancelBoot()
 
 	handlers := llmchat.NewHandlers(provider, redisClient, readyzProbeTimeout)
 
@@ -220,6 +264,22 @@ func loadConfigFromEnv(getenv func(string) string) (runtimeConfig, error) {
 		MaxWallClockPerTurn: maxWallClock,
 		MaxAssistantBytes:   maxAssistantBytes,
 	}
+
+	cfg.ChatAssistantAgentID = strings.TrimSpace(getenv("LLMCHAT_CHAT_ASSISTANT_AGENT_ID"))
+	if cfg.ChatAssistantAgentID == "" {
+		return runtimeConfig{}, fmt.Errorf("LLMCHAT_CHAT_ASSISTANT_AGENT_ID is required")
+	}
+	cfg.Tenant = strings.TrimSpace(getenv("LLMCHAT_TENANT"))
+
+	delegationTTLSeconds, err := envIntOrDefault(getenv, "LLMCHAT_DELEGATION_TTL_SECONDS", int(defaultDelegationTTL.Seconds()))
+	if err != nil {
+		return runtimeConfig{}, err
+	}
+	if delegationTTLSeconds <= 0 {
+		return runtimeConfig{}, fmt.Errorf("LLMCHAT_DELEGATION_TTL_SECONDS must be positive")
+	}
+	cfg.DelegationTTL = time.Duration(delegationTTLSeconds) * time.Second
+
 	return cfg, nil
 }
 
@@ -279,4 +339,22 @@ func envDurationOrDefault(getenv func(string) string, key string, fallback time.
 		return 0, fmt.Errorf("parse %s=%q: %w", key, raw, err)
 	}
 	return v, nil
+}
+
+// mcpAdapter bridges *llmchat.MCPClient (which takes json.RawMessage
+// args + a bearer token) to the llmchat.MCPCallToolClient interface
+// (which takes map[string]any). Bootstrap uses the service API key
+// (bearerToken=""), so the underlying MCP client falls through to the
+// X-API-Key header path — by design, since registration runs before
+// any per-session delegation could exist.
+type mcpAdapter struct {
+	client *llmchat.MCPClient
+}
+
+func (a mcpAdapter) CallTool(ctx context.Context, name string, args map[string]any) (*mcp.ToolCallResult, error) {
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("mcpAdapter: marshal args: %w", err)
+	}
+	return a.client.CallTool(ctx, name, raw, "")
 }

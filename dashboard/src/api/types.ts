@@ -1878,3 +1878,9 @@ export interface CopilotSession {
   metadata?: Record<string, string>;
 }
 
+export interface CopilotSessionDetailResponse {
+  session: CopilotSession;
+  jobs: Job[];
+  decisions: GovernanceDecision[];
+  truncated: boolean;
+}
