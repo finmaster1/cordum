@@ -102,6 +102,7 @@ func (m *MockProvider) Complete(
 		// channel closes with Done=true exactly once.
 		select {
 		case <-ctx.Done():
+			out <- Chunk{Done: true, Err: ctx.Err()}
 		case out <- Chunk{Done: true}:
 		}
 	}()

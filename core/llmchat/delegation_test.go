@@ -247,29 +247,20 @@ func TestDelegationClient_401IsTypedError(t *testing.T) {
 	}
 }
 
-func TestDelegationClient_RetryOn5xx(t *testing.T) {
+func TestDelegationClient_DoesNotRetryDelegatePostOn5xx(t *testing.T) {
 	t.Parallel()
 	g := newFakeGateway(t)
-	g.issueHandler = func(_ *delegateRequestPayload, attempt int32) (int, delegateResponsePayload) {
-		if attempt < 2 {
-			return http.StatusServiceUnavailable, delegateResponsePayload{}
-		}
-		return http.StatusCreated, delegateResponsePayload{
-			Token: "tok-after-retry", JTI: "jti", ChainDepth: 1,
-			ExpiresAt: time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339Nano),
-		}
+	g.issueHandler = func(_ *delegateRequestPayload, _ int32) (int, delegateResponsePayload) {
+		return http.StatusServiceUnavailable, delegateResponsePayload{}
 	}
 	c := newTestDelegationClient(t, g)
 
-	sess, err := c.IssueForSession(context.Background(), "alice@cordum.io")
-	if err != nil {
-		t.Fatalf("IssueForSession after retry: %v", err)
+	_, err := c.IssueForSession(context.Background(), "alice@cordum.io")
+	if err == nil {
+		t.Fatal("expected error on 503")
 	}
-	if sess.Token != "tok-after-retry" {
-		t.Errorf("Token = %q, want tok-after-retry", sess.Token)
-	}
-	if got := g.issueCalls.Load(); got != 2 {
-		t.Errorf("issue calls = %d, want 2", got)
+	if got := g.issueCalls.Load(); got != 1 {
+		t.Errorf("issue calls = %d, want 1 (POST /delegate must not be retried)", got)
 	}
 }
 

@@ -45,6 +45,26 @@ const (
 	sessionFieldPendingToolCallSON = "pending_tool_call_json"
 )
 
+var appendMessageScript = redis.NewScript(`
+local metaKey = KEYS[1]
+local msgsKey = KEYS[2]
+local msgJSON = ARGV[1]
+local ttlSec = tonumber(ARGV[2])
+local maxMsgs = tonumber(ARGV[3])
+local lastActiveAt = ARGV[4]
+
+if redis.call('EXISTS', metaKey) == 0 then
+	return redis.error_reply('session not found')
+end
+
+redis.call('RPUSH', msgsKey, msgJSON)
+redis.call('LTRIM', msgsKey, -maxMsgs, -1)
+redis.call('EXPIRE', msgsKey, ttlSec)
+redis.call('HSET', metaKey, '` + sessionFieldLastActiveAt + `', lastActiveAt)
+redis.call('EXPIRE', metaKey, ttlSec)
+return 'OK'
+`)
+
 // Session is the persisted chat-assistant session record. Pinned shape;
 // admin viewer + WS handler in phase 5 deserialise this same JSON.
 //
@@ -52,10 +72,11 @@ const (
 // HASH (atomic field updates — no read-modify-write race); transcript
 // messages live under `chat:session:{id}:messages` as a Redis list
 // (RPUSH appends, LTRIM caps, LRANGE reads). Splitting metadata from
-// transcript means AppendMessage is a single atomic pipeline (RPUSH+
-// LTRIM+EXPIRE on list + HSET last_active_at on metadata + EXPIRE on
-// meta) and SetDelegation HSET-touches only the delegation fields,
-// never clobbering activity timestamps or other concurrent writes.
+// transcript means AppendMessage is a single atomic Lua script (check
+// metadata exists + RPUSH+LTRIM+EXPIRE on list + HSET last_active_at on
+// metadata + EXPIRE on meta) and SetDelegation HSET-touches only the
+// delegation fields, never clobbering activity timestamps or other
+// concurrent writes.
 type Session struct {
 	ID              string             `json:"id"`
 	UserPrincipal   string             `json:"user_principal"`
@@ -193,13 +214,12 @@ func (s *SessionStore) Get(ctx context.Context, id string) (*Session, error) {
 }
 
 // AppendMessage appends a transcript entry and refreshes the 24h TTL.
-// Atomic via a single Redis pipeline: RPUSH on the message list +
-// LTRIM to enforce the FIFO 50-cap + HSET on the LastActiveAt field
-// (no read-modify-write) + EXPIRE on both keys. Cross-replica
-// concurrent appends + concurrent SetDelegation are safe — Redis
-// serialises pipeline commands per-connection and HSET only touches
-// the named field, leaving DelegationJSON / DelegationJTI / other
-// metadata untouched.
+// Atomic via a single Redis Lua script: check metadata exists, RPUSH on
+// the message list, LTRIM to enforce the FIFO 50-cap, HSET the
+// LastActiveAt field, then EXPIRE both keys. Cross-replica concurrent
+// appends + concurrent SetDelegation are safe — Redis serialises the
+// script and HSET only touches the named field, leaving DelegationJSON /
+// DelegationJTI / other metadata untouched.
 func (s *SessionStore) AppendMessage(ctx context.Context, id string, msg SessionMessage) error {
 	if s == nil || s.client == nil {
 		return errors.New("chat session: store not configured")
@@ -215,25 +235,17 @@ func (s *SessionStore) AppendMessage(ctx context.Context, id string, msg Session
 
 	metaKey := sessionKey(id)
 	msgsKey := messagesKey(id)
-
-	// Verify the session metadata exists before appending; otherwise an
-	// orphaned message list could outlive the metadata key.
-	if exists, err := s.client.Exists(ctx, metaKey).Result(); err != nil {
-		return fmt.Errorf("chat session: append exists check: %w", err)
-	} else if exists == 0 {
-		return fmt.Errorf("chat session: append: session %s not found", id)
-	}
-
 	now := time.Now().UTC()
-	pipe := s.client.Pipeline()
-	pipe.RPush(ctx, msgsKey, raw)
-	// LTRIM 0 49 = keep the LAST 50 entries (drop everything before -50).
-	pipe.LTrim(ctx, msgsKey, -int64(SessionMaxMessages), -1)
-	pipe.Expire(ctx, msgsKey, SessionTTL)
-	pipe.HSet(ctx, metaKey, sessionFieldLastActiveAt, strconv.FormatInt(now.UnixNano(), 10))
-	pipe.Expire(ctx, metaKey, SessionTTL)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("chat session: append pipeline: %w", err)
+	if err := appendMessageScript.Run(
+		ctx,
+		s.client,
+		[]string{metaKey, msgsKey},
+		string(raw),
+		int(SessionTTL.Seconds()),
+		SessionMaxMessages,
+		strconv.FormatInt(now.UnixNano(), 10),
+	).Err(); err != nil {
+		return fmt.Errorf("chat session: append script: %w", err)
 	}
 	return nil
 }

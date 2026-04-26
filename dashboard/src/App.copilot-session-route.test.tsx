@@ -54,7 +54,7 @@ describe("App routing — /copilot/sessions/:sessionId resolves to CopilotSessio
     renderApp(`/copilot/sessions/sess-xyz999`);
 
     await waitFor(() => {
-    expect(screen.queryByTestId("copilot-session-timeline")).not.toBeNull();
+      expect(screen.queryByTestId("copilot-session-timeline")).not.toBeNull();
     });
 
     expect(screen.queryByText(/page not found/i)).toBeNull();

@@ -169,7 +169,7 @@ func (s *server) collectCopilotSessionJobs(ctx context.Context, sessionID, tenan
 		return nil, nil, false, err
 	}
 	for _, record := range recent {
-		if record.ID == "" || record.Tenant != tenant {
+		if record.ID == "" {
 			continue
 		}
 		if _, ok := jobSet[record.ID]; ok {
@@ -177,6 +177,9 @@ func (s *server) collectCopilotSessionJobs(ctx context.Context, sessionID, tenan
 		}
 		meta, err := s.jobStore.GetAllMeta(ctx, record.ID)
 		if err != nil || len(meta) == 0 {
+			continue
+		}
+		if tenant != "" && meta["tenant"] != "" && meta["tenant"] != tenant {
 			continue
 		}
 		labels := parseCopilotLabels(meta["labels"])
@@ -215,44 +218,58 @@ func (s *server) collectCopilotSessionDecisions(ctx context.Context, tenant stri
 	if s.decisionLogStore == nil || len(jobIDs) == 0 {
 		return []copilotSessionDecisionView{}, false, nil
 	}
-	page, err := s.decisionLogStore.QueryDecisions(ctx, model.DecisionQuery{
-		Tenant: tenant,
-		Since:  1,
-		Until:  time.Now().UTC().Add(24 * time.Hour).UnixMilli(),
-		Limit:  copilotSessionAggregateLimit,
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	decisions := make([]copilotSessionDecisionView, 0, len(page.Items))
-	truncated := page.NextCursor != ""
-	for _, record := range page.Items {
-		if _, ok := jobIDs[record.JobID]; !ok {
-			continue
-		}
-		if len(decisions) == copilotSessionAggregateLimit {
-			truncated = true
-			break
-		}
-		verdict, err := record.Verdict.DecisionLogWireValue()
+	until := time.Now().UTC().Add(24 * time.Hour).UnixMilli()
+	decisions := make([]copilotSessionDecisionView, 0, min(len(jobIDs), copilotSessionAggregateLimit))
+	var cursor string
+	for {
+		page, err := s.decisionLogStore.QueryDecisions(ctx, model.DecisionQuery{
+			Tenant: tenant,
+			Since:  1,
+			Until:  until,
+			Limit:  copilotSessionAggregateLimit,
+			Cursor: cursor,
+		})
 		if err != nil {
 			return nil, false, err
 		}
-		decisions = append(decisions, copilotSessionDecisionView{
-			JobID:            record.JobID,
-			Topic:            record.Topic,
-			MatchedRule:      record.RuleID,
-			Verdict:          verdict,
-			Reason:           record.Reason,
-			Constraints:      record.Constraints,
-			ApprovalStatus:   record.ApprovalStatus,
-			ApprovalDecision: record.ApprovalDecision,
-			AgentID:          record.AgentID,
-			PolicyVersion:    record.PolicyVersion,
-			Timestamp:        governanceTimestamp(record.Timestamp),
-		})
+		for _, record := range page.Items {
+			if _, ok := jobIDs[record.JobID]; !ok {
+				continue
+			}
+			view, err := copilotDecisionViewFromRecord(record)
+			if err != nil {
+				return nil, false, err
+			}
+			decisions = append(decisions, view)
+			if len(decisions) > copilotSessionAggregateLimit {
+				return decisions[:copilotSessionAggregateLimit], true, nil
+			}
+		}
+		if page.NextCursor == "" {
+			return decisions, false, nil
+		}
+		cursor = page.NextCursor
 	}
-	return decisions, truncated, nil
+}
+
+func copilotDecisionViewFromRecord(record model.DecisionLogRecord) (copilotSessionDecisionView, error) {
+	verdict, err := record.Verdict.DecisionLogWireValue()
+	if err != nil {
+		return copilotSessionDecisionView{}, err
+	}
+	return copilotSessionDecisionView{
+		JobID:            record.JobID,
+		Topic:            record.Topic,
+		MatchedRule:      record.RuleID,
+		Verdict:          verdict,
+		Reason:           record.Reason,
+		Constraints:      record.Constraints,
+		ApprovalStatus:   record.ApprovalStatus,
+		ApprovalDecision: record.ApprovalDecision,
+		AgentID:          record.AgentID,
+		PolicyVersion:    record.PolicyVersion,
+		Timestamp:        governanceTimestamp(record.Timestamp),
+	}, nil
 }
 
 func orderedCopilotSessionJobIDs(sess *copilot.CopilotSession) []string {

@@ -25,8 +25,9 @@ func captureFlusher(t *testing.T, w http.ResponseWriter) http.Flusher {
 }
 
 // streamFrames writes each SSE event onto w with a Flush between
-// frames so the client sees boundaries immediately. The terminating
-// `data: [DONE]` is appended automatically.
+// frames so the client sees boundaries immediately. Callers must
+// include the terminating `data: [DONE]` frame in the slice if
+// required.
 func streamFrames(t *testing.T, w http.ResponseWriter, frames []string) {
 	t.Helper()
 	w.Header().Set("Content-Type", "text/event-stream")

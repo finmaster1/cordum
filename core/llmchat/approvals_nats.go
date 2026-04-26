@@ -2,7 +2,6 @@ package llmchat
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -70,9 +69,4 @@ func approvalEventFromPacket(packet *pb.BusPacket) (ApprovalEvent, bool) {
 		ev.Status = ApprovalStatusRejected
 	}
 	return ev, true
-}
-
-func approvalEventToAlertMessage(ev ApprovalEvent) string {
-	raw, _ := json.Marshal(ev)
-	return string(raw)
 }

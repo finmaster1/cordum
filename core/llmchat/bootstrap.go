@@ -251,14 +251,15 @@ func setsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	seen := make(map[string]struct{}, len(b))
+	counts := make(map[string]int, len(b))
 	for _, s := range b {
-		seen[s] = struct{}{}
+		counts[s]++
 	}
 	for _, s := range a {
-		if _, ok := seen[s]; !ok {
+		if counts[s] == 0 {
 			return false
 		}
+		counts[s]--
 	}
 	return true
 }

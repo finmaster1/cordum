@@ -149,6 +149,54 @@ func TestHandleGetCopilotSession_HappyPathAggregatesSessionJobsAndDecisions(t *t
 	}
 }
 
+func TestCollectCopilotSessionDecisionsPagesUntilSessionMatch(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	calls := 0
+	s.decisionLogStore = &stubDecisionLogStore{
+		queryFn: func(query model.DecisionQuery) (model.DecisionPage, error) {
+			calls++
+			switch query.Cursor {
+			case "":
+				return model.DecisionPage{
+					Items: []model.DecisionLogRecord{{
+						JobID:     "unrelated-job",
+						Tenant:    "tenant-a",
+						Verdict:   model.SafetyDeny,
+						Timestamp: time.Now().UTC().UnixMilli(),
+					}},
+					NextCursor: "cursor-2",
+				}, nil
+			case "cursor-2":
+				return model.DecisionPage{Items: []model.DecisionLogRecord{{
+					JobID:     "job-1",
+					Tenant:    "tenant-a",
+					Topic:     "job.deploy",
+					RuleID:    "rule-session",
+					Verdict:   model.SafetyAllow,
+					Timestamp: time.Now().UTC().UnixMilli(),
+				}}}, nil
+			default:
+				t.Fatalf("unexpected cursor %q", query.Cursor)
+				return model.DecisionPage{}, nil
+			}
+		},
+	}
+
+	decisions, truncated, err := s.collectCopilotSessionDecisions(context.Background(), "tenant-a", map[string]struct{}{"job-1": {}})
+	if err != nil {
+		t.Fatalf("collectCopilotSessionDecisions() error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("QueryDecisions calls = %d want 2", calls)
+	}
+	if truncated {
+		t.Fatalf("truncated=true want false; unrelated first page should not crowd out session match")
+	}
+	if len(decisions) != 1 || decisions[0].JobID != "job-1" || decisions[0].MatchedRule != "rule-session" {
+		t.Fatalf("decisions=%+v want job-1/rule-session", decisions)
+	}
+}
+
 func TestHandleGetCopilotSession_ErrorMapping(t *testing.T) {
 	tests := []struct {
 		name       string

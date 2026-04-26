@@ -40,11 +40,6 @@ type chatRunner interface {
 	Turn(ctx context.Context, in TurnInput) <-chan Frame
 }
 
-type chatAgent interface {
-	chatRunner
-	approvalResumeRunner
-}
-
 // chatSessionStore is the slice of SessionStore needed by HTTP transports and
 // the admin viewer.
 type chatSessionStore interface {
@@ -259,7 +254,7 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("llmchat: ws upgrade failed", "error", err, "session_id", session.ID)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	startedAt := time.Now()
 	turnCount := 0

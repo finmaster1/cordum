@@ -103,7 +103,7 @@ func main() {
 	// placeholders pass through unchanged (rail #1 — substituters
 	// WRAP, never REPLACE the prompt loader).
 	basePromptLoader := llmchat.NewFilePromptLoader("")
-	var promptLoader llmchat.PromptLoader = basePromptLoader
+	promptLoader := basePromptLoader
 	if envOrDefault(os.Getenv, "LLMCHAT_KNOWLEDGE_PACK_ENABLED", "true") == "true" {
 		kp := llmchat.NewKnowledgePackLoader(basePromptLoader)
 		kp.Register("api_summary", llmchat.NewOpenAPISubstituter(os.Getenv("LLMCHAT_OPENAPI_PATH")))

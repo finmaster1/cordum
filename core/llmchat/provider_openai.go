@@ -119,9 +119,9 @@ var retryDelays = []time.Duration{
 // channel that emits Chunks until the stream terminates. The channel
 // is closed after the final Chunk.
 //
-// 5xx and network errors trigger exponential-backoff retries (3
-// attempts total: 100ms/200ms/400ms gap). 4xx bubbles immediately —
-// retrying a 400 is never correct.
+// 5xx and network errors trigger exponential-backoff retries (4
+// attempts total: initial request + 100ms/200ms/400ms gaps). 4xx
+// bubbles immediately — retrying a 400 is never correct.
 func (p *OpenAIProvider) Complete(
 	ctx context.Context,
 	req CompleteRequest,
@@ -208,7 +208,7 @@ func (p *OpenAIProvider) buildRequestBody(req CompleteRequest, mode SamplingMode
 	return json.Marshal(payload)
 }
 
-// doWithRetry sends the POST with up to 3 attempts, retrying only on
+// doWithRetry sends the POST with up to 4 attempts, retrying only on
 // 5xx or transport errors. A 4xx surfaces immediately so malformed
 // payloads fail loud.
 func (p *OpenAIProvider) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {

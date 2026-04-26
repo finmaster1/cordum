@@ -23,7 +23,7 @@ func TestChatWSGeneratesSessionIDAndResumesExisting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial new ws: %v resp=%v", err, resp)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if resp.Header.Get(HeaderChatSessionID) == "" {
 		t.Fatalf("upgrade response missing %s", HeaderChatSessionID)
 	}
@@ -53,7 +53,7 @@ func TestChatWSGeneratesSessionIDAndResumesExisting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial resume ws after close: %v", err)
 	}
-	defer conn2.Close()
+	defer func() { _ = conn2.Close() }()
 	if err := conn2.WriteJSON(chatPostRequest{Message: "again"}); err != nil {
 		t.Fatalf("write resume: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestChatWSOversizeMessageClosesWithErrorFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	oversized := strings.Repeat("x", maxWSMessageBytes+1)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"message":"`+oversized+`"}`)); err != nil {
@@ -107,7 +107,7 @@ func TestApprovalResumeResolvedAndRejectedOverFakeBus(t *testing.T) {
 	sessions := newFakeChatSessionStore()
 	h := newTestChatHandlers(runner, sessions, true)
 	h.approvals = NewApprovalResumer(ApprovalResumerConfig{Bus: bus, Runner: runner})
-	defer h.approvals.Close()
+	defer func() { _ = h.approvals.Close() }()
 
 	server := httptest.NewServer(http.HandlerFunc(h.HandleChatWS))
 	defer server.Close()
@@ -115,7 +115,7 @@ func TestApprovalResumeResolvedAndRejectedOverFakeBus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := conn.WriteJSON(chatPostRequest{Message: "mutate"}); err != nil {
 		t.Fatalf("write: %v", err)
 	}

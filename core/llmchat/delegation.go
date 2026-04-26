@@ -66,12 +66,15 @@ type DelegationConfig struct {
 	// 15min (900s); the gateway clamps to its own max.
 	IssueTTL time.Duration
 	// RetryDelay is the initial 5xx retry backoff. Doubles each attempt
-	// up to 3 attempts. Tests inject 1ms; production uses 100ms.
+	// up to 3 attempts for idempotent methods. Tests inject 1ms;
+	// production uses 100ms.
 	RetryDelay time.Duration
-	// HTTPClient lets tests inject a transport. nil = http.DefaultClient
-	// with explicit per-request deadlines.
+	// HTTPClient lets tests inject a transport. nil = a default client
+	// with a bounded Timeout.
 	HTTPClient *http.Client
 }
+
+const defaultDelegationHTTPTimeout = 30 * time.Second
 
 // DelegationClient mints + revokes per-session delegation JWTs against
 // the cordum gateway. One client per cordum-llm-chat process; safe to
@@ -98,7 +101,7 @@ func NewDelegationClient(cfg DelegationConfig) *DelegationClient {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{}
+		httpClient = &http.Client{Timeout: defaultDelegationHTTPTimeout}
 	}
 	return &DelegationClient{
 		cfg:        cfg,
@@ -200,10 +203,9 @@ func (c *DelegationClient) ForSession(ctx context.Context, userPrincipal string,
 	return c.IssueForSession(ctx, userPrincipal)
 }
 
-// Revoke invalidates a delegation token by JTI. Best-effort: a 5xx is
-// retried twice but a final failure is logged + swallowed by the
-// caller (typically WS disconnect handler) since the token TTL will
-// eventually expire it anyway.
+// Revoke invalidates a delegation token by JTI. Best-effort: failures are
+// logged + swallowed by the caller (typically WS disconnect handler) since
+// the token TTL will eventually expire it anyway.
 func (c *DelegationClient) Revoke(ctx context.Context, jti, reason string) error {
 	body := map[string]any{
 		"jti":     jti,
@@ -224,14 +226,21 @@ func (c *DelegationClient) Revoke(ctx context.Context, jti, reason string) error
 	return nil
 }
 
-// doWithRetry implements 3-attempt 5xx exponential-backoff retry with
-// 4xx surfacing immediately. The userPrincipal arg, when non-empty, is
-// forwarded as `X-Cordum-User-Principal` so the gateway audit records
-// it.
+// doWithRetry implements 3-attempt 5xx exponential-backoff retry for
+// idempotent methods with 4xx surfacing immediately. POST is a single
+// attempt because /delegate is a non-idempotent write: if the server
+// minted a token but the response was lost, retrying could leave an
+// extra live child token until TTL expiry. The userPrincipal arg, when
+// non-empty, is forwarded as `X-Cordum-User-Principal` so the gateway
+// audit records it.
 func (c *DelegationClient) doWithRetry(ctx context.Context, method, url string, body []byte, userPrincipal string) (*http.Response, error) {
 	delay := c.cfg.RetryDelay
 	var lastErr error
-	for attempt := range 3 {
+	maxAttempts := 3
+	if method == http.MethodPost {
+		maxAttempts = 1
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():

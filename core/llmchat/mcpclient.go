@@ -100,8 +100,8 @@ type MCPClientConfig struct {
 	// did not provide a context with its own deadline.
 	PostTimeout time.Duration
 
-	// HTTPClient lets tests inject a transport. nil = http.DefaultClient
-	// with no Timeout (per-call ctx drives cancellation).
+	// HTTPClient lets tests inject a transport. nil = a default client
+	// with a bounded Timeout (per-call ctx still drives cancellation).
 	HTTPClient *http.Client
 }
 
@@ -163,7 +163,7 @@ func NewMCPClient(cfg MCPClientConfig) (*MCPClient, error) {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{} // ctx drives cancellation
+		httpClient = &http.Client{Timeout: cfg.PostTimeout}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -304,7 +304,8 @@ func (c *MCPClient) post(
 	params json.RawMessage,
 	bearerToken string,
 ) (*mcp.JSONRPCMessage, error) {
-	if err := c.waitForSession(ctx); err != nil {
+	sessionID, err := c.waitForSession(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if c.cfg.PostTimeout > 0 {
@@ -332,10 +333,13 @@ func (c *MCPClient) post(
 	if err != nil {
 		return nil, fmt.Errorf("llmchat/mcpclient: build request: %w", err)
 	}
+	if c.ctx.Err() != nil {
+		return nil, ErrClosed
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	c.applyAuthHeaders(req, bearerToken)
-	c.applyContextHeaders(req)
+	c.applyContextHeaders(req, sessionID)
 
 	httpResp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -385,10 +389,7 @@ func (c *MCPClient) applyAuthHeaders(req *http.Request, bearerToken string) {
 
 // applyContextHeaders attaches MCP session + tenant + agent metadata so
 // the gateway resolves identity + tenant at the auth middleware layer.
-func (c *MCPClient) applyContextHeaders(req *http.Request) {
-	c.mu.Lock()
-	sessionID := c.sessionID
-	c.mu.Unlock()
+func (c *MCPClient) applyContextHeaders(req *http.Request, sessionID string) {
 	if sessionID != "" {
 		req.Header.Set("X-MCP-Session-ID", sessionID)
 	}
@@ -402,21 +403,27 @@ func (c *MCPClient) applyContextHeaders(req *http.Request) {
 
 // waitForSession blocks until the SSE bootstrap has captured a session ID
 // or ctx is cancelled / the client closed.
-func (c *MCPClient) waitForSession(ctx context.Context) error {
-	c.mu.Lock()
-	ready := c.sessionReady
-	have := c.sessionID != ""
-	c.mu.Unlock()
-	if have {
-		return nil
-	}
-	select {
-	case <-ready:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-c.ctx.Done():
-		return ErrClosed
+func (c *MCPClient) waitForSession(ctx context.Context) (string, error) {
+	for {
+		c.mu.Lock()
+		ready := c.sessionReady
+		sessionID := c.sessionID
+		c.mu.Unlock()
+		if sessionID != "" {
+			return sessionID, nil
+		}
+		select {
+		case <-ready:
+			// The SSE loop may invalidate the session immediately after
+			// waking waiters. Re-read under the mutex so POSTs bind to a
+			// concrete session ID instead of racing into an empty/stale
+			// X-MCP-Session-ID header.
+			continue
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-c.ctx.Done():
+			return "", ErrClosed
+		}
 	}
 }
 
@@ -437,6 +444,9 @@ func (c *MCPClient) sseReadLoop() {
 		err := c.runSSE()
 		if c.ctx.Err() != nil {
 			return
+		}
+		if err == nil {
+			backoff = c.cfg.ReconnectInitial
 		}
 		if err != nil {
 			slog.Warn("llmchat/mcpclient: SSE disconnected", "error", err, "backoff", backoff)
