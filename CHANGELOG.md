@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### LLM Chat Assistant — Phase 6 (Gmail-style dashboard widget)
+- **Floating chat widget** (`dashboard/src/components/chat-assistant/`) — `ChatWidget`, `ChatStream`, `ToolCallCard`, `ApprovalInlinePrompt`, `ChatComposer`, and `ChatHeaderButton`. The panel mounts once in `AppShell` outside `<Routes>` so it survives navigation between pages exactly like Gmail's chat pane. Animations respect `prefers-reduced-motion`; the panel is `role="complementary"` (not `dialog` — it is persistent, not modal) and Esc-to-close is wired but suppressed when typing in the composer.
+- **Header button visibility gate** — the icon in the top bar renders only when (a) the `llmChatAssistant` feature flag is on, (b) the `LicenseEntitlements.features.llm_chat_assistant` flag is true, and (c) `/api/v1/chat/healthz` is returning 200. Any failure hides the button entirely (no greyed-out state) per the epic rail "users never see a broken chat UI".
+- **Availability hook** (`hooks/useChatAssistantAvailability.ts`) — polls `/chat/healthz` every 10s, never fires on Community-tier deployments to avoid noisy 401s. Returns a tagged union `{available, reason}` with `unentitled` / `unauthorized` / `vllm_down` / `redis_down` / `unknown` reasons.
+- **Session hook** (`hooks/useChatAssistantSession.ts`) — manages a single WebSocket to `/api/v1/chat/ws` using the existing `cordum-api-key.<base64>` subprotocol auth. Exponential backoff 1s/2s/4s/8s capped, 5-failure cap before surfacing `status='closed'`.
+- **Session-scoped store** (`state/chatAssistant.ts`) — new zustand store distinct from the existing run-keyed `state/chat.ts`. Persists panel-open state and session id via `sessionStorage` (NOT `localStorage` — chat state is principal-bound and must not survive sign-outs); messages stay in memory only.
+- **Admin sessions index** (`pages/settings/ChatAssistantSessionsPage.tsx`) — admin-only page at `/settings/chat-sessions` listing all chat sessions with cursor pagination; rows link to the existing `/copilot/sessions/:sessionId` detail page rather than duplicating transcript rendering.
+- **Default MSW handlers** for `/chat/healthz`, `/chat/sessions`, and `/chat/sessions/:id` so any test that mounts `<AppShell />` runs cleanly without per-test setup.
+- **Feature flag** `VITE_LLM_CHAT_ASSISTANT` — default `false`. Operators flip it explicitly per environment so the widget can dark-launch independent of the license entitlement state.
+
 #### LLM Chat Assistant — Phase 5 (HTTP transports + admin session viewer)
 - **Chat HTTP surface** (`core/llmchat`) — added `POST /api/v1/chat`, SSE fallback `GET /api/v1/chat/stream`, and WebSocket `GET /api/v1/chat/ws`, all gated by the `llm_chat_assistant` entitlement with stable `feature_unavailable` errors when disabled.
 - **WebSocket frame contract** — pinned seven frame types (`user`, `assistant_delta`, `tool_call`, `tool_result`, `approval_required`, `final`, `error`) with optional `session_id`; tool-result frames get a defense-in-depth redaction pass before leaving the service.

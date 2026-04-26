@@ -71,9 +71,6 @@ export interface ChatAssistantSessionApi {
 export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionApi {
   const apiKey = useConfigStore((s) => s.apiKey);
   const apiBaseUrl = useConfigStore((s) => s.apiBaseUrl);
-  const sessionId = useChatAssistantStore((s) => s.sessionId);
-  const setSession = useChatAssistantStore((s) => s.setSession);
-  const applyFrame = useChatAssistantStore((s) => s.applyFrame);
 
   const [status, setStatus] = useState<ChatConnectionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -109,10 +106,14 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
 
     setStatus(failureCountRef.current === 0 ? "connecting" : "reconnecting");
 
-    let assignedId = sessionId;
+    // Read session id imperatively so this closure stays stable across the
+    // mint-on-first-connect → setSession path that would otherwise cause a
+    // reconnect loop via the surrounding useEffect.
+    const store = useChatAssistantStore.getState();
+    let assignedId = store.sessionId;
     if (!assignedId) {
       assignedId = generateUUID();
-      setSession(assignedId);
+      store.setSession(assignedId);
     }
 
     const url = deriveWsUrl(assignedId);
@@ -144,7 +145,7 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
     ws.onmessage = (ev) => {
       const frame = safeParseFrame(typeof ev.data === "string" ? ev.data : "");
       if (!frame) return;
-      applyFrame(frame);
+      useChatAssistantStore.getState().applyFrame(frame);
     };
 
     ws.onerror = () => {
@@ -175,7 +176,7 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
         connectRef.current?.();
       }, delay);
     };
-  }, [apiKey, enabled, sessionId, applyFrame, setSession]);
+  }, [apiKey, enabled]);
 
   // Allow ws.onclose to call back into the latest connect() without
   // re-binding listeners on every render.
@@ -198,33 +199,30 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
     // apiBaseUrl change requires a fresh URL derivation; track it explicitly.
   }, [enabled, apiKey, apiBaseUrl, connect, closeSocket]);
 
-  const send = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        setError("not connected");
-        return;
-      }
-      const frame = {
-        type: "user",
-        id: generateUUID(),
-        text: trimmed,
-        at: new Date().toISOString(),
-      };
-      try {
-        ws.send(JSON.stringify(frame));
-        applyFrame(frame as ChatFrame);
-      } catch (err) {
-        logger.warn("chat-session", "send failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-        setError("send failed");
-      }
-    },
-    [applyFrame],
-  );
+  const send = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setError("not connected");
+      return;
+    }
+    const frame = {
+      type: "user",
+      id: generateUUID(),
+      text: trimmed,
+      at: new Date().toISOString(),
+    };
+    try {
+      ws.send(JSON.stringify(frame));
+      useChatAssistantStore.getState().applyFrame(frame as ChatFrame);
+    } catch (err) {
+      logger.warn("chat-session", "send failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      setError("send failed");
+    }
+  }, []);
 
   const disconnect = useCallback(() => {
     cancelledRef.current = true;
