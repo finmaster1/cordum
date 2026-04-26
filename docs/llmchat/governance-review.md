@@ -91,10 +91,10 @@ Each probe section follows this template:
 3. Capture: `after=$(curl -sk "$BASE/api/v1/audit/query?type=mcp.tool_invocation&limit=1" | jq '.total')`.
 4. Assert `after - before == 100`.
 
-**Actual:** _tbd_
-**Verdict:** _tbd_
-**Evidence:** _tbd_
-**P0/P1 task filed:** _tbd_
+**Actual (worker-e2a9, 2026-04-26T17:25Z):** BLOCKED hard by F8 — neither `/api/v1/audit/query` nor `/api/v1/audit/events` exist in the gateway (gateway.go:1192-1207 only registers /audit/export*, /audit/verify, /audit/legal-hold*). Cannot count `mcp.tool_invocation` events via the documented HTTP path. Workaround paths: (a) audit-export to a webhook/syslog/Datadog backend then grep externally (production-realistic but requires backend setup), (b) implement the gateway handler (architectural fix), (c) query Redis audit store directly (out-of-band, brittle).
+**Verdict:** BLOCKED on F8 (P0).
+**Evidence:** Live confirmation: `curl https://localhost:8081/api/v1/audit/query?type=mcp.tool_invocation → 404`.
+**P0/P1 task filed:** F8 → step-8 P0.
 
 ---
 
@@ -107,10 +107,16 @@ Each probe section follows this template:
 3. After completion, `curl -sk "$BASE/api/v1/audit/verify?tenant=default" | jq '.status, .valid'`.
 4. Capture `time` of 3 successive verify calls; record p99.
 
-**Actual:** _tbd_
-**Verdict:** _tbd_
-**Evidence:** _tbd_
-**P0/P1 task filed:** _tbd_
+**Actual (worker-e2a9, 2026-04-26T17:25Z):** PARTIAL PASS.
+- Chain integrity: `status=ok, total_events=10000, verified_events=10000, gaps=[], retention_window_hours=168, first_seq=1, last_seq=10000`. Hash chain is intact across 10000 events.
+- Baseline serial latency (5 calls): 199, 206, 215, 222, 241 ms — p99 ≈ 241ms.
+- 20 concurrent calls: p50=1660ms, p95=2325ms, p99=2354ms (overall wall-clock 2690ms for 20 parallel).
+- DoD #3 budget says "≤ p99 10ms regression" under chat load. The verify operation re-hashes 10K events on each call — absolute latency is 199-2354ms range; the 10ms regression budget is unmeasurable here without (a) chat-induced load (blocked by F8 — cannot drive chat-MCP calls and count audit emission), AND (b) a proper baseline-vs-load comparison harness. The verify endpoint's poor concurrency scaling (10× from baseline at 20 parallel) is itself a finding worth filing — verify is not designed for hot-path / load-test usage.
+- Chat-driven load probe component (probe 3 backbone) BLOCKED by F8.
+
+**Verdict:** PARTIAL PASS (chain integrity verified ok); regression-budget portion BLOCKED by F8.
+**Evidence:** Live curl outputs in step-5 worker note. Verify endpoint's concurrency scaling characterized.
+**P0/P1 task filed:** F8 (P0); also recommend P1 follow-up "audit-verify endpoint concurrency scaling — investigate whether re-hashing 10K events per call is the intended hot-path design".
 
 ---
 
@@ -218,10 +224,14 @@ Each probe section follows this template:
 3. Wait for completion; verify all tool calls accounted for in audit (completed + aborted = total).
 4. Run `/api/v1/audit/verify` → expect status=ok.
 
-**Actual:** _tbd_
-**Verdict:** _tbd_
-**Evidence:** _tbd_
-**P0/P1 task filed:** _tbd_
+**Actual (worker-e2a9, 2026-04-26T17:25Z):** DEFERRED.
+- The "completed vs aborted = total" accounting requires per-call audit visibility, which is blocked by F8 (cannot list `mcp.tool_invocation` events by type/since).
+- Restarting `cordum-scheduler-1` in the SHARED dev stack would disrupt other workers concurrently working on this stack (multiple parallel agents per the chat log). Cannot run the destructive part of this probe without a dedicated stack.
+- Static prerequisite: chain integrity is verified intact (10000/10000 verified, no gaps) — see Probe 4 evidence.
+
+**Verdict:** DEFERRED on F8 + shared-stack risk.
+**Evidence:** N/A — would re-use Probe 4 verify output post-restart.
+**P0/P1 task filed:** F8 (P0); also recommend dedicated test stack for destructive probes.
 
 ---
 
