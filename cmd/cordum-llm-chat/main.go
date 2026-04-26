@@ -95,6 +95,28 @@ func main() {
 	sessionStore := llmchat.NewSessionStoreFromClient(redisClient)
 	_ = sessionStore // consumed by phase-5 WS handler
 
+	// Wire the knowledge-pack substituters around the file-backed
+	// prompt loader. When LLMCHAT_KNOWLEDGE_PACK_ENABLED=false the
+	// placeholders pass through unchanged (rail #1 — substituters
+	// WRAP, never REPLACE the prompt loader).
+	basePromptLoader := llmchat.NewFilePromptLoader("")
+	var promptLoader llmchat.PromptLoader = basePromptLoader
+	if envOrDefault(os.Getenv, "LLMCHAT_KNOWLEDGE_PACK_ENABLED", "true") == "true" {
+		kp := llmchat.NewKnowledgePackLoader(basePromptLoader)
+		kp.Register("api_summary", llmchat.NewOpenAPISubstituter(os.Getenv("LLMCHAT_OPENAPI_PATH")))
+		kp.Register("cordum_io_summary", llmchat.NewCordumIOSubstituter(os.Getenv("LLMCHAT_CORDUM_IO_PATH")))
+		llmchat.ListenSIGHUP(kp) // build-tagged stub on Windows
+		// Precompute on boot so the per-turn LLM call sees a hot
+		// cache (rail #5).
+		warmCtx, warmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if _, err := kp.Load(warmCtx); err != nil {
+			slog.Warn("cordum-llm-chat: knowledge_pack_warm_failed", "error", err)
+		}
+		warmCancel()
+		promptLoader = kp
+	}
+	_ = promptLoader // consumed by phase-5 WS handler via Agent
+
 	mcpClient, err := llmchat.NewMCPClient(llmchat.MCPClientConfig{
 		BaseURL:       cfg.GatewayURL,
 		APIKey:        cfg.CordumAPIKey,
