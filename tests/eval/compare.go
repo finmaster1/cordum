@@ -18,10 +18,17 @@ const DefaultDeltaThreshold = 0.05
 // markdown-formatted report suitable for pasting into a PR comment.
 // `severeFailures` counts cases that regressed beyond the threshold —
 // callers can use it as the exit code for CI gating.
+//
+// When the baseline carries Provenance == ProvenancePlaceholder, the
+// diff is reported as informational only (severeFailures is forced to
+// 0). The placeholder represents the v1 schema-only baseline shipped
+// before any GPU-backed capture; the first real run is expected to
+// replace it, not match it.
 func CompareSummaries(baseline, current *EvalSummary, threshold float64) (report string, severeFailures int) {
 	if threshold <= 0 {
 		threshold = DefaultDeltaThreshold
 	}
+	placeholderMode := baseline != nil && baseline.Provenance == ProvenancePlaceholder
 
 	baseByName := indexCases(baseline)
 	curByName := indexCases(current)
@@ -29,6 +36,10 @@ func CompareSummaries(baseline, current *EvalSummary, threshold float64) (report
 	var b strings.Builder
 	fmt.Fprintf(&b, "# llm-chat eval — %s vs baseline %s\n\n",
 		safeModel(current), safeModel(baseline))
+	if placeholderMode {
+		fmt.Fprintln(&b, "> **Placeholder baseline.** This file ships as the v1 schema reference; it has no real GPU-backed capture behind it. The diff below is informational. Per `docs/llmchat/model-version-bump.md` step 4, copy this run's `summary.json` over the baseline (with `provenance: \"captured\"`) to anchor the next gate.")
+		fmt.Fprintln(&b)
+	}
 	fmt.Fprintf(&b, "- Threshold: %.0f%% per-case score delta\n", threshold*100)
 	fmt.Fprintf(&b, "- Baseline: %d/%d cases passed (%.1f%%)\n",
 		baseline.PassedCases, baseline.TotalCases, percent(baseline.PassedCases, baseline.TotalCases))
@@ -64,7 +75,9 @@ func CompareSummaries(baseline, current *EvalSummary, threshold float64) (report
 			case delta < -threshold:
 				regressed = append(regressed, fmt.Sprintf("%s (%.2f → %.2f, Δ%.0f%%)",
 					name, baseScore, curScore, delta*100))
-				severeFailures++
+				if !placeholderMode {
+					severeFailures++
+				}
 			case delta > threshold:
 				improved = append(improved, fmt.Sprintf("%s (%.2f → %.2f, Δ+%.0f%%)",
 					name, baseScore, curScore, delta*100))
@@ -73,7 +86,11 @@ func CompareSummaries(baseline, current *EvalSummary, threshold float64) (report
 	}
 
 	if len(regressed) > 0 {
-		fmt.Fprintf(&b, "## ❌ Regressions (>%.0f%% degradation)\n\n", threshold*100)
+		header := fmt.Sprintf("## ❌ Regressions (>%.0f%% degradation)", threshold*100)
+		if placeholderMode {
+			header = fmt.Sprintf("## ℹ️ Score deltas vs placeholder (>%.0f%%)", threshold*100)
+		}
+		fmt.Fprintf(&b, "%s\n\n", header)
 		for _, r := range regressed {
 			fmt.Fprintf(&b, "- %s\n", r)
 		}

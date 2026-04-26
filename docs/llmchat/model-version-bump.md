@@ -83,6 +83,14 @@ has a documented waiver), regenerate the baseline:
 ```bash
 cp tests/eval/results/<run_id>/summary.json \
    tests/eval/baseline/<new_model_name>.json
+
+# Tag this baseline as a real capture so the comparator gates against
+# it on the next bump (see "First real capture", below).
+jq '.provenance = "captured"' \
+   tests/eval/baseline/<new_model_name>.json \
+   > tests/eval/baseline/<new_model_name>.json.tmp \
+&& mv tests/eval/baseline/<new_model_name>.json.tmp \
+      tests/eval/baseline/<new_model_name>.json
 ```
 
 Then bump the model pin in the SAME PR:
@@ -98,6 +106,34 @@ Then bump the model pin in the SAME PR:
 > existing baseline file to make a failing bump pass. A baseline is a
 > snapshot of *that model's* behavior; updating it for a different
 > model is the same as deleting the gate.
+
+#### First real capture (placeholder → captured)
+
+The v1 baseline (`tests/eval/baseline/qwen3_coder_30b_fp8.json`) ships
+with `"provenance": "placeholder"` because no GPU host was available
+at v1 cut-time to record real scores. The comparator detects this
+marker and downgrades the diff to **informational only** — every
+delta is reported but `severeFailures` stays at zero, so the first
+real capture against the pinned model is not mistaken for a
+regression.
+
+When you produce the first real capture (typically as part of a v2
+GPU-budget rollout, but possibly any time staging vLLM access becomes
+available before that), follow step 4 above and additionally set
+`"provenance": "captured"` (the `jq` snippet handles this). From that
+point on, any per-case >5% regression in a future bump fails CI as
+designed.
+
+You can regenerate the placeholder shape at any time (e.g. after
+adding new cases) via:
+
+```bash
+go run tests/eval/cmd/genplaceholderbaseline/main.go \
+  > tests/eval/baseline/qwen3_coder_30b_fp8.json
+```
+
+The generator only ships a placeholder; replacing it with a real
+capture is always a deliberate human action.
 
 ### 5. Merge → deploy → monitor
 

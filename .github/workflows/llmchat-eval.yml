@@ -142,12 +142,48 @@ jobs:
           path: ${{ steps.results.outputs.dir }}/
           retention-days: 30
 
-      - name: Post diff to PR
-        if: inputs.pr_number != '' && steps.results.outputs.dir != ''
+      - name: Prepare PR comment body
+        id: prepare_body
+        if: always() && inputs.pr_number != '' && steps.results.outputs.dir != ''
+        run: |
+          dir="${{ steps.results.outputs.dir }}"
+          body="${dir}/pr-comment.md"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -f "${dir}/diff.md" ]; then
+            cp "${dir}/diff.md" "${body}"
+            printf '\n---\n\n[Run details](%s)\n' "${run_url}" >> "${body}"
+          elif [ -f "${dir}/summary.json" ]; then
+            passed=$(jq -r '.passed_cases' "${dir}/summary.json")
+            total=$(jq -r '.total_cases' "${dir}/summary.json")
+            model=$(jq -r '.model_name' "${dir}/summary.json")
+            {
+              echo "# llm-chat eval — ${model}"
+              echo
+              echo "Passed: ${passed}/${total} cases"
+              echo
+              echo "_No baseline diff produced for this run — either \`EVAL_BASELINE\` was unset, or the named baseline file was missing. Use this run's \`summary.json\` as the next captured baseline per docs/llmchat/model-version-bump.md step 4._"
+              echo
+              echo "---"
+              echo
+              echo "[Run details](${run_url})"
+            } > "${body}"
+          else
+            {
+              echo "# llm-chat eval — failed before producing a summary"
+              echo
+              echo "The harness did not write \`summary.json\` for this run. See the workflow logs for the failure."
+              echo
+              echo "[Run details](${run_url})"
+            } > "${body}"
+          fi
+          echo "body=${body}" >> "$GITHUB_OUTPUT"
+
+      - name: Post comment to PR
+        if: always() && inputs.pr_number != '' && steps.prepare_body.outputs.body != ''
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ inputs.pr_number }}
-          body-path: ${{ steps.results.outputs.dir }}/diff.md
+          body-path: ${{ steps.prepare_body.outputs.body }}
           edit-mode: replace
 
       - name: Capture compose logs on failure

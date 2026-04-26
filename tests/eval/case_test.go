@@ -230,6 +230,50 @@ func TestCompareSummaries_RegressionAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestCompareSummaries_PlaceholderBaselineNeverSevere(t *testing.T) {
+	t.Parallel()
+	base := &EvalSummary{
+		Provenance: ProvenancePlaceholder,
+		Cases: []CaseResult{
+			{Name: "a", ToolCallAccuracy: 1, ArgValidity: 1, SummaryContainsHits: 1, SummaryContainsExpected: 1},
+		},
+	}
+	cur := &EvalSummary{
+		Cases: []CaseResult{
+			{Name: "a", ToolCallAccuracy: 0.1, ArgValidity: 0.1, SummaryContainsHits: 0, SummaryContainsExpected: 1},
+		},
+	}
+	report, severe := CompareSummaries(base, cur, 0.05)
+	if severe != 0 {
+		t.Errorf("placeholder baseline must not produce severeFailures; got %d", severe)
+	}
+	if !strings.Contains(report, "Placeholder baseline") {
+		t.Errorf("report should declare placeholder mode: %s", report)
+	}
+	if !strings.Contains(report, "Score deltas vs placeholder") {
+		t.Errorf("report should re-label regression header in placeholder mode: %s", report)
+	}
+}
+
+func TestCompareSummaries_CapturedBaselineStillSevere(t *testing.T) {
+	t.Parallel()
+	base := &EvalSummary{
+		Provenance: ProvenanceCaptured,
+		Cases: []CaseResult{
+			{Name: "a", ToolCallAccuracy: 1, ArgValidity: 1, SummaryContainsHits: 1, SummaryContainsExpected: 1},
+		},
+	}
+	cur := &EvalSummary{
+		Cases: []CaseResult{
+			{Name: "a", ToolCallAccuracy: 0.1, ArgValidity: 0.1, SummaryContainsHits: 0, SummaryContainsExpected: 1},
+		},
+	}
+	_, severe := CompareSummaries(base, cur, 0.05)
+	if severe != 1 {
+		t.Errorf("captured baseline must still flag regressions; got severe=%d", severe)
+	}
+}
+
 func TestCompareSummaries_ImprovementAboveThreshold(t *testing.T) {
 	t.Parallel()
 	base := &EvalSummary{

@@ -212,7 +212,14 @@ type CaseResult struct {
 // EvalSummary aggregates per-case results into one report. Used by
 // compare.go to diff two runs and by the GitHub workflow to post a PR
 // comment.
+//
+// Provenance is "placeholder" for the structurally-valid v1 file
+// committed before any GPU-backed capture, and "captured" once a real
+// harness run has overwritten it. Comparator treats placeholders as
+// informational (no severeFailures emitted) so the first real capture
+// against a freshly pinned model is not mistaken for a regression.
 type EvalSummary struct {
+	Provenance     string             `json:"provenance,omitempty"`
 	RunID          string             `json:"run_id"`
 	ModelName      string             `json:"model_name"`
 	VLLMURL        string             `json:"vllm_url"`
@@ -223,6 +230,16 @@ type EvalSummary struct {
 	CategoryScores map[string]float64 `json:"category_scores"`
 	Cases          []CaseResult       `json:"cases"`
 }
+
+const (
+	// ProvenancePlaceholder marks a baseline file shipped without an
+	// actual harness run (v1 ships with this; replaced at first real
+	// capture per docs/llmchat/model-version-bump.md step 4).
+	ProvenancePlaceholder = "placeholder"
+	// ProvenanceCaptured marks a baseline produced by a real harness
+	// run against a live vLLM.
+	ProvenanceCaptured = "captured"
+)
 
 // LoadAllCases walks the cases directory recursively and parses every
 // *.yaml file into a Case. Default-tag (no build constraint) so the

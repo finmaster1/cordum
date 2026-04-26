@@ -40,6 +40,58 @@ func TestCasesParseable(t *testing.T) {
 	}
 }
 
+// TestPlaceholderBaselineMatchesCorpus loads the committed v1 baseline
+// JSON and asserts (a) it parses, (b) provenance is "placeholder",
+// (c) it covers exactly the same set of case names as the on-disk
+// corpus. Regenerate via `go run
+// tests/eval/cmd/genplaceholderbaseline/main.go > tests/eval/baseline/qwen3_coder_30b_fp8.json`
+// when the corpus changes.
+func TestPlaceholderBaselineMatchesCorpus(t *testing.T) {
+	t.Parallel()
+	baseline, err := LoadSummary("baseline/qwen3_coder_30b_fp8.json")
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if baseline == nil {
+		t.Fatal("baseline file missing — regenerate via cmd/genplaceholderbaseline")
+	}
+	if baseline.Provenance != ProvenancePlaceholder {
+		t.Errorf("baseline.Provenance = %q, want %q", baseline.Provenance, ProvenancePlaceholder)
+	}
+
+	cases, err := LoadAllCases("cases")
+	if err != nil {
+		t.Fatalf("LoadAllCases: %v", err)
+	}
+	corpus := map[string]string{}
+	for _, c := range cases {
+		corpus[c.Name] = c.Category
+	}
+	if got, want := len(baseline.Cases), len(corpus); got != want {
+		t.Errorf("baseline cases=%d, corpus cases=%d — regenerate baseline", got, want)
+	}
+	for _, br := range baseline.Cases {
+		if cat, ok := corpus[br.Name]; !ok {
+			t.Errorf("baseline references case %q that is not in corpus", br.Name)
+		} else if br.Category != cat {
+			t.Errorf("baseline case %q has category=%q, corpus has %q",
+				br.Name, br.Category, cat)
+		}
+	}
+	for name := range corpus {
+		found := false
+		for _, br := range baseline.Cases {
+			if br.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("corpus case %q missing from baseline — regenerate baseline", name)
+		}
+	}
+}
+
 // TestCasesUniqueNames asserts no two cases share a name. The harness
 // assumes Case.Name is the unique identifier when writing per-case
 // JSON results.
