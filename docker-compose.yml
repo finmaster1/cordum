@@ -527,6 +527,128 @@ services:
       retries: 3
       start_period: 5s
 
+  # vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8 for the local LLM chat
+  # assistant. Brought up only with `--profile llmchat` so the default
+  # stack stays lean for users without a GPU. See docs/llmchat/helm.md
+  # for hardware-tier guidance and the qwen3_xml-vs-qwen3_coder parser
+  # rationale (the wrong parser emits `!!!!!!!!` infinite streams on
+  # long tool-heavy conversations — model-card upstream is outdated).
+  qwen-inference:
+    profiles: [llmchat]
+    image: vllm/vllm-openai:latest
+    restart: unless-stopped
+    command:
+      - --model
+      - Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+      - --served-model-name
+      - qwen3-coder
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_xml
+      - --max-model-len
+      - "131072"
+      - --kv-cache-dtype
+      - fp8
+      - --enable-prefix-caching
+      - --gpu-memory-utilization
+      - "0.9"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      # Loopback ONLY. llm-chat is the sole legitimate client; binding
+      # to 0.0.0.0 here would expose the inference endpoint externally
+      # and is a P0 (see security review task-6cda949c).
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - qwen_hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8000/v1/models || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # FP8 weights are ~30GB; first load takes 3-5min on NVMe + CUDA
+      # warmup. start_period MUST cover the cold path or the stack will
+      # mark the service unhealthy before vLLM finishes loading.
+      start_period: 300s
+
+  # Cordum LLM Chat Assistant — connects to the local vLLM via OpenAI
+  # API; talks to the rest of Cordum over the existing MCP server (for
+  # mutations) and REST API (for reads). Profile-gated alongside
+  # qwen-inference; both up together via `--profile llmchat`.
+  llm-chat:
+    profiles: [llmchat]
+    image: ghcr.io/cordum-io/cordum/llm-chat:${CORDUM_VERSION:-latest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: cordum-llm-chat
+    depends_on:
+      # service_started (NOT service_healthy) — vLLM cold-load can take
+      # 5+ minutes; healthy-gating the chat service would block the
+      # whole stack. llm-chat /readyz probes vLLM and reports not-ready
+      # until /v1/models returns 200; the dashboard chat button hides
+      # accordingly.
+      qwen-inference:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      - CORDUM_API_KEY=${CORDUM_API_KEY:?CORDUM_API_KEY_not_set}
+      - REDIS_URL=rediss://:${REDIS_PASSWORD:?REDIS_PASSWORD_not_set}@redis:6379
+      - REDIS_TLS_CA=/etc/cordum/tls/ca/ca.crt
+      - REDIS_TLS_CERT=/etc/cordum/tls/client/tls.crt
+      - REDIS_TLS_KEY=/etc/cordum/tls/client/tls.key
+      - REDIS_TLS_SERVER_NAME=redis
+      - NATS_URL=tls://nats:4222
+      - NATS_TLS_CA=/etc/cordum/tls/ca/ca.crt
+      - NATS_TLS_CERT=/etc/cordum/tls/client/tls.crt
+      - NATS_TLS_KEY=/etc/cordum/tls/client/tls.key
+      - NATS_TLS_SERVER_NAME=nats
+      - LLMCHAT_BASE_URL=http://qwen-inference:8000/v1
+      - LLMCHAT_MODEL=qwen3-coder
+      - LLMCHAT_PROVIDER=openai
+      - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
+      - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
+      - LLMCHAT_SUMMARY_TEMPERATURE=${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}
+      - LLMCHAT_SUMMARY_TOP_P=${LLMCHAT_SUMMARY_TOP_P:-0.8}
+    volumes:
+      - ./certs:/etc/cordum/tls:ro
+    ports:
+      - "8090:8090"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
 volumes:
   nats_data:
   redis_data:
+  # Persisted across restarts — re-pulling 30GB FP8 weights on every
+  # `docker compose up` is unacceptable.
+  qwen_hf_cache:

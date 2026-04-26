@@ -1,0 +1,147 @@
+{{- if .Values.qwenInference.enabled }}
+{{- if .Values.qwenInference.hfCache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cordum.fullname" . }}-qwen-hf-cache
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qwen-inference
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.qwenInference.hfCache.size | quote }}
+  {{- if .Values.qwenInference.hfCache.storageClass }}
+  storageClassName: {{ .Values.qwenInference.hfCache.storageClass | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cordum.fullname" . }}-qwen-inference
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qwen-inference
+spec:
+  replicas: {{ .Values.qwenInference.replicas }}
+  # Recreate not RollingUpdate — only one pod can hold the GPU at a
+  # time on a single-GPU node, and FP8 weight load is 5+ minutes; a
+  # rolling overlap would deadlock.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cordum.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: qwen-inference
+  template:
+    metadata:
+      labels:
+        {{- include "cordum.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: qwen-inference
+    spec:
+      {{- with .Values.qwenInference.gpu.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.qwenInference.gpu.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: qwen-inference
+          image: {{ .Values.qwenInference.image | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          # vLLM command — the EXACT 10 flags. DO NOT swap qwen3_xml for
+          # qwen3_coder (infinite-!!!! stream bug on long tool-heavy
+          # conversations) or for hermes (different parser family).
+          # DO NOT drop the -FP8 model suffix (BF16 won't fit H100 at
+          # 128K context).
+          args:
+            - --model
+            - {{ .Values.qwenInference.model | quote }}
+            - --served-model-name
+            - {{ .Values.qwenInference.servedModelName | quote }}
+            - --enable-auto-tool-choice
+            - --tool-call-parser
+            - {{ .Values.qwenInference.toolCallParser | quote }}
+            - --max-model-len
+            - {{ .Values.qwenInference.maxModelLen | quote }}
+            - --kv-cache-dtype
+            - {{ .Values.qwenInference.kvCacheDtype | quote }}
+            {{- if .Values.qwenInference.enablePrefixCaching }}
+            - --enable-prefix-caching
+            {{- end }}
+            - --gpu-memory-utilization
+            - {{ .Values.qwenInference.gpuMemoryUtilization | quote }}
+            # In-cluster: bind to all interfaces so the llm-chat pod can
+            # reach us via the Service's ClusterIP. The boundary is the
+            # Service.type=ClusterIP (no external exposure), NOT the
+            # container bind address. Compose uses 127.0.0.1 because
+            # the boundary there is the host port mapping.
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+          ports:
+            - name: openai
+              containerPort: 8000
+          readinessProbe:
+            tcpSocket:
+              port: openai
+            # FP8 weights are ~30GB; cold load takes 3-5 minutes on
+            # NVMe + CUDA warmup. initialDelaySeconds matches the
+            # compose start_period.
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            failureThreshold: 5
+          livenessProbe:
+            tcpSocket:
+              port: openai
+            initialDelaySeconds: 600
+            periodSeconds: 60
+            failureThreshold: 3
+          resources:
+            limits:
+              nvidia.com/gpu: {{ .Values.qwenInference.gpu.count }}
+              {{- with .Values.qwenInference.resources.limits.memory }}
+              memory: {{ . }}
+              {{- end }}
+            requests:
+              {{- with .Values.qwenInference.resources.requests.memory }}
+              memory: {{ . }}
+              {{- end }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        - name: hf-cache
+          {{- if .Values.qwenInference.hfCache.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cordum.fullname" . }}-qwen-hf-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cordum.fullname" . }}-qwen-inference
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qwen-inference
+spec:
+  # ClusterIP ONLY. NEVER LoadBalancer or NodePort — llm-chat is the
+  # sole legitimate client. External exposure of the inference endpoint
+  # is a P0 (see security review task-6cda949c).
+  type: ClusterIP
+  ports:
+    - name: openai
+      port: 8000
+      targetPort: openai
+  selector:
+    {{- include "cordum.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: qwen-inference
+{{- end }}

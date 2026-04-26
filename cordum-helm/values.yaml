@@ -568,3 +568,82 @@ networkPolicy:
   ingressControllerSelector:
     matchLabels:
       app.kubernetes.io/name: ingress-nginx
+
+# =============================================================================
+# LLM Chat Assistant (cordum-llm-chat) — Gmail-style chat copilot that
+# drives Cordum's REST + MCP surface. Default-enabled at the chart level;
+# the dashboard chat button hides whenever the inference backend is
+# unreachable. Operators with no GPU node can either (a) point at an
+# external vLLM via llmChat.externalBaseUrl + qwenInference.enabled=false,
+# or (b) disable both with --set llmChat.enabled=false.
+# =============================================================================
+llmChat:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ghcr.io/cordum-io/cordum/llm-chat
+    tag: ""           # empty → falls back to global.image.tag
+    pullPolicy: ""    # empty → falls back to global.image.pullPolicy
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: "1"
+    requests:
+      memory: 256Mi
+      cpu: "500m"
+  service:
+    port: 8090
+  # When set + qwenInference.enabled=false, llm-chat talks to this
+  # external OpenAI-compatible endpoint instead of the in-cluster vLLM.
+  externalBaseUrl: ""
+  sampling:
+    # Two-pass sampling: deterministic args on the tool-call phase,
+    # warmer prose on the natural-language summarization phase. See
+    # docs/llmchat/helm.md for the rationale.
+    toolTemperature: 0.3
+    toolTopP: 0.9
+    summaryTemperature: 0.7
+    summaryTopP: 0.8
+
+# =============================================================================
+# vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8. Tier 1 (H100 80GB) is
+# the recommended target. See docs/llmchat/helm.md for Tier 2 (RTX 5090
+# / PRO 6000 with the AWQ swap) and Tier 3 (A100 — no native FP8) paths.
+# =============================================================================
+qwenInference:
+  enabled: true
+  replicas: 1
+  image: "vllm/vllm-openai:latest"
+  # Tier 1 default. For Tier 2 hardware (Ada/Blackwell consumer cards
+  # without native FP8), override via --set qwenInference.model=…AWQ.
+  model: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"
+  # Reference value for the Tier 2 swap. Operators set
+  # qwenInference.model to this for RTX 5090 / PRO 6000 deployments.
+  tier2AwqModel: "QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ"
+  servedModelName: "qwen3-coder"
+  # MUST be qwen3_xml. NOT qwen3_coder (infinite-!!!! bug on long
+  # tool-heavy conversations — the Qwen model-card upstream is
+  # outdated). NOT hermes (different parser family).
+  toolCallParser: "qwen3_xml"
+  maxModelLen: 131072
+  kvCacheDtype: "fp8"
+  enablePrefixCaching: true
+  gpuMemoryUtilization: 0.9
+  gpu:
+    count: 1
+    nodeSelector:
+      accelerator: nvidia
+    tolerations: []
+  resources:
+    limits:
+      memory: 40Gi
+    requests:
+      memory: 32Gi
+  hfCache:
+    # PVC for HuggingFace weight cache. Re-pulling 30GB FP8 weights on
+    # every pod restart is unacceptable, so this defaults on. Set to
+    # false for ephemeral test deployments where the cold-load delay
+    # is acceptable.
+    enabled: true
+    size: 50Gi
+    storageClass: ""  # empty → cluster default

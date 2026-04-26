@@ -1,0 +1,119 @@
+{{- if .Values.llmChat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cordum.fullname" . }}-llm-chat
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: llm-chat
+spec:
+  replicas: {{ .Values.llmChat.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cordum.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: llm-chat
+  template:
+    metadata:
+      labels:
+        {{- include "cordum.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: llm-chat
+    spec:
+      serviceAccountName: {{ include "cordum.serviceAccountName" . }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: llm-chat
+          image: "{{ .Values.llmChat.image.repository }}:{{ .Values.llmChat.image.tag | default .Values.global.image.tag }}"
+          imagePullPolicy: {{ .Values.llmChat.image.pullPolicy | default .Values.global.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.llmChat.service.port }}
+          env:
+            - name: CORDUM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cordum.fullname" . }}-secrets
+                  key: apiKey
+            - name: REDIS_URL
+              value: "rediss://:$(REDIS_PASSWORD)@{{ include "cordum.fullname" . }}-redis:{{ .Values.redis.service.port }}"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cordum.fullname" . }}-secrets
+                  key: redisPassword
+            - name: NATS_URL
+              value: "tls://{{ include "cordum.fullname" . }}-nats:{{ .Values.nats.service.port }}"
+            - name: LLMCHAT_BASE_URL
+              {{- if .Values.qwenInference.enabled }}
+              value: "http://{{ include "cordum.fullname" . }}-qwen-inference:8000/v1"
+              {{- else }}
+              value: {{ required "llmChat.externalBaseUrl is required when qwenInference.enabled is false" .Values.llmChat.externalBaseUrl | quote }}
+              {{- end }}
+            - name: LLMCHAT_MODEL
+              value: {{ .Values.qwenInference.servedModelName | quote }}
+            - name: LLMCHAT_PROVIDER
+              value: "openai"
+            - name: LLMCHAT_TOOL_TEMPERATURE
+              value: {{ .Values.llmChat.sampling.toolTemperature | quote }}
+            - name: LLMCHAT_TOOL_TOP_P
+              value: {{ .Values.llmChat.sampling.toolTopP | quote }}
+            - name: LLMCHAT_SUMMARY_TEMPERATURE
+              value: {{ .Values.llmChat.sampling.summaryTemperature | quote }}
+            - name: LLMCHAT_SUMMARY_TOP_P
+              value: {{ .Values.llmChat.sampling.summaryTopP | quote }}
+            {{- if .Values.global.tls.enabled }}
+            - name: REDIS_TLS_CA
+              value: /etc/cordum/tls/ca/ca.crt
+            - name: NATS_TLS_CA
+              value: /etc/cordum/tls/ca/ca.crt
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.llmChat.resources | nindent 12 }}
+          {{- if .Values.global.tls.enabled }}
+          volumeMounts:
+            - name: tls-ca
+              mountPath: /etc/cordum/tls/ca
+              readOnly: true
+          {{- end }}
+      {{- if .Values.global.tls.enabled }}
+      volumes:
+        - name: tls-ca
+          secret:
+            secretName: {{ .Values.global.tls.clientCertSecret | default (printf "%s-tls-client" (include "cordum.fullname" .)) }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cordum.fullname" . }}-llm-chat
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: llm-chat
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.llmChat.service.port }}
+      targetPort: http
+  selector:
+    {{- include "cordum.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: llm-chat
+{{- end }}
