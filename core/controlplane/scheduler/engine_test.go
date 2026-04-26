@@ -22,6 +22,7 @@ import (
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -1350,7 +1351,7 @@ func TestProcessJobApprovalGateApprovedAutoCompletes(t *testing.T) {
 			"gate_type":         "workflow_approval",
 		},
 	}
-	jobHash, err := HashJobRequest(req)
+	jobHash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -1426,7 +1427,7 @@ func TestProcessJobApprovalGatePublishFailureReturnsRetryableError(t *testing.T)
 			"approval_snapshot": workflowGateSnapshot,
 		},
 	}
-	jobHash, err := HashJobRequest(req)
+	jobHash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -1475,7 +1476,7 @@ func TestApprovedWorkerJobNotAutoCompleted(t *testing.T) {
 			"step_id":          "send_email",
 		},
 	}
-	jobHash, err := HashJobRequest(req)
+	jobHash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -1528,7 +1529,7 @@ func TestApprovalGateTopicStillAutoCompletes(t *testing.T) {
 				"gate_type":         "workflow_approval",
 			},
 		}
-		jobHash, err := HashJobRequest(req)
+		jobHash, err := reqhash.Hash(req)
 		if err != nil {
 			t.Fatalf("hash: %v", err)
 		}
@@ -2702,9 +2703,9 @@ func TestCheckSafetyDecisionApprovalGrantedAppendsDecisionLog(t *testing.T) {
 			"agent_id":          "agent-approved",
 		},
 	}
-	jobHash, err := HashJobRequest(req)
+	jobHash, err := reqhash.Hash(req)
 	if err != nil {
-		t.Fatalf("HashJobRequest() error = %v", err)
+		t.Fatalf("reqhash.Hash() error = %v", err)
 	}
 	store.safety[req.JobId] = SafetyDecisionRecord{
 		Decision:         SafetyRequireApproval,
@@ -2755,9 +2756,9 @@ func TestCheckSafetyDecision_PreservesExistingJobHashOnRequireApproval(t *testin
 		ApprovalRequired: true,
 		JobHash:          pristineHash,
 	}
-	computedHash, err := HashJobRequest(req)
+	computedHash, err := reqhash.Hash(req)
 	if err != nil {
-		t.Fatalf("HashJobRequest() error = %v", err)
+		t.Fatalf("reqhash.Hash() error = %v", err)
 	}
 	if computedHash == pristineHash {
 		t.Fatal("computed hash unexpectedly matched seeded gateway hash")
@@ -2871,9 +2872,9 @@ func TestCheckSafetyDecision_ComputesJobHashWhenNoneExists(t *testing.T) {
 		TenantId: "tenant-a",
 		Labels:   map[string]string{"workflow_id": "wf-2"},
 	}
-	wantHash, err := HashJobRequest(req)
+	wantHash, err := reqhash.Hash(req)
 	if err != nil {
-		t.Fatalf("HashJobRequest() error = %v", err)
+		t.Fatalf("reqhash.Hash() error = %v", err)
 	}
 
 	record, err := engine.checkSafetyDecision(context.Background(), req)

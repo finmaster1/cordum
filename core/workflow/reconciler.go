@@ -381,7 +381,7 @@ func (r *reconciler) reconcileStuckWaitingSteps(ctx context.Context, run *Workfl
 			sr.Status = StepStatusFailed
 			sr.CompletedAt = &now
 			sr.Error = map[string]any{
-				"message":             "approval dispatch failed after reconciler recovery attempts",
+				"message":            "approval dispatch failed after reconciler recovery attempts",
 				"_reconcile_retries": retries,
 			}
 			run.Steps[stepID] = sr

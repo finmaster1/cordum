@@ -16,6 +16,7 @@ import (
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/model"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 )
 
 func TestRedisJobStoreStateAndResultPtr(t *testing.T) {
@@ -574,7 +575,7 @@ func TestRedisJobStoreResolveApprovalAtomically(t *testing.T) {
 	if err := store.SetState(ctx, req.GetJobId(), model.JobStateApproval); err != nil {
 		t.Fatalf("set approval state: %v", err)
 	}
-	hash, err := hashApprovalJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash request: %v", err)
 	}
@@ -744,7 +745,7 @@ func TestRedisJobStoreResolveRejectSeedsDLQPublishIntent(t *testing.T) {
 	if err := store.SetState(ctx, req.GetJobId(), model.JobStateApproval); err != nil {
 		t.Fatalf("set approval state: %v", err)
 	}
-	hash, err := hashApprovalJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash request: %v", err)
 	}
@@ -829,7 +830,7 @@ func TestRedisJobStoreApplyApprovalRepairApprovedResolution(t *testing.T) {
 	if err := store.SetState(ctx, req.GetJobId(), model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := hashApprovalJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash request: %v", err)
 	}
@@ -919,7 +920,7 @@ func TestRedisJobStoreApplyApprovalRepairInvalidatesStaleRequest(t *testing.T) {
 		Topic:    "job.test",
 		TenantId: "default",
 	}
-	hash, err := hashApprovalJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash request: %v", err)
 	}

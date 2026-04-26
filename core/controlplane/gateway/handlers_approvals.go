@@ -14,12 +14,12 @@ import (
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/controlplane/gateway/policybundles"
-	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -1053,9 +1053,9 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		// the currently stored request. Without this, drift between the
 		// scheduler's post-mutation hash (computed after effective-config /
 		// constraints were attached to req.Env) and the reconciler's
-		// hashApprovalJobRequest(stored-req) can cause the approval to be
+		// reqhash.Hash(stored-req) can cause the approval to be
 		// auto-invalidated as stale_request after a successful approve.
-		if lockedHash, err := scheduler.HashJobRequest(req); err == nil && lockedHash != "" {
+		if lockedHash, err := reqhash.Hash(req); err == nil && lockedHash != "" {
 			if lockedHash != safetyRecord.JobHash {
 				safetyRecord.JobHash = lockedHash
 				if err := s.jobStore.SetSafetyDecision(ctx, jobID, safetyRecord); err != nil {

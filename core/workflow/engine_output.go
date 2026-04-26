@@ -84,9 +84,9 @@ func recordStepInlineOutput(run *WorkflowRun, stepID string, stepDef *Step, outp
 	if stepDef != nil {
 		if path := strings.TrimSpace(stepDef.OutputPath); path != "" {
 			if pathErr := setContextPath(run.Context, path, output); pathErr != nil {
-			slog.Warn("workflow: setContextPath failed for inline output",
-				"path", path, "error", pathErr)
-		}
+				slog.Warn("workflow: setContextPath failed for inline output",
+					"path", path, "error", pathErr)
+			}
 		}
 	}
 	steps[stepID] = entry

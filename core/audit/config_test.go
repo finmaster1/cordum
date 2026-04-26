@@ -43,7 +43,7 @@ func TestNewExporterFromEnv_NoneTypeCaseInsensitive(t *testing.T) {
 
 // TestNewExporterFromEnv_NullBackCompat pins that operators who explicitly
 // opt into the discard/null exporter (for metrics parity with a real SIEM
-// backend) still get a DiscardExporter. Only '' and 'none' are treated as
+// backend) still get a DiscardExporter. Only ” and 'none' are treated as
 // "no exporter at all" after task-096de016.
 func TestNewExporterFromEnv_NullBackCompat(t *testing.T) {
 	for _, typ := range []string{"null", "discard", "chain-only"} {

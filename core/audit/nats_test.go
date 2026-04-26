@@ -159,7 +159,7 @@ func TestNATSAuditConsumer_ExportsEvent(t *testing.T) {
 		Payload: &pb.BusPacket_Alert{
 			Alert: &pb.SystemAlert{
 				SourceComponent: "audit-export",
-				Message:   string(payload),
+				Message:         string(payload),
 			},
 		},
 	}
@@ -199,7 +199,7 @@ func TestNATSAuditConsumer_RetryOnExportFailure(t *testing.T) {
 		Payload: &pb.BusPacket_Alert{
 			Alert: &pb.SystemAlert{
 				SourceComponent: "audit-export",
-				Message:   string(payload),
+				Message:         string(payload),
 			},
 		},
 	}
@@ -268,7 +268,7 @@ func TestNATSAuditConsumer_MalformedPayloadAcks(t *testing.T) {
 		Payload: &pb.BusPacket_Alert{
 			Alert: &pb.SystemAlert{
 				SourceComponent: "audit-export",
-				Message:   "{invalid json",
+				Message:         "{invalid json",
 			},
 		},
 	}

@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	"github.com/cordum/cordum/core/configsvc"
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/bus"
@@ -19,11 +18,12 @@ import (
 	"github.com/cordum/cordum/core/infra/health"
 	cordumotel "github.com/cordum/cordum/core/infra/otel"
 	"github.com/cordum/cordum/core/licensing"
+	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	"log/slog"
 
 	"github.com/cordum/cordum/core/infra/registry"
-	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/infra/schema"
+	"github.com/cordum/cordum/core/infra/store"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
 

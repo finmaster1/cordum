@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
-	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/infra/secrets"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/licensing"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
@@ -325,7 +325,7 @@ func (s *server) SubmitJob(ctx context.Context, req *pb.SubmitJobRequest) (*pb.S
 				}
 			}
 
-			jobHash, hashErr := scheduler.HashJobRequest(jobReq)
+			jobHash, hashErr := reqhash.Hash(jobReq)
 			if hashErr != nil {
 				slog.Warn("failed to compute job hash for approval safety record", "job_id", jobID, "error", hashErr)
 			}

@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cordum/cordum/core/controlplane/gateway/packs"
 	"github.com/cordum/cordum/core/packs/signing"
 	"github.com/redis/go-redis/v9"
-	"github.com/cordum/cordum/core/controlplane/gateway/packs"
 )
 
 // Gateway-side mirror verification for pack installs (task-9c63baa0

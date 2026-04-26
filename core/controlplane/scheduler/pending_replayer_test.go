@@ -11,6 +11,7 @@ import (
 	infraStore "github.com/cordum/cordum/core/infra/store"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 )
 
 func TestPendingReplayerReplaysJobs(t *testing.T) {
@@ -357,7 +358,7 @@ func TestPendingReplayerMarksApprovalSubmitIntentPublished(t *testing.T) {
 	if err := store.SetState(ctx, req.GetJobId(), JobStateApproval); err != nil {
 		t.Fatalf("set approval state: %v", err)
 	}
-	hash, err := HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -429,7 +430,7 @@ func TestPendingReplayerReplaysRejectedApprovalPublishes(t *testing.T) {
 	if err := store.SetState(ctx, req.GetJobId(), JobStateApproval); err != nil {
 		t.Fatalf("set approval state: %v", err)
 	}
-	hash, err := HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}

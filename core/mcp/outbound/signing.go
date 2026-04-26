@@ -92,14 +92,14 @@ const DefaultClockSkew = 5 * time.Minute
 // after clock sync / new nonce) from "untrusted_key" (operator must
 // register the key).
 var (
-	ErrMissingHeaders      = errors.New("mcp outbound: required signature header missing")
-	ErrMalformedHeader     = errors.New("mcp outbound: malformed signature header")
-	ErrTimestampExpired    = errors.New("mcp outbound: timestamp outside clock skew window")
-	ErrNonceReplayed       = errors.New("mcp outbound: nonce already seen")
-	ErrUntrustedKey        = errors.New("mcp outbound: key_id is not trusted")
-	ErrSignatureInvalid    = errors.New("mcp outbound: signature does not verify")
-	ErrInvalidPrivateKey   = errors.New("mcp outbound: invalid private key")
-	ErrInvalidPublicKey    = errors.New("mcp outbound: invalid public key")
+	ErrMissingHeaders    = errors.New("mcp outbound: required signature header missing")
+	ErrMalformedHeader   = errors.New("mcp outbound: malformed signature header")
+	ErrTimestampExpired  = errors.New("mcp outbound: timestamp outside clock skew window")
+	ErrNonceReplayed     = errors.New("mcp outbound: nonce already seen")
+	ErrUntrustedKey      = errors.New("mcp outbound: key_id is not trusted")
+	ErrSignatureInvalid  = errors.New("mcp outbound: signature does not verify")
+	ErrInvalidPrivateKey = errors.New("mcp outbound: invalid private key")
+	ErrInvalidPublicKey  = errors.New("mcp outbound: invalid public key")
 )
 
 // Signer holds one ECDSA P-256 private key and the key_id it

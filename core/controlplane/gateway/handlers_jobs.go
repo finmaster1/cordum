@@ -18,7 +18,6 @@ import (
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/controlplane/gateway/policybundles"
-	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/controlplane/topicregistry"
 	"github.com/cordum/cordum/core/infra/artifacts"
 	"github.com/cordum/cordum/core/infra/buildinfo"
@@ -31,6 +30,7 @@ import (
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/cordum/cordum/core/protocol/protoutil"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
@@ -1925,7 +1925,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 
 			// Persist safety decision record so the approval endpoint can
 			// validate policy snapshot stability and job request integrity.
-			jobHash, hashErr := scheduler.HashJobRequest(jobReq)
+			jobHash, hashErr := reqhash.Hash(jobReq)
 			if hashErr != nil {
 				slog.Warn("failed to compute job hash for approval safety record", "job_id", jobID, "error", hashErr)
 			}
@@ -2262,7 +2262,7 @@ func (s *server) persistSubmitDeniedJob(
 		}
 	}
 
-	jobHash, hashErr := scheduler.HashJobRequest(jobReq)
+	jobHash, hashErr := reqhash.Hash(jobReq)
 	if hashErr != nil {
 		slog.Warn("failed to compute job hash for denied safety record", "job_id", jobID, "error", hashErr)
 	}

@@ -36,8 +36,8 @@ func TestDefaultRedactor_RegexHeuristics(t *testing.T) {
 	r := DefaultRedactor()
 
 	cases := []struct {
-		name   string
-		input  string
+		name      string
+		input     string
 		sensitive string
 	}{
 		// Fake test fixtures — assembled from fragments to keep GitHub secret-

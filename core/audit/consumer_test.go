@@ -137,13 +137,13 @@ func TestNATSAuditConsumer_ChainFailPermissiveExports(t *testing.T) {
 func TestParseChainFailMode(t *testing.T) {
 	t.Parallel()
 	cases := map[string]ChainFailMode{
-		"":            ChainFailStrict,
-		"strict":      ChainFailStrict,
-		"STRICT":      ChainFailStrict,
-		"permissive":  ChainFailPermissive,
-		"Permissive":  ChainFailPermissive,
+		"":             ChainFailStrict,
+		"strict":       ChainFailStrict,
+		"STRICT":       ChainFailStrict,
+		"permissive":   ChainFailPermissive,
+		"Permissive":   ChainFailPermissive,
 		" permissive ": ChainFailPermissive,
-		"garbage":     ChainFailStrict,
+		"garbage":      ChainFailStrict,
 	}
 	for input, want := range cases {
 		if got := ParseChainFailMode(input); got != want {

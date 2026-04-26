@@ -615,9 +615,9 @@ func TestCheckPolicyBundleLoaded_WarnOnPartialDemoRuleset(t *testing.T) {
 	t.Parallel()
 	bundles := `{"items":[{"id":"default","enabled":true,"rules_count":1}]}`
 	cases := []struct {
-		name      string
-		rules     string
-		wantMiss  []string
+		name     string
+		rules    string
+		wantMiss []string
 	}{
 		{
 			name:     "only_allow_rule_present",
@@ -752,9 +752,9 @@ func TestCheckVersionSkew_SkipWhenNoStatus(t *testing.T) {
 func TestSplitMajorMinor(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		in         string
-		maj, min   int
-		ok         bool
+		in       string
+		maj, min int
+		ok       bool
 	}{
 		{"1.2.3", 1, 2, true},
 		{"v1.2.3", 1, 2, true},
@@ -778,13 +778,13 @@ func TestSplitMajorMinor(t *testing.T) {
 func TestIsDestructiveFix(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
-		"docker compose logs scheduler":          false,
-		"cordumctl pack install ./demo":          false,
-		"cordumctl generate-certs --force":       true,
-		"docker compose down -v":                 true,
-		"git reset --hard HEAD":                  true,
-		"rm -rf /var/lib/redis":                  true,
-		"cordumctl policy activate demo":         false,
+		"docker compose logs scheduler":    false,
+		"cordumctl pack install ./demo":    false,
+		"cordumctl generate-certs --force": true,
+		"docker compose down -v":           true,
+		"git reset --hard HEAD":            true,
+		"rm -rf /var/lib/redis":            true,
+		"cordumctl policy activate demo":   false,
 	}
 	for in, want := range cases {
 		if got := isDestructiveFix(in); got != want {
@@ -1151,11 +1151,11 @@ func TestRunDoctorChecks_EndToEnd_AllGreen(t *testing.T) {
 func TestParseServiceURLOverrides_Table(t *testing.T) {
 	t.Parallel()
 	cases := map[string]map[string]string{
-		"":                                      {},
-		"scheduler=http://a":                    {"scheduler": "http://a"},
-		"scheduler=http://a,mcp=http://b":       {"scheduler": "http://a", "mcp": "http://b"},
+		"":                                {},
+		"scheduler=http://a":              {"scheduler": "http://a"},
+		"scheduler=http://a,mcp=http://b": {"scheduler": "http://a", "mcp": "http://b"},
 		"scheduler=http://a,malformed,mcp=http://b": {"scheduler": "http://a", "mcp": "http://b"},
-		" scheduler = http://a ":                {"scheduler": "http://a"},
+		" scheduler = http://a ":                    {"scheduler": "http://a"},
 	}
 	for in, want := range cases {
 		got := parseServiceURLOverrides(in)
@@ -1211,9 +1211,9 @@ func TestEmitJSON_WritesEnvelopeToStdout(t *testing.T) {
 func TestHumanDuration_Format(t *testing.T) {
 	t.Parallel()
 	cases := map[time.Duration]string{
-		-time.Hour:        "expired",
-		30 * time.Minute:  "30m",
-		3 * time.Hour:     "3h",
+		-time.Hour:         "expired",
+		30 * time.Minute:   "30m",
+		3 * time.Hour:      "3h",
 		2 * 24 * time.Hour: "2d",
 		7 * 24 * time.Hour: "7d",
 	}

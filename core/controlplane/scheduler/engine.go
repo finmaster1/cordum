@@ -28,6 +28,7 @@ import (
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 	"github.com/cordum/cordum/core/protocol/protoutil"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
@@ -2020,7 +2021,7 @@ func (e *Engine) checkSafetyDecision(ctx context.Context, req *pb.JobRequest) (S
 			defer cancel()
 			prev, err := e.jobStore.GetSafetyDecision(storeCtx, jobID)
 			if err == nil && (prev.ApprovalRequired || prev.Decision == SafetyRequireApproval) && prev.JobHash != "" {
-				hash, err := HashJobRequest(req)
+				hash, err := reqhash.Hash(req)
 				if err == nil && hash == prev.JobHash {
 					// Bind the fast-path to the PolicySnapshot this approval
 					// was admitted against. The gateway stamps approval_snapshot
@@ -2160,7 +2161,7 @@ func (e *Engine) hashPersistedApprovalRequest(ctx context.Context, jobID string,
 		}); ok {
 			stored, err := store.GetJobRequest(ctx, jobID)
 			if err == nil && stored != nil {
-				return HashJobRequest(stored)
+				return reqhash.Hash(stored)
 			}
 			if err != nil && !errors.Is(err, redis.Nil) {
 				slog.Warn("approval hash: persisted request unavailable, falling back to in-memory request",
@@ -2170,7 +2171,7 @@ func (e *Engine) hashPersistedApprovalRequest(ctx context.Context, jobID string,
 			}
 		}
 	}
-	return HashJobRequest(req)
+	return reqhash.Hash(req)
 }
 
 func (e *Engine) appendDecisionLog(req *pb.JobRequest, record SafetyDecisionRecord) {

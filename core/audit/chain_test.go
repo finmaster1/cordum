@@ -131,9 +131,9 @@ func TestChainer_AppendConcurrentMonotonic(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		producers        = 16
-		perProducer      = 25
-		totalExpected    = producers * perProducer
+		producers     = 16
+		perProducer   = 25
+		totalExpected = producers * perProducer
 	)
 
 	var (

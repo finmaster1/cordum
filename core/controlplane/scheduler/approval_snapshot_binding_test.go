@@ -20,6 +20,7 @@ import (
 
 	"github.com/cordum/cordum/core/audit"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 )
 
 // TestCheckSafetyDecision_ApprovalFastPathRequiresSnapshotBinding
@@ -60,7 +61,7 @@ func TestCheckSafetyDecision_ApprovalFastPathRequiresSnapshotBinding(t *testing.
 				"step_id":          "send-email",
 			},
 		}
-		hash, err := HashJobRequest(req)
+		hash, err := reqhash.Hash(req)
 		if err != nil {
 			t.Fatalf("hash job: %v", err)
 		}

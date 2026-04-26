@@ -161,16 +161,6 @@ func normalizeTimestampMicrosUpper(ts int64) int64 {
 	}
 }
 
-// hashApprovalJobRequest forwards to reqhash.Hash, the repo-wide
-// canonicaliser for JobRequest. Retained as a package-local alias so
-// store callers and the existing store_test.go suite keep compiling
-// without churn. Behaviour is byte-identical to scheduler.HashJobRequest
-// by construction (both forward to reqhash.Hash). See task-090ab6af
-// for the unification history.
-func hashApprovalJobRequest(req *pb.JobRequest) (string, error) {
-	return reqhash.Hash(req)
-}
-
 // RedisJobStore implements model.JobStore backed by Redis.
 type RedisJobStore struct {
 	client         redis.UniversalClient
@@ -1994,7 +1984,7 @@ func (s *RedisJobStore) InspectApprovalRepair(ctx context.Context, jobID string)
 	approvalRecord = NormalizeApprovalRecord(state, safetyRecord, approvalRecord)
 	requestHash := ""
 	if req != nil {
-		if hash, err := hashApprovalJobRequest(req); err == nil {
+		if hash, err := reqhash.Hash(req); err == nil {
 			requestHash = hash
 		}
 	}
@@ -2550,7 +2540,7 @@ func (s *RedisJobStore) ResolveApproval(ctx context.Context, params ApprovalReso
 			return fmt.Errorf("unmarshal job request: %w", err)
 		}
 		if params.Decision == model.ApprovalDecisionApprove {
-			hash, err := hashApprovalJobRequest(&req)
+			hash, err := reqhash.Hash(&req)
 			if err != nil {
 				return fmt.Errorf("hash approval request: %w", err)
 			}

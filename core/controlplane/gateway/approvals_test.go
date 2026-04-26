@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
-	"github.com/cordum/cordum/core/controlplane/scheduler"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
 	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 	wf "github.com/cordum/cordum/core/workflow"
 	"github.com/google/uuid"
 )
@@ -46,7 +46,7 @@ func TestApproveJobBindsSnapshotAndHash(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestApprove_LocksJobHashAgainstReconcilerDrift(t *testing.T) {
 	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	wantHash, err := scheduler.HashJobRequest(req)
+	wantHash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestApproveJobMarksPublishIntentComplete(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestApproveJobPublishFailureLeavesPendingIntent(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestApproveWorkflowGateBypassesSafetySnapshotCheck(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestApproveJobUsesAuthContextForApprover(t *testing.T) {
 		if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 			t.Fatalf("set state: %v", err)
 		}
-		hash, err := scheduler.HashJobRequest(req)
+		hash, err := reqhash.Hash(req)
 		if err != nil {
 			t.Fatalf("hash job: %v", err)
 		}
@@ -483,7 +483,7 @@ func TestApproveJobRefreshesStaleSnapshot(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestApproveJobRejectsWhenSnapshotUnavailable(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestRejectJobStoresApprovalRecord(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestRejectJobMarksPublishIntentComplete(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -706,7 +706,7 @@ func TestRejectWorkflowGateResultPublishFailureLeavesPendingIntent(t *testing.T)
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -782,7 +782,7 @@ func TestRepairApprovalDryRunClassifiesTerminalWorkflowRun(t *testing.T) {
 	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -840,7 +840,7 @@ func TestRepairApprovalDryRunClassifiesStaleSnapshot(t *testing.T) {
 	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -897,7 +897,7 @@ func TestRepairApprovalApplyApprovedResolutionPublishesAndAudits(t *testing.T) {
 	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -1304,7 +1304,7 @@ func TestApproveJobDoubleApproveIdempotent(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -1364,7 +1364,7 @@ func TestApproveJobConcurrentRace(t *testing.T) {
 	if err := s.jobStore.SetState(context.Background(), jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}
@@ -1465,7 +1465,7 @@ func TestApproveJob_RejectsTimedOutRun(t *testing.T) {
 	if err := s.jobStore.SetState(ctx, jobID, model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := scheduler.HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash job: %v", err)
 	}

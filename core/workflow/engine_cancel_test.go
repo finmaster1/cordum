@@ -9,9 +9,9 @@ import (
 	"time"
 
 	miniredis "github.com/alicebob/miniredis/v2"
-	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
+	capsdk "github.com/cordum/cordum/core/protocol/capsdk"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
 )
 

@@ -8,6 +8,7 @@ import (
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/model"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 )
 
 // Regression guards for task-3527fdc5: single-step approval workflow
@@ -60,7 +61,7 @@ func TestClassifyApprovalRepair_NoOpApproval_ReturnsNone(t *testing.T) {
 	}
 	// 2. Compute hash on the pre-mutation request (matches the
 	//    preMutationHash path in engine.go).
-	preHash, err := hashApprovalJobRequest(req)
+	preHash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestClassifyApprovalRepair_ApprovalLabelsAdded_DoesNotTripStaleRequest(t *t
 			"workflow_id": "wf-1",
 		},
 	}
-	preHash, _ := hashApprovalJobRequest(req)
+	preHash, _ := reqhash.Hash(req)
 	if err := store.SetState(ctx, req.GetJobId(), model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestClassifyApprovalRepair_RealPayloadDrift_StillTripsStaleRequest(t *testi
 		TenantId: "default",
 		Labels:   map[string]string{"priority": "normal"},
 	}
-	preHash, _ := hashApprovalJobRequest(req)
+	preHash, _ := reqhash.Hash(req)
 	if err := store.SetState(ctx, req.GetJobId(), model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestClassifyApprovalRepair_EffectiveConfigEnvMutation_NotStale(t *testing.T
 	ctx := context.Background()
 	req := &pb.JobRequest{JobId: "job-env", Topic: "job.approval-gate", TenantId: "default"}
 	// Pre-mutation hash (what the fix-path captures).
-	preHash, _ := hashApprovalJobRequest(req)
+	preHash, _ := reqhash.Hash(req)
 	if err := store.SetJobRequest(ctx, req); err != nil {
 		t.Fatalf("set req: %v", err)
 	}

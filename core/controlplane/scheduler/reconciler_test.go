@@ -14,6 +14,7 @@ import (
 	infraStore "github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/model"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"github.com/cordum/cordum/core/protocol/reqhash"
 )
 
 type fakeReconcileStore struct {
@@ -522,7 +523,7 @@ func TestReconcilerAutoRepairsApprovedLegacyApproval(t *testing.T) {
 	if err := store.SetState(ctx, req.GetJobId(), model.JobStateApproval); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	hash, err := HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash request: %v", err)
 	}
@@ -577,7 +578,7 @@ func TestReconcilerInvalidatesStaleApprovalRequest(t *testing.T) {
 		Topic:    "job.test",
 		TenantId: "default",
 	}
-	hash, err := HashJobRequest(req)
+	hash, err := reqhash.Hash(req)
 	if err != nil {
 		t.Fatalf("hash request: %v", err)
 	}

@@ -14,7 +14,7 @@ import (
 // Session-store constants pinned for cross-package consumption (admin
 // session viewer, WS handler in phase 5). Renaming is a wire-break.
 const (
-	sessionKeyPrefix = "chat:session:"
+	sessionKeyPrefix  = "chat:session:"
 	sessionMsgsSuffix = ":messages"
 
 	// SessionTTL is the sliding TTL applied on Create + every

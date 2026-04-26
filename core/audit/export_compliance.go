@@ -305,10 +305,10 @@ func writeNDJSONExport(
 		// Emit a partial footer so a downstream pipeline can distinguish
 		// a broken stream from a complete one, then surface the error.
 		footer := map[string]any{
-			"type":         "footer",
-			"event_count":  count,
-			"error":        err.Error(),
-			"truncated":    false,
+			"type":        "footer",
+			"event_count": count,
+			"error":       err.Error(),
+			"truncated":   false,
 		}
 		_ = writeJSONLine(w, footer)
 		manifest.EventCount = count
@@ -323,11 +323,11 @@ func writeNDJSONExport(
 	// streaming the file can assert integrity AFTER confirming the
 	// byte count matches.
 	footer := map[string]any{
-		"type":            "footer",
-		"event_count":     count,
-		"truncated":       truncated,
-		"max_events_cap":  opts.MaxEvents,
-		"generated_at":    manifest.GeneratedAt,
+		"type":           "footer",
+		"event_count":    count,
+		"truncated":      truncated,
+		"max_events_cap": opts.MaxEvents,
+		"generated_at":   manifest.GeneratedAt,
 	}
 	if err := writeJSONLine(w, footer); err != nil {
 		return manifest, err

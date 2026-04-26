@@ -94,16 +94,16 @@ func (s *EvalDatasetStore) Close() error {
 // block that (name, version) slot.
 //
 // KEYS:
-//   1. rec:<id>
-//   2. byname:<name>:<version>
-//   3. name:<name>
-//   4. index
+//  1. rec:<id>
+//  2. byname:<name>:<version>
+//  3. name:<name>
+//  4. index
 //
 // ARGV:
-//   1. dataset id (member for both ZADDs)
-//   2. marshaled JSON payload
-//   3. version (score for name ZSET)
-//   4. created_at_ms (score for index ZSET)
+//  1. dataset id (member for both ZADDs)
+//  2. marshaled JSON payload
+//  3. version (score for name ZSET)
+//  4. created_at_ms (score for index ZSET)
 //
 // Returns 1 on success, 0 on (name, version) collision.
 var evalDatasetCreateScript = redis.NewScript(`
@@ -122,13 +122,13 @@ return 1
 // atomic operation.
 //
 // KEYS:
-//   1. rec:<id>
-//   2. byname:<name>:<version>
-//   3. name:<name>
-//   4. index
+//  1. rec:<id>
+//  2. byname:<name>:<version>
+//  3. name:<name>
+//  4. index
 //
 // ARGV:
-//   1. dataset id
+//  1. dataset id
 var evalDatasetDeleteScript = redis.NewScript(`
 redis.call('DEL', KEYS[1])
 redis.call('DEL', KEYS[2])

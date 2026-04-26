@@ -137,16 +137,16 @@ type packPolicySimulationRequest struct {
 }
 
 type packRecord struct {
-	ID           string                   `json:"id"`
-	Version      string                   `json:"version"`
-	Status       string                   `json:"status"`
-	InstalledAt  string                   `json:"installed_at,omitempty"`
-	InstalledBy  string                   `json:"installed_by,omitempty"`
-	Manifest     packRecordManifest       `json:"manifest,omitempty"`
-	Resources    packRecordResources      `json:"resources,omitempty"`
-	Overlays     packRecordOverlays       `json:"overlays,omitempty"`
-	Tests        packTests                `json:"tests,omitempty"`
-	Verification *packRecordVerification  `json:"verification,omitempty"`
+	ID           string                  `json:"id"`
+	Version      string                  `json:"version"`
+	Status       string                  `json:"status"`
+	InstalledAt  string                  `json:"installed_at,omitempty"`
+	InstalledBy  string                  `json:"installed_by,omitempty"`
+	Manifest     packRecordManifest      `json:"manifest,omitempty"`
+	Resources    packRecordResources     `json:"resources,omitempty"`
+	Overlays     packRecordOverlays      `json:"overlays,omitempty"`
+	Tests        packTests               `json:"tests,omitempty"`
+	Verification *packRecordVerification `json:"verification,omitempty"`
 }
 
 // packRecordVerification is the on-the-wire shape the gateway persists

@@ -350,4 +350,3 @@ func copilotLogPrincipal(principal string) string {
 	}
 	return principal[:8]
 }
-

@@ -209,9 +209,9 @@ func TestHTTPBridge_RegisterAgent_RequiresCoreFields(t *testing.T) {
 	srv, _ := newStubGateway(t, http.StatusOK, nil)
 	b := mutatingBridge(t, srv)
 	cases := []RegisterAgentInput{
-		{Owner: "o", RiskTier: "low"},                // no name
-		{Name: "n", RiskTier: "low"},                 // no owner
-		{Name: "n", Owner: "o"},                      // no risk_tier
+		{Owner: "o", RiskTier: "low"}, // no name
+		{Name: "n", RiskTier: "low"},  // no owner
+		{Name: "n", Owner: "o"},       // no risk_tier
 	}
 	for i, c := range cases {
 		if _, err := b.RegisterAgent(context.Background(), c); err == nil {
