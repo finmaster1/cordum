@@ -71,6 +71,12 @@ func (s *server) handleGetCopilotSession(w http.ResponseWriter, r *http.Request)
 	if !s.requirePermissionOrRole(w, r, auth.PermJobsRead) {
 		return
 	}
+	// Custom RBAC roles can grant jobs.read without governance.read. Without a
+	// separate gate the response would leak DecisionLogRecord data behind only
+	// the jobs.read permission, bypassing the existing /api/v1/governance/decisions
+	// gate (auth.PermGovernanceRead). Compute the gate once here; jobs.read-only
+	// callers still get the timeline + linked jobs but with decisions:[].
+	canReadGovernance := s.hasPermissionSilent(r, auth.PermGovernanceRead)
 
 	tenant, err := s.resolveTenant(r, "")
 	if err != nil {
@@ -83,6 +89,7 @@ func (s *server) handleGetCopilotSession(w http.ResponseWriter, r *http.Request)
 		"session_id", sessionID,
 		"principal", copilotLogPrincipal(userID),
 		"tenant", tenant,
+		"governance_read", canReadGovernance,
 	)
 
 	store := s.copilotStore
@@ -104,10 +111,24 @@ func (s *server) handleGetCopilotSession(w http.ResponseWriter, r *http.Request)
 		writeInternalError(w, r, "get copilot session jobs", err)
 		return
 	}
-	decisions, decisionsTruncated, err := s.collectCopilotSessionDecisions(r.Context(), tenant, jobIDs)
-	if err != nil {
-		writeInternalError(w, r, "get copilot session decisions", err)
-		return
+	var (
+		decisions          []copilotSessionDecisionView
+		decisionsTruncated bool
+	)
+	if canReadGovernance {
+		decisions, decisionsTruncated, err = s.collectCopilotSessionDecisions(r.Context(), tenant, jobIDs, sess.CreatedAt)
+		if err != nil {
+			writeInternalError(w, r, "get copilot session decisions", err)
+			return
+		}
+	} else {
+		decisions = []copilotSessionDecisionView{}
+		slog.Info("copilot session decisions omitted",
+			"session_id", sessionID,
+			"principal", copilotLogPrincipal(userID),
+			"tenant", tenant,
+			"reason", "missing governance.read",
+		)
 	}
 	truncated := jobsTruncated || decisionsTruncated
 	if truncated {
@@ -169,7 +190,7 @@ func (s *server) collectCopilotSessionJobs(ctx context.Context, sessionID, tenan
 		return nil, nil, false, err
 	}
 	for _, record := range recent {
-		if record.ID == "" {
+		if record.ID == "" || record.Tenant != tenant {
 			continue
 		}
 		if _, ok := jobSet[record.ID]; ok {
@@ -177,9 +198,6 @@ func (s *server) collectCopilotSessionJobs(ctx context.Context, sessionID, tenan
 		}
 		meta, err := s.jobStore.GetAllMeta(ctx, record.ID)
 		if err != nil || len(meta) == 0 {
-			continue
-		}
-		if tenant != "" && meta["tenant"] != "" && meta["tenant"] != tenant {
 			continue
 		}
 		labels := parseCopilotLabels(meta["labels"])
@@ -201,30 +219,63 @@ func (s *server) collectCopilotSessionJobs(ctx context.Context, sessionID, tenan
 	}
 
 	jobs := make([]copilotSessionJobView, 0, len(jobIDs))
+	// decisionJobSet must include every job id the session references, even
+	// those whose enriched metadata has expired or been evicted from the job
+	// store. Without that, governance decisions for missing-meta jobs are
+	// silently dropped from the response. Cross-tenant jobs are still
+	// excluded — both for security and because QueryDecisions filters by
+	// tenant, so they cannot match anyway.
+	decisionJobSet := make(map[string]struct{}, len(jobIDs))
 	for _, id := range jobIDs {
 		meta := metas[id]
-		if len(meta) == 0 {
+		if tenant != "" && meta["tenant"] != "" && meta["tenant"] != tenant {
 			continue
 		}
-		if tenant != "" && meta["tenant"] != "" && meta["tenant"] != tenant {
+		decisionJobSet[id] = struct{}{}
+		if len(meta) == 0 {
+			slog.Warn("copilot session job reference missing",
+				"session_id", sessionID,
+				"tenant", tenant,
+				"job_id", id,
+			)
 			continue
 		}
 		jobs = append(jobs, copilotJobViewFromMeta(id, meta))
 	}
-	return jobs, jobSetFromViews(jobs), truncated, nil
+	return jobs, decisionJobSet, truncated, nil
 }
 
-func (s *server) collectCopilotSessionDecisions(ctx context.Context, tenant string, jobIDs map[string]struct{}) ([]copilotSessionDecisionView, bool, error) {
+func (s *server) collectCopilotSessionDecisions(ctx context.Context, tenant string, jobIDs map[string]struct{}, sessionStartedAt time.Time) ([]copilotSessionDecisionView, bool, error) {
 	if s.decisionLogStore == nil || len(jobIDs) == 0 {
 		return []copilotSessionDecisionView{}, false, nil
 	}
-	until := time.Now().UTC().Add(24 * time.Hour).UnixMilli()
-	decisions := make([]copilotSessionDecisionView, 0, min(len(jobIDs), copilotSessionAggregateLimit))
-	var cursor string
+
+	// Bound the decision-log scan to the session's lifetime, with a 7-day
+	// minimum lookback for sessions that started within the last week. A
+	// `Since: 1` (epoch) query otherwise scans every historical decision
+	// for the tenant, which is unnecessary work and a latency tail risk on
+	// tenants with extensive decision history.
+	now := time.Now().UTC()
+	weekAgoMillis := now.Add(-7 * 24 * time.Hour).UnixMilli()
+	sinceMillis := weekAgoMillis
+	if !sessionStartedAt.IsZero() {
+		startedMillis := sessionStartedAt.UTC().UnixMilli()
+		if startedMillis < sinceMillis {
+			sinceMillis = startedMillis
+		}
+	}
+	if sinceMillis < 1 {
+		sinceMillis = 1
+	}
+	var (
+		decisions []copilotSessionDecisionView
+		cursor    string
+		until     = now.Add(24 * time.Hour).UnixMilli()
+	)
 	for {
 		page, err := s.decisionLogStore.QueryDecisions(ctx, model.DecisionQuery{
 			Tenant: tenant,
-			Since:  1,
+			Since:  sinceMillis,
 			Until:  until,
 			Limit:  copilotSessionAggregateLimit,
 			Cursor: cursor,
@@ -232,6 +283,7 @@ func (s *server) collectCopilotSessionDecisions(ctx context.Context, tenant stri
 		if err != nil {
 			return nil, false, err
 		}
+
 		for _, record := range page.Items {
 			if _, ok := jobIDs[record.JobID]; !ok {
 				continue
@@ -241,8 +293,8 @@ func (s *server) collectCopilotSessionDecisions(ctx context.Context, tenant stri
 				return nil, false, err
 			}
 			decisions = append(decisions, view)
-			if len(decisions) > copilotSessionAggregateLimit {
-				return decisions[:copilotSessionAggregateLimit], true, nil
+			if len(decisions) == copilotSessionAggregateLimit {
+				return decisions, true, nil
 			}
 		}
 		if page.NextCursor == "" {
@@ -250,26 +302,6 @@ func (s *server) collectCopilotSessionDecisions(ctx context.Context, tenant stri
 		}
 		cursor = page.NextCursor
 	}
-}
-
-func copilotDecisionViewFromRecord(record model.DecisionLogRecord) (copilotSessionDecisionView, error) {
-	verdict, err := record.Verdict.DecisionLogWireValue()
-	if err != nil {
-		return copilotSessionDecisionView{}, err
-	}
-	return copilotSessionDecisionView{
-		JobID:            record.JobID,
-		Topic:            record.Topic,
-		MatchedRule:      record.RuleID,
-		Verdict:          verdict,
-		Reason:           record.Reason,
-		Constraints:      record.Constraints,
-		ApprovalStatus:   record.ApprovalStatus,
-		ApprovalDecision: record.ApprovalDecision,
-		AgentID:          record.AgentID,
-		PolicyVersion:    record.PolicyVersion,
-		Timestamp:        governanceTimestamp(record.Timestamp),
-	}, nil
 }
 
 func orderedCopilotSessionJobIDs(sess *copilot.CopilotSession) []string {
@@ -296,6 +328,13 @@ func orderedCopilotSessionJobIDs(sess *copilot.CopilotSession) []string {
 
 func copilotJobViewFromMeta(id string, meta map[string]string) copilotSessionJobView {
 	topic := meta["topic"]
+	// Pool is its own metadata key; falling back to topic preserves the
+	// previous behavior for jobs whose meta predates the pool field, but
+	// real pool metadata must take precedence when present.
+	pool := strings.TrimSpace(meta["pool"])
+	if pool == "" {
+		pool = topic
+	}
 	labels := parseCopilotLabels(meta["labels"])
 	status := strings.ToLower(strings.TrimSpace(meta["state"]))
 	if status == "" {
@@ -310,7 +349,7 @@ func copilotJobViewFromMeta(id string, meta map[string]string) copilotSessionJob
 		Type:         topic,
 		Topic:        topic,
 		Status:       status,
-		Pool:         topic,
+		Pool:         pool,
 		Capabilities: capabilities,
 		RiskTags:     parseCopilotStringSlice(meta["risk_tags"]),
 		Metadata:     labels,
@@ -352,18 +391,30 @@ func formatCopilotUnixMicros(raw string) string {
 	return time.UnixMicro(micros).UTC().Format(time.RFC3339Nano)
 }
 
-func jobSetFromViews(jobs []copilotSessionJobView) map[string]struct{} {
-	out := make(map[string]struct{}, len(jobs))
-	for _, job := range jobs {
-		out[job.ID] = struct{}{}
-	}
-	return out
-}
-
 func copilotLogPrincipal(principal string) string {
 	principal = strings.TrimSpace(principal)
 	if len(principal) <= 8 {
 		return principal
 	}
 	return principal[:8]
+}
+
+func copilotDecisionViewFromRecord(record model.DecisionLogRecord) (copilotSessionDecisionView, error) {
+	verdict, err := record.Verdict.DecisionLogWireValue()
+	if err != nil {
+		return copilotSessionDecisionView{}, err
+	}
+	return copilotSessionDecisionView{
+		JobID:            record.JobID,
+		Topic:            record.Topic,
+		MatchedRule:      record.RuleID,
+		Verdict:          verdict,
+		Reason:           record.Reason,
+		Constraints:      record.Constraints,
+		ApprovalStatus:   record.ApprovalStatus,
+		ApprovalDecision: record.ApprovalDecision,
+		AgentID:          record.AgentID,
+		PolicyVersion:    record.PolicyVersion,
+		Timestamp:        governanceTimestamp(record.Timestamp),
+	}, nil
 }

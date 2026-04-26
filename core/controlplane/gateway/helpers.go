@@ -1297,6 +1297,27 @@ func (s *server) requireFeatureEntitlement(w http.ResponseWriter, feature, messa
 	return false
 }
 
+// hasPermissionSilent reports whether the request's authenticated role holds
+// the named permission, without writing any HTTP response. Use this when a
+// handler is already authorized for its primary permission but needs to gate
+// an additional sub-resource (e.g. include governance decisions inside a
+// session detail response only when the caller also has governance.read).
+//
+// When RBAC is not entitled or the permission checker is unavailable, the
+// basic role mapping is in force; admin/operator/viewer all share the same
+// {jobs,governance,...}.read alignment in basicRolePermissions, so callers
+// authorized at the primary permission are implicitly authorized for the
+// secondary one. Returning true in that case preserves existing behavior.
+func (s *server) hasPermissionSilent(r *http.Request, permission string) bool {
+	if s == nil || s.auth == nil || s.permChecker == nil {
+		return true
+	}
+	if !auth.RBACEntitled(s.currentEntitlements()) {
+		return true
+	}
+	return s.permChecker.RequirePermission(r, permission) == nil
+}
+
 // requireStoreAndPermissionOrRole combines nil-store checks with
 // requirePermissionOrRole.
 func (s *server) requireStoreAndPermissionOrRole(w http.ResponseWriter, r *http.Request, permission string, legacyRoles []string, stores ...any) bool {

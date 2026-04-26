@@ -2,7 +2,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import { ApiError } from "@/api/client";
-import type { CopilotSessionDetailResponse, GovernanceDecision, Job } from "@/api/types";
+import type {
+  CopilotSessionDecision,
+  CopilotSessionDetailResponse,
+  CopilotSessionJob,
+} from "@/api/types";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge, type BadgeVariant } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -100,6 +104,7 @@ export default function CopilotSessionPage() {
   const messages = data?.session.messages ?? [];
   const decisions = data?.decisions ?? [];
   const jobs = data?.jobs ?? [];
+  const knownJobIds = new Set(jobs.map((job) => job.id));
 
   return (
     <motion.div
@@ -128,8 +133,9 @@ export default function CopilotSessionPage() {
               Backend pending
             </p>
             <p className="text-sm text-foreground">
-              Copilot session backend is being wired up — only linked jobs are
-              available for now.
+              Copilot session details are not available yet. Linked jobs and
+              governance decisions will appear once the backend store is
+              wired up.
             </p>
           </div>
           <LinkedJobsTable jobs={jobs} navigate={navigate} />
@@ -150,7 +156,7 @@ export default function CopilotSessionPage() {
           )}
 
           <div data-testid="copilot-session-timeline" className="space-y-6">
-            <MessageTimeline messages={messages} />
+            <MessageTimeline messages={messages} knownJobIds={knownJobIds} />
             <GovernanceDecisionsPanel decisions={decisions} />
             <LinkedJobsTable jobs={jobs} navigate={navigate} />
           </div>
@@ -160,7 +166,13 @@ export default function CopilotSessionPage() {
   );
 }
 
-function MessageTimeline({ messages }: { messages: CopilotSessionDetailResponse["session"]["messages"] }) {
+function MessageTimeline({
+  messages,
+  knownJobIds,
+}: {
+  messages: CopilotSessionDetailResponse["session"]["messages"];
+  knownJobIds: Set<string>;
+}) {
   return (
     <section className="instrument-card space-y-4">
       <div>
@@ -197,9 +209,21 @@ function MessageTimeline({ messages }: { messages: CopilotSessionDetailResponse[
               </p>
               {message.jobIds && message.jobIds.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
+                  {/*
+                   * Render every job id the message references. The API
+                   * exposes message.jobIds independently of the enriched
+                   * jobs array (which can be capped by
+                   * copilotSessionAggregateLimit) and `/jobs/:jobId` only
+                   * needs the id, so a chip remains useful even when the
+                   * enriched view was truncated. Use knownJobIds purely
+                   * for styling so users can distinguish jobs whose
+                   * metadata loaded from those that did not.
+                   */}
                   {message.jobIds.map((jobId) => (
                     <Link key={jobId} to={`/jobs/${jobId}`} className="inline-flex">
-                      <StatusBadge variant="info">{jobId}</StatusBadge>
+                      <StatusBadge variant={knownJobIds.has(jobId) ? "info" : "muted"}>
+                        {jobId}
+                      </StatusBadge>
                     </Link>
                   ))}
                 </div>
@@ -212,7 +236,7 @@ function MessageTimeline({ messages }: { messages: CopilotSessionDetailResponse[
   );
 }
 
-function GovernanceDecisionsPanel({ decisions }: { decisions: GovernanceDecision[] }) {
+function GovernanceDecisionsPanel({ decisions }: { decisions: CopilotSessionDecision[] }) {
   return (
     <section className="instrument-card space-y-4">
       <div>
@@ -270,7 +294,7 @@ function DecisionField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function LinkedJobsTable({ jobs, navigate }: { jobs: Job[]; navigate: ReturnType<typeof useNavigate> }) {
+function LinkedJobsTable({ jobs, navigate }: { jobs: CopilotSessionJob[]; navigate: ReturnType<typeof useNavigate> }) {
   return (
     <section className="space-y-3">
       <div>
