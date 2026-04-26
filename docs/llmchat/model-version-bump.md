@@ -64,12 +64,40 @@ the three `EVAL_*` values above when staging uses a non-default tenant
 or role. Without these headers, the direct service fails closed with
 `authentication_required` before any case reaches the model.
 
+The direct service also enforces the `llm_chat_assistant` license
+entitlement before it parses the chat message. Local or workflow evals
+must start `cordum-llm-chat` with an Enterprise/eval license via
+`CORDUM_LICENSE_TOKEN` and `CORDUM_LICENSE_PUBLIC_KEY`; otherwise
+`POST /api/v1/chat` fails with HTTP 402 `feature_unavailable`. The
+GitHub workflow exports those runtime variables from dedicated
+repository secrets named `CORDUM_LLMCHAT_EVAL_LICENSE_TOKEN` and
+`CORDUM_LLMCHAT_EVAL_LICENSE_PUBLIC_KEY`, then smoke-posts `{}` to
+`/api/v1/chat` and expects `400 empty_message` to prove the entitlement
+gate is open without invoking the model.
+
 The harness writes:
 
 - `tests/eval/results/<run_id>/cases/<case_name>.json` per case
 - `tests/eval/results/<run_id>/summary.json` aggregate
 - `tests/eval/results/<run_id>/diff.md` baseline diff (when
   `EVAL_BASELINE` is set)
+
+### GitHub workflow prerequisites
+
+`.github/workflows/llmchat-eval.yml` is manual-only in v1. The workflow
+runs on `ubuntu-latest`, which cannot host the GPU-backed
+`qwen-inference` compose profile, so the `workflow_dispatch` input
+`vllm_url` is required and must point at a reachable staging/external
+OpenAI-compatible vLLM endpoint. Re-introduce a nightly schedule only
+after v2 provisions either a self-hosted GPU runner or a durable
+staging-vLLM secret.
+
+Required repository secrets for a successful manual run:
+
+- `CORDUM_LLMCHAT_EVAL_LICENSE_TOKEN` — an eval/Enterprise license with
+  `llm_chat_assistant` enabled.
+- `CORDUM_LLMCHAT_EVAL_LICENSE_PUBLIC_KEY` — the public key that
+  verifies that eval license.
 
 ### 3. Review the diff
 

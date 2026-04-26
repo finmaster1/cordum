@@ -135,7 +135,11 @@ The 6 directories under `tests/eval/cases/` map to behavioral domains:
 
    The identity values become the trusted `X-Cordum-*` headers expected
    by the direct llm-chat service. Override them for tenant-specific
-   staging runs.
+   staging runs. The service itself must also be started with
+   `CORDUM_LICENSE_TOKEN` and `CORDUM_LICENSE_PUBLIC_KEY` for an
+   eval/Enterprise license that enables `llm_chat_assistant`; otherwise
+   every chat case fails fast with HTTP 402 `feature_unavailable`
+   before the harness reaches the model.
 
 ## When NOT to add a case
 

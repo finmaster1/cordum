@@ -7,10 +7,11 @@ name: llmchat-eval
 # comment when triggered manually with a PR number.
 #
 # Eval is expensive (each case round-trips a real LLM call), so this
-# workflow is NOT triggered on every PR push. Manual via
-# `workflow_dispatch` is the default; an optional nightly schedule
-# catches drift from upstream-vLLM bumps even when the model is
-# unchanged.
+# workflow is NOT triggered on every PR push. For v1 it is manual-only:
+# GitHub-hosted runners do not have the GPU required to run the local
+# Qwen FP8 vLLM profile, so callers must provide a staging/external
+# OpenAI-compatible vLLM URL. Nightly drift-watching moves to v2 after a
+# self-hosted GPU runner or durable staging-vLLM endpoint is available.
 #
 # Branch-protection promotion to required check is OUT OF SCOPE for
 # v1 (per task rail #1: harness + baseline only); promote after a
@@ -24,16 +25,11 @@ on:
         required: false
         default: 'qwen3_coder_30b_fp8'
       vllm_url:
-        description: 'OpenAI-compat URL of the vLLM under test'
-        required: false
-        default: 'http://127.0.0.1:8000/v1'
+        description: 'Required OpenAI-compat URL of the staging/external vLLM under test'
+        required: true
       pr_number:
         description: 'PR number to post the diff comment on (optional)'
         required: false
-  schedule:
-    # Nightly: 08:00 UTC. Catches regressions from upstream-vLLM
-    # bumps even when the model identifier is unchanged.
-    - cron: '0 8 * * *'
 
 permissions:
   contents: read
@@ -76,6 +72,24 @@ jobs:
           ./bin/cordumctl generate-certs --dir ./certs
           chmod -R a+rX ./certs
 
+      - name: Configure eval license entitlement
+        env:
+          EVAL_LICENSE_TOKEN: ${{ secrets.CORDUM_LLMCHAT_EVAL_LICENSE_TOKEN }}
+          EVAL_LICENSE_PUBLIC_KEY: ${{ secrets.CORDUM_LLMCHAT_EVAL_LICENSE_PUBLIC_KEY }}
+        run: |
+          if [ -z "${EVAL_LICENSE_TOKEN}" ] || [ -z "${EVAL_LICENSE_PUBLIC_KEY}" ]; then
+            echo "::error title=Missing eval license secrets::Set repository secrets CORDUM_LLMCHAT_EVAL_LICENSE_TOKEN and CORDUM_LLMCHAT_EVAL_LICENSE_PUBLIC_KEY to an eval Enterprise license with llm_chat_assistant enabled."
+            exit 1
+          fi
+          {
+            echo "CORDUM_LICENSE_TOKEN<<__CORDUM_LLMCHAT_EVAL_LICENSE_TOKEN__"
+            printf '%s\n' "${EVAL_LICENSE_TOKEN}"
+            echo "__CORDUM_LLMCHAT_EVAL_LICENSE_TOKEN__"
+            echo "CORDUM_LICENSE_PUBLIC_KEY<<__CORDUM_LLMCHAT_EVAL_LICENSE_PUBLIC_KEY__"
+            printf '%s\n' "${EVAL_LICENSE_PUBLIC_KEY}"
+            echo "__CORDUM_LLMCHAT_EVAL_LICENSE_PUBLIC_KEY__"
+          } >> "$GITHUB_ENV"
+
       - name: Bring up the compose stack (llmchat profile)
         env:
           CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
@@ -86,16 +100,22 @@ jobs:
           # supplies an external vLLM URL, still start cordum-llm-chat and
           # pass that URL through LLMCHAT_BASE_URL; do not start only the
           # demo profile, because that omits /api/v1/chat entirely.
+          : "${CORDUM_LICENSE_TOKEN:?CORDUM_LICENSE_TOKEN_missing}"
+          : "${CORDUM_LICENSE_PUBLIC_KEY:?CORDUM_LICENSE_PUBLIC_KEY_missing}"
           external_vllm="${{ inputs.vllm_url }}"
-          if [ -n "${external_vllm}" ] && [ "${external_vllm}" != "http://127.0.0.1:8000/v1" ]; then
-            echo "Using external vLLM at ${external_vllm}; starting core stack plus llm-chat with LLMCHAT_BASE_URL override."
-            export LLMCHAT_BASE_URL="${external_vllm}"
-            docker compose --profile demo up -d --build
-            docker compose --profile llmchat up -d --build --no-deps llm-chat
-          else
-            export LLMCHAT_BASE_URL="http://qwen-inference:8000/v1"
-            docker compose --profile llmchat up -d --build
+          if [ -z "${external_vllm}" ]; then
+            echo "::error title=Missing vLLM URL::workflow_dispatch input vllm_url is required for the v1 eval workflow."
+            exit 1
           fi
+          if [ "${external_vllm}" = "http://127.0.0.1:8000/v1" ]; then
+            echo "::error title=Local GPU vLLM unavailable::This v1 workflow runs on ubuntu-latest and cannot start the Qwen FP8 GPU compose profile. Provide a staging/external vLLM URL or move this workflow to a self-hosted GPU runner in v2."
+            exit 1
+          fi
+          echo "Using external vLLM at ${external_vllm}; starting core stack plus llm-chat with LLMCHAT_BASE_URL override."
+          export LLMCHAT_BASE_URL="${external_vllm}"
+          docker compose --profile demo up -d --build
+          docker compose --profile llmchat up -d --build --no-deps llm-chat
+          docker compose ps
 
       - name: Wait for gateway /api/v1/status
         run: |
@@ -125,6 +145,40 @@ jobs:
             sleep 2
           done
 
+      - name: Smoke-test llm-chat entitlement gate
+        env:
+          CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
+        run: |
+          body="$(mktemp)"
+          http_code="$(curl -sS -o "${body}" -w '%{http_code}' \
+            -X POST http://127.0.0.1:8090/api/v1/chat \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${CORDUM_API_KEY}" \
+            -H "X-Cordum-Principal: eval-runner" \
+            -H "X-Cordum-Tenant: default" \
+            -H "X-Cordum-Role: operator" \
+            --data '{}')"
+          echo "llm-chat entitlement smoke POST returned HTTP ${http_code}"
+          if [ "${http_code}" = "402" ]; then
+            if jq -e '.code == "feature_unavailable"' "${body}" >/dev/null; then
+              echo "::error title=LLM chat entitlement closed::Expected eval license to enable llm_chat_assistant; /api/v1/chat returned 402 feature_unavailable before the eval could reach the model."
+            else
+              echo "::error title=LLM chat entitlement closed::Expected eval license to enable llm_chat_assistant; /api/v1/chat returned 402 before the eval could reach the model."
+            fi
+            cat "${body}"
+            exit 1
+          fi
+          if [ "${http_code}" != "400" ]; then
+            echo "::error title=Unexpected llm-chat smoke status::Expected 400 empty_message after entitlement/auth checks, got ${http_code}."
+            cat "${body}"
+            exit 1
+          fi
+          if ! jq -e '.code == "empty_message"' "${body}" >/dev/null; then
+            echo "::error title=Unexpected llm-chat smoke body::Expected JSON error code empty_message, proving the request passed the entitlement gate without invoking the model."
+            cat "${body}"
+            exit 1
+          fi
+
       - name: Install demo-mock-bank pack
         env:
           CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
@@ -135,7 +189,7 @@ jobs:
       - name: Run llm-chat tool-call eval
         env:
           EVAL_LLMCHAT_URL: http://127.0.0.1:8090
-          EVAL_VLLM_URL: ${{ inputs.vllm_url || 'http://127.0.0.1:8000/v1' }}
+          EVAL_VLLM_URL: ${{ inputs.vllm_url }}
           EVAL_API_KEY: ${{ env.CORDUM_API_KEY }}
           EVAL_PRINCIPAL: eval-runner
           EVAL_TENANT: default
