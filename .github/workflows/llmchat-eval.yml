@@ -47,7 +47,7 @@ jobs:
   llmchat-eval:
     name: llmchat-eval
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # 30 cases × ~60s budget = 30min worst-case + stack startup
+    timeout-minutes: 90   # 30 cases x ~60s budget = 30min worst-case + stack startup
 
     steps:
       - name: Checkout
@@ -81,21 +81,23 @@ jobs:
           CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
           REDIS_PASSWORD: ${{ env.REDIS_PASSWORD }}
         run: |
-          # The llmchat profile brings up qwen-inference + cordum-llm-chat
-          # alongside the core stack. NOTE: the qwen-inference container
-          # requires a GPU runner. On GHA's standard ubuntu-latest there
-          # is no GPU; this workflow expects a self-hosted runner labeled
-          # `gpu` for nightly + manual-with-vllm runs. For CPU-only smoke
-          # we use the demo profile + EVAL_VLLM_URL pointing at a
-          # caller-provided staging endpoint.
-          if [ -n "${{ inputs.vllm_url }}" ] && [ "${{ inputs.vllm_url }}" != "http://127.0.0.1:8000/v1" ]; then
-            echo "Using external vLLM at ${{ inputs.vllm_url }}; bringing up demo profile only."
+          # The eval harness targets the cordum-llm-chat service directly
+          # (http://127.0.0.1:8090), not the API gateway. When a caller
+          # supplies an external vLLM URL, still start cordum-llm-chat and
+          # pass that URL through LLMCHAT_BASE_URL; do not start only the
+          # demo profile, because that omits /api/v1/chat entirely.
+          external_vllm="${{ inputs.vllm_url }}"
+          if [ -n "${external_vllm}" ] && [ "${external_vllm}" != "http://127.0.0.1:8000/v1" ]; then
+            echo "Using external vLLM at ${external_vllm}; starting core stack plus llm-chat with LLMCHAT_BASE_URL override."
+            export LLMCHAT_BASE_URL="${external_vllm}"
             docker compose --profile demo up -d --build
+            docker compose --profile llmchat up -d --build --no-deps llm-chat
           else
+            export LLMCHAT_BASE_URL="http://qwen-inference:8000/v1"
             docker compose --profile llmchat up -d --build
           fi
 
-      - name: Wait for /api/v1/status
+      - name: Wait for gateway /api/v1/status
         run: |
           attempts=0
           until curl -ksf --connect-timeout 2 --max-time 5 \
@@ -104,6 +106,20 @@ jobs:
             attempts=$((attempts + 1))
             if [ "$attempts" -ge 30 ]; then
               echo "gateway /api/v1/status did not return 200 within 60s"
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Wait for cordum-llm-chat /readyz
+        run: |
+          attempts=0
+          until curl -sf --connect-timeout 2 --max-time 5 \
+            http://127.0.0.1:8090/readyz >/dev/null; do
+            attempts=$((attempts + 1))
+            if [ "$attempts" -ge 90 ]; then
+              echo "cordum-llm-chat /readyz did not return 200 within 180s"
+              docker compose logs --no-color llm-chat qwen-inference || true
               exit 1
             fi
             sleep 2
@@ -118,7 +134,7 @@ jobs:
 
       - name: Run llm-chat tool-call eval
         env:
-          EVAL_LLMCHAT_URL: https://127.0.0.1:8081
+          EVAL_LLMCHAT_URL: http://127.0.0.1:8090
           EVAL_VLLM_URL: ${{ inputs.vllm_url || 'http://127.0.0.1:8000/v1' }}
           EVAL_API_KEY: ${{ env.CORDUM_API_KEY }}
           EVAL_MODEL_NAME: ${{ inputs.model_name || 'qwen3_coder_30b_fp8' }}
@@ -144,24 +160,24 @@ jobs:
 
       - name: Prepare PR comment body
         id: prepare_body
-        if: always() && inputs.pr_number != '' && steps.results.outputs.dir != ''
+        if: always() && inputs.pr_number != ''
         run: |
           dir="${{ steps.results.outputs.dir }}"
-          body="${dir}/pr-comment.md"
+          body="$RUNNER_TEMP/llmchat-eval-pr-comment.md"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          if [ -f "${dir}/diff.md" ]; then
+          if [ -n "${dir}" ] && [ -f "${dir}/diff.md" ]; then
             cp "${dir}/diff.md" "${body}"
             printf '\n---\n\n[Run details](%s)\n' "${run_url}" >> "${body}"
-          elif [ -f "${dir}/summary.json" ]; then
+          elif [ -n "${dir}" ] && [ -f "${dir}/summary.json" ]; then
             passed=$(jq -r '.passed_cases' "${dir}/summary.json")
             total=$(jq -r '.total_cases' "${dir}/summary.json")
             model=$(jq -r '.model_name' "${dir}/summary.json")
             {
-              echo "# llm-chat eval — ${model}"
+              echo "# llm-chat eval - ${model}"
               echo
               echo "Passed: ${passed}/${total} cases"
               echo
-              echo "_No baseline diff produced for this run — either \`EVAL_BASELINE\` was unset, or the named baseline file was missing. Use this run's \`summary.json\` as the next captured baseline per docs/llmchat/model-version-bump.md step 4._"
+              echo "_No baseline diff produced for this run - either \`EVAL_BASELINE\` was unset, or the named baseline file was missing. Use this run's \`summary.json\` as the next captured baseline per docs/llmchat/model-version-bump.md step 4._"
               echo
               echo "---"
               echo
@@ -169,9 +185,9 @@ jobs:
             } > "${body}"
           else
             {
-              echo "# llm-chat eval — failed before producing a summary"
+              echo "# llm-chat eval - failed before producing a summary"
               echo
-              echo "The harness did not write \`summary.json\` for this run. See the workflow logs for the failure."
+              echo "The harness did not write \`summary.json\` for this run. This can happen when compose startup, /readyz, pack installation, or the Go test command fails before the harness creates \`tests/eval/results/<run_id>/\`. See the workflow logs for the failure."
               echo
               echo "[Run details](${run_url})"
             } > "${body}"
@@ -190,7 +206,7 @@ jobs:
         if: failure()
         run: |
           mkdir -p /tmp/llmchat-eval-logs
-          for svc in api-gateway scheduler safety-kernel workflow-engine cordum-llm-chat qwen-inference redis nats; do
+          for svc in api-gateway scheduler safety-kernel workflow-engine llm-chat qwen-inference redis nats; do
             docker compose logs --no-color "$svc" > "/tmp/llmchat-eval-logs/${svc}.log" 2>&1 || true
           done
 

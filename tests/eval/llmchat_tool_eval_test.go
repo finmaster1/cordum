@@ -12,7 +12,7 @@
 // thing that runs it; locally a contributor invokes:
 //
 //	EVAL_VLLM_URL=http://127.0.0.1:8000/v1 \
-//	EVAL_LLMCHAT_URL=https://127.0.0.1:8081 \
+//	EVAL_LLMCHAT_URL=http://127.0.0.1:8090 \
 //	EVAL_API_KEY=$(cat .env | grep CORDUM_API_KEY | cut -d= -f2) \
 //	go test -tags=eval -run TestLLMChatToolEval ./tests/eval/...
 //
