@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +147,52 @@ func TestHandleGetCopilotSession_HappyPathAggregatesSessionJobsAndDecisions(t *t
 	}
 	if resp.Truncated {
 		t.Fatalf("Truncated=true want false")
+	}
+}
+
+func TestCollectCopilotSessionDecisionsPaginatesPastUnrelatedTenantDecisions(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.April, 26, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < copilotSessionAggregateLimit; i++ {
+		if err := s.decisionLogStore.AppendDecision(ctx, model.DecisionLogRecord{
+			JobID:     "unrelated-job-" + strconv.Itoa(i),
+			Tenant:    "tenant-a",
+			Topic:     "job.other",
+			AgentID:   "agent-noise",
+			RuleID:    "rule-noise",
+			Verdict:   model.SafetyAllow,
+			Reason:    "noise",
+			Timestamp: now.Add(time.Duration(i+2) * time.Millisecond).UnixMilli(),
+		}); err != nil {
+			t.Fatalf("AppendDecision(unrelated %d) error = %v", i, err)
+		}
+	}
+	if err := s.decisionLogStore.AppendDecision(ctx, model.DecisionLogRecord{
+		JobID:     "session-job",
+		Tenant:    "tenant-a",
+		Topic:     "job.deploy",
+		AgentID:   "agent-session",
+		RuleID:    "rule-session",
+		Verdict:   model.SafetyDeny,
+		Reason:    "session decision",
+		Timestamp: now.Add(time.Millisecond).UnixMilli(),
+	}); err != nil {
+		t.Fatalf("AppendDecision(session) error = %v", err)
+	}
+
+	decisions, truncated, err := s.collectCopilotSessionDecisions(ctx, "tenant-a", map[string]struct{}{"session-job": {}})
+	if err != nil {
+		t.Fatalf("collectCopilotSessionDecisions() error = %v", err)
+	}
+	if truncated {
+		t.Fatalf("truncated=true want false after exhausting unrelated first page")
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("len(decisions)=%d want 1: %#v", len(decisions), decisions)
+	}
+	if decisions[0].JobID != "session-job" || decisions[0].MatchedRule != "rule-session" || decisions[0].Verdict != "deny" {
+		t.Fatalf("unexpected decision: %#v", decisions[0])
 	}
 }
 
