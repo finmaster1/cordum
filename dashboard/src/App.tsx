@@ -59,6 +59,7 @@ const SettingsLicensePage = lazy(() => import("./pages/settings/LicensePage"));
 const SettingsSSOPage = lazy(() => import("./pages/settings/SettingsSSOPage"));
 const SettingsSCIMPage = lazy(() => import("./pages/settings/SettingsSCIMPage"));
 const SettingsAuditExportPage = lazy(() => import("./pages/settings/SettingsAuditExportPage"));
+const ChatAssistantSessionsPage = lazy(() => import("./pages/settings/ChatAssistantSessionsPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const SettingsHubPage = lazy(() => import("./pages/SettingsHubPage"));
 const GovernPolicyOverviewPage = lazy(() => import("./pages/govern/PolicyOverviewPage"));
@@ -184,6 +185,7 @@ function ProtectedRoutes() {
           <Route path="/settings/sso" element={<SettingsSSOPage />} />
           <Route path="/settings/scim" element={<SettingsSCIMPage />} />
           <Route path="/settings/audit-export" element={<SettingsAuditExportPage />} />
+          <Route path="/settings/chat-sessions" element={<ChatAssistantSessionsPage />} />
           <Route path="/settings/license" element={<SettingsLicensePage />} />
 
           <Route path="*" element={<NotFoundPage />} />

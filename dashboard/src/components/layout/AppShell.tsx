@@ -20,6 +20,8 @@ import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcuts";
 import { TierBadge } from "@/components/TierBadge";
 import { TelemetryConsentBanner } from "@/components/TelemetryConsentBanner";
+import { ChatHeaderButton } from "@/components/chat-assistant/ChatHeaderButton";
+import { ChatWidget } from "@/components/chat-assistant/ChatWidget";
 import {
   LayoutGrid,
   ListChecks,
@@ -216,6 +218,9 @@ export function AppShell({ children }: AppShellProps) {
       </a>
       <CommandPalette />
       <KeyboardShortcutsDialog />
+      {/* The chat-assistant panel is mounted at the shell level so it
+          persists across route navigations like Gmail's chat pane. */}
+      <ChatWidget />
 
       {/* Mobile hamburger */}
       <button type="button"
@@ -550,6 +555,8 @@ export function AppShell({ children }: AppShellProps) {
               </button>
             )}
             <ConnectionIndicator />
+
+            <ChatHeaderButton />
 
             {/* Pending approvals badge in top bar */}
             {pendingApprovals > 0 && (

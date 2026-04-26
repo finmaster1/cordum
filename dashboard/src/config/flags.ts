@@ -33,4 +33,9 @@ export const FEATURE_FLAGS = {
   // is proven. Opt-in explicitly for previews.
   delegationDashboard:
     import.meta.env.VITE_DELEGATION_DASHBOARD === "true",
+  // LLM chat assistant widget is gated on the Enterprise license entitlement
+  // and the cordum-llm-chat service health probe; this flag is the master kill
+  // switch so operators can dark-launch independently of license state.
+  llmChatAssistant:
+    import.meta.env.VITE_LLM_CHAT_ASSISTANT === "true",
 } as const;
