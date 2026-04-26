@@ -128,5 +128,13 @@ if [ "${LLMCHAT_SECURITY_REQUIRE_LIVE:-0}" = "1" ] && [ "${live_missing}" -gt 0 
   exit 1
 fi
 
+# In default (non-REQUIRE_LIVE) mode, surface partial-coverage explicitly so a
+# green PASS is not mistaken for full DoD coverage. The previous behavior printed
+# only "OK: pass=N" which let live_missing markers go unnoticed in CI/PR review.
+if [ "${live_missing}" -gt 0 ]; then
+  echo "[llmchat_run_all] PARTIAL: pass=${pass} skip=${skip} fail=${fail}, live_missing=${live_missing} (set LLMCHAT_SECURITY_REQUIRE_LIVE=1 on a GPU/clean-stack runner to gate-check live probes); results=${RESULTS_JSON}"
+  exit 0
+fi
+
 echo "[llmchat_run_all] OK: pass=${pass} skip=${skip} fail=${fail}; results=${RESULTS_JSON}"
 exit 0

@@ -70,6 +70,19 @@ func liveHTTPClient() *http.Client {
 	}
 }
 
+// liveMCPHTTPClient returns an http.Client suitable for the MCPClient.
+// Same TLS-skip as liveHTTPClient (the demo profile ships a self-signed
+// CA), but with NO client-level Timeout so the long-lived SSE response
+// to /mcp/sse is not torn down after 30s. The MCPClient drives both
+// per-POST and SSE-loop deadlines via context internally.
+func liveMCPHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // demo cert
+		},
+	}
+}
+
 // pollHealthy polls path until 200 OK or deadline. Returns the body.
 func pollHealthy(t *testing.T, client *http.Client, apiBase, apiKey, path string, deadline time.Duration) []byte {
 	t.Helper()
@@ -206,12 +219,17 @@ func TestLiveStack_CaseA_PreapprovedSubmit(t *testing.T) {
 	// Confirm the mock-bank pack is installed; skip with remediation
 	// pointer otherwise (the workflow runs `cordumctl pack install` in
 	// the demo profile, but a local invocation may not have it).
-	resp, err := client.Get(fmt.Sprintf("%s/api/v1/packs", apiBase))
+	packReq, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/v1/packs", apiBase), nil)
+	packReq.Header.Set("X-API-Key", apiKey)
+	resp, err := client.Do(packReq)
 	if err != nil {
 		t.Fatalf("list packs: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
+	// /api/v1/packs requires auth; without X-API-Key the gateway returns
+	// 401 with an empty body — the same shape as "no packs installed",
+	// so the test would silently skip even after a successful install.
 	if !strings.Contains(string(body), "demo-mock-bank") {
 		t.Skipf("demo-mock-bank pack not installed; remediation: cordumctl pack install demo/mock-bank/pack")
 	}
@@ -226,6 +244,7 @@ func TestLiveStack_CaseA_PreapprovedSubmit(t *testing.T) {
 	mcpClient, err := NewMCPClient(MCPClientConfig{
 		BaseURL: apiBase, APIKey: apiKey, TenantID: tenant,
 		AgentID: "chat-assistant", ClientName: "llmchat-integration-test", ClientVersion: "0.0.0",
+		HTTPClient: liveMCPHTTPClient(),
 	})
 	if err != nil {
 		t.Fatalf("NewMCPClient: %v", err)
@@ -272,12 +291,17 @@ func TestLiveStack_CaseB_ApprovalGatedResume(t *testing.T) {
 
 	pollHealthy(t, client, apiBase, apiKey, "/api/v1/status", 60*time.Second)
 
-	resp, err := client.Get(fmt.Sprintf("%s/api/v1/packs", apiBase))
+	packReq, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/v1/packs", apiBase), nil)
+	packReq.Header.Set("X-API-Key", apiKey)
+	resp, err := client.Do(packReq)
 	if err != nil {
 		t.Fatalf("list packs: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
+	// /api/v1/packs requires auth; without X-API-Key the gateway returns
+	// 401 with an empty body — the same shape as "no packs installed",
+	// so the test would silently skip even after a successful install.
 	if !strings.Contains(string(body), "demo-mock-bank") {
 		t.Skipf("demo-mock-bank pack not installed; remediation: cordumctl pack install demo/mock-bank/pack")
 	}
@@ -288,6 +312,7 @@ func TestLiveStack_CaseB_ApprovalGatedResume(t *testing.T) {
 	mcpClient, err := NewMCPClient(MCPClientConfig{
 		BaseURL: apiBase, APIKey: apiKey, TenantID: tenant,
 		AgentID: "chat-assistant", ClientName: "llmchat-integration-test", ClientVersion: "0.0.0",
+		HTTPClient: liveMCPHTTPClient(),
 	})
 	if err != nil {
 		t.Fatalf("NewMCPClient: %v", err)
