@@ -92,11 +92,18 @@ func pollHealthy(t *testing.T, client *http.Client, apiBase, apiKey, path string
 	return nil
 }
 
+// auditVerifyResponse mirrors the wire shape of audit.VerifyResult: the
+// real handler returns `status` (a VerifyStatus enum — "ok" / "compromised"
+// / "partial") and `total_events`, NOT a bare `valid` bool or `event_count`.
 type auditVerifyResponse struct {
-	Status     string `json:"status"`
-	Valid      bool   `json:"valid"`
-	EventCount int    `json:"event_count"`
+	Status      string `json:"status"`
+	TotalEvents int    `json:"total_events"`
 }
+
+// Valid reports whether the chain verified cleanly. Derived from Status
+// so callers can read it like a boolean predicate without the test having
+// to know the wire enum.
+func (r auditVerifyResponse) Valid() bool { return r.Status == "ok" }
 
 // fetchAuditVerify hits GET /api/v1/audit/verify and parses the
 // response. Used to assert chain integrity + event count growth.
@@ -143,7 +150,7 @@ func TestLiveStack_MCPRoundtripEmitsAuditEvent(t *testing.T) {
 
 	// Snapshot baseline audit count.
 	before := fetchAuditVerify(t, client, apiBase, apiKey, tenant)
-	if !before.Valid {
+	if !before.Valid() {
 		t.Fatalf("baseline audit chain invalid: status=%s", before.Status)
 	}
 
@@ -174,10 +181,10 @@ func TestLiveStack_MCPRoundtripEmitsAuditEvent(t *testing.T) {
 	time.Sleep(auditFlushDelay)
 
 	after := fetchAuditVerify(t, client, apiBase, apiKey, tenant)
-	if !after.Valid {
+	if !after.Valid() {
 		t.Fatalf("post-call audit chain invalid: status=%s", after.Status)
 	}
-	if grew := after.EventCount - before.EventCount; grew < 1 {
+	if grew := after.TotalEvents - before.TotalEvents; grew < 1 {
 		t.Errorf("audit event_count grew by %d, want >=1 (mcp.tool_invocation expected)", grew)
 	}
 }
@@ -235,12 +242,12 @@ func TestLiveStack_CaseA_PreapprovedSubmit(t *testing.T) {
 
 	time.Sleep(auditFlushDelay)
 	after := fetchAuditVerify(t, client, apiBase, apiKey, tenant)
-	if !after.Valid {
+	if !after.Valid() {
 		t.Fatalf("audit chain invalid after submit: status=%s", after.Status)
 	}
-	if after.EventCount <= before.EventCount {
+	if after.TotalEvents <= before.TotalEvents {
 		t.Errorf("audit event_count did not grow after cordum_submit_job (before=%d after=%d)",
-			before.EventCount, after.EventCount)
+			before.TotalEvents, after.TotalEvents)
 	}
 }
 
@@ -387,11 +394,11 @@ func TestLiveStack_CaseB_ApprovalGatedResume(t *testing.T) {
 
 	time.Sleep(auditFlushDelay)
 	after := fetchAuditVerify(t, client, apiBase, apiKey, tenant)
-	if !after.Valid {
+	if !after.Valid() {
 		t.Fatalf("audit chain invalid after approval: status=%s", after.Status)
 	}
-	if after.EventCount <= before.EventCount {
+	if after.TotalEvents <= before.TotalEvents {
 		t.Errorf("audit event_count did not grow during approval flow (before=%d after=%d)",
-			before.EventCount, after.EventCount)
+			before.TotalEvents, after.TotalEvents)
 	}
 }
