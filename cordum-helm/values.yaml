@@ -629,7 +629,7 @@ llmChat:
 qwenInference:
   enabled: true
   replicas: 1
-  image: "vllm/vllm-openai:latest"
+  image: "vllm/vllm-openai:v0.16.0"
   # Tier 1 default. For Tier 2 hardware (Ada/Blackwell consumer cards
   # without native FP8), override via --set qwenInference.model=…AWQ.
   model: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"

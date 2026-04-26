@@ -306,7 +306,7 @@ services:
 
   qwen-inference:
     profiles: [llmchat]
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.16.0
     restart: unless-stopped
     command:
       - --model
@@ -321,9 +321,11 @@ services:
       - --kv-cache-dtype
       - fp8
       - --enable-prefix-caching
-      # Do not log prompts / request bodies from chat traffic. Synthetic
-      # security probes grep vLLM logs for JWT/API-key shapes and must find
-      # zero hits.
+      # Do not log prompts / request bodies from chat traffic. vLLM is pinned
+      # to v0.16.0 because that tag still accepts this deprecated-but-supported
+      # request-log suppression flag; later releases removed it.
+      # Synthetic security probes grep vLLM logs for JWT/API-key shapes and
+      # must find zero hits.
       - --disable-log-requests
       - --gpu-memory-utilization
       - "0.9"
