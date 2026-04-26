@@ -1,12 +1,21 @@
 import { useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { X, AlertCircle } from "lucide-react";
+import { X, AlertCircle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChatAssistantStore } from "@/state/chatAssistant";
 import { useChatAssistantSession } from "@/hooks/useChatAssistantSession";
 import { useChatAssistantAvailability } from "@/hooks/useChatAssistantAvailability";
 import { ChatStream } from "./ChatStream";
 import { ChatComposer } from "./ChatComposer";
+
+// OWASP LLM09 — operator-overreliance affordance. The disclaimer is
+// rendered persistently below the composer so it stays in view even
+// when the transcript scrolls. Copy is intentionally specific: it names
+// the two real defense layers (approval gate + audit chain) so an
+// operator cannot reasonably claim they thought the assistant could
+// act unilaterally.
+const ADVISORY_DISCLAIMER =
+  "Assistant suggestions are advisory. Cordum's approval gate and audit chain are what execute and record actions — verify args before approving any state-changing tool call.";
 
 export function ChatWidget() {
   const availability = useChatAssistantAvailability();
@@ -96,6 +105,14 @@ export function ChatWidget() {
             disabled={composerDisabled}
             placeholder={composerDisabled ? "Connecting..." : undefined}
           />
+          <div
+            role="note"
+            aria-label="advisory disclaimer"
+            className="flex items-start gap-2 border-t border-border/50 bg-surface-1/50 px-3 py-2 text-[11px] text-muted-foreground"
+          >
+            <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+            <span>{ADVISORY_DISCLAIMER}</span>
+          </div>
         </motion.aside>
       )}
     </AnimatePresence>
