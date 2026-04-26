@@ -16,7 +16,7 @@ import (
 
 // recordingEmitter captures every SIEMEvent appended through the
 // AuditEmitter interface. Test fixtures use it to assert the
-// `cap.agent_registered` event fires on first-boot register-success
+// `chat.bootstrap_registered` event fires on first-boot register-success
 // and NOT on lookup-hit reuse.
 type recordingEmitter struct {
 	mu        sync.Mutex
@@ -318,7 +318,7 @@ func TestBootstrap_DivergentScopeRejected(t *testing.T) {
 }
 
 // TestBootstrap_AuditEventOnFirstBootRegister verifies that
-// `cap.agent_registered` SIEMEvent is appended to the audit chain
+// `chat.bootstrap_registered` SIEMEvent is appended to the audit chain
 // when the chat-assistant identity is created on first boot. QA's
 // DoD requires the event presence be asserted — this test is the
 // canonical check.
@@ -347,8 +347,8 @@ func TestBootstrap_AuditEventOnFirstBootRegister(t *testing.T) {
 		t.Fatalf("expected 1 audit event, got %d", len(events))
 	}
 	ev := events[0]
-	if ev.Action != SIEMActionChatBootstrapRegistered {
-		t.Errorf("Action = %q, want %q", ev.Action, SIEMActionChatBootstrapRegistered)
+	if ev.Action != audit.SIEMActionChatBootstrapRegistered {
+		t.Errorf("Action = %q, want %q", ev.Action, audit.SIEMActionChatBootstrapRegistered)
 	}
 	if ev.AgentID != id {
 		t.Errorf("AgentID = %q, want %q", ev.AgentID, id)
@@ -387,9 +387,9 @@ func TestBootstrap_AuditEmitFailureFailsBoot(t *testing.T) {
 		b := NewBootstrapper(f, "tenant-a", emitter)
 		_, err := b.Boot(context.Background())
 		if err == nil {
-			t.Fatal("Boot should fail when audit emitter cannot record cap.agent_registered")
+			t.Fatal("Boot should fail when audit emitter cannot record chat.bootstrap_registered")
 		}
-		if !strings.Contains(err.Error(), "cap.agent_registered audit emit failed") {
+		if !strings.Contains(err.Error(), "chat.bootstrap_registered audit emit failed") {
 			t.Errorf("error %v should explain the failed audit emission", err)
 		}
 	})
@@ -422,7 +422,7 @@ func TestBootstrap_AuditEmitFailureFailsBoot(t *testing.T) {
 }
 
 // TestBootstrap_AuditEventVisibleViaConcreteChainer verifies the
-// `cap.agent_registered` event is appended to the canonical Redis-
+// `chat.bootstrap_registered` event is appended to the canonical Redis-
 // backed audit chain (not just an in-memory recorder). QA's DoD
 // requires the event be assertable via the concrete audit pipeline
 // — the equivalent of the `/api/v1/audit/events` query path. This
@@ -475,8 +475,8 @@ func TestBootstrap_AuditEventVisibleViaConcreteChainer(t *testing.T) {
 	if err := json.Unmarshal([]byte(rawEvent), &ev); err != nil {
 		t.Fatalf("decode chain event: %v", err)
 	}
-	if ev.Action != SIEMActionChatBootstrapRegistered {
-		t.Errorf("Action = %q, want %q", ev.Action, SIEMActionChatBootstrapRegistered)
+	if ev.Action != audit.SIEMActionChatBootstrapRegistered {
+		t.Errorf("Action = %q, want %q", ev.Action, audit.SIEMActionChatBootstrapRegistered)
 	}
 	if ev.AgentID != id {
 		t.Errorf("AgentID = %q, want %q", ev.AgentID, id)
@@ -491,7 +491,7 @@ func TestBootstrap_AuditEventVisibleViaConcreteChainer(t *testing.T) {
 
 // TestBootstrap_NoAuditEventOnLookupHit verifies the inverse: a Boot
 // that finds an existing chat-assistant must NOT emit a new
-// `cap.agent_registered` event. The event represents agent CREATION,
+// `chat.bootstrap_registered` event. The event represents agent CREATION,
 // not service boot.
 func TestBootstrap_NoAuditEventOnLookupHit(t *testing.T) {
 	t.Parallel()
@@ -517,7 +517,7 @@ func TestBootstrap_NoAuditEventOnLookupHit(t *testing.T) {
 	}
 
 	if got := len(emitter.Events()); got != 0 {
-		t.Errorf("lookup-hit reuse must NOT emit cap.agent_registered; got %d events", got)
+		t.Errorf("lookup-hit reuse must NOT emit chat.bootstrap_registered; got %d events", got)
 	}
 }
 

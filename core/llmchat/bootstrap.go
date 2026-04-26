@@ -25,15 +25,6 @@ import (
 	"github.com/cordum/cordum/core/mcp"
 )
 
-// SIEMActionChatBootstrapRegistered is the canonical audit-event action
-// emitted when the chat-assistant agent identity is created on first
-// boot. Phase-5 WS handler will use parallel `chat.session_started`
-// and `chat.session_closed` constants from the same family (filed as
-// task-88a3bc57 followup); pre-defined here so this task's audit-event
-// test asserts the right wire-format string and downstream tasks pin
-// to the same family.
-const SIEMActionChatBootstrapRegistered = "cap.agent_registered"
-
 // AuditEmitter is the slice of audit.Chainer the bootstrap needs.
 // Defined as an interface so tests can inject a recorder without
 // pulling in a real Redis.
@@ -62,9 +53,10 @@ type Bootstrapper struct {
 // tenant. The tenant is forwarded to the lookup filter so the same
 // chat-assistant identity is scoped per tenant in multi-tenant
 // deployments. The emitter, when non-nil, receives a
-// `cap.agent_registered` SIEMEvent on first-boot register-success
+// `chat.bootstrap_registered` SIEMEvent on first-boot register-success
 // (NOT on lookup-hit reuse — the event represents agent creation, not
-// service boot).
+// service boot). The action string lives in core/audit so phase-5
+// websocket/session handlers share the same chat.* action family.
 func NewBootstrapper(client MCPCallToolClient, tenant string, emitter AuditEmitter) *Bootstrapper {
 	return &Bootstrapper{mcp: client, tenant: tenant, emitter: emitter}
 }
@@ -143,7 +135,7 @@ func (b *Bootstrapper) Boot(ctx context.Context) (string, error) {
 	}
 	if err := b.emitRegisteredAuditEvent(ctx, id); err != nil {
 		// Audit emission failure is FATAL on first-boot register
-		// because cap.agent_registered is the canonical signal that
+		// because chat.bootstrap_registered is the canonical signal that
 		// a new agent identity exists in the system; if we can't
 		// record it, the audit trail is already split. Boot fails;
 		// the operator's remediation is to repair the audit pipeline
@@ -153,7 +145,7 @@ func (b *Bootstrapper) Boot(ctx context.Context) (string, error) {
 		// QA reopen #2 at 2026-04-26 specifically required this be
 		// fail-rather-than-swallow.
 		return "", fmt.Errorf(
-			"llmchat/bootstrap: cap.agent_registered audit emit failed for chat-assistant id=%s; "+
+			"llmchat/bootstrap: chat.bootstrap_registered audit emit failed for chat-assistant id=%s; "+
 				"boot aborted to keep audit trail consistent: %w",
 			id, err)
 	}
@@ -161,7 +153,7 @@ func (b *Bootstrapper) Boot(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-// emitRegisteredAuditEvent writes a `cap.agent_registered` SIEMEvent
+// emitRegisteredAuditEvent writes a `chat.bootstrap_registered` SIEMEvent
 // into the audit chain on first-boot agent creation. With one retry
 // on transient failure (network blip, redis CAS contention) before
 // surfacing the error to Boot, which then fails the entire bootstrap.
@@ -177,7 +169,7 @@ func (b *Bootstrapper) emitRegisteredAuditEvent(ctx context.Context, agentID str
 			TenantID:  b.tenant,
 			AgentID:   agentID,
 			AgentName: "chat-assistant",
-			Action:    SIEMActionChatBootstrapRegistered,
+			Action:    audit.SIEMActionChatBootstrapRegistered,
 			Decision:  "registered",
 			Reason:    "chat-assistant first-boot bootstrap registration via MCP cordum_register_agent + cordum_set_agent_scope",
 			Extra: map[string]string{
