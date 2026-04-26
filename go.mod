@@ -4,7 +4,7 @@ go 1.25.9
 
 require (
 	github.com/alicebob/miniredis/v2 v2.36.1
-	github.com/cordum-io/cap/v2 v2.9.3
+	github.com/cordum-io/cap/v2 v2.10.1-0.20260426111249-aad944585a51
 	github.com/cordum/cordum/sdk v0.0.0
 	github.com/crewjam/saml v0.5.1
 	github.com/expr-lang/expr v1.17.8
@@ -56,15 +56,6 @@ require (
 )
 
 replace github.com/cordum/cordum/sdk => ./sdk
-
-// Workspace replace for the CAP module: cordum-llm-chat phase-3
-// bootstrap (task-cc03a68d) depends on capsdk.AgentClient which lands
-// in cap PR #44 (feat/sdk-go-agent-wrappers, commit aad9445). Until
-// that branch is merged + tagged (e.g. v2.10.0), cordum points at the
-// sibling cap repo via this replace. After the cap version tag bump,
-// drop this replace and bump the require line below from v2.9.3 to
-// the new tag.
-replace github.com/cordum-io/cap/v2 => ../cap
 
 // Use published CAP module
 require (
