@@ -8,8 +8,34 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/mcp"
 )
+
+// recordingEmitter captures every SIEMEvent appended through the
+// AuditEmitter interface. Test fixtures use it to assert the
+// `cap.agent_registered` event fires on first-boot register-success
+// and NOT on lookup-hit reuse.
+type recordingEmitter struct {
+	mu     sync.Mutex
+	events []*audit.SIEMEvent
+}
+
+func (r *recordingEmitter) Append(_ context.Context, ev *audit.SIEMEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clone := *ev
+	r.events = append(r.events, &clone)
+	return nil
+}
+
+func (r *recordingEmitter) Events() []*audit.SIEMEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*audit.SIEMEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
 
 // fakeBootstrapClient scripts MCP CallTool responses for bootstrap.
 type fakeBootstrapClient struct {
@@ -108,7 +134,7 @@ func TestBootstrap_LookupHit_NoRegister(t *testing.T) {
 			},
 		}), nil
 	}
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	id, err := b.Boot(context.Background())
 	if err != nil {
 		t.Fatalf("Boot: %v", err)
@@ -153,7 +179,7 @@ func TestBootstrap_LookupMiss_RegistersAndSetsScope(t *testing.T) {
 		return okResult(), nil
 	}
 
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	id, err := b.Boot(context.Background())
 	if err != nil {
 		t.Fatalf("Boot: %v", err)
@@ -172,7 +198,7 @@ func TestBootstrap_RegisterFailed_NoSetScope(t *testing.T) {
 	f.respond[mcp.ToolRegisterAgent] = func(_ map[string]any) (*mcp.ToolCallResult, error) {
 		return nil, errors.New("approval required")
 	}
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	_, err := b.Boot(context.Background())
 	if err == nil {
 		t.Fatal("expected error when register fails")
@@ -197,7 +223,7 @@ func TestBootstrap_SetScopeFailed_PartialState(t *testing.T) {
 		return nil, errors.New("scope update failed")
 	}
 
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	_, err := b.Boot(context.Background())
 	if err == nil {
 		t.Fatal("expected error on set_scope failure")
@@ -235,7 +261,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 		return okResult(), nil
 	}
 
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	if _, err := b.Boot(context.Background()); err != nil {
 		t.Fatalf("first Boot: %v", err)
 	}
@@ -269,13 +295,92 @@ func TestBootstrap_DivergentScopeRejected(t *testing.T) {
 			},
 		}), nil
 	}
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	_, err := b.Boot(context.Background())
 	if err == nil {
 		t.Fatal("expected divergent-scope error")
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "divergent") {
 		t.Errorf("error %v should mention divergent scope", err)
+	}
+}
+
+// TestBootstrap_AuditEventOnFirstBootRegister verifies that
+// `cap.agent_registered` SIEMEvent is appended to the audit chain
+// when the chat-assistant identity is created on first boot. QA's
+// DoD requires the event presence be asserted — this test is the
+// canonical check.
+func TestBootstrap_AuditEventOnFirstBootRegister(t *testing.T) {
+	t.Parallel()
+	f := newFakeBootstrapClient()
+	f.respond[mcp.ToolListAgents] = func(_ map[string]any) (*mcp.ToolCallResult, error) {
+		return listResult(nil), nil
+	}
+	f.respond[mcp.ToolRegisterAgent] = func(_ map[string]any) (*mcp.ToolCallResult, error) {
+		return registerResult("chat-assistant-fresh"), nil
+	}
+	f.respond[mcp.ToolSetAgentScope] = func(_ map[string]any) (*mcp.ToolCallResult, error) {
+		return okResult(), nil
+	}
+
+	emitter := &recordingEmitter{}
+	b := NewBootstrapper(f, "tenant-a", emitter)
+	id, err := b.Boot(context.Background())
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+
+	events := emitter.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Action != SIEMActionChatBootstrapRegistered {
+		t.Errorf("Action = %q, want %q", ev.Action, SIEMActionChatBootstrapRegistered)
+	}
+	if ev.AgentID != id {
+		t.Errorf("AgentID = %q, want %q", ev.AgentID, id)
+	}
+	if ev.AgentName != "chat-assistant" {
+		t.Errorf("AgentName = %q, want chat-assistant", ev.AgentName)
+	}
+	if ev.TenantID != "tenant-a" {
+		t.Errorf("TenantID = %q, want tenant-a", ev.TenantID)
+	}
+	if ev.Decision != "registered" {
+		t.Errorf("Decision = %q, want registered", ev.Decision)
+	}
+}
+
+// TestBootstrap_NoAuditEventOnLookupHit verifies the inverse: a Boot
+// that finds an existing chat-assistant must NOT emit a new
+// `cap.agent_registered` event. The event represents agent CREATION,
+// not service boot.
+func TestBootstrap_NoAuditEventOnLookupHit(t *testing.T) {
+	t.Parallel()
+	f := newFakeBootstrapClient()
+	f.respond[mcp.ToolListAgents] = func(_ map[string]any) (*mcp.ToolCallResult, error) {
+		return listResult([]map[string]any{
+			{
+				"id":                         "chat-assistant-existing",
+				"name":                       "chat-assistant",
+				"tenant_id":                  "tenant-a",
+				"risk_tier":                  "medium",
+				"allowed_tools":              expectedAllowedTools(),
+				"preapproved_mutating_tools": []string{"cordum_submit_job"},
+				"data_classifications":       []string{"public", "internal"},
+			},
+		}), nil
+	}
+
+	emitter := &recordingEmitter{}
+	b := NewBootstrapper(f, "tenant-a", emitter)
+	if _, err := b.Boot(context.Background()); err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+
+	if got := len(emitter.Events()); got != 0 {
+		t.Errorf("lookup-hit reuse must NOT emit cap.agent_registered; got %d events", got)
 	}
 }
 
@@ -292,7 +397,7 @@ func TestBootstrap_MultipleQueuedRegistrationsRejected(t *testing.T) {
 				"data_classifications": []string{"public", "internal"}},
 		}), nil
 	}
-	b := NewBootstrapper(f, "tenant-a")
+	b := NewBootstrapper(f, "tenant-a", nil)
 	_, err := b.Boot(context.Background())
 	if err == nil {
 		t.Fatal("expected error on multiple chat-assistant registrations")

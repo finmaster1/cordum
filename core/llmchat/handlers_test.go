@@ -25,7 +25,7 @@ func newMiniredisClient(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
 
 func decodeReadyBody(t *testing.T, resp *http.Response) readyBody {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body readyBody
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
@@ -43,7 +43,7 @@ func TestHandlers_Healthz(t *testing.T) {
 	h.Healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/llmchat"
@@ -118,7 +119,8 @@ func main() {
 	}
 	defer mcpClient.Close()
 
-	bootstrapper := llmchat.NewBootstrapper(mcpAdapter{client: mcpClient}, cfg.Tenant)
+	auditChainer := audit.NewChainer(redisClient, "audit:chain:")
+	bootstrapper := llmchat.NewBootstrapper(mcpAdapter{client: mcpClient}, cfg.Tenant, auditChainer)
 	bootCtx, cancelBoot := context.WithTimeout(context.Background(), bootstrapTimeout)
 	if _, err := bootstrapper.Boot(bootCtx); err != nil {
 		cancelBoot()

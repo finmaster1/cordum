@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -352,11 +351,3 @@ func copilotLogPrincipal(principal string) string {
 	return principal[:8]
 }
 
-func sortedCopilotJobIDs(jobSet map[string]struct{}) []string {
-	ids := make([]string, 0, len(jobSet))
-	for id := range jobSet {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}

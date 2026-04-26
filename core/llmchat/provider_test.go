@@ -68,32 +68,19 @@ func TestSamplingMode_String(t *testing.T) {
 	}
 }
 
-// TestProviderInterface_MockImpl confirms the mock satisfies Provider
-// at the type level — a compile-time check disguised as a runtime
-// assertion so a future signature drift surfaces immediately.
-func TestProviderInterface_MockImpl(t *testing.T) {
-	t.Parallel()
+// Compile-time interface satisfaction guards. A signature drift on
+// Provider would fail to compile here, surfacing immediately rather
+// than at first use. No runtime assertion needed (the linter rejected
+// the `if p == nil` form as impossible-condition; the var-decl form
+// is the canonical Go idiom).
+var (
+	_ Provider = (*MockProvider)(nil)
+	_ Provider = (*OpenAIProvider)(nil)
+)
 
-	var p Provider = NewMockProvider()
-	if p == nil {
-		t.Fatal("mock provider should satisfy Provider")
-	}
-}
-
-// TestProviderInterface_OpenAIImpl confirms OpenAIProvider satisfies
-// Provider.
-func TestProviderInterface_OpenAIImpl(t *testing.T) {
-	t.Parallel()
-
-	var p Provider = NewOpenAIProvider(ProviderConfig{Kind: "openai"})
-	if p == nil {
-		t.Fatal("openai provider should satisfy Provider")
-	}
-}
-
-// sentinelErr is an in-package error value used by mock-based tests
+// errSentinel is an in-package error value used by mock-based tests
 // to assert specific error propagation paths.
-var sentinelErr = errors.New("sentinel")
+var errSentinel = errors.New("sentinel")
 
 // TestMockHealthCheckPropagatesError keeps the wiring from drifting:
 // HealthCheck is what /readyz uses, so the contract is load-bearing.
@@ -101,9 +88,9 @@ func TestMockHealthCheckPropagatesError(t *testing.T) {
 	t.Parallel()
 
 	m := NewMockProvider()
-	m.SetHealthErr(sentinelErr)
-	if err := m.HealthCheck(context.Background()); !errors.Is(err, sentinelErr) {
-		t.Fatalf("HealthCheck = %v, want %v", err, sentinelErr)
+	m.SetHealthErr(errSentinel)
+	if err := m.HealthCheck(context.Background()); !errors.Is(err, errSentinel) {
+		t.Fatalf("HealthCheck = %v, want %v", err, errSentinel)
 	}
 	if got := m.HealthCalls(); got != 1 {
 		t.Fatalf("HealthCalls = %d, want 1", got)

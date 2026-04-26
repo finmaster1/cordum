@@ -130,7 +130,7 @@ func (c *DelegationClient) IssueForSession(ctx context.Context, userPrincipal st
 	if err != nil {
 		return SessionDelegation{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if err != nil {
@@ -195,7 +195,7 @@ func (c *DelegationClient) Revoke(ctx context.Context, jti, reason string) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<14))
 	return nil
 }

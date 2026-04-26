@@ -2,6 +2,7 @@ package llmchat
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -167,6 +168,95 @@ func TestSessionStore_SlidingTTLExpiry(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("Get after expiry returned %+v, want nil", got)
+	}
+}
+
+// TestSessionStore_TwoReplicasNoDataLoss verifies that two independent
+// SessionStore instances backed by the same miniredis (modelling two
+// cordum-llm-chat replicas) can append messages to the same session
+// concurrently without losing writes. Regression guard for the
+// pre-redesign JSON-blob race that QA flagged at 2026-04-26.
+func TestSessionStore_TwoReplicasNoDataLoss(t *testing.T) {
+	srv, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	clientA := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	clientB := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	t.Cleanup(func() { _ = clientA.Close() })
+	t.Cleanup(func() { _ = clientB.Close() })
+
+	storeA := NewSessionStoreFromClient(clientA)
+	storeB := NewSessionStoreFromClient(clientB)
+	ctx := context.Background()
+
+	in, err := storeA.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// 20 messages, half from replica A and half from replica B.
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := storeA.AppendMessage(ctx, in.ID, SessionMessage{Role: "user", Text: fmt.Sprintf("a-%d", i)}); err != nil {
+				t.Errorf("storeA AppendMessage %d: %v", i, err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := storeB.AppendMessage(ctx, in.ID, SessionMessage{Role: "assistant", Text: fmt.Sprintf("b-%d", i)}); err != nil {
+				t.Errorf("storeB AppendMessage %d: %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	got, err := storeA.Get(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Messages) != 20 {
+		t.Errorf("expected 20 messages after cross-replica concurrent appends, got %d (no data loss is the QA-mandated requirement)", len(got.Messages))
+	}
+}
+
+// TestSessionStore_SetDelegation verifies the JWT/JTI/expiry round-trip
+// through the session metadata. QA explicitly required Session to
+// persist the delegation token (not just the JTI) so phase-5 WS
+// handlers can recover the bearer token after a process restart.
+func TestSessionStore_SetDelegation(t *testing.T) {
+	store, _ := newTestSessionStore(t)
+	ctx := context.Background()
+
+	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	delegation := &SessionDelegation{
+		Token:      "eyJ-fake-jwt",
+		JTI:        "jti-abc",
+		ExpiresAt:  time.Now().UTC().Add(15 * time.Minute),
+		ChainDepth: 1,
+	}
+	if err := store.SetDelegation(ctx, in.ID, delegation); err != nil {
+		t.Fatalf("SetDelegation: %v", err)
+	}
+
+	got, err := store.Get(ctx, in.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Delegation == nil || got.Delegation.Token != "eyJ-fake-jwt" {
+		t.Errorf("Delegation.Token = %v, want eyJ-fake-jwt", got.Delegation)
+	}
+	if got.DelegationJTI != "jti-abc" {
+		t.Errorf("DelegationJTI = %q, want jti-abc (mirror of Delegation.JTI)", got.DelegationJTI)
 	}
 }
 

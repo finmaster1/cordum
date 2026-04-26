@@ -181,12 +181,8 @@ func (p *OpenAIProvider) buildRequestBody(req CompleteRequest, mode SamplingMode
 		tools = make([]openaiTool, 0, len(req.Tools))
 		for _, t := range req.Tools {
 			tools = append(tools, openaiTool{
-				Type: "function",
-				Function: openaiToolSchema{
-					Name:        t.Name,
-					Description: t.Description,
-					Parameters:  t.Parameters,
-				},
+				Type:     "function",
+				Function: openaiToolSchema(t),
 			})
 		}
 		toolChoice = "auto"
@@ -286,7 +282,7 @@ var ErrPrematureStreamEnd = errors.New("llmchat/openai: stream ended before [DON
 // not silently consume a truncated assistant turn (QA gate, task
 // task-8775a7c9 reopen).
 func (p *OpenAIProvider) stream(ctx context.Context, resp *http.Response, out chan<- Chunk) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	defer close(out)
 
 	reader := bufio.NewReader(resp.Body)
@@ -426,7 +422,7 @@ func (p *OpenAIProvider) HealthCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("llmchat/openai: health GET failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("llmchat/openai: health GET status %d", resp.StatusCode)
 	}

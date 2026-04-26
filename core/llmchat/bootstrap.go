@@ -19,9 +19,27 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/mcp"
 )
+
+// SIEMActionChatBootstrapRegistered is the canonical audit-event action
+// emitted when the chat-assistant agent identity is created on first
+// boot. Phase-5 WS handler will use parallel `chat.session_started`
+// and `chat.session_closed` constants from the same family (filed as
+// task-88a3bc57 followup); pre-defined here so this task's audit-event
+// test asserts the right wire-format string and downstream tasks pin
+// to the same family.
+const SIEMActionChatBootstrapRegistered = "cap.agent_registered"
+
+// AuditEmitter is the slice of audit.Chainer the bootstrap needs.
+// Defined as an interface so tests can inject a recorder without
+// pulling in a real Redis.
+type AuditEmitter interface {
+	Append(ctx context.Context, event *audit.SIEMEvent) error
+}
 
 // MCPCallToolClient is the slim contract bootstrap needs from the MCP
 // client. The phase-2 *MCPClient satisfies it via a thin adapter; tests
@@ -35,38 +53,53 @@ type MCPCallToolClient interface {
 // startup; the resulting agent identity is consumed by the rest of
 // the service via the returned id.
 type Bootstrapper struct {
-	mcp    MCPCallToolClient
-	tenant string
+	mcp     MCPCallToolClient
+	tenant  string
+	emitter AuditEmitter
 }
 
 // NewBootstrapper constructs a Bootstrapper bound to the supplied
 // tenant. The tenant is forwarded to the lookup filter so the same
 // chat-assistant identity is scoped per tenant in multi-tenant
-// deployments.
-func NewBootstrapper(client MCPCallToolClient, tenant string) *Bootstrapper {
-	return &Bootstrapper{mcp: client, tenant: tenant}
+// deployments. The emitter, when non-nil, receives a
+// `cap.agent_registered` SIEMEvent on first-boot register-success
+// (NOT on lookup-hit reuse — the event represents agent creation, not
+// service boot).
+func NewBootstrapper(client MCPCallToolClient, tenant string, emitter AuditEmitter) *Bootstrapper {
+	return &Bootstrapper{mcp: client, tenant: tenant, emitter: emitter}
 }
 
 // expectedAllowedTools is the canonical AllowedTools list for the
-// chat-assistant agent identity. Defined here so tests + production
-// code agree on the exact wire shape; any drift is caught by the
+// chat-assistant agent identity. Includes ALL read-only MCP tools from
+// core/mcp/tools.go (lines 25-38) plus the four mutating tools the
+// chat-assistant is permitted to invoke. Any drift is caught by the
 // scope-divergence check in Boot.
 func expectedAllowedTools() []string {
 	return []string{
+		// All read-only discovery tools (core/mcp/tools.go:25-38).
 		mcp.ToolListJobs,
 		mcp.ToolGetJob,
+		mcp.ToolListRuns,
+		mcp.ToolGetRun,
+		mcp.ToolRunTimeline,
+		mcp.ToolListWorkflows,
+		mcp.ToolListPacks,
+		mcp.ToolListTopics,
 		mcp.ToolListWorkers,
 		mcp.ToolListAgents,
 		mcp.ToolListPendingApprovals,
 		mcp.ToolAuditQuery,
 		mcp.ToolAuditVerify,
 		mcp.ToolStatus,
-		"cordum_query_policy",
+		// Policy query (read-only inspection of policy bundles).
+		mcp.ToolQueryPolicy,
+		// Mutating tools: submit_job is the ONLY pre-approved one
+		// (rail #2); the rest traverse the approval gate per call.
 		mcp.ToolSubmitJob,
-		"cordum_approve_job",
-		"cordum_reject_job",
-		"cordum_cancel_job",
-		"cordum_trigger_workflow",
+		mcp.ToolApproveJob,
+		mcp.ToolRejectJob,
+		mcp.ToolCancelJob,
+		mcp.ToolTriggerWorkflow,
 	}
 }
 
@@ -108,8 +141,42 @@ func (b *Bootstrapper) Boot(ctx context.Context) (string, error) {
 				"operator remediation: revoke the agent identity and re-run boot: %w",
 			id, err)
 	}
+	if err := b.emitRegisteredAuditEvent(ctx, id); err != nil {
+		// Audit emission failure is logged but doesn't fail boot — the
+		// agent identity is already created, and re-running boot
+		// would hit lookup-hit and skip both the register and the
+		// audit emission. The MCP register call itself produced an
+		// `mcp.tool_invocation` audit entry via the existing
+		// ToolInvocationAuditor pipeline; this event is the
+		// chat-assistant-specific signal on top.
+		slog.Warn("llmchat: bootstrap audit emit failed", "agent_id", id, "error", err)
+	}
 	slog.Info("llmchat: chat-assistant bootstrap registered", "agent_id", id, "tenant", b.tenant)
 	return id, nil
+}
+
+// emitRegisteredAuditEvent writes a `cap.agent_registered` SIEMEvent
+// into the audit chain on first-boot agent creation. No-op when no
+// emitter was wired (tests that don't need audit-trail verification).
+func (b *Bootstrapper) emitRegisteredAuditEvent(ctx context.Context, agentID string) error {
+	if b.emitter == nil {
+		return nil
+	}
+	return b.emitter.Append(ctx, &audit.SIEMEvent{
+		Timestamp: time.Now().UTC(),
+		EventType: "agent_lifecycle",
+		Severity:  "info",
+		TenantID:  b.tenant,
+		AgentID:   agentID,
+		AgentName: "chat-assistant",
+		Action:    SIEMActionChatBootstrapRegistered,
+		Decision:  "registered",
+		Reason:    "chat-assistant first-boot bootstrap registration via MCP cordum_register_agent + cordum_set_agent_scope",
+		Extra: map[string]string{
+			"chat_assistant_agent_id":          agentID,
+			"preapproved_mutating_tools_count": "1",
+		},
+	})
 }
 
 // agentRecord is the parsed representation of the cordum_list_agents

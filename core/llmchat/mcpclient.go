@@ -345,7 +345,7 @@ func (c *MCPClient) post(
 		}
 		return nil, fmt.Errorf("llmchat/mcpclient: %s POST: %w", method, err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 1<<24)) // 16 MiB cap
 	if err != nil {
@@ -482,7 +482,7 @@ func (c *MCPClient) runSSE() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("sse status %d", resp.StatusCode)
 	}
