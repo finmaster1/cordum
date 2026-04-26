@@ -4,6 +4,15 @@ The chat assistant runs Qwen3-Coder-30B locally via vLLM. GPU choice
 sets your concurrent-session budget and your inference throughput.
 Pick the tier that matches your fleet.
 
+> **Interim CPU QA mode (2026-04-26):** Per Yaron's direction to
+> "switch to CPU LLM model for now", Cordum can run a dedicated CPU vLLM
+> stack for QA and air-gapped low-throughput evaluation while the GPU/k8s
+> staging matrix is deferred. This does **not** change the production
+> recommendation: production deployments still require GPU-backed vLLM.
+> Ops probes 06, 07, 12, 13, 14, and 15 remain deferred to the GPU/k8s
+> follow-up; probes 01-05, 08-11, and 16-18 are the CPU-mode evidence
+> set for `task-a5d09fad`.
+
 | Tier | GPU | VRAM | Quant | Concurrent sessions | Status | Cost (illustrative) |
 |---|---|---|---|---|---|---|
 | **Tier 1 — recommended production** | H100 | 80 GB | FP8 native | 16 (comfortable) → 32 (stress ceiling) | Production | AWS p5.xlarge ≈ $5/hr |

@@ -22,7 +22,7 @@ vi.mock("framer-motion", () => {
   };
 });
 
-const { ParentContextBanner } = await import("./JobDetailPage");
+const { ParentContextBanner, SubmittedByBanner } = await import("./JobDetailPage");
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
@@ -61,6 +61,22 @@ function findViewParentButton(container: HTMLElement): HTMLButtonElement | null 
   return Array.from(container.querySelectorAll("button")).find((b) =>
     b.textContent?.includes("View Parent"),
   ) as HTMLButtonElement | null;
+}
+
+function renderSubmittedBy(job: Job): { container: HTMLDivElement; cleanup: () => void } {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(React.createElement(SubmittedByBanner, { job }));
+  });
+  return {
+    container,
+    cleanup: () => {
+      act(() => root.unmount());
+      container.remove();
+    },
+  };
 }
 
 describe("ParentContextBanner — workflowId guard against /workflows/all/runs/X (task-22a85a34)", () => {
@@ -130,6 +146,29 @@ describe("ParentContextBanner — workflowId guard against /workflows/all/runs/X
       const arg = String(navigateMock.mock.calls[0][0]);
       expect(arg).not.toMatch(/\/workflows\/all\//);
       expect(arg).toBe("/copilot/sessions/sess-abc123xy");
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("SubmittedByBanner — chat-assistant lineage (task-f13505cc)", () => {
+  it("renders a chat-assistant Submitted by banner with the full actor identity", () => {
+    const { container, cleanup } = renderSubmittedBy(
+      makeJob({ actorId: "chat-assistant@tenant-default", tenant: "tenant-default" }),
+    );
+    try {
+      expect(container.textContent).toContain("Submitted by");
+      expect(container.textContent).toContain("chat-assistant@tenant-default");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("does not render the chat-assistant banner for jobs without an actor identity", () => {
+    const { container, cleanup } = renderSubmittedBy(makeJob({ actorId: undefined }));
+    try {
+      expect(container.textContent).not.toContain("Submitted by");
     } finally {
       cleanup();
     }

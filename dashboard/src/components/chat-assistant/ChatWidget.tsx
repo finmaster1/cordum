@@ -95,8 +95,12 @@ export function ChatWidget() {
           </header>
           <ChatStream messages={messages} />
           {session.error && (
-            <div className="flex items-start gap-2 border-t border-status-error/30 bg-status-error/10 px-3 py-2 text-xs text-status-error">
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="flex items-start gap-2 border-t border-status-error/30 bg-status-error/10 px-3 py-2 text-xs text-status-error"
+            >
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>{session.error}</span>
             </div>
           )}

@@ -2,18 +2,36 @@
 
 Task: `task-e363a7fa` — production readiness + vLLM config verification + failure modes + rolling upgrade.
 
-## Executive summary
+## Interim CPU operating mode
 
-Static vLLM configuration verification is documented separately in `docs/llmchat/vllm-config-verification.md` and passed for compose/Helm config. This runbook covers the runtime failure-mode harness under `tests/ops/`.
+Static vLLM configuration verification is documented separately in
+`docs/llmchat/vllm-config-verification.md` and passed for compose/Helm
+config. This runbook covers the runtime failure-mode harness under
+`tests/ops/`.
 
-Current evidence status (2026-04-26 local/shared worker environment):
+Scope decision (2026-04-26): Yaron directed the team to **"switch to CPU
+LLM model for now"**. That is the formal interim narrowing for
+`task-a5d09fad` and the ops-harness follow-up to `task-e363a7fa`.
 
-- `bash tests/ops/llmchat_run_all.sh` completed with `pass=0`, `skip=18`, `fail=0`.
-- `LLMCHAT_OPS_REQUIRE_LIVE=1 bash tests/ops/llmchat_run_all.sh` failed closed because all 18 probes skipped without a live GPU/k8s target.
-- No runtime PASS verdict is claimed in this document. The local compose/dev path uses the Python qwen-inference mock, not real vLLM, so running destructive/performance probes there would create false evidence.
-- Follow-up infra blocker filed: `task-a5d09fad` (P0 QA infra: provision GPU/k8s staging to execute this harness).
+Interim evidence model:
 
-Verdict: **BLOCKED for shipment evidence** until a dedicated real-vLLM GPU/k8s staging environment runs the harness with `LLMCHAT_OPS_REQUIRE_LIVE=1`.
+- CPU mode is for QA and air-gapped, low-throughput evaluation only.
+  Production deployments still require the GPU vLLM path.
+- The GPU/k8s tier-matrix probes are formally **DEFERRED** to a follow-up
+  GPU/k8s staging task: probe 06 (Tier 1 H100 capacity), probe 07 (GPU
+  OOM / at-capacity), probe 12 (rolling upgrade), probe 13 (HF cache
+  loss), probe 14 (Tier 2 AWQ), and probe 15 (Tier 3 A100).
+- The remaining 12 probes are in scope for a dedicated CPU vLLM stack:
+  probes 01-05, 08-11, and 16-18.
+- The local compose/dev path that uses the Python qwen-inference mock is
+  still not valid evidence for destructive or performance probes.
+- `task-a5d09fad` now tracks the CPU-mode staging work; `task-e363a7fa`
+  must not be marked complete until CPU live evidence exists or its DoD
+  is formally narrowed.
+
+Do not interpret CPU latency or throughput as a production claim. The
+per-probe verdict table below remains blocked until the CPU live run
+lands and is updated with concrete evidence paths.
 
 ## How to run
 
@@ -238,4 +256,3 @@ Evidence is written under `out/llmchat-ops/<probe-id>/evidence.txt` plus per-pro
 - Cleanup: destructive scripts use reconnect/unpause/restore traps where they mutate Docker network state or pause services; HF-cache and rollout probes record restore/remediation evidence.
 - Secret handling: scripts require API keys via environment but write only headers/paths/statuses, not raw key values. Probe payloads are operational placeholders, not real attacker hosts.
 - Embarrassment check: submitting these skips as PASS would be misleading; this runbook explicitly marks the task BLOCKED pending real staging evidence.
-
