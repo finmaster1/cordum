@@ -71,6 +71,14 @@ type chatAuditSender interface {
 type chatPostRequest struct {
 	SessionID string `json:"session_id,omitempty"`
 	Message   string `json:"message"`
+	Text      string `json:"text,omitempty"`
+}
+
+func (r chatPostRequest) userMessage() string {
+	if msg := strings.TrimSpace(r.Message); msg != "" {
+		return msg
+	}
+	return strings.TrimSpace(r.Text)
 }
 
 // chatPostResponse is returned by POST /api/v1/chat.
@@ -144,6 +152,7 @@ func NewChatHandlers(cfg ChatHandlersConfig) *ChatHandlers {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
+			Subprotocols:    []string{gatewayauth.WSAuthSubprotocol},
 			CheckOrigin: func(_ *http.Request) bool {
 				return true
 			},
@@ -165,7 +174,8 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 		writeChatError(w, http.StatusBadRequest, "invalid_json", "request body must be JSON {session_id?, message}")
 		return
 	}
-	if strings.TrimSpace(req.Message) == "" {
+	msg := req.userMessage()
+	if msg == "" {
 		writeChatError(w, http.StatusBadRequest, "empty_message", "message is required")
 		return
 	}
@@ -177,7 +187,7 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
-	frames := h.collectTurnFrames(r.Context(), session, req.Message, bearer)
+	frames := h.collectTurnFrames(r.Context(), session, msg, bearer)
 	resp := chatPostResponse{SessionID: session.ID, Frames: frames}
 	for _, frame := range frames {
 		switch frame.Type {
@@ -238,7 +248,8 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 		writeChatError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required for WS upgrade")
 		return
 	}
-	session, bearer, err := h.sessionAndDelegation(r.Context(), r, r.Header.Get(HeaderChatSessionID))
+	sessionID := firstNonEmpty(r.URL.Query().Get("session_id"), r.Header.Get(HeaderChatSessionID))
+	session, bearer, err := h.sessionAndDelegation(r.Context(), r, sessionID)
 	if err != nil {
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
@@ -288,12 +299,13 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 			h.emitToWS(out, Frame{Type: FrameError, ErrorCode: "invalid_json", ErrorMsg: "message must be JSON", SessionID: session.ID})
 			continue
 		}
-		if strings.TrimSpace(msg.Message) == "" {
+		userMsg := msg.userMessage()
+		if userMsg == "" {
 			h.emitToWS(out, Frame{Type: FrameError, ErrorCode: "empty_message", ErrorMsg: "message is required", SessionID: session.ID})
 			continue
 		}
 		turnCount++
-		frames := h.collectTurnFrames(r.Context(), session, msg.Message, bearer)
+		frames := h.collectTurnFrames(r.Context(), session, userMsg, bearer)
 		for _, frame := range frames {
 			if frame.Type == FrameToolCall {
 				totalToolCalls++
@@ -390,7 +402,11 @@ func (h *ChatHandlers) resolveOrCreateSession(ctx context.Context, r *http.Reque
 			slog.Warn("llmchat: forged or cross-tenant chat session id rejected", "session_id", sessionID, "tenant", tenant)
 			return nil, errChatSessionForbidden
 		}
-		return nil, errChatSessionNotFound
+		created, err := h.sessions.Create(ctx, Session{ID: sessionID, UserPrincipal: user, Tenant: tenant, AgentID: h.agentID})
+		if err != nil {
+			return nil, fmt.Errorf("create session: %w", err)
+		}
+		return &created, nil
 	}
 	created, err := h.sessions.Create(ctx, Session{ID: uuid.NewString(), UserPrincipal: user, Tenant: tenant, AgentID: h.agentID})
 	if err != nil {

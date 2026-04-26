@@ -40,11 +40,91 @@ function authSubprotocols(apiKey: string): string[] | undefined {
   return ["cordum-api-key", encoded];
 }
 
-function safeParseFrame(raw: string): ChatFrame | null {
+function stringField(raw: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = raw[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return "";
+}
+
+function objectField(raw: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = raw[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function safeParseFrame(raw: string, assistantFrameIdRef: { current: string | null }): ChatFrame | null {
   try {
-    const parsed = JSON.parse(raw) as ChatFrame;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object" || typeof parsed.type !== "string") return null;
-    return parsed;
+    const at = stringField(parsed, "at") || new Date().toISOString();
+    const assistantId = () => {
+      if (!assistantFrameIdRef.current) assistantFrameIdRef.current = generateUUID();
+      return assistantFrameIdRef.current;
+    };
+
+    switch (parsed.type) {
+      case "user":
+        return {
+          type: "user",
+          id: stringField(parsed, "id") || generateUUID(),
+          text: stringField(parsed, "text", "message"),
+          at,
+        };
+      case "assistant_delta":
+        return {
+          type: "assistant_delta",
+          id: stringField(parsed, "id") || assistantId(),
+          delta: stringField(parsed, "delta", "text"),
+          at,
+        };
+      case "tool_call": {
+        const toolCall = objectField(parsed, "tool_call");
+        return {
+          type: "tool_call",
+          id: stringField(parsed, "id") || assistantId(),
+          toolCallId: stringField(toolCall, "id", "tool_call_id") || generateUUID(),
+          tool: stringField(parsed, "tool") || stringField(toolCall, "name"),
+          args: (toolCall.arguments as Record<string, unknown>) ?? {},
+          at,
+        };
+      }
+      case "tool_result":
+        return {
+          type: "tool_result",
+          id: stringField(parsed, "id") || assistantId(),
+          toolCallId: stringField(parsed, "tool_call_id") || "tool-result",
+          ok: parsed.is_error !== true,
+          resultPreview: stringField(parsed, "resultPreview", "tool_result"),
+          at,
+        };
+      case "approval_required": {
+        const toolCall = objectField(parsed, "tool_call");
+        return {
+          type: "approval_required",
+          id: stringField(parsed, "id") || assistantId(),
+          toolCallId: stringField(toolCall, "id", "tool_call_id") || stringField(parsed, "tool_call_id") || generateUUID(),
+          approvalId: stringField(parsed, "approvalId", "approval_id"),
+          tool: stringField(parsed, "tool") || stringField(toolCall, "name"),
+          args: (toolCall.arguments as Record<string, unknown>) ?? {},
+          at,
+        };
+      }
+      case "final":
+        return { type: "final", id: stringField(parsed, "id") || assistantId(), at };
+      case "error":
+        return {
+          type: "error",
+          id: stringField(parsed, "id") || assistantId(),
+          message: stringField(parsed, "message", "error_msg", "text") || "chat error",
+          code: stringField(parsed, "code", "error_code") || undefined,
+          at,
+        };
+      default:
+        return null;
+    }
   } catch {
     return null;
   }
@@ -81,6 +161,7 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
   const failureCountRef = useRef(0);
   const cancelledRef = useRef(false);
   const connectRef = useRef<(() => void) | null>(null);
+  const assistantFrameIdRef = useRef<string | null>(null);
 
   const closeSocket = useCallback((code: number, reason: string) => {
     if (reconnectTimerRef.current !== null) {
@@ -102,6 +183,18 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
     if (!apiKey || !enabled) {
       setStatus("idle");
       return;
+    }
+
+    const existing = wsRef.current;
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+      if (existing.readyState === WebSocket.OPEN) {
+        setStatus("open");
+      }
+      return;
+    }
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
 
     setStatus(failureCountRef.current === 0 ? "connecting" : "reconnecting");
@@ -132,6 +225,10 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) {
+        ws.close(1000, "stale");
+        return;
+      }
       if (cancelledRef.current) {
         ws.close();
         return;
@@ -143,16 +240,26 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
     };
 
     ws.onmessage = (ev) => {
-      const frame = safeParseFrame(typeof ev.data === "string" ? ev.data : "");
+      if (wsRef.current !== ws) return;
+      const frame = safeParseFrame(typeof ev.data === "string" ? ev.data : "", assistantFrameIdRef);
       if (!frame) return;
       useChatAssistantStore.getState().applyFrame(frame);
+      if (frame.type === "final" || frame.type === "error") {
+        assistantFrameIdRef.current = null;
+      }
     };
 
     ws.onerror = () => {
+      if (wsRef.current !== ws) return;
       logger.debug("chat-session", "ws error event");
     };
 
     ws.onclose = (ev) => {
+      // React StrictMode and quick config/availability changes can close an
+      // older socket after a replacement has already been assigned. Ignore
+      // stale close events so they cannot null the live connection or put the
+      // widget back into an endless "reconnecting" state.
+      if (wsRef.current !== ws) return;
       wsRef.current = null;
       if (cancelledRef.current) {
         setStatus("closed");

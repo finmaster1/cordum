@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	gatewayauth "github.com/cordum/cordum/core/controlplane/gateway/auth"
 )
 
 func TestChatWSGeneratesSessionIDAndResumesExisting(t *testing.T) {
@@ -66,6 +68,45 @@ func TestChatWSGeneratesSessionIDAndResumesExisting(t *testing.T) {
 	}
 	if sessions.createdN != 1 {
 		t.Fatalf("createdN=%d want one session reused", sessions.createdN)
+	}
+}
+
+func TestChatWSBrowserQuerySessionTextPayloadAndSubprotocol(t *testing.T) {
+	runner := &scriptedChatRunner{frames: [][]Frame{{{Type: FrameAssistantDelta, Text: "hello"}, {Type: FrameFinal, Text: "hello"}}}}
+	sessions := newFakeChatSessionStore()
+	h := newTestChatHandlers(runner, sessions, true)
+
+	server := httptest.NewServer(http.HandlerFunc(h.HandleChatWS))
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "?session_id=browser-session-1"
+	dialer := websocket.Dialer{Subprotocols: []string{gatewayauth.WSAuthSubprotocol, "token-placeholder"}}
+	conn, resp, err := dialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial browser-shaped ws: %v resp=%v", err, resp)
+	}
+	defer func() { _ = conn.Close() }()
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != gatewayauth.WSAuthSubprotocol {
+		t.Fatalf("Sec-WebSocket-Protocol=%q want %q", got, gatewayauth.WSAuthSubprotocol)
+	}
+	if got := resp.Header.Get(HeaderChatSessionID); got != "browser-session-1" {
+		t.Fatalf("%s=%q want browser-session-1", HeaderChatSessionID, got)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"user","text":"hi from dashboard"}`)); err != nil {
+		t.Fatalf("write browser text payload: %v", err)
+	}
+	var first Frame
+	if err := conn.ReadJSON(&first); err != nil {
+		t.Fatalf("read first response frame: %v", err)
+	}
+	if first.SessionID != "browser-session-1" {
+		t.Fatalf("first SessionID=%q want browser-session-1", first.SessionID)
+	}
+	turns, _ := runner.snapshot()
+	if len(turns) != 1 || turns[0].UserMessage != "hi from dashboard" {
+		t.Fatalf("turns=%+v want text alias routed to one agent turn", turns)
+	}
+	if sessions.createdN != 1 {
+		t.Fatalf("createdN=%d want browser query session created once", sessions.createdN)
 	}
 }
 
