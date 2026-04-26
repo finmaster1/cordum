@@ -130,6 +130,7 @@ export interface JobFilterValues {
   tenant?: string;
   sessionId?: string;
   runId?: string;
+  agentId?: string;
 }
 
 export function JobFiltersBar({
@@ -150,6 +151,7 @@ export function JobFiltersBar({
   const tenantFilter = searchParams.get("tenant") ?? "";
   const sessionIdFilter = searchParams.get("sessionId") ?? "";
   const runIdFilter = searchParams.get("runId") ?? "";
+  const agentIdFilter = searchParams.get("agentId") ?? "";
 
   // Local inputs for debounce
   const [topicLocal, setTopicLocal] = useState(topicFilter);
@@ -157,6 +159,7 @@ export function JobFiltersBar({
   const [tenantLocal, setTenantLocal] = useState(tenantFilter);
   const [sessionIdLocal, setSessionIdLocal] = useState(sessionIdFilter);
   const [runIdLocal, setRunIdLocal] = useState(runIdFilter);
+  const [agentIdLocal, setAgentIdLocal] = useState(agentIdFilter);
 
   // Re-sync local inputs when URL changes externally (back/forward
   // navigation, deep links). Without this, the local debounced state can
@@ -166,6 +169,7 @@ export function JobFiltersBar({
   useEffect(() => { setTenantLocal(tenantFilter); }, [tenantFilter]);
   useEffect(() => { setSessionIdLocal(sessionIdFilter); }, [sessionIdFilter]);
   useEffect(() => { setRunIdLocal(runIdFilter); }, [runIdFilter]);
+  useEffect(() => { setAgentIdLocal(agentIdFilter); }, [agentIdFilter]);
 
   const [showCustomRange, setShowCustomRange] = useState(timeRangeFilter === "custom");
   const topicTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -173,6 +177,7 @@ export function JobFiltersBar({
   const tenantTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const sessionIdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const runIdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const agentIdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Clear pending debounce timers on unmount
   useEffect(() => {
@@ -182,6 +187,7 @@ export function JobFiltersBar({
       clearTimeout(tenantTimer.current);
       clearTimeout(sessionIdTimer.current);
       clearTimeout(runIdTimer.current);
+      clearTimeout(agentIdTimer.current);
     };
   }, []);
 
@@ -196,7 +202,8 @@ export function JobFiltersBar({
     (updatedBeforeFilter ? 1 : 0) +
     (tenantFilter ? 1 : 0) +
     (sessionIdFilter ? 1 : 0) +
-    (runIdFilter ? 1 : 0);
+    (runIdFilter ? 1 : 0) +
+    (agentIdFilter ? 1 : 0);
 
   // Setter: update URL params and notify parent
   const setFilters = useCallback(
@@ -229,8 +236,9 @@ export function JobFiltersBar({
       tenant: tenantFilter || undefined,
       sessionId: sessionIdFilter || undefined,
       runId: runIdFilter || undefined,
+      agentId: agentIdFilter || undefined,
     });
-  }, [stateFilter.join(","), decisionFilter.join(","), topicFilter, poolFilter, timeRangeFilter, updatedAfterFilter, updatedBeforeFilter, tenantFilter, sessionIdFilter, runIdFilter]);
+  }, [stateFilter.join(","), decisionFilter.join(","), topicFilter, poolFilter, timeRangeFilter, updatedAfterFilter, updatedBeforeFilter, tenantFilter, sessionIdFilter, runIdFilter, agentIdFilter]);
 
   // Handlers
   const handleStateChange = useCallback(
@@ -293,6 +301,16 @@ export function JobFiltersBar({
     [setFilters],
   );
 
+  const handleAgentIdChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setAgentIdLocal(val);
+      clearTimeout(agentIdTimer.current);
+      agentIdTimer.current = setTimeout(() => setFilters({ agentId: val }), 400);
+    },
+    [setFilters],
+  );
+
   const handleTimeRange = useCallback(
     (value: string) => {
       if (value === "custom") {
@@ -319,11 +337,13 @@ export function JobFiltersBar({
     clearTimeout(tenantTimer.current);
     clearTimeout(sessionIdTimer.current);
     clearTimeout(runIdTimer.current);
+    clearTimeout(agentIdTimer.current);
     setTopicLocal("");
     setPoolLocal("");
     setTenantLocal("");
     setSessionIdLocal("");
     setRunIdLocal("");
+    setAgentIdLocal("");
     setShowCustomRange(false);
     setFilters({
       state: "",
@@ -336,6 +356,7 @@ export function JobFiltersBar({
       tenant: "",
       sessionId: "",
       runId: "",
+      agentId: "",
     });
   }, [setFilters]);
 
@@ -387,6 +408,17 @@ export function JobFiltersBar({
         value={tenantLocal}
         onChange={handleTenantChange}
         className="w-24 rounded-xl border border-border bg-card/70 px-3 py-1.5 text-xs text-ink placeholder:text-muted/60 transition hover:border-accent/40 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
+      />
+
+      {/* Agent ID text input (debounced) — substring match against
+          job.actorId. Bookmark-friendly via ?agentId= URL param. */}
+      <input
+        type="text"
+        placeholder="Agent ID"
+        aria-label="Filter by agent ID"
+        value={agentIdLocal}
+        onChange={handleAgentIdChange}
+        className="w-32 rounded-xl border border-border bg-card/70 px-3 py-1.5 text-xs text-ink placeholder:text-muted/60 transition hover:border-accent/40 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
       />
 
       {/* Session ID text input (debounced) */}

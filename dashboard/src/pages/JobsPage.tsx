@@ -92,6 +92,35 @@ export function OriginPill({ job }: { job: Job }) {
   );
 }
 
+// AgentCell renders the submitting-agent identity for a row in the
+// JobsPage table. Truncates to the part before the @-delimited tenant
+// suffix to keep the column narrow; full identity is exposed via the
+// title attribute for hover-inspection. The chat-assistant copilot
+// gets a `copilot` badge so operators can spot LLM-driven jobs at a
+// glance — this is the dogfooding affordance for task-f13505cc.
+function AgentCell({ actorId, tenant }: { actorId?: string; tenant?: string }) {
+  if (!actorId) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  const isCopilot = actorId === "chat-assistant" || actorId.startsWith("chat-assistant@");
+  const displayName = actorId.split("@")[0] || actorId;
+  const tooltip = actorId.includes("@") || !tenant ? actorId : `${actorId}@${tenant}`;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-xs text-foreground"
+      title={tooltip}
+      aria-label={tooltip}
+    >
+      <span className="font-mono">{displayName}</span>
+      {isCopilot && (
+        <span className="rounded-full border border-cordum/30 bg-cordum/10 px-1.5 py-0.5 text-[10px] font-medium text-cordum">
+          copilot
+        </span>
+      )}
+    </span>
+  );
+}
+
 function jobStatusVariant(status: string) {
   switch (status) {
     case "running":
@@ -115,7 +144,7 @@ function jobStatusVariant(status: string) {
   }
 }
 
-type SortKey = "status" | "id" | "topic" | "safety" | "attempts" | "updatedAt";
+type SortKey = "status" | "id" | "topic" | "agent" | "safety" | "attempts" | "updatedAt";
 type SortDir = "asc" | "desc";
 
 const statusOrder: Record<string, number> = {
@@ -433,6 +462,13 @@ export default function JobsPage() {
       if (jobFilters.decision && jobFilters.decision.length > 0) {
         if (!j._safetyDecision || !jobFilters.decision.includes(j._safetyDecision)) return false;
       }
+      // Agent ID filter — case-insensitive substring match against the
+      // submitting agent identity. Surfaces the chat-assistant copilot
+      // jobs alongside any other agent-driven jobs.
+      if (jobFilters.agentId) {
+        const needle = jobFilters.agentId.toLowerCase();
+        if (!(j.actorId ?? "").toLowerCase().includes(needle)) return false;
+      }
 
       // Search
       if (search) {
@@ -458,6 +494,9 @@ export default function JobsPage() {
           break;
         case "topic":
           cmp = (a.topic ?? "").localeCompare(b.topic ?? "");
+          break;
+        case "agent":
+          cmp = (a.actorId ?? "").localeCompare(b.actorId ?? "");
           break;
         case "safety":
           cmp =
@@ -729,6 +768,14 @@ export default function JobsPage() {
                   </th>
                   <th
                     className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
+                    {...sortableThProps("agent")}
+                  >
+                    <span className="inline-flex items-center">
+                      Agent <SortIcon col="agent" />
+                    </span>
+                  </th>
+                  <th
+                    className="text-left px-5 py-3 text-xs font-mono font-medium text-muted-foreground uppercase tracking-widest cursor-pointer select-none hover:text-foreground transition-colors"
                     {...sortableThProps("safety")}
                   >
                     <span className="inline-flex items-center">
@@ -787,6 +834,9 @@ export default function JobsPage() {
                     </td>
                     <td className="px-5 py-3">
                       <OriginPill job={job} />
+                    </td>
+                    <td className="px-5 py-3">
+                      <AgentCell actorId={job.actorId} tenant={job.tenant} />
                     </td>
                     <td className="px-5 py-3">
                       <SafetyDecisionBadge

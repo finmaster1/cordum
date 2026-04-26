@@ -19,7 +19,7 @@ export interface UserFrame {
   type: "user";
   id: string;
   text: string;
-  at: string;
+  at?: string;
 }
 
 export interface AssistantDeltaFrame {

@@ -283,6 +283,35 @@ function HeroBanner({ job, elapsed, isActive }: { job: Job; elapsed: string; isA
   );
 }
 
+// SubmittedByBanner surfaces "Submitted by chat-assistant@<tenant>"
+// on jobs the LLM copilot drove. Operators must be able to tell at a
+// glance which jobs came from the chat assistant — it's the dogfooding
+// affordance the epic claims (rail #6) and the visual half of probe 2
+// in task-931eaea2's senior governance review.
+export function SubmittedByBanner({ job }: { job: Job }) {
+  const actorId = job.actorId;
+  if (!actorId) return null;
+  const isCopilot = actorId === "chat-assistant" || actorId.startsWith("chat-assistant@");
+  if (!isCopilot) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="instrument-card border-l-4 border-cordum bg-cordum/5 px-4 py-3 mb-6"
+      role="note"
+      aria-label="submitted by chat assistant"
+    >
+      <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-1">
+        Submitted by Cordum chat assistant
+      </p>
+      <p className="text-sm text-foreground">
+        <span className="font-mono">{actorId}</span>
+        <span className="text-muted-foreground"> — every action stays gated by the same approval and audit pipeline as any other agent.</span>
+      </p>
+    </motion.div>
+  );
+}
+
 export function ParentContextBanner({ job }: { job: Job }) {
   const navigate = useNavigate();
   const { runId, sessionId, workflowId } = getJobParentRefs(job);
@@ -355,6 +384,7 @@ function SmartContext({ job }: { job: Job }) {
   return (
     <div className="space-y-6">
       <ParentContextBanner job={job} />
+      <SubmittedByBanner job={job} />
 
       {isPayment && <PaymentContext ctx={ctx} />}
       {isB2B && <B2BContext ctx={ctx} />}
@@ -937,6 +967,7 @@ function MetadataBar({ job, navigate }: { job: Job; navigate: (path: string) => 
   const fields: [string, string | undefined, (() => void) | undefined][] = [
     ["Topic", job.topic, undefined],
     ["Tenant", job.tenant, undefined],
+    ["Submitted by", job.actorId || "—", undefined],
     ["Workflow", workflowId, workflowId ? () => navigate(`/workflows/${workflowId}/studio`) : undefined],
     ["Run", runId, workflowId && runId ? () => navigate(`/workflows/${workflowId}/runs/${runId}`) : undefined],
     ["Session", sessionId, sessionId ? () => navigate(`/copilot/sessions/${sessionId}`) : undefined],
