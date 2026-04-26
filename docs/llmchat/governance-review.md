@@ -29,7 +29,28 @@ Recorded in `task-931eaea2` step-2 (worker-e2a9, 2026-04-26). Each finding affec
 | F5 | Audit query endpoint is `/api/v1/audit/query` (NOT `/api/v1/audit/events` as the task description says) | 3 | P2 | Update probe procedure |
 | F6 | Dashboard `JobsPage.tsx:700-756` does NOT render an `agent_id` column. Visual parity DoD cannot pass without dashboard work. | 2 | P0 | File dashboard task to add agent_id column to Jobs table |
 | F7 | `config/llmchat/policy-default.yaml` is NOT auto-loaded; operator must POST to `/api/v1/policy/bundles` after first stack boot | 12 | P1 | Either auto-load on chat-assistant boot OR document the manual step in the deployment runbook + add a smoke check |
-| F8 | **`/api/v1/audit/query` endpoint returns 404** — gateway never registers it (`core/controlplane/gateway/gateway.go:1192-1207` only registers `/audit/export*`, `/audit/verify`, `/audit/legal-hold*`). MCP `audit_query` tool at `core/mcp/bridge_readonly.go:245` calls this non-existent endpoint and would fail at runtime. | 1, 3, 4, 5, 11 | **P0** | Either implement the gateway handler OR change the MCP bridge to use a different mechanism (e.g. policy/audit, legal-hold export). Verified live: `curl https://localhost:8081/api/v1/audit/query?type=chat.bootstrap_registered → 404`, `audit/verify → 200`. |
+| F8 | **Historical `/api/v1/audit/query` 404** — the gateway initially did not register the endpoint that MCP `audit_query` calls. | 1, 3, 4, 5, 7, 11 | **P0 — FIXED IN `task-5b755f42`** | Gateway now registers `/api/v1/audit/query`; OpenAPI route coverage passes; `since` / `until` accept RFC3339 or unix-ms; `type` filters `SIEMEvent.EventType` with legacy `Action` fallback. Original live evidence: `curl https://localhost:8081/api/v1/audit/query?type=chat.bootstrap_registered → 404`; rerun requires deploying the fixed gateway binary. |
+
+### F8 follow-up verification (worker-7a6d, 2026-04-26)
+
+`task-5b755f42` re-open verification removed F8 as a code blocker for the affected governance probes. Evidence from the fixed code path:
+
+- `go test ./core/controlplane/gateway -run 'Test(OpenAPICoverage|RouteCoverage_AllRegisteredRoutesAppearInOpenAPI|HandleAuditQuery)' -count=3` → PASS.
+- `go test ./core/controlplane/gateway/... -count=1` → PASS.
+- `go test ./core/mcp/... -count=1` → PASS.
+- `go vet ./core/controlplane/gateway/...` → PASS.
+
+Rerun verdicts for probes previously blocked by F8:
+
+| Probe | F8 sub-check after fix | Overall probe verdict after rerun | Remaining blocker(s) |
+|---|---|---|---|
+| 1 | PASS by route/OpenAPI/RFC3339 contract tests | PARTIAL PASS; still BLOCKED for fresh-boot idempotency evidence | Docker mount issue prevents `cordum-llm-chat` restart in the shared stack |
+| 3 | PASS by `TestHandleAuditQuery_FiltersByEventType` (`type=mcp.tool_invocation` matches `SIEMEvent.EventType`) | BLOCKED, but no longer by F8 | Live 100-turn chat-MCP run still needs a deterministic LLM/tool-call harness or real vLLM runner |
+| 4 | PASS by audit-query contract tests plus existing `/api/v1/audit/verify` evidence | PARTIAL PASS; chat-load regression budget still BLOCKED | Probe 3 live chat-load backbone is not available in the shared mock-LLM stack |
+| 5 | PASS for ability to read back `safety.decision` / `mcp.tool_*` audit event types | BLOCKED, but no longer by F8 | Mock LLM never emits the required tool call, so the chat→MCP→safety-kernel path is not exercised |
+| 7 | PASS for audit readback primitive | BLOCKED, but no longer by F8 | F1 remains: no safe `cordumctl agent set-scope` path; mutating shared chat-assistant scope would affect other workers |
+| 11 | PASS for per-call audit visibility primitive | DEFERRED, but no longer by F8 | Scheduler restart is destructive in the shared stack; requires a dedicated clean stack |
+
 
 ## Probe template
 
@@ -59,12 +80,12 @@ Each probe section follows this template:
 **Actual (worker-e2a9, 2026-04-26T17:20Z):**
 - (a) chat-assistant agent IS registered in `/api/v1/agents`: 1 entry (no duplicate ⇒ idempotent boot worked at least once across the stack lifetime), `id=d2315a95-7b08-40a1-8bdc-7b96858f41e6`, `risk_tier=medium` ✓ (matches plan spec), `owner=system`, `allowed_tools=20` (matches `config/llmchat/policy-default.yaml`), `preapproved_mutating_tools=['cordum_submit_job']` ✓ (matches epic rail #4).
 - (b) Restart for idempotency check: `docker restart cordum-llm-chat-1` failed with `Error response from daemon: Cannot restart container cordum-llm-chat-1: error while creating mount source path '/run/desktop/mnt/host/d/Cordum/cordum-llm-debug/config/llmchat': mkdir /run/desktop/mnt/host/d/Cordum/cordum-llm-debug: file exists`. Environmental issue (orphan mount from another worker session); does NOT invalidate (a) but blocks fresh-boot test.
-- (c) Audit emission verification BLOCKED by **F8** — `/api/v1/audit/query` returns 404. Gateway only registers `/audit/export*`, `/audit/verify`, `/audit/legal-hold*` (`gateway.go:1192-1207`). The MCP `audit_query` tool at `bridge_readonly.go:245` calls a non-existent endpoint.
+- (c) F8 follow-up: audit emission verification is no longer blocked by endpoint plumbing in the fixed code path. `/api/v1/audit/query` is registered and covered by OpenAPI route tests; RFC3339 `since` / `until` and `type=SIEMEvent.EventType` filtering are covered by gateway tests. Live re-run still requires deploying the fixed gateway binary.
 - (d) Chain integrity: `GET /api/v1/audit/verify` → `{"status":"ok"}` (response is just `{status}`; no `valid`/`chain_depth`/`verified_count` fields).
 
-**Verdict:** PARTIAL PASS for (a), BLOCKED on (b) by Docker mount issue, BLOCKED on (c) by F8.
-**Evidence:** Live API responses captured in step-4 worker note. Code refs: `core/audit/siem_actions.go:9` (constant exists), `core/llmchat/bootstrap.go:126,190` (boot + emission). `core/controlplane/gateway/gateway.go:1192-1207` (audit routes registered — no /query).
-**P0/P1 task filed:** F8 to be filed in step-8 triage as P0 (audit query plumbing broken).
+**Verdict:** PARTIAL PASS for (a), BLOCKED on (b) by Docker mount issue. F8 is fixed at the gateway-contract layer; live audit-emission re-run is deployment-gated.
+**Evidence:** Live API responses captured in step-4 worker note for the original failure. F8 fix evidence: gateway/OpenAPI/audit-query tests listed in [F8 follow-up verification](#f8-follow-up-verification-worker-7a6d-2026-04-26). Code refs: `core/audit/siem_actions.go:9` (constant exists), `core/llmchat/bootstrap.go:126,190` (boot + emission), `core/controlplane/gateway/handlers_audit_query.go` (query handler).
+**P0/P1 task filed:** F8 filed and fixed as `task-5b755f42`; no new P0/P1 for the endpoint plumbing after the contract tests pass.
 
 ---
 
@@ -91,10 +112,12 @@ Each probe section follows this template:
 3. Capture: `after=$(curl -sk "$BASE/api/v1/audit/query?type=mcp.tool_invocation&limit=1" | jq '.total')`.
 4. Assert `after - before == 100`.
 
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** BLOCKED hard by F8 — neither `/api/v1/audit/query` nor `/api/v1/audit/events` exist in the gateway (gateway.go:1192-1207 only registers /audit/export*, /audit/verify, /audit/legal-hold*). Cannot count `mcp.tool_invocation` events via the documented HTTP path. Workaround paths: (a) audit-export to a webhook/syslog/Datadog backend then grep externally (production-realistic but requires backend setup), (b) implement the gateway handler (architectural fix), (c) query Redis audit store directly (out-of-band, brittle).
-**Verdict:** BLOCKED on F8 (P0).
-**Evidence:** Live confirmation: `curl https://localhost:8081/api/v1/audit/query?type=mcp.tool_invocation → 404`.
-**P0/P1 task filed:** F8 → step-8 P0.
+**Actual (worker-e2a9, 2026-04-26T17:25Z):** Originally BLOCKED hard by F8 — neither `/api/v1/audit/query` nor `/api/v1/audit/events` existed in the gateway.
+
+**F8 follow-up (worker-7a6d, 2026-04-26):** Endpoint plumbing is fixed in code: route registration is covered by OpenAPI route tests, and `type=mcp.tool_invocation` filtering now matches `SIEMEvent.EventType` (with legacy `Action` fallback). The full 100-turn live chat run was not executed in this shared stack because the available governance probe scripts are placeholders and the dev mock LLM does not emit deterministic tool calls.
+**Verdict:** F8 sub-check PASS; full probe remains BLOCKED on non-F8 live chat/tool-call harness availability.
+**Evidence:** Historical live confirmation: `curl https://localhost:8081/api/v1/audit/query?type=mcp.tool_invocation → 404`. Fix evidence: `TestHandleAuditQuery_FiltersByEventType`, OpenAPI route coverage, and MCP package tests pass.
+**P0/P1 task filed:** F8 fixed by `task-5b755f42`; remaining deterministic LLM harness gap is lower-severity follow-up from probes 5/6.
 
 ---
 
@@ -111,12 +134,12 @@ Each probe section follows this template:
 - Chain integrity: `status=ok, total_events=10000, verified_events=10000, gaps=[], retention_window_hours=168, first_seq=1, last_seq=10000`. Hash chain is intact across 10000 events.
 - Baseline serial latency (5 calls): 199, 206, 215, 222, 241 ms — p99 ≈ 241ms.
 - 20 concurrent calls: p50=1660ms, p95=2325ms, p99=2354ms (overall wall-clock 2690ms for 20 parallel).
-- DoD #3 budget says "≤ p99 10ms regression" under chat load. The verify operation re-hashes 10K events on each call — absolute latency is 199-2354ms range; the 10ms regression budget is unmeasurable here without (a) chat-induced load (blocked by F8 — cannot drive chat-MCP calls and count audit emission), AND (b) a proper baseline-vs-load comparison harness. The verify endpoint's poor concurrency scaling (10× from baseline at 20 parallel) is itself a finding worth filing — verify is not designed for hot-path / load-test usage.
-- Chat-driven load probe component (probe 3 backbone) BLOCKED by F8.
+- DoD #3 budget says "≤ p99 10ms regression" under chat load. The verify operation re-hashes 10K events on each call — absolute latency is 199-2354ms range; the 10ms regression budget is unmeasurable here without (a) a live chat-induced load generator, AND (b) a proper baseline-vs-load comparison harness. The verify endpoint's poor concurrency scaling (10× from baseline at 20 parallel) is itself a finding worth filing — verify is not designed for hot-path / load-test usage.
+- F8 follow-up: the audit-query primitive needed by the probe-3 backbone now passes handler/OpenAPI/MCP contract tests; the chat-load component remains blocked on the live tool-call harness, not endpoint plumbing.
 
-**Verdict:** PARTIAL PASS (chain integrity verified ok); regression-budget portion BLOCKED by F8.
+**Verdict:** PARTIAL PASS (chain integrity verified ok); regression-budget portion remains BLOCKED by missing live chat-load harness. F8 is fixed at the endpoint-contract layer.
 **Evidence:** Live curl outputs in step-5 worker note. Verify endpoint's concurrency scaling characterized.
-**P0/P1 task filed:** F8 (P0); also recommend P1 follow-up "audit-verify endpoint concurrency scaling — investigate whether re-hashing 10K events per call is the intended hot-path design".
+**P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend P1 follow-up "audit-verify endpoint concurrency scaling — investigate whether re-hashing 10K events per call is the intended hot-path design".
 
 ---
 
@@ -127,14 +150,14 @@ Each probe section follows this template:
 1. Craft chat message that maps to `cordum_update_policy_bundle` with bundle missing required patterns.
 2. Capture MCP error code + audit row.
 
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** BLOCKED on mock-LLM + F8.
+**Actual (worker-e2a9, 2026-04-26T17:25Z):** Originally BLOCKED on mock-LLM + F8.
 - The dev stack runs a Python mock LLM (`docker-compose.dev.yml`) that always returns hardcoded `"Cordum dev mock LLM is healthy."` — it NEVER emits a tool_call request, so a chat user message cannot map to `cordum_update_policy_bundle`.
-- Even if the mock could emit it, F8 (audit/query 404) blocks reading back the `decision=SafetyDeny + rule_id` audit row.
+- F8 follow-up: audit readback is no longer a code blocker; the fixed handler supports `type=safety.decision` / `type=mcp.tool_*` event-type filtering and RFC3339 bounds.
 - Workaround: bypass chat path and POST a malformed bundle directly to `/api/v1/policy/bundles` (admin endpoint) to test the policy validator. But that tests the policy validator, NOT the chat→MCP→safety-kernel pipeline that the probe is meant to exercise.
 
-**Verdict:** BLOCKED on mock-LLM + F8.
+**Verdict:** BLOCKED on mock-LLM only; F8 endpoint-contract sub-check PASS.
 **Evidence:** N/A.
-**P0/P1 task filed:** F8 (P0); also recommend P2 follow-up "QA dev stack should ship a deterministic LLM stub that emits scripted tool_calls for governance probes".
+**P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend P2 follow-up "QA dev stack should ship a deterministic LLM stub that emits scripted tool_calls for governance probes".
 
 ---
 
@@ -166,10 +189,12 @@ Each probe section follows this template:
 3. Chat user requests submit; capture MCP error + audit row.
 4. Restore scope.
 
-**Actual (worker-e2a9, 2026-04-26T17:20Z):** BLOCKED by F1 (no `cordumctl agent set-scope` CLI command) AND F8 (cannot confirm audit reason via /audit/query). The static code path is correct (scope-first ordering verified at `core/mcp/registry.go:274,303`), but the runtime evidence cannot be captured without (a) a CLI / API workaround for narrowing scope, AND (b) the audit query endpoint to read back the deny reason.
+**Actual (worker-e2a9, 2026-04-26T17:20Z):** Originally BLOCKED by F1 (no `cordumctl agent set-scope` CLI command) AND F8 (could not confirm audit reason via /audit/query). The static code path is correct (scope-first ordering verified at `core/mcp/registry.go:274,303`).
+
+**F8 follow-up (worker-7a6d, 2026-04-26):** Audit readback is no longer a code blocker; the fixed handler can query by event type and RFC3339 bounds. Runtime scope-narrowing evidence still cannot be captured safely without a CLI/API workflow that does not mutate the shared chat-assistant scope for other workers.
 **Verdict:** BLOCKED
 **Evidence:** Order confirmed by code: scope filter at `core/mcp/registry.go:274` runs before approval gate at `core/mcp/registry.go:303`.
-**P0/P1 task filed:** F1 + F8 → step-8 P0/P1.
+**P0/P1 task filed:** F8 fixed by `task-5b755f42`; F1 remains the blocking scope-mutation follow-up.
 
 ---
 
@@ -184,11 +209,11 @@ Each probe section follows this template:
 **Actual (worker-e2a9, 2026-04-26T17:30Z):** BLOCKED on mock-LLM + F8.
 - The chat-assistant agent record from `/api/v1/agents` does NOT include a `data_classifications` field in the JSON response (only id/name/description/owner/team/risk_tier/allowed_tools shown). The classification metadata may be set elsewhere (CAP scope) — needs separate verification.
 - Driving a chat query that maps to a pii-classified tool requires real LLM (mock blocks).
-- Audit row capture blocked by F8.
+- F8 follow-up: audit row capture is no longer blocked by missing endpoint code; the fixed handler supports event-type filtering. Runtime capture is still blocked by the mock LLM and missing classification metadata path.
 
-**Verdict:** BLOCKED on mock-LLM + F8 + classification metadata not surfaced in /api/v1/agents response.
+**Verdict:** BLOCKED on mock-LLM + classification metadata not surfaced in /api/v1/agents response. F8 endpoint-contract sub-check PASS.
 **Evidence:** Agent JSON shape verified — no `data_classifications` key.
-**P0/P1 task filed:** F8 (P0); P2 follow-up to surface DataClassifications in /api/v1/agents API response.
+**P0/P1 task filed:** F8 fixed by `task-5b755f42`; P2 follow-up to surface DataClassifications in /api/v1/agents API response.
 
 ---
 
@@ -243,13 +268,13 @@ Each probe section follows this template:
 4. Run `/api/v1/audit/verify` → expect status=ok.
 
 **Actual (worker-e2a9, 2026-04-26T17:25Z):** DEFERRED.
-- The "completed vs aborted = total" accounting requires per-call audit visibility, which is blocked by F8 (cannot list `mcp.tool_invocation` events by type/since).
+- F8 follow-up: the per-call audit visibility primitive is fixed in code (`/api/v1/audit/query` can list `mcp.tool_invocation` events by type/since). The destructive restart test still requires a dedicated stack running the fixed gateway binary.
 - Restarting `cordum-scheduler-1` in the SHARED dev stack would disrupt other workers concurrently working on this stack (multiple parallel agents per the chat log). Cannot run the destructive part of this probe without a dedicated stack.
 - Static prerequisite: chain integrity is verified intact (10000/10000 verified, no gaps) — see Probe 4 evidence.
 
-**Verdict:** DEFERRED on F8 + shared-stack risk.
-**Evidence:** N/A — would re-use Probe 4 verify output post-restart.
-**P0/P1 task filed:** F8 (P0); also recommend dedicated test stack for destructive probes.
+**Verdict:** DEFERRED on shared-stack risk; F8 endpoint-contract sub-check PASS.
+**Evidence:** F8 fix evidence from gateway/OpenAPI/MCP tests; would re-use Probe 4 verify output post-restart on a dedicated stack.
+**P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend dedicated test stack for destructive probes.
 
 ---
 
@@ -287,11 +312,11 @@ Each probe section follows this template:
 **Actual (worker-e2a9, 2026-04-26T17:25Z):** BLOCKED.
 - F1: no `cordumctl agent set-scope`. The CAP SDK control-plane endpoint at `bootstrap.go:295-300` could be used directly via API, but doing so on the live shared dev stack would corrupt the chat-assistant scope for other workers.
 - Mock-LLM blocks driving the unauthorized mutation through the chat path.
-- F8 blocks reading back the SafetyDeny audit row.
+- F8 follow-up: reading back the SafetyDeny audit row is no longer blocked by missing endpoint code; runtime remains blocked by F1, mock-LLM, and shared-stack safety.
 
-**Verdict:** BLOCKED on F1 + mock-LLM + F8 + shared-stack risk.
+**Verdict:** BLOCKED on F1 + mock-LLM + shared-stack risk. F8 endpoint-contract sub-check PASS.
 **Evidence:** N/A.
-**P0/P1 task filed:** F1 (P1), F8 (P0), mock-LLM follow-up (P2). Shared-stack risk recommends dedicated test env.
+**P0/P1 task filed:** F1 (P1), mock-LLM follow-up (P2). F8 fixed by `task-5b755f42`; shared-stack risk recommends dedicated test env.
 
 ---
 

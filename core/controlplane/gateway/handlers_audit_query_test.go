@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/cordum/cordum/core/audit"
+	"github.com/redis/go-redis/v9"
 )
 
 // seedChainWithActions appends one event per action string so query tests
@@ -32,6 +34,30 @@ func seedChainWithActions(t *testing.T, s *server, tenant string, actions []stri
 		out = append(out, ev)
 	}
 	return out
+}
+
+func seedRawAuditEntry(t *testing.T, s *server, tenant string, id time.Time, ev audit.SIEMEvent) string {
+	t.Helper()
+	if ev.TenantID == "" {
+		ev.TenantID = tenant
+	}
+	if ev.Timestamp.IsZero() {
+		ev.Timestamp = id.UTC()
+	}
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal raw audit event: %v", err)
+	}
+	streamID := strconv.FormatInt(id.UTC().UnixMilli(), 10) + "-0"
+	chainer := audit.NewChainer(s.redisClient(), "")
+	if err := s.redisClient().XAdd(context.Background(), &redis.XAddArgs{
+		Stream: chainer.StreamKey(tenant),
+		ID:     streamID,
+		Values: map[string]any{"seq": "1", "event": string(payload)},
+	}).Err(); err != nil {
+		t.Fatalf("xadd raw audit entry: %v", err)
+	}
+	return streamID
 }
 
 func TestHandleAuditQuery_HappyPathNoFilter(t *testing.T) {
@@ -67,7 +93,36 @@ func TestHandleAuditQuery_HappyPathNoFilter(t *testing.T) {
 
 func TestHandleAuditQuery_FiltersByEventType(t *testing.T) {
 	s, _, _ := newTestGateway(t)
-	seedChainWithActions(t, s, "default", []string{"chat.bootstrap_registered", "mcp.tool_invocation", "chat.bootstrap_registered", "policy.deny"})
+	base := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	seedRawAuditEntry(t, s, "default", base.Add(1*time.Second), audit.SIEMEvent{EventType: audit.EventMCPToolInvocation, Action: "cordum_list_jobs"})
+	seedRawAuditEntry(t, s, "default", base.Add(2*time.Second), audit.SIEMEvent{EventType: audit.EventSafetyDecision, Action: "cordum_submit_job"})
+	seedRawAuditEntry(t, s, "default", base.Add(3*time.Second), audit.SIEMEvent{EventType: audit.EventMCPToolInvocation, Action: "cordum_query_policy"})
+
+	req := adminCtx(httptest.NewRequest(http.MethodGet,
+		"/api/v1/audit/query?tenant=default&type="+audit.EventMCPToolInvocation, nil))
+	rec := httptest.NewRecorder()
+	s.handleAuditQuery(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp auditQueryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 2 {
+		t.Fatalf("Total = %d, want 2 (only mcp.tool_invocation)", resp.Total)
+	}
+	for i, item := range resp.Items {
+		if item.Event.EventType != audit.EventMCPToolInvocation {
+			t.Errorf("item %d event_type = %q, want %q", i, item.Event.EventType, audit.EventMCPToolInvocation)
+		}
+	}
+}
+
+func TestHandleAuditQuery_FiltersByLegacyActionFallback(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	seedChainWithActions(t, s, "default", []string{"chat.bootstrap_registered", "cordum_list_jobs", "chat.bootstrap_registered"})
 
 	req := adminCtx(httptest.NewRequest(http.MethodGet,
 		"/api/v1/audit/query?tenant=default&type=chat.bootstrap_registered", nil))
@@ -82,12 +137,41 @@ func TestHandleAuditQuery_FiltersByEventType(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if resp.Total != 2 {
-		t.Fatalf("Total = %d, want 2 (only chat.bootstrap_registered)", resp.Total)
+		t.Fatalf("Total = %d, want 2 (only chat.bootstrap_registered action fallback)", resp.Total)
 	}
 	for i, item := range resp.Items {
 		if item.Event.Action != "chat.bootstrap_registered" {
 			t.Errorf("item %d action = %q, want chat.bootstrap_registered", i, item.Event.Action)
 		}
+	}
+}
+
+func TestHandleAuditQuery_AcceptsRFC3339SinceUntil(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	base := time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC)
+	seedRawAuditEntry(t, s, "default", base.Add(1*time.Second), audit.SIEMEvent{EventType: audit.EventSafetyDecision, Action: "before"})
+	seedRawAuditEntry(t, s, "default", base.Add(2*time.Second), audit.SIEMEvent{EventType: audit.EventMCPToolInvocation, Action: "inside"})
+	seedRawAuditEntry(t, s, "default", base.Add(3*time.Second), audit.SIEMEvent{EventType: audit.EventSafetyDecision, Action: "after"})
+
+	path := "/api/v1/audit/query?tenant=default&since=" +
+		base.Add(2*time.Second).Format(time.RFC3339Nano) +
+		"&until=" + base.Add(2*time.Second).Format(time.RFC3339Nano)
+	req := adminCtx(httptest.NewRequest(http.MethodGet, path, nil))
+	rec := httptest.NewRecorder()
+	s.handleAuditQuery(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp auditQueryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Items) != 1 {
+		t.Fatalf("Total=%d Items=%d, want 1/1", resp.Total, len(resp.Items))
+	}
+	if got := resp.Items[0].Event.Action; got != "inside" {
+		t.Fatalf("action = %q, want inside", got)
 	}
 }
 

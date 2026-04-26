@@ -4165,6 +4165,84 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/audit/query:
+    get:
+      operationId: queryAuditEvents
+      summary: Query audit events
+      description: |
+        Returns a paginated view of raw audit stream events for the caller's tenant.
+        Admin-only. Supports the MCP audit_query tool contract: `type` filters
+        SIEMEvent.event_type (with action fallback for legacy chat lifecycle events),
+        and `since` / `until` accept RFC3339 timestamps or unix milliseconds.
+      tags:
+      - AuditExport
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: tenant
+        in: query
+        required: false
+        description: Tenant id to query; must match caller scope and defaults to the authenticated/request tenant.
+        schema:
+          type: string
+      - name: type
+        in: query
+        required: false
+        description: Exact SIEMEvent.event_type filter (for example `mcp.tool_invocation` or `safety.decision`).
+        schema:
+          type: string
+      - name: since
+        in: query
+        required: false
+        description: Inclusive lower bound as RFC3339 timestamp or unix milliseconds.
+        schema:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: integer
+            format: int64
+            minimum: 0
+      - name: until
+        in: query
+        required: false
+        description: Inclusive upper bound as RFC3339 timestamp or unix milliseconds.
+        schema:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: integer
+            format: int64
+            minimum: 0
+      - name: limit
+        in: query
+        required: false
+        description: Page size (default 50, max 500).
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      - name: cursor
+        in: query
+        required: false
+        description: Opaque continuation token from a previous response.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Audit event page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditQueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/audit/export:
     get:
       operationId: exportAuditCompliance
@@ -8481,6 +8559,33 @@ components:
       type: object
       properties: {}
       additionalProperties: true
+    AuditQueryItem:
+      type: object
+      required:
+      - stream_id
+      - event
+      properties:
+        stream_id:
+          type: string
+          description: Redis stream ID; pass this value as `cursor` to continue after this event.
+        event:
+          $ref: '#/components/schemas/GenericObject'
+    AuditQueryResponse:
+      type: object
+      required:
+      - items
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditQueryItem'
+        next_cursor:
+          type: string
+          description: Opaque continuation cursor when another page is available.
+        total:
+          type: integer
+          description: Number of returned items after filtering.
     AuditVerifyGap:
       type: object
       properties:

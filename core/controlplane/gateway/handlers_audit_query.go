@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
@@ -41,12 +43,11 @@ type auditQueryResponse struct {
 //
 //	tenant   (optional) — tenant to query, must match caller's scope;
 //	                      defaults to caller's tenant when omitted
-//	type     (optional) — exact-match filter on SIEMEvent.Action
-//	                      (e.g. "mcp.tool_invocation" or
-//	                      "chat.bootstrap_registered")
-//	since    (optional) — unix ms, inclusive lower bound (matches the
-//	                      verify endpoint's convention)
-//	until    (optional) — unix ms, inclusive upper bound
+//	type     (optional) — exact-match filter on SIEMEvent.EventType.
+//	                      For compatibility with the original QA fix,
+//	                      SIEMEvent.Action is also accepted as a fallback.
+//	since    (optional) — RFC3339 timestamp or unix ms, inclusive lower bound
+//	until    (optional) — RFC3339 timestamp or unix ms, inclusive upper bound
 //	limit    (optional) — page size, default 50, capped at 500
 //	cursor   (optional) — opaque continuation token from a prior
 //	                      response's next_cursor field
@@ -85,19 +86,23 @@ func (s *server) handleAuditQuery(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		since = "-"
 	} else {
-		if _, err := strconv.ParseInt(since, 10, 64); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "since must be a non-negative unix millisecond")
+		parsed, err := parseAuditQueryBound(since)
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("since must be a non-negative unix millisecond or RFC3339 timestamp: %v", err))
 			return
 		}
+		since = parsed
 	}
 	until := strings.TrimSpace(q.Get("until"))
 	if until == "" {
 		until = "+"
 	} else {
-		if _, err := strconv.ParseInt(until, 10, 64); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "until must be a non-negative unix millisecond")
+		parsed, err := parseAuditQueryBound(until)
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("until must be a non-negative unix millisecond or RFC3339 timestamp: %v", err))
 			return
 		}
+		until = parsed
 	}
 	cursor := strings.TrimSpace(q.Get("cursor"))
 	minID := since
@@ -150,7 +155,7 @@ func (s *server) handleAuditQuery(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 			continue
 		}
-		if eventType != "" && ev.Action != eventType {
+		if eventType != "" && ev.EventType != eventType && ev.Action != eventType {
 			continue
 		}
 		resp.Items = append(resp.Items, auditQueryItem{StreamID: entry.ID, Event: ev})
@@ -161,4 +166,23 @@ func (s *server) handleAuditQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, resp)
+}
+
+func parseAuditQueryBound(raw string) (string, error) {
+	if ms, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if ms < 0 {
+			return "", fmt.Errorf("negative unix millisecond")
+		}
+		return strconv.FormatInt(ms, 10), nil
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return "", err
+	}
+	ms := ts.UTC().UnixMilli()
+	if ms < 0 {
+		return "", fmt.Errorf("timestamp is before unix epoch")
+	}
+	return strconv.FormatInt(ms, 10), nil
 }
