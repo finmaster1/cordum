@@ -76,8 +76,26 @@ demo-quickstart-test:
 demo-mock-bank-test:
 	CORDUM_INTEGRATION=1 ./demo/mock-bank/integration_test.sh
 
+# dev-up brings up the full stack plus one of the three LLM-chat
+# inference profiles. Default is `llmchat-ollama` (CPU, ~4.5 GB resident,
+# no GPU required) so a fresh `git clone && make dev-up` Just Works on a
+# typical 8 GB Docker host. Override PROFILE to switch:
+#   make dev-up                          # default: Ollama + Qwen2.5-Coder-7B
+#   make dev-up PROFILE=llmchat          # vLLM + Qwen3-Coder-30B-FP8 (GPU)
+#   make dev-up PROFILE=llmchat-cpu      # vLLM + Qwen3-Coder-30B-AWQ (CPU, 16-24 GB RAM)
+PROFILE ?= llmchat-ollama
 dev-up:
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile $(PROFILE) up -d --build
+
+# Convenience shortcuts mapping to the supported PROFILE values.
+dev-up-gpu:
+	$(MAKE) dev-up PROFILE=llmchat
+
+dev-up-cpu:
+	$(MAKE) dev-up PROFILE=llmchat-cpu
+
+dev-up-ollama:
+	$(MAKE) dev-up PROFILE=llmchat-ollama
 
 dev-down:
 	docker compose down
@@ -103,7 +121,10 @@ help:
 	@echo "  make verify-images      Verify published GHCR images (pull + cosign + multi-arch)"
 	@echo "  make demo-quickstart-test  End-to-end test for the demo-quickstart pack"
 	@echo "  make demo-mock-bank-test   End-to-end test for the demo-mock-bank pack (all three verdicts)"
-	@echo "  make dev-up             Start all services via docker compose (with local rebuild)"
+	@echo "  make dev-up             Start all services + LLM-chat profile (default: Ollama/CPU)"
+	@echo "  make dev-up-gpu         dev-up with vLLM + Qwen3-Coder-30B-FP8 (requires GPU)"
+	@echo "  make dev-up-cpu         dev-up with vLLM + Qwen3-Coder-30B-AWQ (requires 16-24GB RAM)"
+	@echo "  make dev-up-ollama      dev-up with Ollama + Qwen2.5-Coder-7B (no GPU, ~5GB RAM)"
 	@echo "  make dev-down           Stop all services"
 	@echo "  make dev-logs           Tail docker compose logs"
 	@echo "  make soak-ws            10-minute WebSocket soak test"
@@ -123,4 +144,4 @@ soak-ws-full:
 	@echo "Running 2-hour full WebSocket soak test..."
 	./tools/scripts/ws_soak_test.sh full
 
-.PHONY: help proto build build-all $(SERVICES:%=build-%) test test-integration coverage coverage-core openapi openapi-validate docker smoke verify-images demo-quickstart-test demo-mock-bank-test dev-up dev-down dev-logs soak-ws soak-ws-quick soak-ws-full
+.PHONY: help proto build build-all $(SERVICES:%=build-%) test test-integration coverage coverage-core openapi openapi-validate docker smoke verify-images demo-quickstart-test demo-mock-bank-test dev-up dev-up-gpu dev-up-cpu dev-up-ollama dev-down dev-logs soak-ws soak-ws-quick soak-ws-full

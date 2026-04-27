@@ -40,8 +40,12 @@ import (
 const (
 	defaultHTTPAddr            = ":8091"
 	defaultProvider            = "openai"
-	defaultBaseURL             = "http://qwen-inference:8000/v1"
-	defaultModel               = "qwen3-coder"
+	// Default points at the Ollama profile (`make dev-up` / `--profile
+	// llmchat-ollama`) so a fresh `git clone` Just Works without a GPU.
+	// GPU and vLLM-CPU profiles override these via env in their compose
+	// blocks. Plan: ~/.claude/plans/goofy-tickling-hartmanis.md.
+	defaultBaseURL             = "http://ollama:11434/v1"
+	defaultModel               = "qwen2.5-coder:7b-instruct-q4_K_M"
 	defaultToolTemperature     = 0.3
 	defaultToolTopP            = 0.9
 	defaultSummaryTemperature  = 0.7

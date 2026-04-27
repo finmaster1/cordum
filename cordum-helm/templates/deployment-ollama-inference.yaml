@@ -1,0 +1,127 @@
+{{- if .Values.ollamaInference.enabled }}
+{{- if .Values.ollamaInference.modelsCache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cordum.fullname" . }}-ollama-models
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama-inference
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.ollamaInference.modelsCache.size | quote }}
+  {{- if .Values.ollamaInference.modelsCache.storageClass }}
+  storageClassName: {{ .Values.ollamaInference.modelsCache.storageClass | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cordum.fullname" . }}-ollama-inference
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama-inference
+spec:
+  replicas: {{ .Values.ollamaInference.replicas }}
+  # Recreate not RollingUpdate — Ollama serializes generations
+  # (OLLAMA_NUM_PARALLEL=1 below); a rolling overlap would deadlock on
+  # the single shared `ollama_models` PVC during startup-time `pull`.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cordum.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ollama-inference
+  template:
+    metadata:
+      labels:
+        {{- include "cordum.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ollama-inference
+    spec:
+      containers:
+        - name: ollama-inference
+          # Pin floor: 0.5.7 — first stable tag that emits OpenAI streaming
+          # `delta.tool_calls[]` arrays. Earlier tags embed tool calls as
+          # JSON in the content field and silently break the chat-loop
+          # tool dispatch. Bump only via tools/scripts/ollama_pin_digest.sh.
+          image: "{{ .Values.ollamaInference.image.repository }}:{{ .Values.ollamaInference.image.tag }}"
+          imagePullPolicy: {{ .Values.ollamaInference.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ollama serve &
+              until ollama list >/dev/null 2>&1; do sleep 1; done
+              ollama pull {{ .Values.ollamaInference.model | quote }}
+              wait
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            # Keep the model resident between turns; the default 5m
+            # forces a re-load on idle and adds ~30s latency to the next
+            # user turn.
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+            # Serialize on small clusters. Two concurrent generations on
+            # a CPU model thrash. The chat session itself is single-flight.
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+          ports:
+            - name: openai
+              containerPort: 11434
+          resources:
+            {{- toYaml .Values.ollamaInference.resources | nindent 12 }}
+          {{- if .Values.ollamaInference.modelsCache.enabled }}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          {{- end }}
+          # First pull is a single ~4.5 GB download; budget the readiness
+          # probe so the kubelet does not kill the pod before the model
+          # registers in /api/tags.
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: openai
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: openai
+            initialDelaySeconds: 600
+            periodSeconds: 30
+            failureThreshold: 6
+      {{- if .Values.ollamaInference.modelsCache.enabled }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "cordum.fullname" . }}-ollama-models
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cordum.fullname" . }}-ollama-inference
+  labels:
+    {{- include "cordum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama-inference
+spec:
+  # ClusterIP ONLY. Do not use externally reachable service types —
+  # llm-chat is the sole legitimate client. External exposure of the
+  # inference endpoint is a P0 (mirrors the qwen-inference posture).
+  type: ClusterIP
+  ports:
+    - name: openai
+      port: {{ .Values.ollamaInference.service.port }}
+      targetPort: openai
+  selector:
+    {{- include "cordum.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama-inference
+{{- end }}

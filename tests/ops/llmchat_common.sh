@@ -10,7 +10,12 @@ OPS_OUT_DIR="${LLMCHAT_OPS_OUT_DIR:-${REPO_ROOT}/out/llmchat-ops}"
 GATEWAY_URL="${LLMCHAT_GATEWAY_URL:-http://127.0.0.1:8081}"
 LLMCHAT_DIRECT_URL="${LLMCHAT_DIRECT_URL:-http://127.0.0.1:8090}"
 VLLM_URL="${LLMCHAT_VLLM_URL:-http://127.0.0.1:8000}"
+OLLAMA_URL="${LLMCHAT_OLLAMA_URL:-http://127.0.0.1:11434}"
 CURL_TIMEOUT_SECONDS="${LLMCHAT_CURL_TIMEOUT_SECONDS:-10}"
+# LLMCHAT_OPS_BACKEND legal values:
+#   gpu-fp8        — vLLM + Qwen3-Coder-30B-FP8 (production GPU profile)
+#   cpu-vllm-awq   — vLLM + Qwen3-Coder-30B-AWQ (CPU/16-24GB RAM)
+#   ollama-cpu     — Ollama + Qwen2.5-Coder-7B-Q4_K_M (CPU/~5GB RAM, default)
 LLMCHAT_OPS_BACKEND="${LLMCHAT_OPS_BACKEND:-gpu-fp8}"
 
 PYTHON_BIN="${LLMCHAT_PYTHON_BIN:-}"
@@ -131,7 +136,8 @@ require_real_vllm() {
   require_live_stack
   case "${LLMCHAT_OPS_BACKEND}" in
     gpu-fp8|cpu-vllm-awq) ;;
-    *) probe_fail "unsupported LLMCHAT_OPS_BACKEND=${LLMCHAT_OPS_BACKEND}; allowed: gpu-fp8, cpu-vllm-awq" ;;
+    ollama-cpu) probe_skip "probe is vLLM-specific; backend=ollama-cpu uses require_real_ollama instead" ;;
+    *) probe_fail "unsupported LLMCHAT_OPS_BACKEND=${LLMCHAT_OPS_BACKEND}; allowed: gpu-fp8, cpu-vllm-awq, ollama-cpu" ;;
   esac
   local cmdline_file="${PROBE_OUT_DIR}/qwen-cmdline.txt"
   local default_container="cordum-qwen-inference-1"
@@ -153,6 +159,63 @@ require_real_vllm() {
   fi
   grep -q -- '--tool-call-parser qwen3_xml' "${cmdline_file}" || probe_fail 'real vLLM parser is not qwen3_xml'
   grep -q -- "${expected_model}" "${cmdline_file}" || probe_fail "real vLLM model does not match ${expected_model} for backend=${LLMCHAT_OPS_BACKEND}"
+}
+
+# Asserts the running container is real Ollama (not a dev stub) and that
+# the chat model is registered. Companion to require_real_vllm() for the
+# `ollama-cpu` backend.
+require_real_ollama() {
+  require_live_stack
+  case "${LLMCHAT_OPS_BACKEND}" in
+    ollama-cpu) ;;
+    gpu-fp8|cpu-vllm-awq) probe_skip "probe is Ollama-specific; backend=${LLMCHAT_OPS_BACKEND} uses require_real_vllm" ;;
+    *) probe_fail "unsupported LLMCHAT_OPS_BACKEND=${LLMCHAT_OPS_BACKEND}; allowed: gpu-fp8, cpu-vllm-awq, ollama-cpu" ;;
+  esac
+  local cmdline_file="${PROBE_OUT_DIR}/ollama-cmdline.txt"
+  local default_container="cordum-ollama-1"
+  local expected_model="${LLMCHAT_OLLAMA_MODEL:-qwen2.5-coder:7b-instruct-q4_K_M}"
+  if command -v docker >/dev/null 2>&1; then
+    docker exec "${LLMCHAT_OLLAMA_CONTAINER:-${default_container}}" sh -c "tr '\\000' ' ' </proc/1/cmdline" >"${cmdline_file}" 2>>"${EVIDENCE_FILE}" || true
+  fi
+  if [ ! -s "${cmdline_file}" ]; then
+    log_evidence 'ollama_cmdline=unavailable'
+    probe_skip "real Ollama cmdline unavailable; run backend=${LLMCHAT_OPS_BACKEND} with a matching ollama container"
+  fi
+  sed -e 's/^/ollama_cmdline: /' "${cmdline_file}" >>"${EVIDENCE_FILE}"
+  # The container's PID 1 is `/bin/sh -c 'ollama serve & ...'`; assert the
+  # serve loop is still in flight rather than greping for a specific arg.
+  grep -q -E 'ollama (serve|pull)' "${cmdline_file}" || probe_fail 'real Ollama process not detected in container PID 1'
+  local tags_file="${PROBE_OUT_DIR}/ollama-tags.json"
+  curl -sS --max-time "${CURL_TIMEOUT_SECONDS}" "${OLLAMA_URL}/api/tags" >"${tags_file}" 2>>"${EVIDENCE_FILE}" || true
+  if [ ! -s "${tags_file}" ]; then
+    probe_skip "Ollama /api/tags unreachable at ${OLLAMA_URL}; the serve loop may still be pulling the model"
+  fi
+  sed -e 's/^/ollama_tags: /' "${tags_file}" >>"${EVIDENCE_FILE}"
+  grep -q -- "${expected_model}" "${tags_file}" || probe_fail "Ollama model registry does not list ${expected_model}; check OLLAMA_KEEP_ALIVE + the pull step in compose"
+}
+
+# Polls Ollama /api/tags until ${expected_model} appears or the timeout
+# elapses. First-pull on a cold cache is ~3-5 minutes for the 4.5 GB
+# Q4_K_M weights, so the default timeout is generous.
+wait_for_ollama_model_loaded() {
+  local expected_model="${1:-${LLMCHAT_OLLAMA_MODEL:-qwen2.5-coder:7b-instruct-q4_K_M}}"
+  local timeout="${2:-600}"
+  local body="${PROBE_OUT_DIR}/ollama-tags-poll.json"
+  local start now status
+  start=$(date +%s)
+  while true; do
+    status=$(curl_status_body 'ollama tags poll' "${body}" "${OLLAMA_URL}/api/tags") || true
+    if [ "${status}" = "200" ] && grep -q -- "${expected_model}" "${body}" 2>/dev/null; then
+      log_evidence "ollama_model_loaded=${expected_model}"
+      return 0
+    fi
+    now=$(date +%s)
+    if [ $((now - start)) -ge "${timeout}" ]; then
+      log_evidence "ollama_model_load_timeout=${timeout} expected_model=${expected_model} last_status=${status}"
+      return 1
+    fi
+    sleep 10
+  done
 }
 
 poll_readyz() {

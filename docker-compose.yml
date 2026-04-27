@@ -828,6 +828,141 @@ services:
       retries: 3
       start_period: 15s
 
+  # CPU-friendly inference runtime for the local LLM chat assistant. Ollama
+  # serves `qwen2.5-coder:7b-instruct-q4_K_M` (~4.5 GB resident) over an
+  # OpenAI-compatible HTTP surface at :11434/v1, with native `tool_calls[]`
+  # streaming. Brought up only via `--profile llmchat-ollama`.
+  #
+  # This is the DEFAULT for `make dev-up` so a fresh `git clone` Just Works
+  # on a typical 8 GB Docker host without a GPU. The GPU/FP8 profile
+  # (`llmchat`) and vLLM/CPU/AWQ profile (`llmchat-cpu`) remain available
+  # for users who want them; this does not replace them.
+  ollama:
+    profiles: [llmchat-ollama]
+    # Pinned to ollama 0.5.7@sha256:7e672211 — first stable tag that emits
+    # OpenAI streaming `delta.tool_calls[]` arrays. Earlier tags embed tool
+    # calls as JSON in the content field and silently break the chat-loop
+    # tool dispatch. Bump only via tools/scripts/ollama_pin_digest.sh.
+    image: "ollama/ollama@sha256:7e672211886f8bd4448a98ed577e26c816b9e8b052112860564afaa2c105800e"
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      # Keep the model resident between turns; default 5m forces re-load on
+      # idle and adds ~30s latency to the next user turn.
+      - OLLAMA_KEEP_ALIVE=24h
+      # Serialize on small hosts. Two concurrent generations on a CPU model
+      # thrash. The chat session itself is single-flight per user.
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull qwen2.5-coder:7b-instruct-q4_K_M
+        wait
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      # Loopback ONLY on the host. Mirrors the vLLM profiles' loopback
+      # binding so the inference endpoint is not exposed off-host.
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # First pull is a single ~4.5 GB download; budget covers slow links.
+      start_period: 600s
+    deploy:
+      resources:
+        limits:
+          # 4.5 GB model + KV-cache headroom; OOMs below this on a typical
+          # turn. Sub-6G hosts must override LLMCHAT_MODEL to a 3B variant.
+          memory: 6G
+          cpus: "2.0"
+
+  # llm-chat sibling for the Ollama profile. Same image and shape as
+  # llm-chat-cpu (the safety/redactor/license-gate stack is identical and
+  # provider-runtime-agnostic); only LLMCHAT_BASE_URL + LLMCHAT_MODEL
+  # change to point at the Ollama OpenAI-compat surface.
+  llm-chat-ollama:
+    profiles: [llmchat-ollama]
+    image: ghcr.io/cordum-io/cordum/llm-chat:${CORDUM_VERSION:-latest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: cordum-llm-chat
+    depends_on:
+      ollama:
+        condition: service_started
+      api-gateway:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      - CORDUM_LLM_CHAT_ADDR=:8090
+      - CORDUM_API_KEY=${CORDUM_API_KEY:?CORDUM_API_KEY_not_set}
+      - CORDUM_LICENSE_TOKEN=${CORDUM_LICENSE_TOKEN:-}
+      - CORDUM_LICENSE_PUBLIC_KEY=${CORDUM_LICENSE_PUBLIC_KEY:-}
+      - REDIS_URL=rediss://:${REDIS_PASSWORD:?REDIS_PASSWORD_not_set}@redis:6379
+      - REDIS_TLS_CA=/etc/cordum/tls/ca/ca.crt
+      - REDIS_TLS_CERT=/etc/cordum/tls/client/tls.crt
+      - REDIS_TLS_KEY=/etc/cordum/tls/client/tls.key
+      - REDIS_TLS_SERVER_NAME=redis
+      - NATS_URL=tls://nats:4222
+      - NATS_TLS_CA=/etc/cordum/tls/ca/ca.crt
+      - NATS_TLS_CERT=/etc/cordum/tls/client/tls.crt
+      - NATS_TLS_KEY=/etc/cordum/tls/client/tls.key
+      - NATS_TLS_SERVER_NAME=nats
+      - NATS_TOKEN=${NATS_TOKEN:-cordum-dev-token}
+      - CORDUM_TLS_CA=/etc/cordum/tls/ca/ca.crt
+      - CORDUM_GATEWAY_URL=${CORDUM_GATEWAY_URL:-https://cordum-api-gateway:8081}
+      - LLMCHAT_BASE_URL=http://ollama:11434/v1
+      - LLMCHAT_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
+      - LLMCHAT_PROVIDER=openai
+      - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
+      - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
+      - LLMCHAT_SUMMARY_TEMPERATURE=${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}
+      - LLMCHAT_SUMMARY_TOP_P=${LLMCHAT_SUMMARY_TOP_P:-0.8}
+      - LLMCHAT_TENANT=${CORDUM_TENANT_ID:-default}
+      - LLMCHAT_KNOWLEDGE_PACK_ENABLED=${LLMCHAT_KNOWLEDGE_PACK_ENABLED:-true}
+      - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-65536}
+      - LLMCHAT_OPENAPI_PATH=/etc/cordum-llm-chat/openapi.yaml
+      - LLMCHAT_CORDUM_IO_PATH=/etc/cordum-llm-chat/cordum-io
+    volumes:
+      - ./certs:/etc/cordum/tls:ro
+      - ./config/llmchat:/home/cordum/config/llmchat:ro
+      - ./docs/api/openapi/cordum-api.yaml:/etc/cordum-llm-chat/openapi.yaml:ro
+      - ./docs-site/docs/concepts:/etc/cordum-llm-chat/cordum-io/concepts:ro
+      - ./docs-site/docs/getting-started:/etc/cordum-llm-chat/cordum-io/getting-started:ro
+      - ./docs-site/docs/operations:/etc/cordum-llm-chat/cordum-io/operations:ro
+    ports:
+      # Distinct from llm-chat (8090) and llm-chat-cpu (8091) so all three
+      # profiles can coexist without port collisions on a multi-tenant host.
+      - "8092:8090"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
 volumes:
   nats_data:
   redis_data:
@@ -837,3 +972,7 @@ volumes:
   # CPU/AWQ profile cache. Kept separate from FP8 cache so CPU probe runs do
   # not evict or mutate production GPU weights.
   qwen_cpu_hf_cache:
+  # Ollama models cache. Holds the pulled `qwen2.5-coder:7b-instruct-q4_K_M`
+  # (~4.5 GB) so cold restarts do not re-download it. Kept separate from the
+  # vLLM caches because the on-disk layouts are unrelated.
+  ollama_models:

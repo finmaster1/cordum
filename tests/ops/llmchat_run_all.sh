@@ -26,6 +26,7 @@ PROBES=(
   llmchat_probe_16_concurrent_isolation.sh
   llmchat_probe_17_graceful_shutdown.sh
   llmchat_probe_18_backpressure.sh
+  llmchat_probe_19_ollama_cold_start.sh
 )
 
 mkdir -p "${OPS_OUT_DIR}"
@@ -40,7 +41,17 @@ defer=0
 
 DEFERRED_PROBES="${LLMCHAT_OPS_DEFERRED_PROBES:-}"
 if [ -z "${DEFERRED_PROBES}" ] && [ "${LLMCHAT_OPS_BACKEND}" = "cpu-vllm-awq" ]; then
-  DEFERRED_PROBES="llmchat_probe_06_tier1_capacity.sh llmchat_probe_07_gpu_oom.sh llmchat_probe_12_rolling_upgrade.sh llmchat_probe_13_hf_cache_loss.sh llmchat_probe_14_tier2_awq.sh llmchat_probe_15_tier3_a100.sh"
+  DEFERRED_PROBES="llmchat_probe_06_tier1_capacity.sh llmchat_probe_07_gpu_oom.sh llmchat_probe_12_rolling_upgrade.sh llmchat_probe_13_hf_cache_loss.sh llmchat_probe_14_tier2_awq.sh llmchat_probe_15_tier3_a100.sh llmchat_probe_19_ollama_cold_start.sh"
+fi
+if [ -z "${DEFERRED_PROBES}" ] && [ "${LLMCHAT_OPS_BACKEND}" = "ollama-cpu" ]; then
+  # Probes 02/07/13/14/15 grep the vLLM cmdline or assume FP8/AWQ weights;
+  # probe 06 is the H100/Tier-1 capacity gate that does not apply to a CPU
+  # Ollama box. Defer them with the same reason as the cpu-vllm-awq path.
+  DEFERRED_PROBES="llmchat_probe_02_vllm_crash.sh llmchat_probe_06_tier1_capacity.sh llmchat_probe_07_gpu_oom.sh llmchat_probe_13_hf_cache_loss.sh llmchat_probe_14_tier2_awq.sh llmchat_probe_15_tier3_a100.sh"
+fi
+if [ -z "${DEFERRED_PROBES}" ] && [ "${LLMCHAT_OPS_BACKEND}" = "gpu-fp8" ]; then
+  # Probe 19 is Ollama-specific; defer cleanly on the GPU profile.
+  DEFERRED_PROBES="llmchat_probe_19_ollama_cold_start.sh"
 fi
 DEFERRED_REASON="${LLMCHAT_OPS_DEFERRED_REASON:-formal CPU-mode scope decision: GPU/k8s tier-matrix probe deferred under task-a5d09fad}"
 

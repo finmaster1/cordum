@@ -682,3 +682,45 @@ qwenInference:
     enabled: true
     size: 50Gi
     storageClass: ""  # empty → cluster default
+
+# =============================================================================
+# Ollama inference (community-tier, CPU-friendly). Mirrors the docker-compose
+# `llmchat-ollama` profile for clusters without a GPU. Production deployments
+# should keep this DISABLED and run the qwenInference (vLLM/GPU) profile above.
+#
+# When enabled with `ollamaInference.enabled=true` AND
+# `qwenInference.enabled=false`, the chart renders an Ollama Deployment +
+# Service + PVC and points llm-chat at it via LLMCHAT_BASE_URL. See
+# docs/llmchat/ollama-runtime.md for sizing guidance + model-swap procedure.
+# =============================================================================
+ollamaInference:
+  enabled: false
+  replicas: 1
+  # Pin floor: 0.5.7 — first stable tag that emits OpenAI streaming
+  # `delta.tool_calls[]` arrays. Earlier tags embed tool calls as JSON in
+  # the content field and silently break the chat-loop tool dispatch.
+  # Bump only via tools/scripts/ollama_pin_digest.sh.
+  image:
+    repository: "ollama/ollama"
+    tag: "0.5.7"
+    pullPolicy: IfNotPresent
+  # Default model: ~4.5 GB resident, Apache 2.0, native OpenAI tool_calls.
+  # For sub-8 GB Docker memory hosts, override via --set
+  # ollamaInference.model=qwen2.5-coder:3b-instruct-q4_K_M (~2 GB).
+  model: "qwen2.5-coder:7b-instruct-q4_K_M"
+  service:
+    port: 11434
+  resources:
+    limits:
+      memory: 6Gi
+      cpu: "2"
+    requests:
+      memory: 5Gi
+      cpu: "1"
+  modelsCache:
+    # PVC for the Ollama model cache (`/root/.ollama`). Re-pulling the
+    # 4.5 GB model on every pod restart is unacceptable, so this defaults
+    # on whenever ollamaInference.enabled=true.
+    enabled: true
+    size: 20Gi
+    storageClass: ""  # empty → cluster default

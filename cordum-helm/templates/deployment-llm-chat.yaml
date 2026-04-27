@@ -60,11 +60,19 @@ spec:
             - name: LLMCHAT_BASE_URL
               {{- if .Values.qwenInference.enabled }}
               value: "http://{{ include "cordum.fullname" . }}-qwen-inference:8000/v1"
+              {{- else if .Values.ollamaInference.enabled }}
+              value: "http://{{ include "cordum.fullname" . }}-ollama-inference:{{ .Values.ollamaInference.service.port }}/v1"
               {{- else }}
-              value: {{ required "llmChat.externalBaseUrl is required when qwenInference.enabled is false" .Values.llmChat.externalBaseUrl | quote }}
+              value: {{ required "llmChat.externalBaseUrl is required when both qwenInference.enabled and ollamaInference.enabled are false" .Values.llmChat.externalBaseUrl | quote }}
               {{- end }}
             - name: LLMCHAT_MODEL
+              {{- if .Values.qwenInference.enabled }}
               value: {{ .Values.qwenInference.servedModelName | quote }}
+              {{- else if .Values.ollamaInference.enabled }}
+              value: {{ .Values.ollamaInference.model | quote }}
+              {{- else }}
+              value: {{ .Values.qwenInference.servedModelName | quote }}
+              {{- end }}
             - name: LLMCHAT_PROVIDER
               value: "openai"
             {{- if .Values.global.tls.enabled }}
