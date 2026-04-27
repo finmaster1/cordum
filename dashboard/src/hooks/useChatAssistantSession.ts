@@ -162,6 +162,11 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
   const cancelledRef = useRef(false);
   const connectRef = useRef<(() => void) | null>(null);
   const assistantFrameIdRef = useRef<string | null>(null);
+  // One-shot self-heal flag: if MAX_FAILURES exhaust, we drop the stale
+  // sessionId and try once more with a fresh id. This pin prevents an
+  // infinite "drop session, retry, drop session, retry" loop when the
+  // chat backend is genuinely down.
+  const staleResetRef = useRef(false);
 
   const closeSocket = useCallback((code: number, reason: string) => {
     if (reconnectTimerRef.current !== null) {
@@ -235,6 +240,7 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
       }
       backoffRef.current = MIN_BACKOFF_MS;
       failureCountRef.current = 0;
+      staleResetRef.current = false;
       setStatus("open");
       setError(null);
     };
@@ -272,6 +278,23 @@ export function useChatAssistantSession(enabled: boolean): ChatAssistantSessionA
         failureCountRef.current += 1;
       }
       if (failureCountRef.current >= MAX_FAILURES) {
+        // Common cause of repeated WS-handshake failure on the same id: a
+        // stale localStorage sessionId (e.g. user reloaded after the
+        // daemon restarted, server no longer recognises the id, gateway
+        // returns 404). Self-heal once: drop the sessionId, reset the
+        // failure count, and reconnect with a fresh id minted in
+        // connect(). If THAT also exhausts MAX_FAILURES, give up for real.
+        if (!staleResetRef.current) {
+          staleResetRef.current = true;
+          useChatAssistantStore.getState().clearSession();
+          failureCountRef.current = 0;
+          backoffRef.current = MIN_BACKOFF_MS;
+          setStatus("reconnecting");
+          reconnectTimerRef.current = setTimeout(() => {
+            connectRef.current?.();
+          }, MIN_BACKOFF_MS);
+          return;
+        }
         setStatus("closed");
         setError("unable to reach chat service");
         return;
