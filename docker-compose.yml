@@ -837,7 +837,7 @@ services:
       start_period: 15s
 
   # CPU-friendly inference runtime for the local LLM chat assistant. Ollama
-  # serves `qwen2.5-coder:3b-instruct-q4_K_M` (~4.5 GB resident) over an
+  # serves `qwen2.5-coder:3b-instruct-q4_K_M-ctx32k` (~4.5 GB resident) over an
   # OpenAI-compatible HTTP surface at :11434/v1, with native `tool_calls[]`
   # streaming. Brought up only via `--profile llmchat-ollama`.
   #
@@ -871,11 +871,21 @@ services:
       # also bump container memory to >=8G.
       - OLLAMA_CONTEXT_LENGTH=32768
     entrypoint: ["/bin/sh", "-c"]
+    # Pulls the upstream tag, then re-tags it with `num_ctx 32768` so the
+    # default 2048-token context does not silently truncate the chat
+    # prompt (system prompt + 19 tool definitions + KP + user msg ~= 20K
+    # tokens). The OLLAMA_CONTEXT_LENGTH env var is NOT honored on
+    # 0.5.7, so the per-model PARAMETER is the reliable lever.
     command:
       - |
         ollama serve &
         until ollama list >/dev/null 2>&1; do sleep 1; done
         ollama pull qwen2.5-coder:3b-instruct-q4_K_M
+        cat > /tmp/Modelfile <<MFEOF
+        FROM qwen2.5-coder:3b-instruct-q4_K_M
+        PARAMETER num_ctx 32768
+        MFEOF
+        ollama create qwen2.5-coder:3b-instruct-q4_K_M-ctx32k -f /tmp/Modelfile
         wait
     volumes:
       - ollama_models:/root/.ollama
@@ -955,7 +965,7 @@ services:
       - CORDUM_TLS_CA=/etc/cordum/tls/ca/ca.crt
       - CORDUM_GATEWAY_URL=${CORDUM_GATEWAY_URL:-https://cordum-api-gateway:8081}
       - LLMCHAT_BASE_URL=http://ollama:11434/v1
-      - LLMCHAT_MODEL=qwen2.5-coder:3b-instruct-q4_K_M
+      - LLMCHAT_MODEL=qwen2.5-coder:3b-instruct-q4_K_M-ctx32k
       - LLMCHAT_PROVIDER=openai
       - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
       - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
@@ -1010,7 +1020,7 @@ volumes:
   # CPU/AWQ profile cache. Kept separate from FP8 cache so CPU probe runs do
   # not evict or mutate production GPU weights.
   qwen_cpu_hf_cache:
-  # Ollama models cache. Holds the pulled `qwen2.5-coder:3b-instruct-q4_K_M`
+  # Ollama models cache. Holds the pulled `qwen2.5-coder:3b-instruct-q4_K_M-ctx32k`
   # (~2 GB) so cold restarts do not re-download it. Kept separate from the
   # vLLM caches because the on-disk layouts are unrelated. Operators with
   # >=8 GB Docker memory can override LLMCHAT_MODEL on llm-chat-ollama and
