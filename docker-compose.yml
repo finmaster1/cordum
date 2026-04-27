@@ -763,6 +763,14 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    # api-gateway hardcodes CORDUM_LLM_CHAT_URL=http://llm-chat:8090, so
+    # every profile-specific llm-chat service must answer to that DNS
+    # name. The three profiles are mutually exclusive (one llm-chat-* up
+    # at a time), so a shared alias does not collide.
+    networks:
+      default:
+        aliases:
+          - llm-chat
     build:
       context: .
       dockerfile: Dockerfile
@@ -898,6 +906,14 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    # api-gateway hardcodes CORDUM_LLM_CHAT_URL=http://llm-chat:8090, so
+    # every profile-specific llm-chat service must answer to that DNS
+    # name. The three profiles are mutually exclusive (one llm-chat-* up
+    # at a time), so a shared alias does not collide.
+    networks:
+      default:
+        aliases:
+          - llm-chat
     build:
       context: .
       dockerfile: Dockerfile
