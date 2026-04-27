@@ -837,7 +837,7 @@ services:
       start_period: 15s
 
   # CPU-friendly inference runtime for the local LLM chat assistant. Ollama
-  # serves `qwen2.5-coder:3b-instruct-q4_K_M-ctx32k` (~4.5 GB resident) over an
+  # serves `qwen2.5-coder:3b-instruct-q4_K_M-ctx8k` (~4.5 GB resident) over an
   # OpenAI-compatible HTTP surface at :11434/v1, with native `tool_calls[]`
   # streaming. Brought up only via `--profile llmchat-ollama`.
   #
@@ -883,9 +883,9 @@ services:
         ollama pull qwen2.5-coder:3b-instruct-q4_K_M
         cat > /tmp/Modelfile <<MFEOF
         FROM qwen2.5-coder:3b-instruct-q4_K_M
-        PARAMETER num_ctx 32768
+        PARAMETER num_ctx 8192
         MFEOF
-        ollama create qwen2.5-coder:3b-instruct-q4_K_M-ctx32k -f /tmp/Modelfile
+        ollama create qwen2.5-coder:3b-instruct-q4_K_M-ctx8k -f /tmp/Modelfile
         wait
     volumes:
       - ollama_models:/root/.ollama
@@ -965,7 +965,7 @@ services:
       - CORDUM_TLS_CA=/etc/cordum/tls/ca/ca.crt
       - CORDUM_GATEWAY_URL=${CORDUM_GATEWAY_URL:-https://cordum-api-gateway:8081}
       - LLMCHAT_BASE_URL=http://ollama:11434/v1
-      - LLMCHAT_MODEL=qwen2.5-coder:3b-instruct-q4_K_M-ctx32k
+      - LLMCHAT_MODEL=qwen2.5-coder:3b-instruct-q4_K_M-ctx8k
       - LLMCHAT_PROVIDER=openai
       - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
       - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
@@ -981,14 +981,18 @@ services:
       - LLMCHAT_TENANT=${CORDUM_TENANT_ID:-default}
       - LLMCHAT_KNOWLEDGE_PACK_ENABLED=${LLMCHAT_KNOWLEDGE_PACK_ENABLED:-true}
       # Budget is in TOKENS (multiplied by approximateBytesPerToken=4 in
-      # core/llmchat/knowledgepack.go applyBudget). The default 65536 *
-      # 4 = 262144 bytes ≈ 65K tokens of KP — combined with the 19 tool
-      # definitions (~5K tokens) the prompt blows past Qwen2.5's 32K
-      # native context and Ollama silently truncates, dropping the tool
-      # definitions so the model emits zero tool_calls. 16000 tokens of
-      # KP (~64KB) plus tools (~5K) plus system prompt + user msg fits
-      # in 32K with comfortable headroom.
-      - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-16000}
+      # core/llmchat/knowledgepack.go applyBudget). On CPU inference
+      # large prompts dominate generation time (KV-cache build for a 32K
+      # prompt on 8 threads = several minutes), so we deliberately keep
+      # the prompt short:
+      #   - 19 tool definitions  ~5K tokens
+      #   - system prompt        ~500 tokens
+      #   - KP (this budget)     1000 tokens
+      #   - user msg + history   ~500 tokens
+      #   - TOTAL                ~7K tokens, fits in 8K ctx with headroom
+      # CPU 3B at 8K prompt + 100-token response = ~10-30s per turn.
+      # GPU profile (vLLM 131K context) is unaffected.
+      - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-1000}
       - LLMCHAT_OPENAPI_PATH=/etc/cordum-llm-chat/openapi.yaml
       - LLMCHAT_CORDUM_IO_PATH=/etc/cordum-llm-chat/cordum-io
     volumes:
@@ -1023,7 +1027,7 @@ volumes:
   # CPU/AWQ profile cache. Kept separate from FP8 cache so CPU probe runs do
   # not evict or mutate production GPU weights.
   qwen_cpu_hf_cache:
-  # Ollama models cache. Holds the pulled `qwen2.5-coder:3b-instruct-q4_K_M-ctx32k`
+  # Ollama models cache. Holds the pulled `qwen2.5-coder:3b-instruct-q4_K_M-ctx8k`
   # (~2 GB) so cold restarts do not re-download it. Kept separate from the
   # vLLM caches because the on-disk layouts are unrelated. Operators with
   # >=8 GB Docker memory can override LLMCHAT_MODEL on llm-chat-ollama and
