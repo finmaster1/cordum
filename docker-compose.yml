@@ -953,6 +953,13 @@ services:
       - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
       - LLMCHAT_SUMMARY_TEMPERATURE=${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}
       - LLMCHAT_SUMMARY_TOP_P=${LLMCHAT_SUMMARY_TOP_P:-0.8}
+      # CPU first-inference on a 4 GB Docker host loads the GGUF weights
+      # into RAM (~30-60s) before generation starts, so the default 60s
+      # wall-clock cap kills the very first turn. Subsequent turns hit
+      # the warm cache and finish in <10s. 5m gives headroom for the
+      # cold path. Operators on the GPU profile see <5s first-inference
+      # and don't need this override.
+      - LLMCHAT_MAX_WALL_CLOCK_PER_TURN=${LLMCHAT_MAX_WALL_CLOCK_PER_TURN:-5m}
       - LLMCHAT_TENANT=${CORDUM_TENANT_ID:-default}
       - LLMCHAT_KNOWLEDGE_PACK_ENABLED=${LLMCHAT_KNOWLEDGE_PACK_ENABLED:-true}
       - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-65536}
