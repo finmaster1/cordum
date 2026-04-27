@@ -173,6 +173,8 @@ Each probe section follows this template:
 **Evidence:** Live curl outputs in step-5 worker note. Verify endpoint's concurrency scaling characterized.
 **P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend P1 follow-up "audit-verify endpoint concurrency scaling — investigate whether re-hashing 10K events per call is the intended hot-path design".
 
+`task-4102015f` follow-up: verify endpoint now coalesces concurrent identical calls via singleflight; new `cordum_audit_verify_*` metrics expose the regression budget. Re-run with the same 20-concurrent harness should show p99 within 1.5x single-call baseline.
+
 ---
 
 ## Probe 5 — Safety kernel actually gates

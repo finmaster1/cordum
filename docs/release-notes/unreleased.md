@@ -130,6 +130,23 @@ the chat panel.
   for the trade-off analysis and re-visit triggers. Closes
   task-090ab6af.
 
+## Observability
+
+- **gateway: `/api/v1/audit/verify` now coalesces concurrent identical
+  requests and exposes verify-load metrics.** A burst of 20 admin
+  re-verify clicks for the same tenant/window now shares one hash-chain
+  walk via `singleflight` instead of re-hashing the same 10K-event
+  window 20 times. Four Prometheus metrics expose the regression budget:
+  `cordum_audit_verify_duration_seconds` (histogram),
+  `cordum_audit_verify_events_total` (counter),
+  `cordum_audit_verify_inflight` (gauge), and
+  `cordum_audit_verify_coalesced_total` (counter). Docs now clarify that
+  full per-call re-walk is deliberate tamper-evidence behavior, recommend
+  `since`/`until` cursors for hot-path callers, and remove the spurious
+  `chain_root` example field that the API never emitted. Closes
+  task-4102015f; driven by the 10K-event p99 measurements in
+  [`docs/llmchat/governance-review.md` probe 4](../llmchat/governance-review.md#probe-4--chain-integrity-across-chat-driven-load).
+
 ## Security
 
 - **WebSocket quarantine-redaction fail-closed**
