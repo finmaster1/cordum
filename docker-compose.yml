@@ -1006,6 +1006,15 @@ services:
       - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-1000}
       - LLMCHAT_OPENAPI_PATH=/etc/cordum-llm-chat/openapi.yaml
       - LLMCHAT_CORDUM_IO_PATH=/etc/cordum-llm-chat/cordum-io
+      # The default system prompt (config/llmchat/system-prompt.md) is
+      # 7.5KB / ~1.8K tokens of nuanced guidance written for the 30B
+      # GPU baseline. The 3B Q4 model on this profile responds better
+      # to a shorter, more directive prompt that mandates tool use on
+      # every Cordum-data turn — without it the model treats
+      # `tool_choice:"auto"` as permission to answer from training
+      # memory and emits zero tool_calls (live evidence:
+      # `summary_phase_started tool_calls=0` after a clean prompt).
+      - LLMCHAT_SYSTEM_PROMPT_PATH=${LLMCHAT_SYSTEM_PROMPT_PATH:-/home/cordum/config/llmchat/system-prompt-ollama.md}
     volumes:
       - ./certs:/etc/cordum/tls:ro
       - ./config/llmchat:/home/cordum/config/llmchat:ro
