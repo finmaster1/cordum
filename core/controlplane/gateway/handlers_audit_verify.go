@@ -92,11 +92,39 @@ func (s *server) handleAuditVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	opts.RetentionBoundarySeq = boundary
 
+	// Wire the HMAC key from the server's chainer (sourced from
+	// CORDUM_AUDIT_HMAC_KEY at boot) so the verify endpoint checks
+	// HMAC tags when HMAC is enabled. The key is NOT accepted as a
+	// query parameter — URLs are routinely logged and cached, making
+	// them unsafe for secret material.
+	if s.auditChainer != nil && s.auditChainer.HMACEnabled() {
+		opts.HMACKey = s.auditChainer.HMACKeyForVerify()
+	}
+
 	result, err := audit.VerifyChain(r.Context(), client, streamKey, opts)
 	if err != nil {
 		writeInternalError(w, r, "audit verify: walk chain", err)
 		return
 	}
+
+	// Fail-closed safety net: if the scanned range contains HMAC-tagged
+	// events but this process has no HMAC key configured, the HMAC
+	// verification branch was skipped entirely. Surface this as a
+	// degraded result so operators don't see a false-green. Uses
+	// result.HMACSeen (set by the verification loop) instead of a
+	// separate Redis probe, so it catches all mixed-rollout scenarios.
+	if len(opts.HMACKey) == 0 && result.HMACSeen {
+		slog.Warn("audit verify: chain contains HMAC-tagged events but CORDUM_AUDIT_HMAC_KEY is not configured — HMAC verification skipped",
+			"tenant", tenant,
+			"total_events", result.TotalEvents,
+		)
+		// Don't override a compromised status, but downgrade ok → partial
+		// so the caller knows verification was incomplete.
+		if result.Status == audit.VerifyStatusOK {
+			result.Status = audit.VerifyStatusPartial
+		}
+	}
+
 	// Surface the operator-configured retention window so the caller
 	// can decide whether the oldest present event's timestamp is
 	// within policy — the boundary seq alone is not enough context.
