@@ -12,13 +12,23 @@ import type {
  * agent run output, this one models a Gmail-style conversational session.
  *
  * Persistence policy:
- *  - Panel open/closed and the active sessionId persist to sessionStorage
- *    so a page reload inside the same tab keeps the panel where the user
- *    left it. They do NOT survive tab close (intentional — chats are
- *    server-side authoritative; localStorage would risk leaking principal-
- *    bound state across sign-outs).
+ *  - `panelOpen` and `sessionId` persist to localStorage (Zustand
+ *    `persist` + `createJSONStorage(() => localStorage)`) so the
+ *    conversation pointer survives both same-tab page reload AND tab
+ *    close + browser restart. This is the Gmail-style resume contract:
+ *    a returning user clicks the header chat-button and lands back in
+ *    the previous transcript without re-typing.
  *  - Messages are kept in memory only; on reconnect, they are reloaded
- *    from `GET /api/v1/chat/sessions/{id}`.
+ *    from `GET /api/v1/chat/sessions/{id}` keyed by the persisted
+ *    sessionId. Server-side state is authoritative.
+ *  - The persisted localStorage entry is principal-scoped only via the
+ *    server-side resume check (the gateway rejects a sessionId that
+ *    does not match the new principal+tenant). To avoid even surfacing
+ *    a stale pointer to the next operator on a shared workstation,
+ *    `resetChatAssistantStore` is invoked from `useConfigStore.logout()`
+ *    on every sign-out, 401-on-license, and any other path that flushes
+ *    `useConfigStore`. That call nukes both the in-memory state and the
+ *    `cordum-chat-assistant` localStorage key.
  */
 export interface ChatAssistantState {
   panelOpen: boolean;

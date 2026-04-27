@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { logger } from "../lib/logger";
 import { broadcastSync } from "../hooks/useCrossTabSync";
 import { useEventStore } from "./events";
+import { resetChatAssistantStore } from "./chatAssistant";
 import { clearVerificationState } from "./verification";
 import type { User } from "../api/types";
 
@@ -194,6 +195,13 @@ export const useConfigStore = create<ConfigState>((set, get) => {
       persistUser(null);
       persistLoginTimestamp(null);
       useEventStore.getState().reset();
+      // Clear chat-assistant store + persisted localStorage to prevent
+      // tenant-bound conversation leakage across user switches on shared
+      // workstations. The chat session pointer is principal-scoped on the
+      // server; on the client, dropping the localStorage key forces the
+      // next sign-in to mint a fresh session rather than resuming a
+      // stranger's transcript.
+      resetChatAssistantStore();
       // Per-user persisted "Last verified at" timestamp — drop it so
       // the next operator on this browser starts clean rather than
       // inheriting the previous principal's chain-check snapshot.

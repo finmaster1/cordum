@@ -216,17 +216,28 @@ session_id pointer".
   + clicking the header button restores the prior conversation via the
   existing resume path.
 
-**Verdict**: **PASS** — resolved on this branch by switching the persisted
-store to `localStorage`. `chatAssistant.ts` now uses
-`createJSONStorage(() => localStorage)` and the `resetChatAssistantStore`
-helper clears `window.localStorage`, so closing the browser preserves the
-`sessionId` pointer and reopening + clicking the header button restores the
-prior conversation. `clearSession` already wipes the in-memory state at
-sign-out, and the persisted entry is namespaced under
-`cordum-chat-assistant`. Closes task-7ff6765f.
+**Verdict**: **PASS** — resolved across two commits on this branch.
+Step 1: switched the persisted store to `localStorage`
+(`createJSONStorage(() => localStorage)`) so closing the browser
+preserves the `sessionId` pointer and reopening + clicking the header
+button restores the prior conversation via the existing resume path
+(task-7dd1af21 commit). Step 2: wired `resetChatAssistantStore()` into
+`useConfigStore.logout()` so sign-out, 401-on-license (via
+`api/client.ts` 401 handler), and any other path that flushes
+`useConfigStore` also wipe the in-memory chat state and the
+`cordum-chat-assistant` localStorage key — preventing tenant-bound
+conversation leakage across user switches on shared workstations
+(task-7ff6765f). The corresponding stale comment block in
+`chatAssistant.ts` lines 9-30 was updated to describe the actual
+contract.
 
-Regression: `dashboard/src/state/chatAssistant.test.ts` (35 assertions
-across the chat-assistant test suite continue to pass).
+Regression: new `dashboard/src/state/__tests__/chat-assistant-logout-reset.test.ts`
+(3 tests: state-clear, localStorage-clear, idempotency) PASS;
+14 chat-assistant + state targeted suites (96 tests) PASS; full
+dashboard suite 223 files / 1780 tests PASS; `tsc --noEmit` clean;
+`npm run build` 763 ms green. Closes task-7ff6765f.
+
+Cross-link: source UX review task-7dd1af21; this fix task task-7ff6765f.
 
 ---
 
