@@ -41,6 +41,10 @@ the chat panel.
   `--preapproved-mutating-tools`, `--add-tool`, `--remove-tool`,
   `--idempotency-key`, and `--dry-run`.
 
+## CI / Build Reliability
+
+- Fixed broken `aquasecurity/trivy-action@0.28.0` reference in `.github/workflows/docker.yml` (3 call sites at lines 121, 233, 346) — the action repo only publishes `v`-prefixed tags, so without this fix the release-tag publish workflow would fail at job setup with `Unable to resolve action`; the next release-tag push is the true smoke test. Now pinned to `v0.36.0` to match `supply-chain-vllm.yml`; closes task-d7353fc0; cross-reference task-991597a4 commit `772e2f6e` for the original `v0.36.0` standardisation. Provenance: https://github.com/cordum-io/cordum/actions/runs/24980069708/job/73140082546.
+
 ## Changed
 
 - **core: extracted the Unix-timestamp → RFC3339 formatter into
