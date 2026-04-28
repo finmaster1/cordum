@@ -66,6 +66,14 @@ the gateway for narrative inspection in the dashboard. Both are
 exported, but downstream consumers should de-duplicate on `job_id` +
 `event_type` if they want raw decisions only.
 
+### LLM Chat lifecycle events (added 2026-04)
+
+The informational-only LLM chat assistant emits `chat.session_started` and
+`chat.session_closed` actions through the same SIEM export pipeline when chat
+sessions open and close. See `docs/llmchat/ops-review.md` probe 8 for exporter
+coverage and the retained/retired event-surface notes after the 2026-04-28
+tool-calling scope reduction.
+
 Severity levels: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`.
 
 <!-- TODO: document which actions map to which event types and severities -->

@@ -22,6 +22,8 @@ backend and keep vLLM-specific panels as opt-in.
 
 Classification after probes 1-12 (2026-04-28): **0 P0**, **6 P1**, **1 P2**, and no secret/metric-cardinality P0s. P1 follow-ups filed: `task-848f003a` (probe 1 structured JSON logs), `task-0e73db35` (probe 3 OTEL/Jaeger), `task-83b72a46` (probe 4 admin audit/search), `task-68a01f28` (probe 5 protocol v1), `task-7ee2d5ab` (probe 10 usage counters), `task-53317462` (probe 11 debug dump). Probe 4 also records a P2 detail-routing check for `/copilot/sessions`.
 
+Outcome counts: **6 PASS/static-pass probes** (2, 6, 7, 8, 9, 12), **6 FAIL/P1 probes** (1, 3, 4, 5, 10, 11), **0 BLOCKED**, **0 P0**. Log-redaction grep result: probe 1 secret scan returned zero hits against sampled `llm-chat-ollama` logs; probe 12 found no INFO/WARN token-delta log spam. Jaeger trace screenshot: **not available** because probe 3 found no llm-chat OTEL/Jaeger exporter configuration.
+
 | Probe | Surface | Verdict | Evidence |
 |---|---|---:|---|
 | 1 | Structured logs + redaction | **FAIL (P1)** | `out/llmchat-ops/probe-01/evidence.txt` |

@@ -76,6 +76,14 @@ The cordum.io substituter walks the mounted directory recursively for `*.md` and
 - **`getting-started/`** — install, quickstart, MCP-with-claude/cursor/vscode walkthroughs. Operator-facing onboarding the LLM can quote from.
 - **`operations/`** — troubleshooting, FAQ, configuration, this very file. The runbook content the LLM cites when explaining a denial or failure.
 
+## Day-2 operations evidence
+
+The senior SRE review for the informational-only chat assistant lives in the
+core repository:
+
+- [`docs/llmchat/ops-runbook.md`](https://github.com/cordum-io/cordum/blob/main/docs/llmchat/ops-runbook.md) — deploy, upgrade, rollback, scale, health checks, alerts, and escalation procedures for the Ollama-default chat profile.
+- [`docs/llmchat/ops-review.md`](https://github.com/cordum-io/cordum/blob/main/docs/llmchat/ops-review.md) — 12-probe observability review covering structured logs, metrics cardinality, traces, admin session review, protocol versioning, dashboards, alerts, SIEM export, usage counters, debug dumps, and log sampling.
+
 Excluded by default:
 
 - **`api-reference/`** — the `{{api_summary}}` substituter already produces a structured digest from the OpenAPI spec. Including the prose API reference would duplicate content and waste budget.
