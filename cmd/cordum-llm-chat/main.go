@@ -82,7 +82,7 @@ type runtimeConfig struct {
 }
 
 func main() {
-	logging.Init("llm-chat-server")
+	logging.InitJSON("llm-chat-server")
 	buildinfo.Log("cordum-llm-chat")
 
 	cfg, err := loadConfigFromEnv(os.Getenv)

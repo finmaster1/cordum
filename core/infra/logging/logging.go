@@ -30,6 +30,16 @@ func Init(component string) *slog.Logger {
 	return l
 }
 
+// InitJSON creates a RedactingHandler for the given component, forces JSON
+// formatting regardless of CORDUM_LOG_FORMAT, sets it as slog.Default(), and
+// returns the logger. The log level still follows CORDUM_LOG_LEVEL.
+func InitJSON(component string) *slog.Logger {
+	h := newHandlerWithFormat(component, os.Stderr, "json")
+	l := slog.New(h)
+	slog.SetDefault(l)
+	return l
+}
+
 // Logger returns a new *slog.Logger with the component attribute baked in,
 // using the same env-driven level and format as Init. It does NOT call
 // slog.SetDefault.
@@ -42,6 +52,16 @@ func Logger(component string) *slog.Logger {
 func newHandler(component string, w io.Writer) *RedactingHandler {
 	lvl := parseLevel(os.Getenv("CORDUM_LOG_LEVEL"))
 	format := strings.ToLower(strings.TrimSpace(os.Getenv("CORDUM_LOG_FORMAT")))
+	return newHandlerWithLevelAndFormat(component, w, lvl, format)
+}
+
+func newHandlerWithFormat(component string, w io.Writer, format string) *RedactingHandler {
+	lvl := parseLevel(os.Getenv("CORDUM_LOG_LEVEL"))
+	return newHandlerWithLevelAndFormat(component, w, lvl, format)
+}
+
+func newHandlerWithLevelAndFormat(component string, w io.Writer, lvl slog.Level, format string) *RedactingHandler {
+	format = strings.ToLower(strings.TrimSpace(format))
 	if format != "json" {
 		format = "text"
 	}

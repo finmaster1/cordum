@@ -170,11 +170,8 @@ func (a *Agent) runTurn(ctx context.Context, in TurnInput, out chan<- Frame) {
 	}
 
 	startedAt := time.Now()
-	slog.Info("llmchat/agent: turn_start",
-		"session_id", in.Session.ID,
-		"principal", in.Session.UserPrincipal,
-		"tenant", in.Session.Tenant,
-	)
+	logger := sessionLogger(ctx, in.Session)
+	logger.Info("llmchat/agent: turn_start")
 
 	userMsg := SessionMessage{Role: "user", Text: in.UserMessage, At: time.Now().UTC()}
 	in.Session.Messages = append(in.Session.Messages, userMsg)
@@ -217,7 +214,7 @@ func (a *Agent) runTurn(ctx context.Context, in TurnInput, out chan<- Frame) {
 		}
 		if elapsed := time.Since(startedAt); elapsed > a.budgets.MaxWallClock {
 			observeProvider()
-			slog.Warn("llmchat/agent: budget_tripped", "kind", "wall_clock", "elapsed", elapsed)
+			logger.Warn("llmchat/agent: budget_tripped", "kind", "wall_clock", "elapsed", elapsed)
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeWallClockBudgetTripped, ErrorMsg: fmt.Sprintf("turn exceeded %s", a.budgets.MaxWallClock)})
 			return
 		}
@@ -228,7 +225,7 @@ func (a *Agent) runTurn(ctx context.Context, in TurnInput, out chan<- Frame) {
 		a.metrics.IncTokenBudgetUsed(float64(len(chunk.Delta)))
 		if bytesSeen > a.budgets.MaxAssistantBytes {
 			observeProvider()
-			slog.Warn("llmchat/agent: budget_tripped", "kind", "assistant_bytes", "seen", bytesSeen)
+			logger.Warn("llmchat/agent: budget_tripped", "kind", "assistant_bytes", "seen", bytesSeen)
 			emitFrame(ctx, out, Frame{Type: FrameError, ErrorCode: ErrorCodeAssistantBytesBudget, ErrorMsg: fmt.Sprintf("assistant output exceeded %d bytes", a.budgets.MaxAssistantBytes)})
 			return
 		}
@@ -246,8 +243,7 @@ func (a *Agent) runTurn(ctx context.Context, in TurnInput, out chan<- Frame) {
 		}
 	}
 
-	slog.Info("llmchat/agent: turn_end",
-		"session_id", in.Session.ID,
+	logger.Info("llmchat/agent: turn_end",
 		"bytes", bytesSeen,
 		"duration_ms", time.Since(startedAt).Milliseconds(),
 	)

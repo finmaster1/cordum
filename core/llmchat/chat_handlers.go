@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -182,9 +181,10 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
+	ctx := contextWithRequestTraceID(r.Context(), r, session.ID)
 	h.metrics.IncSessions()
 	defer h.metrics.DecSessions()
-	frames := h.collectTurnFrames(r.Context(), session, msg)
+	frames := h.collectTurnFrames(ctx, session, msg)
 	resp := chatPostResponse{SessionID: session.ID, Frames: frames}
 	for _, frame := range frames {
 		switch frame.Type {
@@ -218,16 +218,17 @@ func (h *ChatHandlers) HandleChatStream(w http.ResponseWriter, r *http.Request) 
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
+	ctx := contextWithRequestTraceID(r.Context(), r, session.ID)
 	h.metrics.IncSessions()
 	defer h.metrics.DecSessions()
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
-	for _, frame := range h.collectTurnFrames(r.Context(), session, msg) {
+	for _, frame := range h.collectTurnFrames(ctx, session, msg) {
 		raw, err := json.Marshal(frame)
 		if err != nil {
-			slog.Warn("llmchat: marshal SSE frame failed", "error", err, "session_id", session.ID)
+			sessionLogger(ctx, session).Warn("llmchat: marshal SSE frame failed", "error", err)
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
@@ -254,6 +255,7 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
 		return
 	}
+	ctx := contextWithRequestTraceID(r.Context(), r, session.ID)
 	if !h.markSessionActive(session.ID) {
 		h.metrics.IncError(ErrorKindOther)
 		writeChatError(w, http.StatusConflict, "session_already_active", "session already has an active websocket")
@@ -263,7 +265,7 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.upgrader.Upgrade(w, r, http.Header{HeaderChatSessionID: {session.ID}})
 	if err != nil {
-		slog.Warn("llmchat: ws upgrade failed", "error", err, "session_id", session.ID)
+		sessionLogger(ctx, session).Warn("llmchat: ws upgrade failed", "error", err)
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -279,7 +281,7 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
 		for frame := range out {
 			if err := conn.WriteJSON(frame); err != nil {
-				slog.Warn("llmchat: ws write failed", "error", err, "session_id", session.ID)
+				sessionLogger(ctx, session).Warn("llmchat: ws write failed", "error", err)
 				return
 			}
 		}
@@ -308,7 +310,7 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		turnCount++
-		frames := h.collectTurnFrames(r.Context(), session, userMsg)
+		frames := h.collectTurnFrames(ctx, session, userMsg)
 		for _, frame := range frames {
 			if !h.emitToWS(out, frame) {
 				break
@@ -382,7 +384,7 @@ func (h *ChatHandlers) resolveOrCreateSession(ctx context.Context, r *http.Reque
 			return existing, nil
 		}
 		if existing != nil {
-			slog.Warn("llmchat: forged or cross-tenant chat session id rejected", "session_id", sessionID, "tenant", tenant)
+			requestLogger(ctx, r, existing).Warn("llmchat: forged or cross-tenant chat session id rejected")
 			return nil, errChatSessionForbidden
 		}
 		created, err := h.sessions.Create(ctx, Session{ID: sessionID, UserPrincipal: user, Tenant: tenant, AgentID: h.agentID})

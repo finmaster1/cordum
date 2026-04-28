@@ -3,7 +3,6 @@ package llmchat
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -41,8 +40,9 @@ type SessionListPage struct {
 func (h *ChatHandlers) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	requester := defaultUserPrincipal(r)
+	logger := requestLogger(r.Context(), r, nil)
 	defer func() {
-		slog.Info("llmchat: admin_list_sessions", "requester", requester, "latency_ms", time.Since(startedAt).Milliseconds())
+		logger.Info("llmchat: admin_list_sessions", "requester", safeLogCorrelationValue(requester), "latency_ms", time.Since(startedAt).Milliseconds())
 	}()
 	if !h.requireChatEntitlement(w) {
 		return
@@ -78,8 +78,12 @@ func (h *ChatHandlers) HandleListSessions(w http.ResponseWriter, r *http.Request
 func (h *ChatHandlers) HandleGetSession(w http.ResponseWriter, r *http.Request, sessionID string) {
 	startedAt := time.Now()
 	requester := defaultUserPrincipal(r)
+	logger := requestLogger(r.Context(), r, nil)
 	defer func() {
-		slog.Info("llmchat: admin_get_session", "session_id", sessionID, "requester", requester, "latency_ms", time.Since(startedAt).Milliseconds())
+		logger.Info("llmchat: admin_get_session",
+			"session_id", safeLogCorrelationValue(sessionID),
+			"requester", safeLogCorrelationValue(requester),
+			"latency_ms", time.Since(startedAt).Milliseconds())
 	}()
 	if !h.requireChatEntitlement(w) {
 		return

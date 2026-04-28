@@ -11,6 +11,7 @@ require_docker_compose
 
 service="$(resolve_llmchat_log_service)"
 log_file="${probe_dir}/llm-chat.log"
+rm -f "${probe_dir}/json-invalid-samples.txt" "${log_file}.secret_hits"
 if ! docker_compose logs --no-color --since "${LLMCHAT_LOG_SINCE:-1h}" "${service}" >"${log_file}" 2>"${probe_dir}/docker-logs.stderr"; then
   cat "${probe_dir}/docker-logs.stderr" >>"${evidence_file}" || true
   probe_skip "docker compose logs failed for service ${service}"
