@@ -18,8 +18,18 @@ run_go_test "go test chat session hijack defenses" ./core/llmchat -run 'TestChat
 run_go_test "go test trusted forwarder auth" ./cmd/cordum-llm-chat -run 'TestRequireTrustedForwarder|TestRuntimeConfig' -count=1 || probe_fail "trusted-forwarder/runtime config tests failed"
 
 if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ] && [ -n "${LLMCHAT_SECURITY_STOLEN_SESSION_ID:-}" ]; then
+  if [ "${LLMCHAT_SECURITY_BACKEND:-ollama-cpu}" = "ollama-cpu" ] && [ -n "${LLMCHAT_SECURITY_COMPOSE_FILE:-}" ]; then
+    record_section "seed owned-stack stolen session"
+    now_nano="$(( $(date +%s) * 1000000000 ))"
+    run_capture "seed redis session ${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${LLMCHAT_SECURITY_COMPOSE_FILE}" exec -T redis-secprobes redis-cli -a secprobe-redis HSET "chat:session:${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" id "${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" user_principal alice tenant default agent_id agent-secprobe-chat-assistant created_at_unix_nano "${now_nano}" last_active_at_unix_nano "${now_nano}" || probe_fail "failed to seed owned-stack stolen session"
+    run_capture "expire redis session ${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${LLMCHAT_SECURITY_COMPOSE_FILE}" exec -T redis-secprobes redis-cli -a secprobe-redis EXPIRE "chat:session:${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" 86400 || probe_fail "failed to expire owned-stack stolen session"
+  fi
   body="${PROBE_OUT_DIR}/stolen-session.body"
-  status=$(curl_status_body "stolen session resume as different principal" "${body}" -X POST "${GATEWAY_URL}/api/v1/chat" -H "X-Chat-Session-Id: ${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" -H "X-Principal-Id: mallory" -H "X-Tenant-ID: evil.test" -H "Content-Type: application/json" -d '{"message":"resume stolen session"}') || true
+  if [ -n "${LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY:-}" ]; then
+    status=$(curl_status_body "stolen session resume as different principal" "${body}" -X POST "${GATEWAY_URL}/api/v1/chat" -H "X-API-Key: ${LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY}" -H "X-Chat-Session-Id: ${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" -H "X-Cordum-Principal: mallory" -H "X-Cordum-Tenant: evil.test" -H "X-Cordum-Role: user" -H "Content-Type: application/json" -d '{"message":"resume stolen session"}') || true
+  else
+    status=$(curl_status_body "stolen session resume as different principal" "${body}" -X POST "${GATEWAY_URL}/api/v1/chat" -H "X-Chat-Session-Id: ${LLMCHAT_SECURITY_STOLEN_SESSION_ID}" -H "X-Principal-Id: mallory" -H "X-Tenant-ID: evil.test" -H "Content-Type: application/json" -d '{"message":"resume stolen session"}') || true
+  fi
   assert_http_status_in "${status}" "401,403,404" "stolen session must not resume under different identity"
 else
   live_evidence_not_run "live_hijack" "set LLMCHAT_SECURITY_LIVE=1 and LLMCHAT_SECURITY_STOLEN_SESSION_ID to run against clean stack"

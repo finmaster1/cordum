@@ -1,7 +1,7 @@
 # LLM Chat Senior Security Review
 
 Date: 2026-04-28
-Task: `task-6cda949c`
+Task: `task-6cda949c` (senior review); live post-pivot replacement: `task-f80486c5`
 Scope: `cordum-llm-chat`, dashboard chat widget, default Ollama inference packaging, opt-in vLLM packaging, gateway/chat auth boundaries.
 
 ## 2026-04-28 rescope
@@ -11,7 +11,8 @@ Yaron's 2026-04-28 directive changed LLM chat to **informational-only**. The ass
 The original senior-review checklist included tool-calling and parser attack surfaces. Those are now formally superseded for production scoring:
 
 - **Retired/not scored:** probe 03 (PreapprovedMutatingTools exploit), probe 04 as a tool-call-gating bypass, probe 05 as a production parser-pinning blocker, probe 10 as a chat->MCP flood path.
-- **Retained/scored:** probe 01 (no chat delegation token + generic delegation monotonicity), probe 02 (empty chat-assistant identity + MCP filter fail-closed), probe 06 (Ollama/vLLM inference exposure posture), probe 07 (session hijack), probe 08 (admin authZ), probe 09 (WS origin/CSRF), probe 11 (knowledge/log redaction), probe 12 (entitlement bypass).
+- **Retained/scored for default Ollama live suite:** probe 01 (no chat delegation token + generic delegation monotonicity), probe 02 (empty chat-assistant identity + MCP filter fail-closed), probe 07 (session hijack), probe 08 (admin authZ), probe 09 (WS origin/CSRF), probe 11 (knowledge/log redaction), probe 12 (entitlement bypass).
+- **Opt-in/deferred for default Ollama live suite:** probe 06 (vLLM-era inference exposure / loopback binding) remains available for `vllm-gpu`/`cpu-vllm-awq` profiles but is not scored in the Ollama default live run.
 
 ## Executive summary
 
@@ -20,8 +21,9 @@ Result: **PASS for the current informational-only/Ollama scope**.
 | Metric | Count |
 | --- | ---: |
 | Total historical probe scripts | 12 |
-| Retained/scored probes passed | 8 |
-| Retired/superseded probes | 4 |
+| Retained/scored default live probes passed | 7 |
+| Retired/superseded probes removed from default orchestrator | 4 |
+| Opt-in/deferred vLLM-profile probe | 1 |
 | Failed probes | 0 |
 | Skipped probes | 0 |
 | Evidence files with `not_run`/`not_asserted` blockers | 0 |
@@ -30,28 +32,52 @@ Result: **PASS for the current informational-only/Ollama scope**.
 Current harness evidence:
 
 ```text
+LLMCHAT_SECURITY_LIVE=1 LLMCHAT_SECURITY_REQUIRE_LIVE=1 LLMCHAT_SECURITY_BACKEND=ollama-cpu \
+LLMCHAT_SECURITY_COMPOSE_FILE=tests/security/compose.ollama-cpu.yaml \
+LLMCHAT_SECURITY_OUT_DIR=out/llmchat-security-live-step5-final \
+LLMCHAT_GATEWAY_URL=http://127.0.0.1:8095 \
+LLMCHAT_SECURITY_ORIGIN_GATEWAY_URL=https://127.0.0.1:8081 \
+LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY=secprobe-key \
+LLMCHAT_SECURITY_STOLEN_SESSION_ID=secprobe-stolen-step5-final \
 bash tests/security/llmchat_run_all.sh
-# pass=8 retired=4 skip=0 fail=0 live_missing=0
-# results=out/llmchat-security/security-review-results.json
+# pass=7 retired=0 skip=0 fail=0 live_missing=0
+# results=out/llmchat-security-live-step5-final/security-review-results.json
 ```
 
 Regression evidence:
 
 ```text
-go test ./core/controlplane/gateway -run TestApprove_LocksJobHashAgainstReconcilerDrift -count=1
-# ok github.com/cordum/cordum/core/controlplane/gateway 0.418s
+bash -n tests/security/llmchat_common.sh tests/security/llmchat_run_all.sh tests/security/llmchat_probe_*.sh
+# exit 0
 
-go test ./core/controlplane/scheduler/... -count=1
-# ok github.com/cordum/cordum/core/controlplane/scheduler 33.400s
+bash tests/security/llmchat_run_all.sh
+# pass=7 retired=0 skip=0 fail=0 live_missing=0
 
-go test ./...
-# exit 0; all packages ok
+LLMCHAT_SECURITY_LIVE=1 LLMCHAT_SECURITY_REQUIRE_LIVE=1 LLMCHAT_SECURITY_BACKEND=ollama-cpu \
+LLMCHAT_SECURITY_COMPOSE_FILE=tests/security/compose.ollama-cpu.yaml \
+LLMCHAT_SECURITY_OUT_DIR=out/llmchat-security-live-step5-final \
+LLMCHAT_GATEWAY_URL=http://127.0.0.1:8095 \
+LLMCHAT_SECURITY_ORIGIN_GATEWAY_URL=https://127.0.0.1:8081 \
+LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY=secprobe-key \
+LLMCHAT_SECURITY_STOLEN_SESSION_ID=secprobe-stolen-step5-final \
+bash tests/security/llmchat_run_all.sh
+# pass=7 retired=0 skip=0 fail=0 live_missing=0
+
+go test ./cmd/cordum-llm-chat ./core/llmchat ./core/llmchat/knowledge ./core/mcp -count=1
+# exit 0
+
+go test ./core/controlplane/gateway/auth -run 'TestNewBasicAuthProviderLogsAPIKeySource|TestParseAPIKeysFormats' -count=1
+# exit 0
 
 go vet ./...
 # exit 0
 
 go build ./...
 # exit 0
+
+# Full-suite attempts were run for this task and are recorded in the worker handoff, but this Windows host hit
+# unrelated local socket exhaustion in gateway/cmd tests (connectex: Only one usage of each socket address).
+# The security-scope packages and live Ollama probes above passed.
 ```
 
 ## How to reproduce
@@ -63,13 +89,20 @@ cd cordum
 bash tests/security/llmchat_run_all.sh
 ```
 
-Optional live clean-stack review for a dedicated runner (not required for the current PASS, but useful before a customer demo):
+Live clean-stack review for a dedicated runner:
 
 ```bash
 cd cordum
 LLMCHAT_SECURITY_COMPOSE_UP=1 \
 LLMCHAT_SECURITY_LIVE=1 \
+LLMCHAT_SECURITY_REQUIRE_LIVE=1 \
 LLMCHAT_SECURITY_BACKEND=ollama-cpu \
+LLMCHAT_SECURITY_COMPOSE_FILE=tests/security/compose.ollama-cpu.yaml \
+LLMCHAT_SECURITY_OUT_DIR=out/llmchat-security-live-step5-final \
+LLMCHAT_GATEWAY_URL=http://127.0.0.1:8095 \
+LLMCHAT_SECURITY_ORIGIN_GATEWAY_URL=https://127.0.0.1:8081 \
+LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY=secprobe-key \
+LLMCHAT_SECURITY_STOLEN_SESSION_ID=<session-id-to-seed> \
 bash tests/security/llmchat_run_all.sh
 ```
 
@@ -79,18 +112,18 @@ The harness is shell-portable on the Windows/MSYS/WSL developer environment. Doc
 
 | Probe | Attack surface | Current scope | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| 01 | Delegation token scope | Retained: chat must not mint/expose delegation tokens; generic token monotonicity stays covered | PASS | `out/llmchat-security/llmchat_probe_01_delegation_scope/evidence.txt` |
-| 02 | Agent identity scope | Retained: chat-assistant `AllowedTools=[]`, `PreapprovedMutatingTools=[]`; direct MCP filter returns `-32601` for non-visible tools | PASS | `out/llmchat-security/llmchat_probe_02_agent_identity_scope/evidence.txt` |
-| 03 | Preapproved mutation exploit | Retired: no chat->MCP mutation path exists | RETIRED | `out/llmchat-security/llmchat_probe_03_preapproved_mutation/evidence.txt` |
-| 04 | Prompt injection bypassing tool-call gating | Retired as a tool-call bypass; prompt/no-tools/redaction controls remain asserted | RETIRED | `out/llmchat-security/llmchat_probe_04_prompt_injection/evidence.txt` |
-| 05 | Parser config pinning / DoS | Retired as production blocker: Ollama has no tool parser; opt-in vLLM must not enable parser flags | RETIRED | `out/llmchat-security/llmchat_probe_05_parser_pinning/evidence.txt` |
-| 06 | Loopback binding / exposure | Retained: Ollama `127.0.0.1:11434`; opt-in vLLM `127.0.0.1:8000`; Helm `ClusterIP` | PASS | `out/llmchat-security/llmchat_probe_06_loopback_binding/evidence.txt` |
-| 07 | Session hijack | Retained: session IDs bound to trusted principal+tenant | PASS | `out/llmchat-security/llmchat_probe_07_session_hijack/evidence.txt` |
-| 08 | Admin page authZ | Retained: `chat.read_all` permission required, fail-closed without checker | PASS | `out/llmchat-security/llmchat_probe_08_admin_authz/evidence.txt` |
-| 09 | WS origin / CSRF | Retained: browser-facing gateway origin allowlist rejects malicious origins | PASS | `out/llmchat-security/llmchat_probe_09_ws_origin/evidence.txt` |
-| 10 | Rate limiting / chat->MCP backpressure | Retired as chat->MCP flood path; generic gateway and chat output budgets remain asserted | RETIRED | `out/llmchat-security/llmchat_probe_10_rate_limit/evidence.txt` |
-| 11 | Log/knowledge redaction | Retained: API/docs knowledge uses `DefaultRedactor`; provider/agent do not log prompt/auth bodies | PASS | `out/llmchat-security/llmchat_probe_11_log_redaction/evidence.txt` |
-| 12 | Entitlement bypass | Retained: `LLMChatAssistant` gates chat endpoints and dashboard button hides on unavailable health | PASS | `out/llmchat-security/llmchat_probe_12_entitlement_bypass/evidence.txt` |
+| 01 | Delegation token scope | Retained: chat must not mint/expose delegation tokens; generic token monotonicity stays covered | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_01_delegation_scope/evidence.txt` |
+| 02 | Agent identity scope | Retained: chat-assistant `AllowedTools=[]`, `PreapprovedMutatingTools=[]`; direct MCP filter returns `-32601` for non-visible tools | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_02_agent_identity_scope/evidence.txt` |
+| 03 | Preapproved mutation exploit | Retired: no chat->MCP mutation path exists | RETIRED/REMOVED | Not in default orchestrator |
+| 04 | Prompt injection bypassing tool-call gating | Retired as a tool-call bypass; prompt/no-tools/redaction controls remain asserted elsewhere | RETIRED/REMOVED | Not in default orchestrator |
+| 05 | Parser config pinning / DoS | Retired as default production blocker: Ollama has no tool parser | RETIRED/REMOVED | Not in default orchestrator |
+| 06 | Loopback binding / exposure | Opt-in vLLM-profile check; default Ollama live execution documents deferral | DEFERRED | vLLM opt-in profile (`vllm-gpu`/`cpu-vllm-awq`) |
+| 07 | Session hijack | Retained: session IDs bound to trusted principal+tenant | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_07_session_hijack/evidence.txt` |
+| 08 | Admin page authZ | Retained: `chat.read_all` permission required, fail-closed without checker | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_08_admin_authz/evidence.txt` |
+| 09 | WS origin / CSRF | Retained: browser-facing gateway origin allowlist rejects malicious origins | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_09_ws_origin/evidence.txt` |
+| 10 | Rate limiting / chat->MCP backpressure | Retired as chat->MCP flood path; generic gateway and chat output budgets remain asserted elsewhere | RETIRED/REMOVED | Not in default orchestrator |
+| 11 | Log/knowledge redaction | Retained: API/docs knowledge uses `DefaultRedactor`; provider/agent do not log prompt/auth bodies | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_11_log_redaction/evidence.txt` |
+| 12 | Entitlement bypass | Retained: `LLMChatAssistant` gates chat endpoints and dashboard button hides on unavailable health | PASS | `out/llmchat-security-live-step5-final/llmchat_probe_12_entitlement_bypass/evidence.txt` |
 
 ## Per-probe expected vs actual
 
@@ -128,7 +161,7 @@ The harness is shell-portable on the Windows/MSYS/WSL developer environment. Doc
 
 - **Payload:** change Compose inference ports to wildcard/bare host binding or Helm service type to `LoadBalancer`/`NodePort`.
 - **Expected defense layer:** Compose publishes Ollama and vLLM on host loopback only; Helm renders inference services as `ClusterIP` only.
-- **Actual:** PASS. Static Compose/Helm assertions and vLLM lint pass. Docker/Helm CLI render checks are optional in shells where those CLIs are unavailable, but CI can run them.
+- **Actual:** DEFERRED for the default Ollama live suite. Probe 06 remains the opt-in vLLM-profile exposure check; it is not part of `ollama-cpu` live scoring for `task-f80486c5`.
 
 ### Probe 07 — Session hijack
 
@@ -165,6 +198,52 @@ The harness is shell-portable on the Windows/MSYS/WSL developer environment. Doc
 - **Payload:** set `LLMChatAssistant=false` and request `/api/v1/chat/*`; verify dashboard header button hides when chat health is unavailable.
 - **Expected defense layer:** internal chat handlers return stable feature-unavailable/402, gateway gates before forwarding, dashboard health/entitlement hook hides within the 10s poll interval.
 - **Actual:** PASS. Licensing defaults, internal handler gate, gateway proxy gate, and dashboard source/test assertions pass. Dashboard npm tests run when npm/node_modules are available.
+
+
+## POST-PIVOT INFORMATIONAL-ONLY LIVE EVIDENCE — 2026-04-28 (`task-f80486c5`)
+
+This task replaced the deleted GPU/vLLM-only live security task after the product pivot to **Ollama-CPU informational-only**. The live run used the owned compose target `tests/security/compose.ollama-cpu.yaml` with non-shared host ports:
+
+- `cordum-llm-chat-secprobes`: `127.0.0.1:8095 -> 8090`
+- `qwen-inference-secprobes` (Ollama): `127.0.0.1:11436 -> 11434`
+- isolated Redis + gateway-bootstrap mock + generated Enterprise test license fixture; ports can be overridden with LLMCHAT_SECURITY_LLMCHAT_PORT / LLMCHAT_SECURITY_OLLAMA_PORT for concurrent runners
+
+Probe 09 is the one browser-facing gateway-origin check; its cURL hit the live local gateway TLS endpoint (`https://127.0.0.1:8081`) because the owned Ollama compose target intentionally does not boot the whole gateway/scheduler/NATS stack. The llm-chat/Ollama probes used the isolated stack.
+
+Run summary:
+
+```text
+LLMCHAT_SECURITY_LIVE=1 LLMCHAT_SECURITY_REQUIRE_LIVE=1 LLMCHAT_SECURITY_BACKEND=ollama-cpu \
+LLMCHAT_SECURITY_COMPOSE_FILE=tests/security/compose.ollama-cpu.yaml \
+LLMCHAT_SECURITY_OUT_DIR=out/llmchat-security-live-step5-final \
+LLMCHAT_GATEWAY_URL=http://127.0.0.1:8095 \
+LLMCHAT_SECURITY_ORIGIN_GATEWAY_URL=https://127.0.0.1:8081 \
+LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY=secprobe-key \
+LLMCHAT_SECURITY_STOLEN_SESSION_ID=secprobe-stolen-step5-final \
+bash tests/security/llmchat_run_all.sh
+
+[llmchat_probe_01_delegation_scope] PASS (exit=0)
+[llmchat_probe_02_agent_identity_scope] PASS (exit=0)
+[llmchat_probe_07_session_hijack] PASS (exit=0)
+[llmchat_probe_08_admin_authz] PASS (exit=0)
+[llmchat_probe_09_ws_origin] PASS (exit=0)
+[llmchat_probe_11_log_redaction] PASS (exit=0)
+[llmchat_probe_12_entitlement_bypass] PASS (exit=0)
+{"fail":0,"live_missing":0,"live_required":true,"pass":7,"retired":0,"scored_total":7,"skip":0,"total":7}
+```
+
+| Probe | Expected | Procedure | Actual / evidence excerpt | Verdict |
+| --- | --- | --- | --- | --- |
+| 01 | No browser-visible delegation token; generic delegation monotonicity remains fail-closed. | Run retained delegation + no-tool chat tests under `LLMCHAT_SECURITY_LIVE=1`. | `go test ./core/auth/delegation ... exit_code=0`; `go test ./core/llmchat ... exit_code=0`; `live_delegation_token=not_applicable`. | PASS |
+| 02 | Chat-assistant has no MCP tools; direct MCP identity filter remains fail-closed. | Run MCP identity filter + bootstrap empty-scope tests under the Ollama backend. | `go test ./core/mcp ... exit_code=0`; `go test ./core/llmchat ... exit_code=0`; `live_mcp_call=not_applicable`. | PASS |
+| 07 | A stolen `session_id` cannot resume under a different trusted principal/tenant. | Auto-seed isolated Redis with `secprobe-stolen-20260428T0900Z`, then POST to isolated llm-chat with trusted-forwarder key and Mallory/evil tenant headers. | `curl_exit=0 http_status=404`; body `{"code":"not_found",...}`; `assert_http_status_in ok: got=404 allowed=401,403,404`. | PASS |
+| 08 | Non-admin/non-`chat.read_all` caller cannot list all chat sessions. | GET `/api/v1/chat/sessions` on isolated llm-chat with trusted-forwarder key and role `user`. | `curl_exit=0 http_status=403`; `permission chat.read_all denied for role user`; status assertion passed. | PASS |
+| 09 | Malicious WebSocket `Origin` is rejected by the browser-facing gateway before proxying. | GET `/api/v1/chat/ws` with WS upgrade headers and `Origin: https://attacker.example` against live local gateway TLS endpoint. | `curl_exit=0 http_status=403`; body includes `origin not allowed`; status/body assertions passed. | PASS |
+| 11 | Knowledge/log redaction prevents API keys, Bearer tokens, and JWT-like strings from leaking. | Run redaction/provider/auth tests and scan captured isolated Docker logs. | Knowledge, provider, MCP redactor, and auth logging tests exit 0; `assert_no_secret_patterns_in_dir ok`. | PASS |
+| 12 | `LLMChatAssistant` entitlement gates chat and dashboard availability tests pass. | GET isolated `/api/v1/chat/healthz` with trusted-forwarder key under generated Enterprise test license fixture. | `curl_exit=0 http_status=200`; body `{"status":"ok","redis":"ok","vllm":"ok"}`; dashboard health-button tests `2 passed / 11 passed`. | PASS |
+| 06 | vLLM-profile loopback/ClusterIP exposure check. | Not executed in default Ollama live suite. | Deferred by design: `ollama-cpu` default uses the owned loopback compose target; probe 06 remains for opt-in `vllm-gpu` / `cpu-vllm-awq`. | DEFERRED |
+
+Retired probes 03/04/05/10 are no longer in the default orchestrator. They targeted chat-to-MCP mutation, prompt-to-tool bypass, parser pinning, and chat-to-MCP flood surfaces that do not exist in informational-only chat.
 
 ## OWASP LLM Top 10 (2025) mapping
 

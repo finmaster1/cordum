@@ -30,7 +30,11 @@ fi
 
 if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ]; then
   body="${PROBE_OUT_DIR}/entitlement-live.body"
-  status=$(curl_status_body "chat health with current entitlement" "${body}" -X GET "${GATEWAY_URL}/api/v1/chat/healthz" -H "X-Tenant-ID: ${LLMCHAT_SECURITY_TENANT:-default}") || true
+  if [ -n "${LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY:-}" ]; then
+    status=$(curl_status_body "chat health with current entitlement" "${body}" -X GET "${GATEWAY_URL}/api/v1/chat/healthz" -H "X-API-Key: ${LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY}" -H "X-Cordum-Tenant: ${LLMCHAT_SECURITY_TENANT:-default}" -H "X-Cordum-Principal: secprobe-user" -H "X-Cordum-Role: user") || true
+  else
+    status=$(curl_status_body "chat health with current entitlement" "${body}" -X GET "${GATEWAY_URL}/api/v1/chat/healthz" -H "X-Tenant-ID: ${LLMCHAT_SECURITY_TENANT:-default}") || true
+  fi
   log_evidence "live_current_entitlement_status=${status} (set LLMCHAT_SECURITY_EXPECT_DISABLED=1 after flipping license false to assert denial)"
   if [ "${LLMCHAT_SECURITY_EXPECT_DISABLED:-0}" = "1" ]; then
     assert_http_status_in "${status}" "402,403" "disabled LLMChatAssistant must deny chat endpoints at entitlement gate"

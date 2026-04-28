@@ -25,6 +25,13 @@ run_go_test "go test auth logging avoids raw keys" ./core/controlplane/gateway/a
 
 if [ -n "${LLMCHAT_SECURITY_LOG_DIR:-}" ]; then
   assert_no_secret_patterns_in_dir "${LLMCHAT_SECURITY_LOG_DIR}" "provided log directory must not contain probe secret patterns"
+elif [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ] && [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -n "${LLMCHAT_SECURITY_COMPOSE_FILE:-}" ]; then
+  logs_dir="${PROBE_OUT_DIR}/docker-logs"
+  mkdir -p "${logs_dir}"
+  for svc in cordum-llm-chat-secprobes qwen-inference-secprobes gateway-mock-secprobes redis-secprobes; do
+    docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${LLMCHAT_SECURITY_COMPOSE_FILE}" logs --no-color "${svc}" >"${logs_dir}/${svc}.log" 2>/dev/null || true
+  done
+  assert_no_secret_patterns_in_dir "${logs_dir}" "owned Ollama security stack logs must not contain probe secret patterns"
 else
   live_evidence_not_run "log_dir_scan" "optional: set LLMCHAT_SECURITY_LOG_DIR after a clean-stack/load run to grep collected logs"
 fi
@@ -47,10 +54,18 @@ if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ] && [ "${LLMCHAT_SECURITY_RUN_LOAD:-0}
   done
   logs_dir="${PROBE_OUT_DIR}/docker-logs"
   mkdir -p "${logs_dir}"
-  for svc in cordum-llm-chat llm-chat api-gateway scheduler ollama qwen-inference; do
-    docker compose logs --no-color "${svc}" >"${logs_dir}/${svc}.log" 2>/dev/null || true
-  done
+  if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -n "${LLMCHAT_SECURITY_COMPOSE_FILE:-}" ]; then
+    for svc in cordum-llm-chat-secprobes qwen-inference-secprobes gateway-mock-secprobes redis-secprobes; do
+      docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${LLMCHAT_SECURITY_COMPOSE_FILE}" logs --no-color "${svc}" >"${logs_dir}/${svc}.log" 2>/dev/null || true
+    done
+  else
+    for svc in cordum-llm-chat llm-chat api-gateway scheduler ollama qwen-inference; do
+      docker compose logs --no-color "${svc}" >"${logs_dir}/${svc}.log" 2>/dev/null || true
+    done
+  fi
   assert_no_secret_patterns_in_dir "${logs_dir}" "live docker logs must not contain synthetic secrets"
+elif [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ]; then
+  log_evidence "live_log_load=not_requested reason=baseline live log scan completed; set LLMCHAT_SECURITY_RUN_LOAD=1 for long-running synthetic log grep"
 else
   live_evidence_not_run "live_log_load" "optional: set LLMCHAT_SECURITY_LIVE=1 LLMCHAT_SECURITY_RUN_LOAD=1 for 1h/50tpm clean-stack log grep"
 fi

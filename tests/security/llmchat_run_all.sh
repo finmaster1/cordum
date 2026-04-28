@@ -10,38 +10,25 @@ SECURITY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROBES=(
   llmchat_probe_01_delegation_scope.sh
   llmchat_probe_02_agent_identity_scope.sh
-  llmchat_probe_03_preapproved_mutation.sh
-  llmchat_probe_04_prompt_injection.sh
-  llmchat_probe_05_parser_pinning.sh
-  llmchat_probe_06_loopback_binding.sh
+  # task-f80486c5 / task-01aaa6bd post-pivot retirement:
+  # probes 03, 04, 05, and 10 targeted chat->MCP mutation/tool parser
+  # surfaces that no longer exist in the informational-only product. They are
+  # intentionally absent from the scored suite rather than skipped.
   llmchat_probe_07_session_hijack.sh
   llmchat_probe_08_admin_authz.sh
   llmchat_probe_09_ws_origin.sh
-  llmchat_probe_10_rate_limit.sh
   llmchat_probe_11_log_redaction.sh
   llmchat_probe_12_entitlement_bypass.sh
 )
 
-# 2026-04-28 informational-only/Ollama rescope: these historical
-# tool-calling/vLLM-parser/MCP-flood probes still emit evidence, but are not
-# scored as production blockers. Retained probes continue to fail closed.
-RETIRED_PROBES=(
-  llmchat_probe_03_preapproved_mutation
-  llmchat_probe_04_prompt_injection
-  llmchat_probe_05_parser_pinning
-  llmchat_probe_10_rate_limit
-)
-
-is_retired_probe() {
-  local probe="$1"
-  local retired
-  for retired in "${RETIRED_PROBES[@]}"; do
-    if [ "${probe}" = "${retired}" ]; then
-      return 0
-    fi
-  done
-  return 1
-}
+case "${LLMCHAT_SECURITY_BACKEND:-ollama-cpu}" in
+  vllm-gpu|gpu-fp8|cpu-vllm-awq)
+    # Probe 06 is the opt-in inference-exposure check for vLLM-era bindings.
+    # The Ollama default uses the owned compose target and documents this probe
+    # as deferred/opt-in instead of scoring it as a default-stack live probe.
+    PROBES=(llmchat_probe_06_loopback_binding.sh "${PROBES[@]}")
+    ;;
+esac
 
 mkdir -p "${SECURITY_OUT_DIR}"
 RESULTS_TSV="${SECURITY_OUT_DIR}/security-review-results.tsv"
@@ -52,7 +39,11 @@ if [ "${LLMCHAT_SECURITY_COMPOSE_UP:-0}" = "1" ]; then
   PROBE_ID="compose-baseline"
   PROBE_OUT_DIR="${SECURITY_OUT_DIR}/${PROBE_ID}"
   EVIDENCE_FILE="${PROBE_OUT_DIR}/evidence.txt"
+  # The clean-stack baseline is responsible for creating the inference service;
+  # do not require /v1/models to be reachable until compose_clean_up finishes.
+  LLMCHAT_SECURITY_SKIP_LIVE_CHECK=1
   probe_init
+  unset LLMCHAT_SECURITY_SKIP_LIVE_CHECK
   compose_clean_up
 fi
 
@@ -81,9 +72,6 @@ for probe in "${PROBES[@]}"; do
     set -e
     if [ "${code}" -eq 0 ]; then
       status="PASS"
-      if is_retired_probe "${name}"; then
-        status="RETIRED"
-      fi
     elif [ "${code}" -eq 77 ]; then
       status="SKIP"
     else

@@ -1,0 +1,228 @@
+# Owned Ollama-CPU security probe stack for task-f80486c5.
+#
+# This file is intentionally isolated from the shared developer
+# docker-compose.yml stack:
+# - deterministic non-shared host ports by default: llm-chat=8095, Ollama=11436
+#   (override with LLMCHAT_SECURITY_LLMCHAT_PORT / LLMCHAT_SECURITY_OLLAMA_PORT
+#   when running multiple probe stacks on the same host)
+# - dedicated bridge network and named volumes under the compose project
+# - teardown: docker compose -p cordum-llmchat-secprobes -f tests/security/compose.ollama-cpu.yaml down -v
+#
+# The gateway surface is a tiny local mock implementing only the
+# /api/v1/agents endpoints needed by cordum-llm-chat's bootstrap path. Probe
+# semantics still target cordum-llm-chat and the Ollama OpenAI-compatible
+# inference surface; the mock prevents this owned stack from mutating the shared
+# dev gateway.
+
+services:
+  redis-secprobes:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--requirepass", "secprobe-redis"]
+    networks:
+      - cordum-llmchat-secprobes
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "secprobe-redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  gateway-mock-secprobes:
+    image: python:3.12-alpine
+    networks:
+      - cordum-llmchat-secprobes
+    environment:
+      CORDUM_API_KEY: secprobe-key
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/tmp/gateway_mock.py <<'PY'
+        import json
+        import time
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from urllib.parse import urlparse
+
+        agents = {}
+
+        def write_json(handler, status, payload):
+            body = json.dumps(payload).encode("utf-8")
+            handler.send_response(status)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                return
+
+            def _authorized(self):
+                return self.headers.get("X-API-Key", "") == "secprobe-key"
+
+            def _body(self):
+                n = int(self.headers.get("Content-Length", "0") or "0")
+                raw = self.rfile.read(n) if n else b"{}"
+                return json.loads(raw.decode("utf-8") or "{}")
+
+            def do_GET(self):
+                parsed = urlparse(self.path)
+                if parsed.path == "/healthz":
+                    write_json(self, 200, {"status": "ok"})
+                    return
+                if parsed.path == "/api/v1/agents":
+                    if not self._authorized():
+                        write_json(self, 401, {"error": "unauthorized"})
+                        return
+                    write_json(self, 200, {"items": list(agents.values()), "next_cursor": ""})
+                    return
+                write_json(self, 404, {"error": "not_found"})
+
+            def do_POST(self):
+                parsed = urlparse(self.path)
+                if parsed.path != "/api/v1/agents":
+                    write_json(self, 404, {"error": "not_found"})
+                    return
+                if not self._authorized():
+                    write_json(self, 401, {"error": "unauthorized"})
+                    return
+                req = self._body()
+                agent_id = "agent-secprobe-chat-assistant"
+                now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                agent = {
+                    "id": agent_id,
+                    "name": req.get("name", "chat-assistant"),
+                    "tenant": self.headers.get("X-Tenant-ID", "default"),
+                    "owner": req.get("owner", "cordum-llm-chat"),
+                    "risk_tier": req.get("risk_tier", "low"),
+                    "description": req.get("description", ""),
+                    "labels": req.get("labels", {}),
+                    "status": "active",
+                    "allowed_tools": [],
+                    "preapproved_mutating_tools": [],
+                    "data_classifications": ["public", "internal"],
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                agents[agent_id] = agent
+                write_json(self, 201, agent)
+
+            def do_PUT(self):
+                parsed = urlparse(self.path)
+                prefix = "/api/v1/agents/"
+                if not parsed.path.startswith(prefix):
+                    write_json(self, 404, {"error": "not_found"})
+                    return
+                if not self._authorized():
+                    write_json(self, 401, {"error": "unauthorized"})
+                    return
+                agent_id = parsed.path[len(prefix):]
+                agent = agents.setdefault(agent_id, {
+                    "id": agent_id,
+                    "name": "chat-assistant",
+                    "tenant": self.headers.get("X-Tenant-ID", "default"),
+                    "status": "active",
+                })
+                agent.update(self._body())
+                write_json(self, 200, agent)
+
+        ThreadingHTTPServer(("0.0.0.0", 8081), Handler).serve_forever()
+        PY
+        python /tmp/gateway_mock.py
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=2).read()\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  qwen-inference-secprobes:
+    image: "ollama/ollama@sha256:7e672211886f8bd4448a98ed577e26c816b9e8b052112860564afaa2c105800e"
+    networks:
+      - cordum-llmchat-secprobes
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    # The official Ollama image has `ENTRYPOINT ["ollama"]`; override it so this
+    # probe stack can bootstrap the model and then keep the server process alive.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        ollama serve &
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull qwen2.5-coder:3b-instruct-q4_K_M
+        cat >/tmp/Modelfile <<'MODEL'
+        FROM qwen2.5-coder:3b-instruct-q4_K_M
+        PARAMETER num_ctx 32768
+        MODEL
+        ollama create qwen2.5-coder:3b-instruct-q4_K_M-ctx32k -f /tmp/Modelfile
+        wait
+    ports:
+      - "127.0.0.1:${LLMCHAT_SECURITY_OLLAMA_PORT:-11436}:11434"
+    volumes:
+      - ollama_secprobe_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list | grep -F 'qwen2.5-coder:3b-instruct-q4_K_M-ctx32k' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  cordum-llm-chat-secprobes:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        SERVICE: cordum-llm-chat
+    image: cordum/llm-chat:secprobes
+    networks:
+      - cordum-llmchat-secprobes
+    depends_on:
+      redis-secprobes:
+        condition: service_healthy
+      gateway-mock-secprobes:
+        condition: service_healthy
+      qwen-inference-secprobes:
+        condition: service_healthy
+    environment:
+      CORDUM_LLM_CHAT_ADDR: ":8090"
+      CORDUM_API_KEY: secprobe-key
+      CORDUM_LICENSE_FILE: "/etc/cordum/license/secprobe-enterprise-license.json"
+      CORDUM_LICENSE_PUBLIC_KEY_PATH: "/etc/cordum/license/secprobe-license.pub"
+      CORDUM_GATEWAY_URL: "http://gateway-mock-secprobes:8081"
+      REDIS_URL: "redis://:secprobe-redis@redis-secprobes:6379/0"
+      LLMCHAT_BASE_URL: "http://qwen-inference-secprobes:11434/v1"
+      LLMCHAT_OPS_BACKEND: "ollama-cpu"
+      LLMCHAT_MODEL: "qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
+      LLMCHAT_PROVIDER: "openai"
+      LLMCHAT_TENANT: "default"
+      LLMCHAT_KNOWLEDGE_PACK_ENABLED: "true"
+      LLMCHAT_KNOWLEDGE_API_SPEC_PATH: "/etc/cordum/openapi.yaml"
+      LLMCHAT_KNOWLEDGE_SITE_PATH: "/etc/cordum/site-content"
+      LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS: "concepts/*.md,getting-started/*.md,operations/*.md"
+      LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS: "concepts/adr/**"
+      LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS: "24000"
+      LLMCHAT_MAX_WALL_CLOCK_PER_TURN: "600s"
+    ports:
+      - "127.0.0.1:${LLMCHAT_SECURITY_LLMCHAT_PORT:-8095}:8090"
+    volumes:
+      - ../../config/llmchat:/home/cordum/config/llmchat:ro
+      - ../../docs/api/openapi/cordum-api.yaml:/etc/cordum/openapi.yaml:ro
+      - ../../docs-site/docs:/etc/cordum/site-content:ro
+      - ./fixtures/secprobe-enterprise-license.json:/etc/cordum/license/secprobe-enterprise-license.json:ro
+      - ./fixtures/secprobe-license.pub:/etc/cordum/license/secprobe-license.pub:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8090/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+networks:
+  cordum-llmchat-secprobes:
+
+volumes:
+  ollama_secprobe_models:

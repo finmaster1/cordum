@@ -17,7 +17,11 @@ run_go_test "go test chat admin RBAC" ./core/llmchat -run 'TestChatAdminListPerm
 
 if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ]; then
   body="${PROBE_OUT_DIR}/non-admin-sessions.body"
-  status=$(curl_status_body "non-admin GET chat sessions" "${body}" -X GET "${GATEWAY_URL}/api/v1/chat/sessions" -H "X-Tenant-ID: ${LLMCHAT_SECURITY_TENANT:-default}" -H "X-Principal-Role: user") || true
+  if [ -n "${LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY:-}" ]; then
+    status=$(curl_status_body "non-admin GET chat sessions" "${body}" -X GET "${GATEWAY_URL}/api/v1/chat/sessions" -H "X-API-Key: ${LLMCHAT_SECURITY_TRUSTED_FORWARDER_API_KEY}" -H "X-Cordum-Tenant: ${LLMCHAT_SECURITY_TENANT:-default}" -H "X-Cordum-Principal: secprobe-user" -H "X-Cordum-Role: user") || true
+  else
+    status=$(curl_status_body "non-admin GET chat sessions" "${body}" -X GET "${GATEWAY_URL}/api/v1/chat/sessions" -H "X-Tenant-ID: ${LLMCHAT_SECURITY_TENANT:-default}" -H "X-Principal-Role: user") || true
+  fi
   assert_http_status_in "${status}" "401,403" "non-admin/non-chat.read_all caller must not list all chat sessions"
 else
   live_evidence_not_run "live_admin_authz" "set LLMCHAT_SECURITY_LIVE=1 with a clean stack to exercise gateway auth paths"

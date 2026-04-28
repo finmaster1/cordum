@@ -1,0 +1,32 @@
+{
+  "payload": {
+    "org_id": "secprobe",
+    "license_id": "secprobe-llmchat-live",
+    "plan": "enterprise",
+    "entitlements": {
+      "approval_mode": "custom",
+      "max_workers": -1,
+      "requests_per_second": 10000,
+      "max_concurrent_jobs": -1,
+      "audit_retention_days": -1,
+      "sso": true,
+      "saml": true,
+      "scim": true,
+      "rbac": true,
+      "audit": true,
+      "audit_export": true,
+      "siem_export": true,
+      "legal_hold": true,
+      "velocity_rules": true,
+      "break_glass_admin": true,
+      "agent_identity": true,
+      "llm_chat_assistant": true,
+      "features": {
+        "llm_chat_assistant": true
+      }
+    },
+    "expires_at": "2027-04-28T08:53:34Z",
+    "grace_days": 14
+  },
+  "signature": "zNq8TeZcbOrwe/YloWX90ipTAaGsdId0bnwFtyi/Dc/70kVEwQgNw86tXP49J5aFkBmKFuLEixZajv8WUO6xCg=="
+}

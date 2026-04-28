@@ -19,7 +19,9 @@ run_go_test "go test gateway origin middleware" ./core/controlplane/gateway -run
 
 if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ]; then
   body="${PROBE_OUT_DIR}/ws-origin.body"
-  status=$(curl_status_body "malicious-origin WS upgrade" "${body}" -i -N "${GATEWAY_URL}/api/v1/chat/ws" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Origin: https://attacker.example') || true
+  origin_gateway_url="${LLMCHAT_SECURITY_ORIGIN_GATEWAY_URL:-${GATEWAY_URL}}"
+  log_evidence "origin_gateway_url=${origin_gateway_url}"
+  status=$(curl_status_body "malicious-origin WS upgrade" "${body}" -i -N "${origin_gateway_url}/api/v1/chat/ws" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Origin: https://attacker.example') || true
   assert_http_status_in "${status}" "403" "malicious WS Origin must be rejected"
   assert_text_contains "${body}" 'origin not allowed|Forbidden|forbidden' "origin rejection body must identify defense layer"
 else

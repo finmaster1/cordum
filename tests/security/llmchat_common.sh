@@ -7,6 +7,8 @@ set -euo pipefail
 LLMCHAT_SECURITY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${LLMCHAT_SECURITY_DIR}/../.." && pwd)"
 SECURITY_OUT_DIR="${LLMCHAT_SECURITY_OUT_DIR:-${REPO_ROOT}/out/llmchat-security}"
+DEFAULT_OLLAMA_SECURITY_COMPOSE_FILE="${LLMCHAT_SECURITY_DIR}/compose.ollama-cpu.yaml"
+SECURITY_COMPOSE_PROJECT="${LLMCHAT_SECURITY_COMPOSE_PROJECT:-cordum-llmchat-secprobes}"
 GATEWAY_URL="${LLMCHAT_GATEWAY_URL:-http://127.0.0.1:8081}"
 LLMCHAT_DIRECT_URL="${LLMCHAT_DIRECT_URL:-http://127.0.0.1:8090}"
 VLLM_URL="${LLMCHAT_VLLM_URL:-http://127.0.0.1:8000}"
@@ -29,10 +31,10 @@ fi
 if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -z "${LLMCHAT_VLLM_URL:-}" ]; then
   # Kept as VLLM_URL for backward-compatible probe variable names; this is
   # Ollama's OpenAI-compatible /v1 surface.
-  VLLM_URL="http://127.0.0.1:11434"
+  VLLM_URL="http://127.0.0.1:11436"
 fi
 if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -z "${LLMCHAT_DIRECT_URL:-}" ]; then
-  LLMCHAT_DIRECT_URL="http://127.0.0.1:8092"
+  LLMCHAT_DIRECT_URL="http://127.0.0.1:8095"
 fi
 # Convenience for local clean-compose probes: source non-sensitive runtime
 # values from .env without echoing them into evidence. curl_status_body
@@ -88,9 +90,17 @@ probe_init() {
   log_evidence "repo_root=${REPO_ROOT}"
   log_evidence "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   log_evidence "backend=${LLMCHAT_SECURITY_BACKEND:-any-real}"
-  if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ]; then
+  validate_security_backend
+  if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ] && [ "${LLMCHAT_SECURITY_SKIP_LIVE_CHECK:-0}" != "1" ]; then
     require_real_vllm
   fi
+}
+
+validate_security_backend() {
+  case "${LLMCHAT_SECURITY_BACKEND}" in
+    ""|ollama-cpu|vllm-gpu|gpu-fp8|cpu-vllm-awq) ;;
+    *) probe_fail "unsupported LLMCHAT_SECURITY_BACKEND=${LLMCHAT_SECURITY_BACKEND}; allowed: ollama-cpu, vllm-gpu/gpu-fp8, cpu-vllm-awq, or empty" ;;
+  esac
 }
 
 log_evidence() {
@@ -240,17 +250,17 @@ curl_status_body() {
   local label="$1"
   local body_file="$2"
   shift 2
-  record_section "curl ${label}"
+  record_section "curl ${label}" >&2
   local redacted_args
   redacted_args="$*"
   redacted_args=$(printf '%s' "${redacted_args}" | sed -E 's/(Authorization: (Bearer )?)[^"[:space:]]+/\1<redacted>/g; s/(X-API-Key: )[A-Za-z0-9._:-]+/\1<redacted>/g')
-  log_evidence "+ curl ${redacted_args}"
+  log_evidence "+ curl ${redacted_args}" >&2
   set +e
   local status
   status=$(curl -k -sS --max-time "${CURL_TIMEOUT_SECONDS}" -o "${body_file}" -w '%{http_code}' "$@" 2>>"${EVIDENCE_FILE}")
   local code=$?
   set -e
-  log_evidence "curl_exit=${code} http_status=${status} body_file=${body_file}"
+  log_evidence "curl_exit=${code} http_status=${status} body_file=${body_file}" >&2
   if [ -f "${body_file}" ]; then
     sed -e 's/^/body: /' "${body_file}" >>"${EVIDENCE_FILE}" || true
   fi
@@ -300,10 +310,7 @@ require_live_stack() {
 }
 
 require_real_vllm() {
-  case "${LLMCHAT_SECURITY_BACKEND}" in
-    ""|ollama-cpu|vllm-gpu|gpu-fp8|cpu-vllm-awq) ;;
-    *) probe_fail "unsupported LLMCHAT_SECURITY_BACKEND=${LLMCHAT_SECURITY_BACKEND}; allowed: ollama-cpu, vllm-gpu/gpu-fp8, cpu-vllm-awq, or empty" ;;
-  esac
+  validate_security_backend
 
   local default_container="cordum-ollama-1"
   local expected_model="qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
@@ -315,14 +322,22 @@ require_real_vllm() {
     default_container="cordum-qwen-inference-1"
     expected_model="Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"
   elif [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] || [ -z "${LLMCHAT_SECURITY_BACKEND}" ]; then
-    default_container="cordum-ollama-1"
+    default_container="cordum-llmchat-secprobes-qwen-inference-1"
     expected_model="qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
     backend_label="real Ollama"
   fi
 
   local cmdline_file="${PROBE_OUT_DIR}/qwen-cmdline.txt"
   if command -v docker >/dev/null 2>&1; then
-    docker exec "${LLMCHAT_QWEN_CONTAINER:-${default_container}}" sh -c "tr '\000' ' ' </proc/1/cmdline" >"${cmdline_file}" 2>>"${EVIDENCE_FILE}" || true
+    local live_compose_file="${LLMCHAT_SECURITY_COMPOSE_FILE:-}"
+    if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -z "${live_compose_file}" ] && [ -f "${DEFAULT_OLLAMA_SECURITY_COMPOSE_FILE}" ]; then
+      live_compose_file="${DEFAULT_OLLAMA_SECURITY_COMPOSE_FILE}"
+    fi
+    if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -n "${live_compose_file}" ] && [ -z "${LLMCHAT_QWEN_CONTAINER:-}" ]; then
+      docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${live_compose_file}" exec -T qwen-inference-secprobes sh -c "tr '\000' ' ' </proc/1/cmdline" >"${cmdline_file}" 2>>"${EVIDENCE_FILE}" || true
+    else
+      docker exec "${LLMCHAT_QWEN_CONTAINER:-${default_container}}" sh -c "tr '\000' ' ' </proc/1/cmdline" >"${cmdline_file}" 2>>"${EVIDENCE_FILE}" || true
+    fi
   fi
   if [ ! -s "${cmdline_file}" ]; then
     log_evidence "qwen_cmdline=unavailable"
@@ -361,6 +376,7 @@ require_real_vllm() {
 
 compose_clean_up() {
   local profile="${LLMCHAT_SECURITY_COMPOSE_PROFILE:-}"
+  local compose_file="${LLMCHAT_SECURITY_COMPOSE_FILE:-}"
   if [ -z "${profile}" ]; then
     if [ "${LLMCHAT_SECURITY_BACKEND}" = "cpu-vllm-awq" ]; then
       profile="llmchat-cpu"
@@ -373,11 +389,20 @@ compose_clean_up() {
   record_section "clean compose baseline"
   log_evidence "profile=${profile}"
   if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ]; then
-    run_capture "docker compose down -v all llmchat profiles" docker compose --profile llmchat --profile llmchat-cpu --profile llmchat-ollama down -v || return $?
+    if [ -z "${compose_file}" ]; then
+      compose_file="${DEFAULT_OLLAMA_SECURITY_COMPOSE_FILE}"
+    fi
+    log_evidence "compose_file=${compose_file}"
+    log_evidence "compose_project=${SECURITY_COMPOSE_PROJECT}"
+    if [ ! -f "${compose_file}" ]; then
+      probe_fail "owned Ollama security compose file not found: ${compose_file}"
+    fi
+    run_capture "docker compose down -v owned ollama security stack" docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${compose_file}" down -v || return $?
+    run_capture "docker compose up -d --build owned ollama security stack" docker compose -p "${SECURITY_COMPOSE_PROJECT}" -f "${compose_file}" up -d --build || return $?
   else
     run_capture "docker compose down -v" docker compose --profile "${profile}" down -v || return $?
+    run_capture "docker compose up -d --build" docker compose --profile "${profile}" up -d --build || return $?
   fi
-  run_capture "docker compose up -d --build" docker compose --profile "${profile}" up -d --build || return $?
   wait_inference_ready
 }
 
