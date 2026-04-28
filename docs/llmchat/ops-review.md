@@ -25,14 +25,14 @@ backend and keep vLLM-specific panels as opt-in.
 | 1 | Structured logs + redaction | **FAIL (P1)** | `out/llmchat-ops/probe-01/evidence.txt` |
 | 2 | Prometheus metrics + cardinality | **PASS** | `out/llmchat-ops/probe-02/evidence.txt` |
 | 3 | Trace propagation / Jaeger | **FAIL (P1)** | `out/llmchat-ops/probe-03/evidence.txt` |
-| 4 | Admin session viewer + audit | TODO | `out/llmchat-ops/probe-04/evidence.txt` |
+| 4 | Admin session viewer + audit | **FAIL (P1)** | `out/llmchat-ops/probe-04/evidence.txt` |
 | 5 | Chat frame protocol stability | TODO | `out/llmchat-ops/probe-05/evidence.txt` |
-| 6 | Ops runbook | TODO | `docs/llmchat/ops-runbook.md` |
-| 7 | Grafana dashboard | TODO | `cordum-helm/dashboards/llm-chat.json` |
+| 6 | Ops runbook | **PASS** | `docs/llmchat/ops-runbook.md` |
+| 7 | Grafana dashboard | **PASS (static); import not run** | `cordum-helm/dashboards/llm-chat.json` |
 | 8 | SIEM export | TODO | `out/llmchat-ops/probe-08/evidence.txt` |
-| 9 | Alert rules | TODO | `cordum-helm/alerts/llm-chat.yaml` |
+| 9 | Alert rules | **PASS (static)** | `cordum-helm/alerts/llm-chat.yaml` |
 | 10 | Cost / usage visibility | TODO | `out/llmchat-ops/probe-10/evidence.txt` |
-| 11 | Admin debug dump | TODO | `out/llmchat-ops/probe-11/evidence.txt` |
+| 11 | Admin debug dump | **FAIL (P1)** | `out/llmchat-ops/probe-11/evidence.txt` |
 | 12 | Log sampling / volume bounds | **PASS (static); live load not run** | `out/llmchat-ops/probe-12/evidence.txt` |
 
 ### Current pre-probe findings from exploration
@@ -159,13 +159,26 @@ admin view.
 **Procedure:** `scripts/ops-probes/probe-04.sh` exercises list/detail APIs where
 credentials exist; browser evidence is attached separately.
 
-**Actual:** TODO
+**Actual:** Static probe found the backend and dashboard pieces for a basic
+admin viewer: `HandleListSessions`, `HandleGetSession`, `chat.read_all`, cursor
+pagination, tenant field, and `user_principal` mapping are present. Live API
+verification was not run in this pass because `LLMCHAT_OPS_LIVE=1` and an API
+key were not supplied to the probe. The probe found **zero** concrete
+`chat.admin_session_viewed`/admin-view SIEM action hits, and no search query UI
+or API parameter for user/tenant/session_id search. It also flags a P2 routing
+risk: the settings table currently links through `/copilot/sessions`, which may
+not be the intended chat-assistant read-only transcript path.
 
-**Verdict:** TODO
+**Verdict:** **FAIL (P1).** Basic admin list/detail scaffolding exists, but the
+meta-governance requirement (audit event per admin view) and search requirement
+are unmet.
 
 **Evidence:** `out/llmchat-ops/probe-04/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** File/track follow-up for `chat.admin_session_viewed` SIEM
+emission plus admin search by user, tenant, and session ID. Track the
+`/copilot/sessions` routing mismatch as P2 unless product confirms it is the
+canonical read-only transcript route.
 
 ## Probe 5 — Chat frame protocol stability
 
@@ -193,13 +206,20 @@ scale, health checks, alerts, known issues, and escalation for customer ops.
 **Procedure:** `scripts/ops-probes/probe-06.sh` checks required headings and
 links.
 
-**Actual:** TODO
+**Actual:** Rewrote `docs/llmchat/ops-runbook.md` from a stale vLLM production-
+readiness matrix into a customer-facing informational-chat ops runbook. Static
+probe passed: required headings are present (`Deploy`, `Upgrade`, `Rollback`,
+`Scale`, `Check health`, `Common alerts`, `Known issues and workarounds`,
+`Escalation matrix`), and required operational terms are present (`Ollama`,
+Enterprise license, `llm_chat_assistant`, `/healthz`, `/readyz`, `/metrics`,
+rollback, scale, P0, redaction). Secret-pattern scan was clean.
 
-**Verdict:** TODO
+**Verdict:** **PASS.** Runbook content now matches the 2026-04-28
+informational-only/Ollama-default scope.
 
 **Evidence:** `docs/llmchat/ops-runbook.md`, `out/llmchat-ops/probe-06/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** None for the static runbook check.
 
 ## Probe 7 — Grafana dashboard
 
@@ -210,13 +230,21 @@ imports with no-data panels instead of errors.
 **Procedure:** `scripts/ops-probes/probe-07.sh` validates JSON structure and, in
 live mode, records Grafana import evidence.
 
-**Actual:** TODO
+**Actual:** Added `cordum-helm/dashboards/llm-chat.json`. Static JSON validation
+passed with dashboard title `Cordum LLM Chat`, 6 panels, and required metric
+coverage for `chat_sessions_active`, `chat_vllm_latency_seconds_bucket`,
+`chat_errors_total`, and `chat_token_budget_used_total`. Every panel sets
+`noValue: "No data"` for empty-stack rendering. Live Grafana import/screenshot
+was not run because `GRAFANA_URL` and `LLMCHAT_OPS_LIVE=1` were not configured.
 
-**Verdict:** TODO
+**Verdict:** **PASS (static), IMPORT NOT RUN.** The dashboard artifact ships and
+is structurally valid; final customer evidence still needs an owned Grafana
+import or screenshot if the original DoD is enforced literally.
 
 **Evidence:** `out/llmchat-ops/probe-07/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** No P0/P1 from static validation. Import screenshot remains
+manual/dedicated-environment evidence.
 
 ## Probe 8 — SIEM export
 
@@ -244,13 +272,21 @@ and zero sessions for 30m.
 **Procedure:** `scripts/ops-probes/probe-09.sh` validates YAML and runs promtool
 when available.
 
-**Actual:** TODO
+**Actual:** Added `cordum-helm/alerts/llm-chat.yaml` with four alert rules:
+`LLMChatBackendDown`, `LLMChatHighErrorRate`, `LLMChatApprovalBacklogHigh`
+(legacy compatibility / should stay zero for informational-only), and
+`LLMChatNoSessionsFor30m`. Static probe passed required alert/metric/duration
+checks (`chat_sessions_active`, `chat_errors_total`,
+`chat_approval_required_total`, 5m and 30m durations). `promtool` was not
+available in this shell, so promtool validation is recorded as not run.
 
-**Verdict:** TODO
+**Verdict:** **PASS (static).** Alert file exists with expected rule names and
+metrics. Promtool validation remains environment-dependent.
 
 **Evidence:** `out/llmchat-ops/probe-09/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** Optional CI follow-up to run `promtool check rules` where
+promtool is installed.
 
 ## Probe 10 — Cost / usage visibility
 
@@ -278,13 +314,19 @@ bounded retention or cleanup semantics.
 **Procedure:** `scripts/ops-probes/probe-11.sh` checks for endpoint/UI support
 and scans any produced dump with the shared secret scanner.
 
-**Actual:** TODO
+**Actual:** Static search found only documentation references to debug dumps,
+including the runbook statement that live debug dumps are not yet implemented.
+No `DebugDump`, `support_bundle`, `debug_dump`, session-dump handler, gateway
+route, or dashboard UI support was found. Live dump scan was not run because no
+`LLMCHAT_DEBUG_DUMP_URL` was available.
 
-**Verdict:** TODO
+**Verdict:** **FAIL (P1).** The debug-dump support bundle DoD is unmet.
 
 **Evidence:** `out/llmchat-ops/probe-11/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** File/track follow-up for a redacted admin support bundle
+endpoint/UI with transcript, frame log, correlation/trace IDs, secret scanning,
+and retention/cleanup behavior.
 
 ## Probe 12 — Log sampling / volume bounds
 
@@ -317,6 +359,8 @@ is still required if the task is completed under the original DoD wording.
 |---|---|---|---|
 | P1 | TODO | 1 | llm-chat runtime logs are text-prefixed slog, not JSON structured logs with required safe correlation keys. |
 | P1 | TODO | 3 | No llm-chat OTEL/Jaeger exporter evidence; trace-propagation DoD unmet. |
+| P1 | TODO | 4 | Admin session viewer lacks concrete `chat.admin_session_viewed` audit event and search by user/tenant/session_id. |
+| P1 | TODO | 11 | Admin session debug dump/support bundle endpoint/UI is not implemented. |
 
 ## Final verification log
 

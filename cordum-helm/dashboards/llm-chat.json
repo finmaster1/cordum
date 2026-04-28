@@ -1,0 +1,94 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active chat sessions",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(chat_sessions_active)", "legendFormat": "active sessions", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "noValue": "No data" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Backend latency p50/p99",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(chat_vllm_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.99, sum(rate(chat_vllm_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "noValue": "No data" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Chat errors by kind",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(chat_errors_total[5m])) by (kind)", "legendFormat": "{{kind}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "noValue": "No data" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Token budget consumed",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(chat_token_budget_used_total[5m]))", "legendFormat": "tokens/sec", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "noValue": "No data" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Legacy tool/approval counters (should be zero for informational-only)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(chat_tool_calls_total[5m])) by (tool)", "legendFormat": "tool={{tool}}", "refId": "A" },
+        { "expr": "sum(rate(chat_approval_required_total[5m]))", "legendFormat": "approval_required", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "noValue": "No data" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+    },
+    {
+      "type": "stat",
+      "title": "Backend/exporter health",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "up{job=~\".*llm.*chat.*|.*ollama.*|.*qwen.*\"}", "legendFormat": "{{job}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "noValue": "No data" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
+    }
+  ],
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["cordum", "llm-chat", "ollama", "ops"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "prometheus" }
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "Cordum LLM Chat",
+  "uid": "cordum-llm-chat",
+  "version": 1,
+  "weekStart": ""
+}

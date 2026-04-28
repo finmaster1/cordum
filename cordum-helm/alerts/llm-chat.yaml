@@ -1,0 +1,44 @@
+groups:
+  - name: llm-chat.rules
+    interval: 30s
+    rules:
+      - alert: LLMChatBackendDown
+        expr: absent(chat_sessions_active) == 1
+        for: 5m
+        labels:
+          severity: page
+          service: llm-chat
+        annotations:
+          summary: "LLM chat metrics/backend unavailable"
+          description: "No llm-chat Prometheus series have been scraped for 5 minutes. Check /readyz, Redis, and the configured Ollama/vLLM backend."
+          runbook_url: "docs/llmchat/ops-runbook.md#common-alerts"
+      - alert: LLMChatHighErrorRate
+        expr: sum(rate(chat_errors_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+          service: llm-chat
+        annotations:
+          summary: "LLM chat error rate is elevated"
+          description: "chat_errors_total is increasing above baseline. Inspect chat_errors_total{kind}, redacted logs, and inference readiness."
+          runbook_url: "docs/llmchat/ops-runbook.md#common-alerts"
+      - alert: LLMChatApprovalBacklogHigh
+        expr: sum(chat_approval_required_total) > 100
+        for: 5m
+        labels:
+          severity: ticket
+          service: llm-chat
+        annotations:
+          summary: "Legacy chat approval-required backlog is high"
+          description: "Informational-only chat should not create approval-required frames. Non-zero/high values indicate a legacy path or stale deployment."
+          runbook_url: "docs/llmchat/ops-runbook.md#common-alerts"
+      - alert: LLMChatNoSessionsFor30m
+        expr: sum(max_over_time(chat_sessions_active[30m])) == 0
+        for: 30m
+        labels:
+          severity: ticket
+          service: llm-chat
+        annotations:
+          summary: "LLM chat has had zero active sessions for 30 minutes"
+          description: "If traffic is expected, confirm the license entitlement, gateway proxy, dashboard chat button health gate, and user auth path."
+          runbook_url: "docs/llmchat/ops-runbook.md#common-alerts"
