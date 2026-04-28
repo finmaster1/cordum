@@ -1,8 +1,8 @@
 # LLM Chat Observability + Ops Senior Review
 
-Task: `task-8eab552b`  
-Status: **IN PROGRESS**  
-Reviewer: Moe worker `worker-54cf`  
+Task: `task-8eab552b`
+Status: **IN PROGRESS**
+Reviewer: Moe worker `worker-54cf`
 Last updated: 2026-04-28
 
 ## Scope note (2026-04-28 informational-only pivot)
@@ -22,9 +22,9 @@ backend and keep vLLM-specific panels as opt-in.
 
 | Probe | Surface | Verdict | Evidence |
 |---|---|---:|---|
-| 1 | Structured logs + redaction | TODO | `out/llmchat-ops/probe-01/evidence.txt` |
-| 2 | Prometheus metrics + cardinality | TODO | `out/llmchat-ops/probe-02/evidence.txt` |
-| 3 | Trace propagation / Jaeger | TODO | `out/llmchat-ops/probe-03/evidence.txt` |
+| 1 | Structured logs + redaction | **FAIL (P1)** | `out/llmchat-ops/probe-01/evidence.txt` |
+| 2 | Prometheus metrics + cardinality | **PASS** | `out/llmchat-ops/probe-02/evidence.txt` |
+| 3 | Trace propagation / Jaeger | **FAIL (P1)** | `out/llmchat-ops/probe-03/evidence.txt` |
 | 4 | Admin session viewer + audit | TODO | `out/llmchat-ops/probe-04/evidence.txt` |
 | 5 | Chat frame protocol stability | TODO | `out/llmchat-ops/probe-05/evidence.txt` |
 | 6 | Ops runbook | TODO | `docs/llmchat/ops-runbook.md` |
@@ -33,7 +33,7 @@ backend and keep vLLM-specific panels as opt-in.
 | 9 | Alert rules | TODO | `cordum-helm/alerts/llm-chat.yaml` |
 | 10 | Cost / usage visibility | TODO | `out/llmchat-ops/probe-10/evidence.txt` |
 | 11 | Admin debug dump | TODO | `out/llmchat-ops/probe-11/evidence.txt` |
-| 12 | Log sampling / volume bounds | TODO | `out/llmchat-ops/probe-12/evidence.txt` |
+| 12 | Log sampling / volume bounds | **PASS (static); live load not run** | `out/llmchat-ops/probe-12/evidence.txt` |
 
 ### Current pre-probe findings from exploration
 
@@ -75,13 +75,24 @@ INFO.
 or records the non-JSON format as evidence, and runs the shared secret-pattern
 scanner.
 
-**Actual:** TODO
+**Actual:** `probe-01.sh` ran from Git Bash/MSYS against `llm-chat-ollama` logs
+(`LLMCHAT_LOG_SERVICE=llm-chat-ollama`, default 1-hour window). It captured 5
+recent log lines and the secret scanner returned zero hits. JSON validation
+failed on every sampled line because the service emits text-prefixed slog output,
+for example `[LLM-CHAT-SERVER] INFO llmchat/agent: turn_start session_id=...`
+rather than a JSON object. The lines also use `principal=` instead of the
+required `user_principal` key and do not include `trace_id` in the sampled
+application logs.
 
-**Verdict:** TODO
+**Verdict:** **FAIL (P1).** Secret redaction passed for the sampled log dump,
+but the structured-log requirement is not met. This is a day-2 operability gap:
+log processors cannot reliably parse fields or enforce field-level redaction.
 
 **Evidence:** `out/llmchat-ops/probe-01/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** File/track a follow-up before final handoff if this task
+continues to REVIEW: initialize JSON slog for `cordum-llm-chat` and standardize
+safe correlation keys (`session_id`, `user_principal`, `tenant`, `trace_id`).
 
 ## Probe 2 — Metrics + cardinality
 
@@ -92,13 +103,24 @@ is bounded, and no session-like or secret-like value appears in labels.
 checks required families, counts label combinations per family, and scans label
 values for UUID/session/token shapes.
 
-**Actual:** TODO
+**Actual:** `probe-02.sh` fetched `http://127.0.0.1:8092/metrics` successfully
+(~12 KB). Required families were present: `chat_sessions_active`,
+`chat_tool_calls_total`, `chat_approval_required_total`,
+`chat_vllm_latency_seconds`, `chat_token_budget_used_total`, and
+`chat_errors_total`. Cardinality remained under the documented ceiling: active
+sessions=1, approval_required=1, token_budget=1, errors=8, tool_calls=21, and
+vLLM latency histogram emitted fixed bucket/count/sum series. The script found no
+forbidden `session_id`, principal, tenant, token, prompt, trace, UUID, JWT,
+Bearer, or `sk-*` values in labels.
 
-**Verdict:** TODO
+**Verdict:** **PASS.** Cardinality is bounded and enforceable. The metric names
+still include legacy `tool`/`vllm` terminology; under the informational-only
+Ollama default this should be documented as compatibility naming or cleaned up in
+follow-up, but it does not create unbounded cardinality.
 
 **Evidence:** `out/llmchat-ops/probe-02/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** Optional naming follow-up only; no P0/P1 for cardinality.
 
 ## Probe 3 — Trace propagation / Jaeger
 
@@ -110,14 +132,23 @@ legacy tool path is deliberately exercised.
 **Procedure:** `scripts/ops-probes/probe-03.sh` records trace IDs from logs and
 queries the configured Jaeger/OTEL endpoint when present.
 
-**Actual:** TODO
+**Actual:** Static scan of `cmd/cordum-llm-chat`, `core/llmchat`,
+`docker-compose.yml`, and `cordum-helm` found 0 OpenTelemetry/Jaeger/exporter
+matches for the llm-chat service. No `LLMCHAT_JAEGER_QUERY_URL` was configured,
+so no Jaeger trace evidence or screenshot could be captured. This means the
+required browser → gateway → llm-chat → inference trace chain is not currently
+observable; the retired MCP/scheduler/worker spans are no longer production-
+default expectations after the pivot.
 
-**Verdict:** TODO
+**Verdict:** **FAIL (P1).** The trace-propagation/Jaeger DoD is unmet for the
+surviving informational-chat path.
 
-**Evidence:** `out/llmchat-ops/probe-03/evidence.txt` and Jaeger screenshot
-reference if available.
+**Evidence:** `out/llmchat-ops/probe-03/evidence.txt` and no Jaeger screenshot
+available.
 
-**Findings / tasks:** TODO
+**Findings / tasks:** File/track follow-up to add OTEL trace instrumentation and
+exporter configuration for the gateway/llm-chat/inference request path, including
+safe redaction of trace attributes.
 
 ## Probe 4 — Admin session viewer + audit
 
@@ -263,19 +294,29 @@ at INFO; correlation IDs remain available even when detail logs are sampled out.
 **Procedure:** `scripts/ops-probes/probe-12.sh` counts log lines during a small
 chat load test and records whether DEBUG-level token deltas are bounded.
 
-**Actual:** TODO
+**Actual:** `probe-12.sh` captured current `llm-chat-ollama` logs before and
+after the static check. It found 4 lines before, 4 lines after, and no
+`assistant_delta`, `token_delta`, stream-chunk, or chunk-delta log lines at
+INFO/WARN. The 10-message load subcheck was **not run** in this pass
+(`LLMCHAT_OPS_LIVE=1 LLMCHAT_OPS_RUN_LOAD=1` was not set); therefore the
+script records `load_bound_enforced=false` and does not claim the <100-line
+under-load bound as live evidence.
 
-**Verdict:** TODO
+**Verdict:** **PASS (static/sampling scan), LIVE LOAD NOT RUN.** No token-delta
+log spam is visible in the sampled logs, but final REVIEW should not claim the
+full load-bound DoD until the small live load can complete on an owned stack.
 
 **Evidence:** `out/llmchat-ops/probe-12/evidence.txt`
 
-**Findings / tasks:** TODO
+**Findings / tasks:** No immediate P0/P1 from static evidence. Live load evidence
+is still required if the task is completed under the original DoD wording.
 
 ## Follow-up task log
 
 | Severity | Task | Probe | Summary |
 |---|---|---|---|
-| TODO | TODO | TODO | TODO |
+| P1 | TODO | 1 | llm-chat runtime logs are text-prefixed slog, not JSON structured logs with required safe correlation keys. |
+| P1 | TODO | 3 | No llm-chat OTEL/Jaeger exporter evidence; trace-propagation DoD unmet. |
 
 ## Final verification log
 

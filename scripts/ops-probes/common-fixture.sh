@@ -43,6 +43,53 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || probe_fail "missing required command: $1"
 }
 
+find_first_cmd() {
+  local candidate
+  for candidate in "$@"; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+      command -v "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_python_bin() {
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    printf '%s\n' "${PYTHON_BIN}"
+    return 0
+  fi
+  find_first_cmd python python3 python.exe
+}
+
+run_python() {
+  local python_bin
+  python_bin="$(resolve_python_bin)" || probe_fail "missing required command: python/python3/python.exe"
+  "${python_bin}" "$@"
+}
+
+resolve_docker_bin() {
+  if [[ -n "${DOCKER_BIN:-}" ]]; then
+    printf '%s\n' "${DOCKER_BIN}"
+    return 0
+  fi
+  find_first_cmd docker docker.exe
+}
+
+docker_compose() {
+  local docker_bin
+  docker_bin="$(resolve_docker_bin)" || probe_fail "missing required command: docker/docker.exe"
+  MSYS_NO_PATHCONV=1 "${docker_bin}" compose "$@"
+}
+
+require_docker_compose() {
+  local stderr_file="${probe_dir}/docker-compose-version.stderr"
+  if ! docker_compose version >/dev/null 2>"${stderr_file}"; then
+    cat "${stderr_file}" >>"${evidence_file}" || true
+    probe_skip "docker compose unavailable from this shell; run with Git Bash/MSYS on Windows or enable Docker WSL integration"
+  fi
+}
+
 curl_common=(--silent --show-error --location --max-time "${LLMCHAT_CURL_TIMEOUT:-15}")
 if [[ "${CORDUM_API_BASE}" == https://* ]]; then
   curl_common+=(--insecure)
