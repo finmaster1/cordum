@@ -61,6 +61,10 @@ type chatAuditSender interface {
 	Send(event audit.SIEMEvent)
 }
 
+type contextualChatAuditSender interface {
+	SendWithContext(context.Context, audit.SIEMEvent)
+}
+
 // chatPostRequest is shared by POST and WS inbound user-message frames.
 type chatPostRequest struct {
 	SessionID string `json:"session_id,omitempty"`
@@ -266,8 +270,8 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 
 	startedAt := time.Now()
 	turnCount := 0
-	h.emitSessionStarted(session)
-	defer func() { h.emitSessionClosed(session, turnCount, time.Since(startedAt)) }()
+	h.emitSessionStarted(r.Context(), session)
+	defer func() { h.emitSessionClosed(r.Context(), session, turnCount, time.Since(startedAt)) }()
 
 	out := make(chan Frame, wsWriteQueueSize)
 	done := make(chan struct{})
@@ -420,22 +424,22 @@ func (h *ChatHandlers) requireChatEntitlement(w http.ResponseWriter) bool {
 	return false
 }
 
-func (h *ChatHandlers) emitSessionStarted(s *Session) {
+func (h *ChatHandlers) emitSessionStarted(ctx context.Context, s *Session) {
 	if h == nil || h.audit == nil || s == nil {
 		return
 	}
-	h.audit.Send(audit.SIEMEvent{
+	h.sendAudit(ctx, audit.SIEMEvent{
 		Timestamp: time.Now().UTC(), EventType: audit.EventSystemAuth, Severity: "info",
 		TenantID: s.Tenant, AgentID: s.AgentID, Identity: s.UserPrincipal, Action: audit.SIEMActionChatSessionStarted,
 		Extra: map[string]string{"session_id": s.ID, "user_principal": s.UserPrincipal, "tenant": s.Tenant, "agent_id": s.AgentID},
 	})
 }
 
-func (h *ChatHandlers) emitSessionClosed(s *Session, turnCount int, dur time.Duration) {
+func (h *ChatHandlers) emitSessionClosed(ctx context.Context, s *Session, turnCount int, dur time.Duration) {
 	if h == nil || h.audit == nil || s == nil {
 		return
 	}
-	h.audit.Send(audit.SIEMEvent{
+	h.sendAudit(ctx, audit.SIEMEvent{
 		Timestamp: time.Now().UTC(), EventType: audit.EventSystemAuth, Severity: "info",
 		TenantID: s.Tenant, AgentID: s.AgentID, Identity: s.UserPrincipal, Action: audit.SIEMActionChatSessionClosed,
 		Extra: map[string]string{
@@ -443,6 +447,17 @@ func (h *ChatHandlers) emitSessionClosed(s *Session, turnCount int, dur time.Dur
 			"duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
 		},
 	})
+}
+
+func (h *ChatHandlers) sendAudit(ctx context.Context, event audit.SIEMEvent) {
+	if h == nil || h.audit == nil {
+		return
+	}
+	if sender, ok := h.audit.(contextualChatAuditSender); ok {
+		sender.SendWithContext(ctx, event)
+		return
+	}
+	h.audit.Send(event)
 }
 
 func (h *ChatHandlers) markSessionActive(id string) bool {

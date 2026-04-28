@@ -20,15 +20,29 @@ backend and keep vLLM-specific panels as opt-in.
 
 ## Executive summary
 
-Classification after probes 1-12 (2026-04-28): **0 P0**, **6 P1**, **1 P2**, and no secret/metric-cardinality P0s. P1 follow-ups filed: `task-848f003a` (probe 1 structured JSON logs), `task-0e73db35` (probe 3 OTEL/Jaeger), `task-83b72a46` (probe 4 admin audit/search), `task-68a01f28` (probe 5 protocol v1), `task-7ee2d5ab` (probe 10 usage counters), `task-53317462` (probe 11 debug dump). Probe 4 also records a P2 detail-routing check for `/copilot/sessions`.
+Classification after probes 1-12 (2026-04-28) plus the probe-3 follow-up rerun:
+**0 P0**, **5 open P1**, **1 resolved P1**, **1 P2**, and no
+secret/metric-cardinality P0s. P1 follow-ups filed: `task-848f003a` (probe 1
+structured JSON logs), `task-0e73db35` (probe 3 OTEL/Jaeger; **resolved by
+2026-04-28 rerun**), `task-83b72a46` (probe 4 admin audit/search),
+`task-68a01f28` (probe 5 protocol v1), `task-7ee2d5ab` (probe 10 usage
+counters), `task-53317462` (probe 11 debug dump). Probe 4 also records a P2
+detail-routing check for `/copilot/sessions`.
 
-Outcome counts: **6 PASS/static-pass probes** (2, 6, 7, 8, 9, 12), **6 FAIL/P1 probes** (1, 3, 4, 5, 10, 11), **0 BLOCKED**, **0 P0**. Log-redaction grep result: probe 1 secret scan returned zero hits against sampled llm-chat logs; probe 12 found no INFO/WARN token-delta log spam. Jaeger trace screenshot: **not available** because probe 3 found no llm-chat OTEL/Jaeger exporter configuration.
+Outcome counts after task-0e73db35: **7 PASS/static-pass probes** (2, 3, 6, 7,
+8, 9, 12), **5 open FAIL/P1 probes** (1, 4, 5, 10, 11), **0 BLOCKED**, **0
+P0**. Log-redaction grep result: probe 1 secret scan returned zero hits against
+sampled llm-chat logs; probe 12 found no INFO/WARN token-delta log spam. Jaeger
+trace evidence: `out/llmchat-otel-smoke/jaeger-traces.json` with trace ID
+`763604b70c676385f5eddb945d0ee313` (including `chat.audit.emit`) and the
+task-0e73db35 rerun of `probe-03.sh` requiring `chat.ws.connect`,
+`chat.turn`, `llm.inference`, and `chat.audit.emit`.
 
 | Probe | Surface | Verdict | Evidence |
 |---|---|---:|---|
 | 1 | Structured logs + redaction | **FAIL (P1)** | `out/llmchat-ops/probe-01/evidence.txt` |
 | 2 | Prometheus metrics + cardinality | **PASS** | `out/llmchat-ops/probe-02/evidence.txt` |
-| 3 | Trace propagation / Jaeger | **FAIL (P1)** | `out/llmchat-ops/probe-03/evidence.txt` |
+| 3 | Trace propagation / Jaeger | **PASS (follow-up task-0e73db35)** | `out/llmchat-ops/probe-03/evidence.txt`, `out/llmchat-otel-smoke/jaeger-traces.json` |
 | 4 | Admin session viewer + audit | **FAIL (P1)** | `out/llmchat-ops/probe-04/evidence.txt` |
 | 5 | Chat frame protocol stability | **FAIL (P1)** | `out/llmchat-ops/probe-05/evidence.txt` |
 | 6 | Ops runbook | **PASS** | `docs/llmchat/ops-runbook.md` |
@@ -46,7 +60,10 @@ Outcome counts: **6 PASS/static-pass probes** (2, 6, 7, 8, 9, 12), **6 FAIL/P1 p
   image and classify severity.
 - Metrics are live and bounded by allowlists in `core/llmchat/metrics.go`, but
   metric names still contain legacy `tool`/`vllm` terminology.
-- No OpenTelemetry/Jaeger wiring was found for llm-chat during exploration.
+- OpenTelemetry/Jaeger wiring was absent during the original review; follow-up
+  `task-0e73db35` now initializes OTEL in `cordum-llm-chat`, propagates
+  `traceparent` from the gateway proxy, and instruments the surviving
+  informational-chat path.
 - Admin session list/detail routes enforce permission and tenant scope, but no
   `chat.admin_session_viewed` SIEM event constant/emission was found.
 - `/settings/chat-sessions` exists, but search and chat-specific detail routing
@@ -80,8 +97,8 @@ or records the non-JSON format as evidence, and runs the shared secret-pattern
 scanner.
 
 **Actual:** `probe-01.sh` ran from Git Bash/MSYS against the auto-detected chat log service (`llm-chat` in the current post-pivot compose config; `llm-chat` in earlier profile configs). It captured recent log lines and the secret scanner returned zero hits. JSON validation
-failed on every sampled line because the service emits text-prefixed slog output,
-for example `[LLM-CHAT-SERVER] INFO llmchat/agent: turn_start session_id=...`
+failed on every sampled line because the service emitted text-prefixed slog
+output, for example a `LLM-CHAT-SERVER INFO llmchat/agent: turn_start ...`
 rather than a JSON object. The lines also use `principal=` instead of the
 required `user_principal` key and do not include `trace_id` in the sampled
 application logs.
@@ -95,6 +112,8 @@ log processors cannot reliably parse fields or enforce field-level redaction.
 **Findings / tasks:** File/track a follow-up before final handoff if this task
 continues to REVIEW: initialize JSON slog for `cordum-llm-chat` and standardize
 safe correlation keys (`session_id`, `user_principal`, `tenant`, `trace_id`).
+Follow-up task-848f003a resolves this finding and the live probe should be
+rerun before re-reviewing task-8eab552b.
 
 ## Probe 2 — Metrics + cardinality
 
@@ -134,23 +153,29 @@ legacy tool path is deliberately exercised.
 **Procedure:** `scripts/ops-probes/probe-03.sh` records trace IDs from logs and
 queries the configured Jaeger/OTEL endpoint when present.
 
-**Actual:** Static scan of `cmd/cordum-llm-chat`, `core/llmchat`,
-`docker-compose.yml`, and `cordum-helm` found 0 OpenTelemetry/Jaeger/exporter
-matches for the llm-chat service. No `LLMCHAT_JAEGER_QUERY_URL` was configured,
-so no Jaeger trace evidence or screenshot could be captured. This means the
-required browser → gateway → llm-chat → inference trace chain is not currently
-observable; the retired MCP/scheduler/worker spans are no longer production-
-default expectations after the pivot.
+**Actual:** The original review found no llm-chat OpenTelemetry/Jaeger exporter
+configuration. Follow-up `task-0e73db35` added the missing instrumentation:
+`cordum-llm-chat` initializes the shared OTEL provider, the gateway reverse
+proxy injects W3C `traceparent`, and llm-chat emits bounded spans for
+`chat.ws.connect`, `chat.ws.disconnect`, `chat.turn`, `llm.inference`,
+`chat.session.read`/`chat.session.write`, `chat.audit.emit`, and
+`llmchat.knowledge.load`. The Jaeger smoke queried the OTLP-exported trace and
+captured operations `chat.ws.connect`, `chat.ws.disconnect`, `chat.turn`,
+`llm.inference`, and `chat.audit.emit` in trace
+`763604b70c676385f5eddb945d0ee313`.
 
-**Verdict:** **FAIL (P1).** The trace-propagation/Jaeger DoD is unmet for the
-surviving informational-chat path.
+**Verdict:** **PASS (resolved by task-0e73db35).** The surviving
+informational-chat path now has OTEL propagation and Jaeger-verifiable spans.
+The retired chat→MCP/scheduler/worker span expectations remain out of
+production-default scope after the informational-only pivot.
 
-**Evidence:** `out/llmchat-ops/probe-03/evidence.txt` and no Jaeger screenshot
-available.
+**Evidence:** `out/llmchat-ops/probe-03/evidence.txt`,
+`out/llmchat-otel-smoke/jaeger-traces.json`, and Jaeger UI/query URL pattern:
+`http://127.0.0.1:16686/api/traces?service=cordum-llm-chat-smoke&lookback=1h&limit=20`.
 
-**Findings / tasks:** File/track follow-up to add OTEL trace instrumentation and
-exporter configuration for the gateway/llm-chat/inference request path, including
-safe redaction of trace attributes.
+**Findings / tasks:** `task-0e73db35` resolves the probe-3 P1. Keep the
+dedicated trace probe in the ops harness so regressions fail closed when a
+configured Jaeger endpoint is supplied.
 
 ## Probe 4 — Admin session viewer + audit
 
@@ -389,7 +414,7 @@ is still required if the task is completed under the original DoD wording.
 |---:|---|---|---|
 | 1 | Does probe 1 catch token shapes beyond `eyJ` JWTs (EdDSA hex, raw API keys without `Bearer`)? | **FIX-APPLIED** | Expanded `scan_for_secret_patterns` to catch `X-API-Key`, `CORDUM_API_KEY`, and 64+ hex material, and to redact those hits in evidence before display. |
 | 2 | Does probe 2 count exponential cardinality candidates such as histogram bucket series? | **PASS** | Probe 2 counts `chat_vllm_latency_seconds_bucket`, `_sum`, and `_count` separately; bucket series are fixed (11 buckets) and no unbounded session/principal labels appear. |
-| 3 | Does probe 3 cover sad-path traces, not just happy path? | **FAIL-CAPTURED** | No OTEL/Jaeger exporter exists, so both happy and sad-path trace coverage are blocked by P1 follow-up `task-0e73db35`. |
+| 3 | Does probe 3 cover sad-path traces, not just happy path? | **PASS/FOLLOW-UP-RESOLVED** | `task-0e73db35` adds OTEL spans for happy-path chat turns plus error status on provider/runner/session failures; `probe-03.sh` now fails closed when the configured Jaeger trace lacks required operations. |
 | 4 | Does admin-viewer audit identify the exact view (page/cursor/search) for forensics? | **FIX-APPLIED TO FOLLOW-UP** | P1 follow-up `task-83b72a46` now carries a comment requiring page/cursor/search attributes on `chat.admin_session_viewed`. |
 | 5 | Does the `v=2` reject test verify close-frame reason, not just close? | **PASS/FOLLOW-UP-SCOPED** | P1 follow-up `task-68a01f28` requires stable `unsupported_protocol_version` error/close behavior; current probe fails until implemented. |
 | 6 | Do SIEM tests verify event ordering under concurrent sessions? | **GAP-DOCUMENTED** | Probe 8 is static/exporter-unit evidence only; live sink ordering under concurrent sessions remains unproven until configured sink endpoints exist. |
@@ -402,7 +427,7 @@ is still required if the task is completed under the original DoD wording.
 | Severity | Task | Probe | Summary |
 |---|---|---|---|
 | P1 | task-848f003a | 1 | llm-chat runtime logs are text-prefixed slog, not JSON structured logs with required safe correlation keys. |
-| P1 | task-0e73db35 | 3 | No llm-chat OTEL/Jaeger exporter evidence; trace-propagation DoD unmet. |
+| P1 (resolved) | task-0e73db35 | 3 | OTEL/Jaeger trace propagation added for gateway → llm-chat → inference → audit/session lifecycle; `probe-03.sh` rerun passes with configured Jaeger query. |
 | P1 | task-83b72a46 | 4 | Admin session viewer lacks concrete `chat.admin_session_viewed` audit event and search by user/tenant/session_id. |
 | P1 | task-53317462 | 11 | Admin session debug dump/support bundle endpoint/UI is not implemented. |
 | P1 | task-68a01f28 | 5 | Chat frame protocol lacks top-level `v: 1` and unknown-version rejection. |
@@ -413,9 +438,10 @@ is still required if the task is completed under the original DoD wording.
 Final full-probe rerun from `D:/Cordum/cordum` using Git Bash/MSYS on 2026-04-28T07:01Z:
 
 - `bash -n scripts/ops-probes/common-fixture.sh scripts/ops-probes/probe-{01,02,03,04,05,06,07,08,09,10,11,12}.sh` -> `BASH_N_EXIT=0`.
-- Probe exits: `01=1`, `02=0`, `03=1`, `04=1`, `05=1`, `06=0`, `07=0`, `08=0`, `09=0`, `10=1`, `11=1`, `12=0`.
-- Expected PASS/static-pass probes: 2 (metrics/cardinality), 6 (runbook), 7 (Grafana JSON static), 8 (SIEM exporter static + audit unit test), 9 (alert rules static), 12 (log sampling static).
-- Expected FAIL/P1 probes with filed follow-ups: 1 (`task-848f003a`), 3 (`task-0e73db35`), 4 (`task-83b72a46`), 5 (`task-68a01f28`), 10 (`task-7ee2d5ab`), 11 (`task-53317462`).
+- Original probe exits: `01=1`, `02=0`, `03=1`, `04=1`, `05=1`, `06=0`, `07=0`, `08=0`, `09=0`, `10=1`, `11=1`, `12=0`.
+- Post-follow-up probe-3 rerun: `LLMCHAT_JAEGER_QUERY_URL='http://127.0.0.1:16686/api/traces?service=cordum-llm-chat-smoke&lookback=1h&limit=20' bash scripts/ops-probes/probe-03.sh` -> pass with required operations present.
+- Expected PASS/static-pass probes after task-0e73db35: 2 (metrics/cardinality), 3 (trace propagation/Jaeger with configured query), 6 (runbook), 7 (Grafana JSON static), 8 (SIEM exporter static + audit unit test), 9 (alert rules static), 12 (log sampling static).
+- Expected open FAIL/P1 probes with filed follow-ups: 1 (`task-848f003a`), 4 (`task-83b72a46`), 5 (`task-68a01f28`), 10 (`task-7ee2d5ab`), 11 (`task-53317462`).
 - Metrics endpoint used by the final rerun: `http://127.0.0.1:8090/metrics`, matching the current post-pivot compose service name `llm-chat`. The probes still support `LLMCHAT_METRICS_URL` and `LLMCHAT_LOG_SERVICE` overrides for older `llm-chat` profile runs.
 - `python -m json.tool cordum-helm/dashboards/llm-chat.json` -> pass.
 - `git diff --check` on all task-owned docs/scripts/chart artifacts -> clean before the final commit.

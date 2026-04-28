@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -24,6 +25,7 @@ const (
 	envOTELEnabled      = "OTEL_ENABLED"
 	envOTELEndpoint     = "OTEL_EXPORTER_OTLP_ENDPOINT"
 	envOTELServiceName  = "OTEL_SERVICE_NAME"
+	envOTELServiceVer   = "OTEL_SERVICE_VERSION"
 	envOTELSamplerArg   = "OTEL_TRACES_SAMPLER_ARG"
 	defaultSamplingRate = 0.1
 	shutdownTimeout     = 5 * time.Second
@@ -54,7 +56,7 @@ func Enabled() bool {
 // sampling rate.
 //
 // Call Shutdown before process exit to flush pending spans.
-func InitTracer(serviceName string) (trace.TracerProvider, error) {
+func InitTracer(serviceName string, serviceVersion ...string) (trace.TracerProvider, error) {
 	if !Enabled() {
 		slog.Debug("otel tracing disabled", "component", "otel")
 		return noop.NewTracerProvider(), nil
@@ -66,6 +68,7 @@ func InitTracer(serviceName string) (trace.TracerProvider, error) {
 	if serviceName == "" {
 		serviceName = "cordum"
 	}
+	resolvedVersion := resolveServiceVersion(serviceVersion...)
 
 	endpoint := strings.TrimSpace(os.Getenv(envOTELEndpoint))
 	if endpoint == "" {
@@ -93,7 +96,7 @@ func InitTracer(serviceName string) (trace.TracerProvider, error) {
 	}
 
 	res, err := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceName(serviceName)),
+		resource.WithAttributes(resourceAttributes(serviceName, resolvedVersion)...),
 		resource.WithProcessRuntimeDescription(),
 		resource.WithHost(),
 	)
@@ -125,6 +128,7 @@ func InitTracer(serviceName string) (trace.TracerProvider, error) {
 	slog.Info("otel tracing enabled",
 		"component", "otel",
 		"service", serviceName,
+		"service_version", resolvedVersion,
 		"endpoint", endpoint,
 		"sampling_rate", samplingRate,
 	)
@@ -152,4 +156,43 @@ func Provider() trace.TracerProvider {
 // disabled, this returns a noop tracer with zero allocation overhead.
 func Tracer(name string) trace.Tracer {
 	return globalProvider.Tracer(name)
+}
+
+// SetTracerProviderForTest installs a test tracer provider and returns a
+// restore function. It is intentionally narrow: production code should use
+// InitTracer so exporter/resource/shutdown behavior stays centralized.
+func SetTracerProviderForTest(tp trace.TracerProvider) func() {
+	if tp == nil {
+		tp = noop.NewTracerProvider()
+	}
+	prevProvider := globalProvider
+	prevShutdown := globalShutdown
+	globalProvider = tp
+	globalShutdown = func(context.Context) error { return nil }
+	otel.SetTracerProvider(tp)
+	return func() {
+		globalProvider = prevProvider
+		globalShutdown = prevShutdown
+		otel.SetTracerProvider(prevProvider)
+	}
+}
+
+func resolveServiceVersion(serviceVersion ...string) string {
+	if v := strings.TrimSpace(os.Getenv(envOTELServiceVer)); v != "" {
+		return v
+	}
+	for _, v := range serviceVersion {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func resourceAttributes(serviceName, serviceVersion string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{semconv.ServiceName(serviceName)}
+	if serviceVersion = strings.TrimSpace(serviceVersion); serviceVersion != "" {
+		attrs = append(attrs, semconv.ServiceVersion(serviceVersion))
+	}
+	return attrs
 }

@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 const (
@@ -70,6 +72,7 @@ func (s *server) handleLLMChatProxy(w http.ResponseWriter, r *http.Request) {
 		// Do not pass end-user credentials to the private service. Replace them
 		// with the gateway->llm-chat service key and identity headers derived
 		// from the authenticated gateway context.
+		otel.GetTextMapPropagator().Inject(req.Context(), propagation.HeaderCarrier(req.Header))
 		req.Header.Del("Authorization")
 		req.Header.Set("X-API-Key", forwardKey)
 		req.Header.Set("X-Cordum-Tenant", tenantFromRequest(r))

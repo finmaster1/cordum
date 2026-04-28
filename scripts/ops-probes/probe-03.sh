@@ -24,6 +24,19 @@ if [[ -n "${LLMCHAT_JAEGER_QUERY_URL:-}" ]]; then
   else
     probe_fail "Jaeger query configured but request failed"
   fi
+  required_ops="${LLMCHAT_JAEGER_REQUIRED_OPS:-chat.ws.connect chat.turn llm.inference chat.audit.emit}"
+  missing_ops=()
+  for op in ${required_ops}; do
+    if grep -Fq "\"operationName\":\"${op}\"" "${probe_dir}/jaeger.json"; then
+      log_evidence "jaeger_operation_${op}=present"
+    else
+      log_evidence "jaeger_operation_${op}=missing"
+      missing_ops+=("${op}")
+    fi
+  done
+  if (( ${#missing_ops[@]} > 0 )); then
+    probe_fail "Jaeger query missing required operation(s): ${missing_ops[*]}"
+  fi
 else
   log_evidence "jaeger_query=not_configured"
 fi

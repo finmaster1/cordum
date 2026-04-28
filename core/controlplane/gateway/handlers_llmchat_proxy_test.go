@@ -7,10 +7,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/licensing"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestHandleLLMChatProxyHealthForwardsReadyzWithTrustedIdentity(t *testing.T) {
@@ -88,6 +92,47 @@ func TestHandleLLMChatProxyRequiresEntitlementBeforeForwarding(t *testing.T) {
 	}
 	if called {
 		t.Fatal("upstream was called despite missing entitlement")
+	}
+}
+
+func TestHandleLLMChatProxyInjectsTraceContext(t *testing.T) {
+	prevPropagator := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(prevPropagator) })
+
+	tp := sdktrace.NewTracerProvider()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	ctx, span := tp.Tracer("test").Start(context.Background(), "browser")
+	defer span.End()
+
+	s, _, _ := newTestGateway(t)
+	setTestEntitlements(t, s, licensing.PlanEnterprise, func(entitlements *licensing.Entitlements) {
+		entitlements.LLMChatAssistant = true
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		traceparent := r.Header.Get("Traceparent")
+		if traceparent == "" {
+			t.Fatal("Traceparent header missing")
+		}
+		if wantTrace := span.SpanContext().TraceID().String(); !strings.Contains(traceparent, wantTrace) {
+			t.Fatalf("Traceparent = %q, want trace id %s", traceparent, wantTrace)
+		}
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer upstream.Close()
+	t.Setenv(envLLMChatURL, upstream.URL)
+	t.Setenv(envLLMChatForwardAPIKey, "forward-key")
+
+	authCtx := &auth.AuthContext{Tenant: "tenant-a", PrincipalID: "alice", Role: "operator"}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{"message":"hello"}`))
+	req = req.WithContext(context.WithValue(ctx, auth.ContextKey{}, authCtx))
+	rec := httptest.NewRecorder()
+
+	s.handleLLMChatProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
 	}
 }
 

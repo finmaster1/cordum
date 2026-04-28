@@ -26,6 +26,7 @@ import (
 	gatewayauth "github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/infra/buildinfo"
 	"github.com/cordum/cordum/core/infra/logging"
+	cordumotel "github.com/cordum/cordum/core/infra/otel"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/cordum/cordum/core/licensing"
 	"github.com/cordum/cordum/core/llmchat"
@@ -33,6 +34,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -88,11 +92,24 @@ func main() {
 	}
 	logActiveBackend(cfg)
 
+	if _, err := cordumotel.InitTracer("cordum-llm-chat", buildinfo.Version); err != nil {
+		slog.Error("otel tracer init failed", "error", err)
+	}
+	defer func() {
+		if err := cordumotel.Shutdown(context.Background()); err != nil {
+			slog.Error("otel tracer shutdown failed", "error", err)
+		}
+	}()
+
 	provider, err := llmchat.ResolveProvider(cfg.Provider)
 	if err != nil {
 		slog.Error("cordum-llm-chat: provider resolve failed, refusing to start", "error", err)
 		os.Exit(1)
 	}
+	provider = llmchat.NewTracingProvider(provider, llmchat.TracingProviderConfig{
+		Backend: cfg.Backend,
+		Model:   cfg.Provider.Model,
+	})
 
 	redisClient, err := openRedis(cfg.RedisURL)
 	if err != nil {
@@ -105,7 +122,7 @@ func main() {
 		}
 	}()
 
-	sessionStore := llmchat.NewSessionStoreFromClient(redisClient)
+	sessionStore := llmchat.NewTracingSessionStore(llmchat.NewSessionStoreFromClient(redisClient))
 
 	gatewayHTTPClient, err := gatewayHTTPClientFromEnv(os.Getenv, defaultGatewayHTTPTimeout)
 	if err != nil {
@@ -131,13 +148,26 @@ func main() {
 			knowledge.WithCombinedPromptMaxTokens(maxKnowledgePromptTokens),
 		)
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		warmCtx, warmSpan := cordumotel.Tracer("cordum-llm-chat").Start(warmCtx, "llmchat.knowledge.load",
+			oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
+			oteltrace.WithAttributes(attribute.Int("llmchat.knowledge.max_prompt_tokens", maxKnowledgePromptTokens)),
+		)
 		if _, err := kp.Load(warmCtx); err != nil {
+			warmSpan.RecordError(err)
+			warmSpan.SetStatus(codes.Error, err.Error())
+			warmSpan.End()
 			warmCancel()
 			slog.Error("cordum-llm-chat: knowledge pack load failed, refusing to start", "error", err)
 			os.Exit(1)
 		}
-		warmCancel()
 		stats := kp.Stats()
+		warmSpan.SetAttributes(
+			attribute.Int("llmchat.knowledge.api_tokens", stats.APITokens),
+			attribute.Int("llmchat.knowledge.site_tokens", stats.SiteTokens),
+			attribute.Int("llmchat.knowledge.combined_tokens", stats.CombinedTokens),
+		)
+		warmSpan.End()
+		warmCancel()
 		slog.Info("knowledge pack loaded",
 			"api_tokens", stats.APITokens,
 			"site_tokens", stats.SiteTokens,
@@ -189,13 +219,13 @@ func main() {
 		return entitlementResolver.Entitlements()
 	})
 	metrics := llmchat.NewMetrics(prometheus.DefaultRegisterer)
-	agent := llmchat.NewAgent(llmchat.AgentConfig{
+	agent := llmchat.NewTracingRunner(llmchat.NewAgent(llmchat.AgentConfig{
 		Provider:     provider,
 		PromptLoader: promptLoader,
 		Sessions:     sessionStore,
 		Metrics:      metrics,
-	})
-	auditSender := llmchat.NewChainedAuditSender(auditChainer, nil)
+	}), llmchat.TracingRunnerConfig{Backend: cfg.Backend})
+	auditSender := llmchat.NewTracingAuditSender(llmchat.NewChainedAuditSender(auditChainer, nil))
 
 	handlers := llmchat.NewHandlers(provider, redisClient, readyzProbeTimeout)
 	chatHandlers := llmchat.NewChatHandlers(llmchat.ChatHandlersConfig{
@@ -232,7 +262,7 @@ func main() {
 
 	mux.Handle("/api/v1/chat", authedChat(http.HandlerFunc(chatHandlers.HandleChatPost)))
 	mux.Handle("/api/v1/chat/stream", authedChat(http.HandlerFunc(chatHandlers.HandleChatStream)))
-	mux.Handle("/api/v1/chat/ws", authedChat(http.HandlerFunc(chatHandlers.HandleChatWS)))
+	mux.Handle("/api/v1/chat/ws", authedChat(llmchat.TraceWSHandler(http.HandlerFunc(chatHandlers.HandleChatWS))))
 	mux.Handle("/api/v1/chat/sessions", authedChat(http.HandlerFunc(chatHandlers.HandleListSessions)))
 	mux.Handle("/api/v1/chat/sessions/", authedChat(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chatHandlers.HandleGetSession(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/chat/sessions/"))

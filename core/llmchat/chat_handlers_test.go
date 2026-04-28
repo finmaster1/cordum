@@ -395,8 +395,8 @@ func TestChatHandlers_AuditSessionStartedAndClosed(t *testing.T) {
 	h.audit = sink
 	sess := &Session{ID: "sess-test", UserPrincipal: "alice", Tenant: "tenant-a", AgentID: "chat-assistant"}
 
-	h.emitSessionStarted(sess)
-	h.emitSessionClosed(sess, 3, 250*time.Millisecond)
+	h.emitSessionStarted(context.Background(), sess)
+	h.emitSessionClosed(context.Background(), sess, 3, 250*time.Millisecond)
 
 	events := sink.snapshot()
 	if len(events) != 2 {

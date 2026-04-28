@@ -13,6 +13,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### LLM Chat Assistant — Structured ops logs (task-848f003a)
+- **`cordum-llm-chat` JSON logs** — service runtime logs now use JSON slog output by default while preserving Cordum's redacting handler. Session and request logs carry bounded safe correlation keys: `session_id`, `user_principal`, `tenant`, and `trace_id`.
+- **Secret-safe ops probe** — `scripts/ops-probes/probe-01.sh` and `common-fixture.sh` now fail closed on non-JSON llm-chat logs and scan for Bearer, `X-API-Key`, `CORDUM_API_KEY`, JWT, 64+ hex, OpenAI-style `sk-`, AWS AKIA, and private-key material without echoing matched secrets into evidence. Refs parent task-8eab552b probe 1.
+- **Docs** — `docs/llmchat/observability.md` documents the structured-log contract, correlation-key semantics, forbidden values, and probe success evidence.
+
+#### LLM Chat Assistant — OTEL/Jaeger trace propagation (task-0e73db35)
+- **End-to-end chat traces** — `cordum-llm-chat` now initializes the shared OTEL tracer with `service.name=cordum-llm-chat` and `service.version`, gateway-to-chat proxy requests inject W3C `traceparent`, and the informational chat path emits bounded spans for `chat.ws.connect`, `chat.ws.disconnect`, `chat.turn`, `llm.inference`, Redis session reads/writes, `chat.audit.emit`, and knowledge-pack warm load. Refs parent task-8eab552b probe 3.
+- **Opt-in Jaeger profile** — Docker Compose includes an `observability` profile with Jaeger OTLP receivers on loopback (`127.0.0.1:4317/4318`) and UI on `127.0.0.1:16686`; llm-chat OTEL remains disabled by default until `LLMCHAT_OTEL_ENABLED=true`.
+- **Secret-safe probe evidence** — `scripts/ops-probes/probe-03.sh` now fails closed when the configured Jaeger query lacks required operation names (`chat.ws.connect`, `chat.turn`, `llm.inference`, `chat.audit.emit`) instead of treating any query response as proof.
+
 #### LLM Chat Assistant — Knowledge-pack ingestion (task-a72bdedf)
 - **`core/llmchat/knowledge/`** — local, zero-egress APISubstituter + SiteSubstituter pipeline that fills `{{api_summary}}` and `{{cordum_io_summary}}` from the checked-in OpenAPI spec and docs-site content. The loader redacts secret-shaped content, caches the resolved prompt for the service lifetime, logs token counts at boot, and fails closed when source files are missing or token budgets are exceeded. Refs Yaron's 2026-04-25 knowledge-pack directive and the 2026-04-28 informational-only pivot.
 - **Compose/Helm packaging** — `cordum-llm-chat` now receives `LLMCHAT_KNOWLEDGE_API_SPEC_PATH`, `LLMCHAT_KNOWLEDGE_SITE_PATH`, include/exclude globs, and a 24K combined prompt ceiling. Compose mounts the local spec/docs read-only; Helm defaults use the image-baked `/etc/cordum/openapi.yaml` and `/etc/cordum/site-content` paths.
@@ -294,6 +304,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - **LLM Chat Assistant default backend (task-d38e26c0)** — production inference default switched from vLLM + Qwen3-Coder-30B to Ollama + Qwen2.5-Coder-3B. vLLM remains available as an explicit opt-in via `--profile gpu` (Compose) / `inference.backend: vllm-gpu` (Helm). Driven by Yaron’s 2026-04-28 informational-only directive and architect-9b28’s “u decide” backend decision.
+- **LLM Chat Assistant production-readiness criteria (task-ce2b4a32)** — post-pivot Ollama-default runbook now captures live failure-mode evidence, rolling-upgrade posture, CPU/4GiB resource sizing, `/livez` vs `/healthz`/`/readyz` behavior, backend boot-log verification, and p50/p95/p99 latency observability. Refs task-d38e26c0 plus the 2026-04-28 informational-only/backend-choice directive memories.
 - **core: extracted Unix-timestamp → RFC3339 formatter into `core/infra/timeutil` (task-e396a874)** — 5 inline formatters migrated: `FormatUnixAuto` (handlers_chat.go magnitude cascade) + typed `FromSeconds`/`FromMillis`/`FromMicros`/`FromNanos` for compile-time-known units. Byte-for-byte identical output; empty string on `ts<=0` preserved per site.
 - **core: extracted `proto.Clone((*pb.JobRequest))` guard-pattern into `core/protocol/protoutil.CloneJobRequest` (task-625b2ed1)** — 4 inline call sites migrated to one helper with typed ok-check + nil guard. See the paired `Fixed` entry for the latent saga.go:322 nil-deref this closed. JobMetadata clone sites in saga.go not migrated (different type, separate follow-up if drift emerges).
 - **gateway: removed packs_compat.go + policy_compat.go (task-a828e179)** — 233 lines of pure-alias shims deleted. Every caller (~40 files) now imports `core/controlplane/gateway/packs` or `core/controlplane/gateway/policybundles` directly and uses the fully-qualified `packs.PascalCase` / `policybundles.PascalCase` shape. `resolveAgentForAudit` moved to `handlers_agents.go`. Internal refactor; no public API change.

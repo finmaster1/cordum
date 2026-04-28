@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -82,5 +83,35 @@ func TestShutdown_NoopSafe(t *testing.T) {
 	// Shutdown should be safe to call even when nothing is initialized.
 	if err := Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestResourceAttributesIncludeServiceVersion(t *testing.T) {
+	attrs := resourceAttributes("cordum-llm-chat", "1.2.3")
+	want := map[attribute.Key]string{
+		"service.name":    "cordum-llm-chat",
+		"service.version": "1.2.3",
+	}
+	for _, attr := range attrs {
+		if expected, ok := want[attr.Key]; ok {
+			if got := attr.Value.AsString(); got != expected {
+				t.Fatalf("attribute %s = %q, want %q", attr.Key, got, expected)
+			}
+			delete(want, attr.Key)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("resourceAttributes missing keys: %v attrs=%v", want, attrs)
+	}
+}
+
+func TestResolveServiceVersionPrefersExplicitThenEnv(t *testing.T) {
+	t.Setenv(envOTELServiceVer, "")
+	if got := resolveServiceVersion("  build-version  "); got != "build-version" {
+		t.Fatalf("resolveServiceVersion explicit = %q, want build-version", got)
+	}
+	t.Setenv(envOTELServiceVer, " env-version ")
+	if got := resolveServiceVersion("build-version"); got != "env-version" {
+		t.Fatalf("resolveServiceVersion env = %q, want env-version", got)
 	}
 }

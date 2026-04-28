@@ -735,6 +735,9 @@ services:
       - LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS=${LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS:-concepts/*.md,getting-started/*.md,operations/*.md}
       - LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS=${LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS:-concepts/adr/**}
       - LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS=${LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS:-24000}
+      - OTEL_ENABLED=${LLMCHAT_OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${LLMCHAT_OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
+      - OTEL_TRACES_SAMPLER_ARG=${LLMCHAT_OTEL_TRACES_SAMPLER_ARG:-1.0}
     volumes:
       - ./certs:/etc/cordum/tls:ro
       - ./config/llmchat:/home/cordum/config/llmchat:ro
@@ -814,6 +817,9 @@ services:
       - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-65536}
       - LLMCHAT_OPENAPI_PATH=/etc/cordum-llm-chat/openapi.yaml
       - LLMCHAT_CORDUM_IO_PATH=/etc/cordum-llm-chat/cordum-io
+      - OTEL_ENABLED=${LLMCHAT_OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${LLMCHAT_OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
+      - OTEL_TRACES_SAMPLER_ARG=${LLMCHAT_OTEL_TRACES_SAMPLER_ARG:-1.0}
     volumes:
       - ./certs:/etc/cordum/tls:ro
       - ./config/llmchat:/home/cordum/config/llmchat:ro
@@ -897,6 +903,17 @@ services:
           # Ollama overhead; keep the default within a 4 GB Docker host.
           memory: 4G
           cpus: "2.0"
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.60
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
 
 
 volumes:
