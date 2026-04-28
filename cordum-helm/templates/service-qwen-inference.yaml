@@ -1,4 +1,5 @@
-{{- if .Values.qwenInference.enabled }}
+{{- $backend := include "cordum.inferenceBackend" . }}
+{{- if and (eq $backend "vllm-gpu") .Values.qwenInference.enabled }}
 apiVersion: v1
 kind: Service
 metadata:

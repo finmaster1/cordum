@@ -44,16 +44,16 @@ afterEach(() => {
   resetChatAssistantStore();
 });
 
-describe("ChatWidget — overreliance affordances", () => {
-  it("renders the persistent advisory disclaimer when the panel is open", async () => {
+describe("ChatWidget — informational-only affordances", () => {
+  it("renders the persistent informational-only disclaimer when the panel is open", async () => {
     act(() => {
       useChatAssistantStore.getState().openPanel();
     });
     renderWithProviders(<ChatWidget />);
     const note = await screen.findByRole("note", { name: /advisory disclaimer/i });
-    expect(note.textContent).toMatch(/assistant suggestions are advisory/i);
-    expect(note.textContent).toMatch(/approval gate and audit chain/i);
-    expect(note.textContent).toMatch(/verify args before approving/i);
+    expect(note.textContent).toMatch(/informational only/i);
+    expect(note.textContent).toMatch(/does not execute actions/i);
+    expect(note.textContent).toMatch(/use the dashboard or CLI/i);
   });
 
   it("does not render the disclaimer when the panel is closed", () => {

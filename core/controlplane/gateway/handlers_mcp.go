@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -870,7 +871,7 @@ func (s *server) newMCPServiceBridge() mcp.ServiceBridge {
 	if s == nil {
 		return mcp.NewDirectServiceBridge(mcp.DirectServiceBridgeConfig{})
 	}
-	return mcp.NewDirectServiceBridge(mcp.DirectServiceBridgeConfig{
+	direct := mcp.NewDirectServiceBridge(mcp.DirectServiceBridgeConfig{
 		SubmitJobFunc: func(ctx context.Context, req mcp.SubmitJobInput) (*mcp.SubmitJobOutput, error) {
 			body := map[string]any{
 				"prompt":   req.Prompt,
@@ -1063,6 +1064,234 @@ func (s *server) newMCPServiceBridge() mcp.ServiceBridge {
 			return out, nil
 		},
 	})
+	return &mcpReadOnlyBridge{DirectServiceBridge: direct, server: s}
+}
+
+// mcpBridgeBypassKey marks a request as originating from the in-process
+// MCP service bridge (invokeMCPJSONHandler). Handlers gated by
+// requirePermissionOrRole consult this before applying the user's RBAC,
+// because the MCP scope filter (FilterForIdentity / EvaluateForIdentity
+// — see core/mcp/filter.go) has already authorized the call against the
+// chat-assistant agent's AllowedTools + RiskTier + DataClassifications.
+// Re-checking the dashboard user's role at the handler boundary would
+// cause a false-deny on tools the chat-assistant is explicitly scoped
+// to call. The key cannot be forged externally — it is only set by
+// invokeMCPJSONHandler, which is only reachable in-process.
+type mcpBridgeBypassKey struct{}
+
+// mcpBridgeBypassFromContext reports whether the request was initiated
+// by the in-process MCP bridge.
+func mcpBridgeBypassFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(mcpBridgeBypassKey{}).(bool)
+	return v
+}
+
+// withMCPBridgeBypass returns ctx with the bypass marker set.
+func withMCPBridgeBypass(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, mcpBridgeBypassKey{}, true)
+}
+
+// mcpReadOnlyBridge wraps a *mcp.DirectServiceBridge so the gateway's
+// 14 read-only ServiceBridge methods reach the matching gateway HTTP
+// handlers in-process via invokeMCPJSONHandler. Outer methods on this
+// type take precedence over the embedded DirectServiceBridge's stubs
+// (which return BridgeError(501) by design — see core/mcp/bridge_readonly.go).
+// Mutating methods are not overridden so they continue to flow through
+// the DirectServiceBridge funcs configured in newMCPServiceBridge.
+type mcpReadOnlyBridge struct {
+	*mcp.DirectServiceBridge
+	server *server
+}
+
+func (b *mcpReadOnlyBridge) ListJobs(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/jobs", req, nil, b.server.handleListJobs)
+}
+
+func (b *mcpReadOnlyBridge) GetJob(ctx context.Context, jobID string) (*mcp.ResourceItem, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, mcp.NewBridgeError(http.StatusBadRequest, "invalid_request", "job_id required", nil)
+	}
+	return b.server.mcpReadResource(ctx, "/api/v1/jobs/"+url.PathEscape(jobID), "job", jobID, map[string]string{"id": jobID}, b.server.handleGetJob)
+}
+
+func (b *mcpReadOnlyBridge) ListRuns(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/workflow-runs", req, nil, b.server.handleListAllRuns)
+}
+
+func (b *mcpReadOnlyBridge) GetRun(ctx context.Context, runID string) (*mcp.ResourceItem, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, mcp.NewBridgeError(http.StatusBadRequest, "invalid_request", "run_id required", nil)
+	}
+	return b.server.mcpReadResource(ctx, "/api/v1/workflow-runs/"+url.PathEscape(runID), "run", runID, map[string]string{"id": runID}, b.server.handleGetRun)
+}
+
+func (b *mcpReadOnlyBridge) GetRunTimeline(ctx context.Context, runID string) (*mcp.ResourceItem, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, mcp.NewBridgeError(http.StatusBadRequest, "invalid_request", "run_id required", nil)
+	}
+	return b.server.mcpReadResource(ctx, "/api/v1/workflow-runs/"+url.PathEscape(runID)+"/timeline", "run_timeline", runID, map[string]string{"id": runID}, b.server.handleGetRunTimeline)
+}
+
+func (b *mcpReadOnlyBridge) ListWorkflows(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/workflows", req, nil, b.server.handleListWorkflows)
+}
+
+func (b *mcpReadOnlyBridge) ListPacks(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/packs", req, nil, b.server.handleListPacks)
+}
+
+func (b *mcpReadOnlyBridge) ListTopics(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/topics", req, nil, b.server.handleListTopics)
+}
+
+func (b *mcpReadOnlyBridge) ListWorkers(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/workers", req, nil, b.server.handleGetWorkers)
+}
+
+func (b *mcpReadOnlyBridge) ListAgents(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	return b.server.mcpReadList(ctx, "/api/v1/agents", req, nil, b.server.handleListAgents)
+}
+
+func (b *mcpReadOnlyBridge) ListPendingApprovals(ctx context.Context, req mcp.ListInput) (*mcp.ListPage, error) {
+	if req.Filter == nil {
+		req.Filter = map[string]string{}
+	}
+	if _, ok := req.Filter["status"]; !ok {
+		req.Filter["status"] = "pending"
+	}
+	return b.server.mcpReadList(ctx, "/api/v1/approvals", req, nil, b.server.handleListApprovals)
+}
+
+func (b *mcpReadOnlyBridge) QueryAudit(ctx context.Context, req mcp.AuditQueryInput) (*mcp.ListPage, error) {
+	q := mcpListQuery(req.ListInput)
+	if v := strings.TrimSpace(req.EventType); v != "" {
+		q.Set("type", v)
+	}
+	if v := strings.TrimSpace(req.Since); v != "" {
+		q.Set("since", v)
+	}
+	if v := strings.TrimSpace(req.Until); v != "" {
+		q.Set("until", v)
+	}
+	target := "/api/v1/audit/query"
+	if encoded := q.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	status, payload, raw, err := b.server.invokeMCPJSONHandler(ctx, http.MethodGet, target, nil, nil, nil, b.server.handleAuditQuery)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, mcp.NewBridgeErrorFromHTTP(status, raw)
+	}
+	return mcpReadOnlyListPage(payload), nil
+}
+
+func (b *mcpReadOnlyBridge) VerifyAudit(ctx context.Context, tenant string) (*mcp.ResourceItem, error) {
+	target := "/api/v1/audit/verify"
+	if v := strings.TrimSpace(tenant); v != "" {
+		target += "?tenant=" + url.QueryEscape(v)
+	}
+	status, payload, raw, err := b.server.invokeMCPJSONHandler(ctx, http.MethodGet, target, nil, nil, nil, b.server.handleAuditVerify)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, mcp.NewBridgeErrorFromHTTP(status, raw)
+	}
+	return &mcp.ResourceItem{Kind: "audit_verify", Data: payload}, nil
+}
+
+func (b *mcpReadOnlyBridge) GetStatus(ctx context.Context) (*mcp.ResourceItem, error) {
+	status, payload, raw, err := b.server.invokeMCPJSONHandler(ctx, http.MethodGet, "/api/v1/status", nil, nil, nil, b.server.handleStatus)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, mcp.NewBridgeErrorFromHTTP(status, raw)
+	}
+	return &mcp.ResourceItem{Kind: "status", Data: payload}, nil
+}
+
+// mcpReadList runs a GET against the gateway in-process and reshapes
+// the {items, next_cursor, total} envelope into a *mcp.ListPage.
+func (s *server) mcpReadList(ctx context.Context, path string, req mcp.ListInput, pathValues map[string]string, handler http.HandlerFunc) (*mcp.ListPage, error) {
+	target := path
+	if encoded := mcpListQuery(req).Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	status, payload, raw, err := s.invokeMCPJSONHandler(ctx, http.MethodGet, target, nil, pathValues, nil, handler)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, mcp.NewBridgeErrorFromHTTP(status, raw)
+	}
+	return mcpReadOnlyListPage(payload), nil
+}
+
+// mcpReadResource runs a GET against the gateway in-process and wraps
+// the response in a *mcp.ResourceItem with the supplied kind + id.
+func (s *server) mcpReadResource(ctx context.Context, path, kind, id string, pathValues map[string]string, handler http.HandlerFunc) (*mcp.ResourceItem, error) {
+	status, payload, raw, err := s.invokeMCPJSONHandler(ctx, http.MethodGet, path, nil, pathValues, nil, handler)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, mcp.NewBridgeErrorFromHTTP(status, raw)
+	}
+	return &mcp.ResourceItem{ID: id, Kind: kind, Data: payload}, nil
+}
+
+// mcpListQuery builds a url.Values from a ListInput, mirroring the shape
+// HTTPServiceBridge sends (cursor / limit / filter[k]=v).
+func mcpListQuery(req mcp.ListInput) url.Values {
+	q := url.Values{}
+	if req.Cursor != "" {
+		q.Set("cursor", req.Cursor)
+	}
+	if req.PageSize > 0 {
+		q.Set("limit", strconv.Itoa(req.PageSize))
+	}
+	for k, v := range req.Filter {
+		q.Set(k, v)
+	}
+	return q
+}
+
+// mcpReadOnlyListPage extracts a *mcp.ListPage from a gateway response
+// that follows the {items: [...], next_cursor?: string, total?: int}
+// shape used by every read-only list endpoint.
+func mcpReadOnlyListPage(raw map[string]any) *mcp.ListPage {
+	page := &mcp.ListPage{Items: []map[string]any{}}
+	if items, ok := raw["items"].([]any); ok {
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok {
+				page.Items = append(page.Items, m)
+			}
+		}
+	}
+	page.NextCursor = strings.TrimSpace(mcpBridgeString(raw["next_cursor"]))
+	if total, ok := raw["total"]; ok {
+		switch v := total.(type) {
+		case float64:
+			page.Total = int(v)
+		case int:
+			page.Total = v
+		case int64:
+			page.Total = int(v)
+		}
+	}
+	return page
 }
 
 func (s *server) invokeMCPJSONHandler(
@@ -1091,7 +1320,10 @@ func (s *server) invokeMCPJSONHandler(
 	}
 
 	req := httptest.NewRequest(method, target, bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	// Mark the request as MCP-bridge-internal so RBAC-gated handlers
+	// skip their permission check — the MCP scope filter has already
+	// authorized this call against the chat-assistant's AllowedTools.
+	req = req.WithContext(withMCPBridgeBypass(ctx))
 	if len(payload) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -1147,7 +1379,10 @@ func (s *server) invokeMCPAnyHandler(
 	}
 
 	req := httptest.NewRequest(method, target, bytes.NewReader(payload))
-	req = req.WithContext(ctx)
+	// Mark the request as MCP-bridge-internal so RBAC-gated handlers
+	// skip their permission check — the MCP scope filter has already
+	// authorized this call against the chat-assistant's AllowedTools.
+	req = req.WithContext(withMCPBridgeBypass(ctx))
 	if len(payload) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}

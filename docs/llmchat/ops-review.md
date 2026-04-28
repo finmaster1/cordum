@@ -41,7 +41,7 @@ Outcome counts: **6 PASS/static-pass probes** (2, 6, 7, 8, 9, 12), **6 FAIL/P1 p
 
 ### Current pre-probe findings from exploration
 
-- Runtime logs from `llm-chat-ollama` are not pure JSON; they are text-prefixed
+- Runtime logs from `llm-chat` are not pure JSON; they are text-prefixed
   slog lines. Probe 1 must verify whether that is still true for the current
   image and classify severity.
 - Metrics are live and bounded by allowlists in `core/llmchat/metrics.go`, but
@@ -79,7 +79,7 @@ INFO.
 or records the non-JSON format as evidence, and runs the shared secret-pattern
 scanner.
 
-**Actual:** `probe-01.sh` ran from Git Bash/MSYS against the auto-detected chat log service (`llm-chat` in the current post-pivot compose config; `llm-chat-ollama` in earlier profile configs). It captured recent log lines and the secret scanner returned zero hits. JSON validation
+**Actual:** `probe-01.sh` ran from Git Bash/MSYS against the auto-detected chat log service (`llm-chat` in the current post-pivot compose config; `llm-chat` in earlier profile configs). It captured recent log lines and the secret scanner returned zero hits. JSON validation
 failed on every sampled line because the service emits text-prefixed slog output,
 for example `[LLM-CHAT-SERVER] INFO llmchat/agent: turn_start session_id=...`
 rather than a JSON object. The lines also use `principal=` instead of the
@@ -416,6 +416,6 @@ Final full-probe rerun from `D:/Cordum/cordum` using Git Bash/MSYS on 2026-04-28
 - Probe exits: `01=1`, `02=0`, `03=1`, `04=1`, `05=1`, `06=0`, `07=0`, `08=0`, `09=0`, `10=1`, `11=1`, `12=0`.
 - Expected PASS/static-pass probes: 2 (metrics/cardinality), 6 (runbook), 7 (Grafana JSON static), 8 (SIEM exporter static + audit unit test), 9 (alert rules static), 12 (log sampling static).
 - Expected FAIL/P1 probes with filed follow-ups: 1 (`task-848f003a`), 3 (`task-0e73db35`), 4 (`task-83b72a46`), 5 (`task-68a01f28`), 10 (`task-7ee2d5ab`), 11 (`task-53317462`).
-- Metrics endpoint used by the final rerun: `http://127.0.0.1:8090/metrics`, matching the current post-pivot compose service name `llm-chat`. The probes still support `LLMCHAT_METRICS_URL` and `LLMCHAT_LOG_SERVICE` overrides for older `llm-chat-ollama` profile runs.
+- Metrics endpoint used by the final rerun: `http://127.0.0.1:8090/metrics`, matching the current post-pivot compose service name `llm-chat`. The probes still support `LLMCHAT_METRICS_URL` and `LLMCHAT_LOG_SERVICE` overrides for older `llm-chat` profile runs.
 - `python -m json.tool cordum-helm/dashboards/llm-chat.json` -> pass.
 - `git diff --check` on all task-owned docs/scripts/chart artifacts -> clean before the final commit.

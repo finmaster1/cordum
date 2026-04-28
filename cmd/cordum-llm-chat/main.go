@@ -1,10 +1,8 @@
 // Command cordum-llm-chat is the scaffold for the self-hosted Cordum LLM
 // Chat Assistant service. Phase 1 delivered logger + buildinfo + env
-// parsing + OpenAI-compat provider + /healthz + /readyz. Phase 3 wires
-// the identity + persistence layer: Redis session store, per-session
-// delegation tokens via the gateway, and idempotent chat-assistant
-// agent bootstrap via the CAP SDK AgentClient (POST/GET/PUT
-// /api/v1/agents). /api/v1/chat WS handlers land in phase 5.
+// parsing + OpenAI-compat provider + /healthz + /readyz. The service now
+// runs an informational-only assistant: Redis-backed sessions, CAP SDK
+// chat-assistant identity bootstrap, and HTTP/SSE/WS chat handlers.
 package main
 
 import (
@@ -27,36 +25,32 @@ import (
 	"github.com/cordum/cordum/core/audit"
 	gatewayauth "github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/infra/buildinfo"
-	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/cordum/cordum/core/licensing"
 	"github.com/cordum/cordum/core/llmchat"
+	"github.com/cordum/cordum/core/llmchat/knowledge"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	defaultHTTPAddr            = ":8091"
-	defaultProvider            = "openai"
-	// Default points at the Ollama profile (`make dev-up` / `--profile
-	// llmchat-ollama`) so a fresh `git clone` Just Works without a GPU.
-	// 3B Q4 (~2 GB resident) fits inside the 4 GB Docker Desktop default;
-	// operators with >=8 GB Docker memory should set LLMCHAT_MODEL to
-	// `qwen2.5-coder:7b-instruct-q4_K_M` for better tool-call quality.
-	// GPU and vLLM-CPU profiles override these via env in their compose
-	// blocks. Plan: ~/.claude/plans/goofy-tickling-hartmanis.md.
-	defaultBaseURL             = "http://ollama:11434/v1"
-	defaultModel               = "qwen2.5-coder:3b-instruct-q4_K_M"
-	defaultToolTemperature     = 0.3
-	defaultToolTopP            = 0.9
-	defaultSummaryTemperature  = 0.7
-	defaultSummaryTopP         = 0.8
-	defaultMaxToolCallsPerTurn = 12
+	defaultHTTPAddr  = ":8091"
+	defaultProvider  = "openai"
+	backendOllamaCPU = "ollama-cpu"
+	backendVLLMGPU   = "vllm-gpu"
+	// Defaults point at the Ollama CPU backend so a fresh deployment works
+	// without a GPU. GPU customers opt into vLLM by setting
+	// LLMCHAT_OPS_BACKEND=vllm-gpu plus the matching base URL/model.
+	defaultOllamaBaseURL       = "http://ollama:11434/v1"
+	defaultOllamaModel         = "qwen2.5-coder:3b-instruct-q4_K_M"
+	defaultVLLMBaseURL         = "http://qwen-inference:8000/v1"
+	defaultVLLMModel           = "qwen3-coder"
+	defaultResponseTemperature = 0.7
+	defaultResponseTopP        = 0.8
 	defaultMaxWallClockPerTurn = 60 * time.Second
 	defaultMaxAssistantBytes   = 32768
-	defaultDelegationTTL       = 15 * time.Minute
 	bootstrapTimeout           = 30 * time.Second
 	readyzProbeTimeout         = 2 * time.Second
 	defaultGatewayHTTPTimeout  = 30 * time.Second
@@ -75,14 +69,12 @@ type runtimeConfig struct {
 	TLSCertFile          string
 	TLSKeyFile           string
 	RedisURL             string
+	Backend              string
 	Provider             llmchat.ProviderConfig
-	Budget               llmchat.BudgetConfig
 	CordumAPIKey         string
 	GatewayURL           string
-	NATSURL              string
 	ChatAssistantAgentID string
 	Tenant               string
-	DelegationTTL        time.Duration
 }
 
 func main() {
@@ -94,6 +86,7 @@ func main() {
 		slog.Error("cordum-llm-chat: config load failed, refusing to start", "error", err)
 		os.Exit(1)
 	}
+	logActiveBackend(cfg)
 
 	provider, err := llmchat.ResolveProvider(cfg.Provider)
 	if err != nil {
@@ -119,56 +112,45 @@ func main() {
 		slog.Error("cordum-llm-chat: gateway TLS config failed, refusing to start", "error", err)
 		os.Exit(1)
 	}
-	mcpHTTPClient, err := gatewayHTTPClientFromEnv(os.Getenv, -1)
-	if err != nil {
-		slog.Error("cordum-llm-chat: mcp gateway TLS config failed, refusing to start", "error", err)
-		os.Exit(1)
-	}
-
-	// Wire the knowledge-pack substituters around the file-backed
-	// prompt loader. When LLMCHAT_KNOWLEDGE_PACK_ENABLED=false the
-	// placeholders pass through unchanged (rail #1 — substituters
-	// WRAP, never REPLACE the prompt loader).
+	// Wire the local, zero-egress knowledge-pack substituters around the
+	// file-backed prompt loader. They fail closed on missing/invalid API
+	// or docs content when enabled, because informational-only chat
+	// without grounded Cordum knowledge is a product misconfiguration.
 	basePromptLoader := llmchat.NewFilePromptLoader("")
 	promptLoader := basePromptLoader
 	if envOrDefault(os.Getenv, "LLMCHAT_KNOWLEDGE_PACK_ENABLED", "true") == "true" {
-		kp := llmchat.NewKnowledgePackLoader(basePromptLoader)
-		kp.Register("api_summary", llmchat.NewOpenAPISubstituter(os.Getenv("LLMCHAT_OPENAPI_PATH")))
-		kp.Register("cordum_io_summary", llmchat.NewCordumIOSubstituter(os.Getenv("LLMCHAT_CORDUM_IO_PATH")))
-		llmchat.ListenSIGHUP(kp) // build-tagged stub on Windows
-		// Precompute on boot so the per-turn LLM call sees a hot
-		// cache (rail #5).
+		maxKnowledgePromptTokens, err := envIntOrDefault(os.Getenv, "LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS", 24000)
+		if err != nil {
+			slog.Error("cordum-llm-chat: knowledge pack config invalid, refusing to start", "error", err)
+			os.Exit(1)
+		}
+		kp := knowledge.NewLoader(
+			basePromptLoader,
+			knowledge.NewAPISubstituter(""),
+			knowledge.NewSiteSubstituter(""),
+			knowledge.WithCombinedPromptMaxTokens(maxKnowledgePromptTokens),
+		)
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if _, err := kp.Load(warmCtx); err != nil {
-			slog.Warn("cordum-llm-chat: knowledge_pack_warm_failed", "error", err)
+			warmCancel()
+			slog.Error("cordum-llm-chat: knowledge pack load failed, refusing to start", "error", err)
+			os.Exit(1)
 		}
 		warmCancel()
+		stats := kp.Stats()
+		slog.Info("knowledge pack loaded",
+			"api_tokens", stats.APITokens,
+			"site_tokens", stats.SiteTokens,
+			"combined_tokens", stats.CombinedTokens)
 		promptLoader = kp
 	}
-
-	mcpClient, err := llmchat.NewMCPClient(llmchat.MCPClientConfig{
-		BaseURL:       cfg.GatewayURL,
-		APIKey:        cfg.CordumAPIKey,
-		TenantID:      cfg.Tenant,
-		AgentID:       cfg.ChatAssistantAgentID,
-		ClientName:    "cordum-llm-chat",
-		ClientVersion: "0.1.0",
-		HTTPClient:    mcpHTTPClient,
-	})
-	if err != nil {
-		slog.Error("cordum-llm-chat: mcp client construction failed", "error", err)
-		os.Exit(1)
-	}
-	defer mcpClient.Close()
 
 	auditChainer := audit.NewChainer(redisClient, "audit:chain:")
 
 	// chat-assistant bootstrap goes through the CAP SDK AgentClient,
 	// which wraps the gateway's /api/v1/agents endpoints (same audit
-	// chain + approval gate as any other Cordum agent identity). The
-	// service API key authenticates this trust path; per-session
-	// delegation tokens are issued separately by DelegationClient
-	// below.
+	// chain as any other Cordum agent identity). The service API key
+	// authenticates this trust path.
 	agentRegistry, err := capsdk.NewAgentClient(capsdk.AgentClientConfig{
 		BaseURL:    cfg.GatewayURL,
 		APIKey:     cfg.CordumAPIKey,
@@ -191,26 +173,15 @@ func main() {
 	// The agent ID returned from Boot is the canonical identifier —
 	// when bootstrap registers a new agent, the gateway assigns the
 	// id server-side, which may differ from the env hint. Downstream
-	// (DelegationClient) uses the resolved id; if the env supplied a
-	// pin, we error out on mismatch so the operator knows their
-	// configured pin is stale rather than silently issuing tokens for
-	// the wrong agent.
+	// chat handlers use the resolved id for session audit attribution. If
+	// the env supplied a pin, we error out on mismatch so the operator
+	// knows their configured pin is stale.
 	if cfg.ChatAssistantAgentID != "" && cfg.ChatAssistantAgentID != resolvedAgentID {
 		slog.Error("cordum-llm-chat: env LLMCHAT_CHAT_ASSISTANT_AGENT_ID does not match registered agent",
 			"env_id", cfg.ChatAssistantAgentID, "resolved_id", resolvedAgentID,
 			"remediation", "either remove LLMCHAT_CHAT_ASSISTANT_AGENT_ID to use the resolved id, or update it to "+resolvedAgentID)
 		os.Exit(1)
 	}
-
-	delegationClient := llmchat.NewDelegationClient(llmchat.DelegationConfig{
-		BaseURL:    cfg.GatewayURL,
-		AgentID:    resolvedAgentID,
-		APIKey:     cfg.CordumAPIKey,
-		Tenant:     cfg.Tenant,
-		IssueTTL:   cfg.DelegationTTL,
-		RetryDelay: 100 * time.Millisecond,
-		HTTPClient: gatewayHTTPClient,
-	})
 
 	entitlementResolver := licensing.NewEntitlementResolver()
 	entitlementResolver.Init()
@@ -220,28 +191,10 @@ func main() {
 	metrics := llmchat.NewMetrics(prometheus.DefaultRegisterer)
 	agent := llmchat.NewAgent(llmchat.AgentConfig{
 		Provider:     provider,
-		MCP:          mcpClient,
-		Redactor:     llmchat.NewRedactor(),
 		PromptLoader: promptLoader,
 		Sessions:     sessionStore,
 		Metrics:      metrics,
 	})
-	var approvalBus llmchat.ApprovalEventBus
-	if strings.TrimSpace(cfg.NATSURL) != "" {
-		natsBus, err := bus.NewNatsBus(cfg.NATSURL)
-		if err != nil {
-			slog.Warn("cordum-llm-chat: approval NATS bus unavailable; approval resume disabled", "error", err)
-		} else {
-			defer natsBus.Close()
-			approvalBus = llmchat.NewNATSApprovalEventBus(natsBus)
-		}
-	}
-	approvalResumer := llmchat.NewApprovalResumer(llmchat.ApprovalResumerConfig{Bus: approvalBus, Runner: agent})
-	defer func() {
-		if err := approvalResumer.Close(); err != nil {
-			slog.Warn("cordum-llm-chat: approval resumer close failed", "error", err)
-		}
-	}()
 	auditSender := llmchat.NewChainedAuditSender(auditChainer, nil)
 
 	handlers := llmchat.NewHandlers(provider, redisClient, readyzProbeTimeout)
@@ -250,9 +203,7 @@ func main() {
 		Sessions:     sessionStore,
 		Entitlements: entitlementResolver,
 		Permissions:  permissionChecker,
-		Delegations:  delegationClient,
 		Audit:        auditSender,
-		Approvals:    approvalResumer,
 		AgentID:      resolvedAgentID,
 		Metrics:      metrics,
 	})
@@ -360,7 +311,6 @@ func loadConfigFromEnv(getenv func(string) string) (runtimeConfig, error) {
 		RedisURL:     strings.TrimSpace(getenv("REDIS_URL")),
 		CordumAPIKey: strings.TrimSpace(getenv("CORDUM_API_KEY")),
 		GatewayURL:   strings.TrimSpace(getenv("CORDUM_GATEWAY_URL")),
-		NATSURL:      strings.TrimSpace(getenv("NATS_URL")),
 	}
 
 	if cfg.RedisURL == "" {
@@ -376,6 +326,16 @@ func loadConfigFromEnv(getenv func(string) string) (runtimeConfig, error) {
 	if providerKind == "" {
 		providerKind = defaultProvider
 	}
+	backend := strings.TrimSpace(getenv("LLMCHAT_OPS_BACKEND"))
+	if backend == "" {
+		backend = backendOllamaCPU
+	}
+	defaultBaseURL, defaultModel, err := defaultsForBackend(backend)
+	if err != nil {
+		return runtimeConfig{}, err
+	}
+	cfg.Backend = backend
+
 	baseURL := strings.TrimSpace(getenv("LLMCHAT_BASE_URL"))
 	if baseURL == "" {
 		baseURL = defaultBaseURL
@@ -385,27 +345,15 @@ func loadConfigFromEnv(getenv func(string) string) (runtimeConfig, error) {
 		model = defaultModel
 	}
 
-	toolTemp, err := envFloatOrDefault(getenv, "LLMCHAT_TOOL_TEMPERATURE", defaultToolTemperature)
+	responseTemp, err := envFloatOrDefault(getenv, "LLMCHAT_SUMMARY_TEMPERATURE", defaultResponseTemperature)
 	if err != nil {
 		return runtimeConfig{}, err
 	}
-	toolTopP, err := envFloatOrDefault(getenv, "LLMCHAT_TOOL_TOP_P", defaultToolTopP)
-	if err != nil {
-		return runtimeConfig{}, err
-	}
-	summaryTemp, err := envFloatOrDefault(getenv, "LLMCHAT_SUMMARY_TEMPERATURE", defaultSummaryTemperature)
-	if err != nil {
-		return runtimeConfig{}, err
-	}
-	summaryTopP, err := envFloatOrDefault(getenv, "LLMCHAT_SUMMARY_TOP_P", defaultSummaryTopP)
+	responseTopP, err := envFloatOrDefault(getenv, "LLMCHAT_SUMMARY_TOP_P", defaultResponseTopP)
 	if err != nil {
 		return runtimeConfig{}, err
 	}
 
-	maxToolCalls, err := envIntOrDefault(getenv, "LLMCHAT_MAX_TOOL_CALLS_PER_TURN", defaultMaxToolCallsPerTurn)
-	if err != nil {
-		return runtimeConfig{}, err
-	}
 	maxWallClock, err := envDurationOrDefault(getenv, "LLMCHAT_MAX_WALL_CLOCK_PER_TURN", defaultMaxWallClockPerTurn)
 	if err != nil {
 		return runtimeConfig{}, err
@@ -416,17 +364,14 @@ func loadConfigFromEnv(getenv func(string) string) (runtimeConfig, error) {
 	}
 
 	cfg.Provider = llmchat.ProviderConfig{
-		Kind:               providerKind,
-		BaseURL:            baseURL,
-		Model:              model,
-		APIKey:             strings.TrimSpace(getenv("LLMCHAT_API_KEY")),
-		ToolTemperature:    toolTemp,
-		ToolTopP:           toolTopP,
-		SummaryTemperature: summaryTemp,
-		SummaryTopP:        summaryTopP,
+		Kind:                providerKind,
+		BaseURL:             baseURL,
+		Model:               model,
+		APIKey:              strings.TrimSpace(getenv("LLMCHAT_API_KEY")),
+		ResponseTemperature: responseTemp,
+		ResponseTopP:        responseTopP,
 	}
-	cfg.Budget = llmchat.BudgetConfig{
-		MaxToolCallsPerTurn: maxToolCalls,
+	_ = llmchat.BudgetConfig{
 		MaxWallClockPerTurn: maxWallClock,
 		MaxAssistantBytes:   maxAssistantBytes,
 	}
@@ -434,24 +379,32 @@ func loadConfigFromEnv(getenv func(string) string) (runtimeConfig, error) {
 	// LLMCHAT_CHAT_ASSISTANT_AGENT_ID is OPTIONAL: the bootstrap path
 	// resolves the canonical chat-assistant agent id at startup
 	// (either by reusing an existing identity or registering a new
-	// one via MCP). When the env is set it acts as a pin — main.go
-	// errors out post-bootstrap if the resolved id does not match,
-	// surfacing stale operator config rather than silently issuing
-	// delegations for the wrong agent. Greenfield deployments leave
-	// it empty.
+	// one via the control-plane agent registry). When the env is set it
+	// acts as a pin — main.go errors out post-bootstrap if the resolved id
+	// does not match. Greenfield deployments leave it empty.
 	cfg.ChatAssistantAgentID = strings.TrimSpace(getenv("LLMCHAT_CHAT_ASSISTANT_AGENT_ID"))
 	cfg.Tenant = strings.TrimSpace(getenv("LLMCHAT_TENANT"))
 
-	delegationTTLSeconds, err := envIntOrDefault(getenv, "LLMCHAT_DELEGATION_TTL_SECONDS", int(defaultDelegationTTL.Seconds()))
-	if err != nil {
-		return runtimeConfig{}, err
-	}
-	if delegationTTLSeconds <= 0 {
-		return runtimeConfig{}, fmt.Errorf("LLMCHAT_DELEGATION_TTL_SECONDS must be positive")
-	}
-	cfg.DelegationTTL = time.Duration(delegationTTLSeconds) * time.Second
-
 	return cfg, nil
+}
+
+func defaultsForBackend(backend string) (baseURL string, model string, err error) {
+	switch backend {
+	case backendOllamaCPU:
+		return defaultOllamaBaseURL, defaultOllamaModel, nil
+	case backendVLLMGPU:
+		return defaultVLLMBaseURL, defaultVLLMModel, nil
+	default:
+		return "", "", fmt.Errorf("unsupported LLMCHAT_OPS_BACKEND=%s; allowed: %s, %s", backend, backendOllamaCPU, backendVLLMGPU)
+	}
+}
+
+func logActiveBackend(cfg runtimeConfig) {
+	slog.Info("llm-chat backend active",
+		"backend", cfg.Backend,
+		"base_url", cfg.Provider.BaseURL,
+		"model", cfg.Provider.Model,
+	)
 }
 
 func openRedis(redisURL string) (*redis.Client, error) {
@@ -478,10 +431,8 @@ func redisOptionsFromURL(redisURL string) (*redis.Options, error) {
 }
 
 func gatewayHTTPClientFromEnv(getenv func(string) string, timeout time.Duration) (*http.Client, error) {
-	// timeout < 0 intentionally means "no whole-request timeout". The MCP
-	// SSE connection is long-lived and must not inherit the 30s REST timeout
-	// used for short gateway API calls, or it will reconnect forever and spam
-	// warning logs despite a healthy /mcp/sse transport.
+	// timeout < 0 intentionally means "no whole-request timeout" for callers
+	// that manage deadlines themselves.
 	noTimeout := timeout < 0
 	if timeout == 0 {
 		timeout = defaultGatewayHTTPTimeout

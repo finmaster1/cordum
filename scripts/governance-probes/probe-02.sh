@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Probe 02: Chat-driven calls in dashboard Jobs + Audit pages (BLOCKED on dashboard agent_id column - F6)
-# task-931eaea2, see docs/llmchat/governance-review.md for full procedure.
+# Probe 02: Dashboard chat affordance is informational and health/entitlement gated
+# task-01aaa6bd scope-reduced review; see docs/llmchat/governance-review.md.
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common-fixture.sh

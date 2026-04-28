@@ -87,52 +87,6 @@ func TestNewServer_TextOnlyTurnEndsWithStop(t *testing.T) {
 	}
 }
 
-func TestNewServer_ToolCallTurnFinishesWithToolCalls(t *testing.T) {
-	s := NewServer(t, Script{Turns: []Turn{{
-		ToolCalls: []ToolCallDelta{
-			{ID: "tc-1", Name: "cordum_list_jobs", Arguments: `{"limit":10}`},
-		},
-		FinishReason: "tool_calls",
-	}}})
-
-	frames, done := readSSEFrames(t, postCompletions(t, s))
-	if !done {
-		t.Fatal("expected [DONE] sentinel")
-	}
-	// Find the tool-call frame and the terminator frame.
-	var sawToolCall bool
-	var sawFinishToolCalls bool
-	for _, raw := range frames {
-		var frame streamFrame
-		if err := json.Unmarshal([]byte(raw), &frame); err != nil {
-			t.Fatalf("decode frame: %v", err)
-		}
-		if len(frame.Choices) == 0 {
-			continue
-		}
-		choice := frame.Choices[0]
-		if len(choice.Delta.ToolCalls) == 1 {
-			tc := choice.Delta.ToolCalls[0]
-			if tc.ID != "tc-1" || tc.Function.Name != "cordum_list_jobs" {
-				t.Fatalf("unexpected tool call frame: %+v", tc)
-			}
-			if tc.Function.Arguments != `{"limit":10}` {
-				t.Fatalf("tool args = %q", tc.Function.Arguments)
-			}
-			sawToolCall = true
-		}
-		if choice.FinishReason != nil && *choice.FinishReason == "tool_calls" {
-			sawFinishToolCalls = true
-		}
-	}
-	if !sawToolCall {
-		t.Fatal("expected a tool_calls delta frame")
-	}
-	if !sawFinishToolCalls {
-		t.Fatal("expected finish_reason=tool_calls on the terminal frame")
-	}
-}
-
 func TestNewServer_PerTurnAdvance(t *testing.T) {
 	s := NewServer(t, Script{Turns: []Turn{
 		{TextDeltas: []string{"first"}, FinishReason: "stop"},

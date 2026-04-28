@@ -312,13 +312,14 @@ services:
       - REDIS_DATA_TTL=24h
       - JOB_META_TTL=168h
       # WS read deadline for chat sessions = ping interval + pong timeout.
-      # Default 30s + 10s = 40s is shorter than CPU inference time on the
-      # llmchat-ollama profile (3B Q4 model at 8K context = 30-90s per
-      # turn), which closes the dashboard chat WS mid-inference. Bumping
-      # the pong timeout to 120s gives a 150s read deadline that fits
-      # the worst-case CPU turn comfortably. GPU + vLLM-CPU profiles see
-      # <5s inference and don't notice the cap.
-      - GATEWAY_WS_PONG_TIMEOUT=${GATEWAY_WS_PONG_TIMEOUT:-120s}
+      # Default 30s + 10s = 40s is shorter than local CPU inference can
+      # take on the default Ollama/Qwen2.5-Coder-3B backend. 600s pong
+      # timeout gives a 630s read deadline, matching
+      # LLMCHAT_MAX_WALL_CLOCK_PER_TURN=600s on llm-chat. GPU/vLLM users
+      # can tune this lower once measured.
+      # don't notice the cap. The WS deadline is the actual ceiling on
+      # silent-window length — keep these two values in lockstep.
+      - GATEWAY_WS_PONG_TIMEOUT=${GATEWAY_WS_PONG_TIMEOUT:-600s}
       # User authentication (set CORDUM_USER_AUTH_ENABLED=true to enable)
       - CORDUM_USER_AUTH_ENABLED=${CORDUM_USER_AUTH_ENABLED:-false}
       - CORDUM_ADMIN_USERNAME=${CORDUM_ADMIN_USERNAME:-admin}
@@ -560,12 +561,13 @@ services:
       retries: 3
       start_period: 5s
 
-  # vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8 for the local LLM chat
-  # assistant. Brought up only with `--profile llmchat` so the default
-  # stack stays lean for users without a GPU. See docs/llmchat/helm.md
-  # for hardware-tier guidance and the qwen3_xml parser rationale.
+  # Opt-in vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8 for GPU
+  # customers. Demoted from the production default on 2026-04-28 per
+  # Yaron's informational-only directive and task-d38e26c0; Ollama is
+  # the default backend now. Start explicitly with `--profile gpu` and
+  # set LLMCHAT_OPS_BACKEND=vllm-gpu plus LLMCHAT_BASE_URL to this service.
   qwen-inference:
-    profiles: [llmchat]
+    profiles: [gpu]
     # Pinned to vLLM v0.16.0@sha256:48011517 per task-991597a4.
     # Bump only via tools/scripts/vllm_pin_digest.sh + supply-chain CI.
     # Upgrade procedure: docs/llmchat/supply-chain.md.
@@ -576,9 +578,6 @@ services:
       - Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
       - --served-model-name
       - qwen3-coder
-      - --enable-auto-tool-choice
-      - --tool-call-parser
-      - qwen3_xml
       - --max-model-len
       - "131072"
       - --kv-cache-dtype
@@ -641,9 +640,6 @@ services:
       - Qwen/Qwen3-Coder-30B-A3B-Instruct-AWQ
       - --served-model-name
       - qwen3-coder
-      - --enable-auto-tool-choice
-      - --tool-call-parser
-      - qwen3_xml
       - --max-model-len
       - "32768"
       - --enable-prefix-caching
@@ -680,7 +676,6 @@ services:
   # mutations) and REST API (for reads). Profile-gated alongside
   # qwen-inference; both up together via `--profile llmchat`.
   llm-chat:
-    profiles: [llmchat]
     image: ghcr.io/cordum-io/cordum/llm-chat:${CORDUM_VERSION:-latest}
     restart: unless-stopped
     read_only: true
@@ -695,12 +690,7 @@ services:
       args:
         SERVICE: cordum-llm-chat
     depends_on:
-      # service_started (NOT service_healthy) — vLLM cold-load can take
-      # 5+ minutes; healthy-gating the chat service would block the
-      # whole stack. llm-chat /readyz probes vLLM and reports not-ready
-      # until /v1/models returns 200; the dashboard chat button hides
-      # accordingly.
-      qwen-inference:
+      ollama:
         condition: service_started
       api-gateway:
         condition: service_healthy
@@ -726,25 +716,30 @@ services:
       - NATS_TOKEN=${NATS_TOKEN:-cordum-dev-token}
       - CORDUM_TLS_CA=/etc/cordum/tls/ca/ca.crt
       - CORDUM_GATEWAY_URL=${CORDUM_GATEWAY_URL:-https://cordum-api-gateway:8081}
-      - LLMCHAT_BASE_URL=${LLMCHAT_BASE_URL:-http://qwen-inference:8000/v1}
-      - LLMCHAT_MODEL=qwen3-coder
+      - LLMCHAT_BASE_URL=${LLMCHAT_BASE_URL:-http://ollama:11434/v1}
+      - LLMCHAT_OPS_BACKEND=${LLMCHAT_OPS_BACKEND:-ollama-cpu}
+      # 3B coder model on a 4 GB CPU host keeps informational Q&A local
+      # and avoids the prior GPU-only deployment requirement.
+      - LLMCHAT_MODEL=${LLMCHAT_MODEL:-qwen2.5-coder:3b-instruct-q4_K_M-ctx32k}
       - LLMCHAT_PROVIDER=openai
-      - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
-      - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
       - LLMCHAT_SUMMARY_TEMPERATURE=${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}
       - LLMCHAT_SUMMARY_TOP_P=${LLMCHAT_SUMMARY_TOP_P:-0.8}
+      # Local CPU inference can take longer than GPU-backed vLLM; keep a
+      # generous per-turn guardrail while still bounding stuck generations.
+      - LLMCHAT_MAX_WALL_CLOCK_PER_TURN=${LLMCHAT_MAX_WALL_CLOCK_PER_TURN:-600s}
       - LLMCHAT_TENANT=${CORDUM_TENANT_ID:-default}
+      # Knowledge pack stays local/read-only and grounds informational answers.
       - LLMCHAT_KNOWLEDGE_PACK_ENABLED=${LLMCHAT_KNOWLEDGE_PACK_ENABLED:-true}
-      - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-65536}
-      - LLMCHAT_OPENAPI_PATH=/etc/cordum-llm-chat/openapi.yaml
-      - LLMCHAT_CORDUM_IO_PATH=/etc/cordum-llm-chat/cordum-io
+      - LLMCHAT_KNOWLEDGE_API_SPEC_PATH=/etc/cordum/openapi.yaml
+      - LLMCHAT_KNOWLEDGE_SITE_PATH=/etc/cordum/site-content
+      - LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS=${LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS:-concepts/*.md,getting-started/*.md,operations/*.md}
+      - LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS=${LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS:-concepts/adr/**}
+      - LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS=${LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS:-24000}
     volumes:
       - ./certs:/etc/cordum/tls:ro
       - ./config/llmchat:/home/cordum/config/llmchat:ro
-      - ./docs/api/openapi/cordum-api.yaml:/etc/cordum-llm-chat/openapi.yaml:ro
-      - ./docs-site/docs/concepts:/etc/cordum-llm-chat/cordum-io/concepts:ro
-      - ./docs-site/docs/getting-started:/etc/cordum-llm-chat/cordum-io/getting-started:ro
-      - ./docs-site/docs/operations:/etc/cordum-llm-chat/cordum-io/operations:ro
+      - ./docs/api/openapi/cordum-api.yaml:/etc/cordum/openapi.yaml:ro
+      - ./docs-site/docs:/etc/cordum/site-content:ro
     ports:
       - "8090:8090"
     deploy:
@@ -759,8 +754,6 @@ services:
       retries: 3
       start_period: 15s
 
-  # CPU/AWQ sibling of llm-chat for the llmchat-cpu profile. It preserves the
-  # same MCP/REST/chat service contract while pointing only at qwen-inference-cpu.
   llm-chat-cpu:
     profiles: [llmchat-cpu]
     image: ghcr.io/cordum-io/cordum/llm-chat:${CORDUM_VERSION:-latest}
@@ -814,8 +807,6 @@ services:
       - LLMCHAT_BASE_URL=http://qwen-inference-cpu:8000/v1
       - LLMCHAT_MODEL=qwen3-coder
       - LLMCHAT_PROVIDER=openai
-      - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
-      - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
       - LLMCHAT_SUMMARY_TEMPERATURE=${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}
       - LLMCHAT_SUMMARY_TOP_P=${LLMCHAT_SUMMARY_TOP_P:-0.8}
       - LLMCHAT_TENANT=${CORDUM_TENANT_ID:-default}
@@ -844,19 +835,14 @@ services:
       retries: 3
       start_period: 15s
 
-  # CPU-friendly inference runtime for the local LLM chat assistant. Ollama
-  # serves `qwen2.5:7b-instruct-q4_K_M-ctx8k` (~4.5 GB resident) over an
-  # OpenAI-compatible HTTP surface at :11434/v1, with native `tool_calls[]`
-  # streaming. Brought up only via `--profile llmchat-ollama`.
-  #
-  # This is the DEFAULT for `make dev-up` so a fresh `git clone` Just Works
-  # on a typical 8 GB Docker host without a GPU. The GPU/FP8 profile
-  # (`llmchat`) and vLLM/CPU/AWQ profile (`llmchat-cpu`) remain available
-  # for users who want them; this does not replace them.
+  # Default local inference runtime for the informational-only LLM chat
+  # assistant. Ollama serves Qwen2.5-Coder-3B over an OpenAI-compatible
+  # HTTP surface at :11434/v1. This became the production/default backend
+  # on 2026-04-28 per Yaron's "too heavy" directive and task-d38e26c0;
+  # vLLM remains available only under the explicit `gpu` profile.
   ollama:
-    profiles: [llmchat-ollama]
     # Pinned to ollama 0.5.7@sha256:7e672211 — first stable tag that emits
-    # OpenAI streaming `delta.tool_calls[]` arrays. Earlier tags embed tool
+    # OpenAI-compatible streaming responses. Earlier tags differ in response
     # calls as JSON in the content field and silently break the chat-loop
     # tool dispatch. Bump only via tools/scripts/ollama_pin_digest.sh.
     image: "ollama/ollama@sha256:7e672211886f8bd4448a98ed577e26c816b9e8b052112860564afaa2c105800e"
@@ -870,30 +856,26 @@ services:
       # thrash. The chat session itself is single-flight per user.
       - OLLAMA_NUM_PARALLEL=1
       - OLLAMA_MAX_LOADED_MODELS=1
-      # Default context (2048 tokens) silently truncates the chat prompt
-      # — system prompt + 19 tool definitions + knowledge pack + user
-      # message is ~70K tokens, so the model never sees the tools and
-      # emits zero tool_calls. Qwen2.5 supports 32K natively; KV cache
-      # for the 3B Q4 model at 32K is ~100 MB, fits in the 4G container
-      # limit with headroom. Operators bumping to the 7B variant should
-      # also bump container memory to >=8G.
+      # Qwen2.5-Coder supports 32K context natively; KV cache for the
+      # 3B Q4 model at 32K is small enough to keep the container inside
+      # the 4 GB default Docker Desktop memory budget.
       - OLLAMA_CONTEXT_LENGTH=32768
     entrypoint: ["/bin/sh", "-c"]
     # Pulls the upstream tag, then re-tags it with `num_ctx 32768` so the
     # default 2048-token context does not silently truncate the chat
-    # prompt (system prompt + 19 tool definitions + KP + user msg ~= 20K
-    # tokens). The OLLAMA_CONTEXT_LENGTH env var is NOT honored on
+    # prompt (system prompt + local knowledge-pack excerpts + user message).
+    # The OLLAMA_CONTEXT_LENGTH env var is NOT honored on
     # 0.5.7, so the per-model PARAMETER is the reliable lever.
     command:
       - |
         ollama serve &
         until ollama list >/dev/null 2>&1; do sleep 1; done
-        ollama pull qwen2.5:7b-instruct-q4_K_M
+        ollama pull qwen2.5-coder:3b-instruct-q4_K_M
         cat > /tmp/Modelfile <<MFEOF
-        FROM qwen2.5:7b-instruct-q4_K_M
-        PARAMETER num_ctx 8192
+        FROM qwen2.5-coder:3b-instruct-q4_K_M
+        PARAMETER num_ctx 32768
         MFEOF
-        ollama create qwen2.5:7b-instruct-q4_K_M-ctx8k -f /tmp/Modelfile
+        ollama create qwen2.5-coder:3b-instruct-q4_K_M-ctx32k -f /tmp/Modelfile
         wait
     volumes:
       - ollama_models:/root/.ollama
@@ -906,139 +888,16 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      # First pull is a single ~4.5 GB download; budget covers slow links.
+      # First pull is a single ~2 GB download; budget covers slow links.
       start_period: 600s
     deploy:
       resources:
         limits:
-          # 7B Q4 model is ~5 GB resident + ~200 MB KV cache for 8K ctx +
-          # ollama runtime overhead = ~6 GB working set. Container limit
-          # set to 7G with 1 GB headroom. Requires Docker memory >=8 GB
-          # (set via ~/.wslconfig on Windows WSL2 backend) — the 4 GB
-          # default limits are insufficient and Ollama refuses with
-          # "model requires more system memory".
-          memory: 7G
+          # Qwen2.5-Coder-3B Q4 is ~2 GB resident plus 32K KV cache and
+          # Ollama overhead; keep the default within a 4 GB Docker host.
+          memory: 4G
           cpus: "2.0"
 
-  # llm-chat sibling for the Ollama profile. Same image and shape as
-  # llm-chat-cpu (the safety/redactor/license-gate stack is identical and
-  # provider-runtime-agnostic); only LLMCHAT_BASE_URL + LLMCHAT_MODEL
-  # change to point at the Ollama OpenAI-compat surface.
-  llm-chat-ollama:
-    profiles: [llmchat-ollama]
-    image: ghcr.io/cordum-io/cordum/llm-chat:${CORDUM_VERSION:-latest}
-    restart: unless-stopped
-    read_only: true
-    tmpfs:
-      - /tmp
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    # api-gateway hardcodes CORDUM_LLM_CHAT_URL=http://llm-chat:8090, so
-    # every profile-specific llm-chat service must answer to that DNS
-    # name. The three profiles are mutually exclusive (one llm-chat-* up
-    # at a time), so a shared alias does not collide.
-    networks:
-      default:
-        aliases:
-          - llm-chat
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        SERVICE: cordum-llm-chat
-    depends_on:
-      ollama:
-        condition: service_started
-      api-gateway:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
-    environment:
-      - CORDUM_LLM_CHAT_ADDR=:8090
-      - CORDUM_API_KEY=${CORDUM_API_KEY:?CORDUM_API_KEY_not_set}
-      - CORDUM_LICENSE_TOKEN=${CORDUM_LICENSE_TOKEN:-}
-      - CORDUM_LICENSE_PUBLIC_KEY=${CORDUM_LICENSE_PUBLIC_KEY:-}
-      - REDIS_URL=rediss://:${REDIS_PASSWORD:?REDIS_PASSWORD_not_set}@redis:6379
-      - REDIS_TLS_CA=/etc/cordum/tls/ca/ca.crt
-      - REDIS_TLS_CERT=/etc/cordum/tls/client/tls.crt
-      - REDIS_TLS_KEY=/etc/cordum/tls/client/tls.key
-      - REDIS_TLS_SERVER_NAME=redis
-      - NATS_URL=tls://nats:4222
-      - NATS_TLS_CA=/etc/cordum/tls/ca/ca.crt
-      - NATS_TLS_CERT=/etc/cordum/tls/client/tls.crt
-      - NATS_TLS_KEY=/etc/cordum/tls/client/tls.key
-      - NATS_TLS_SERVER_NAME=nats
-      - NATS_TOKEN=${NATS_TOKEN:-cordum-dev-token}
-      - CORDUM_TLS_CA=/etc/cordum/tls/ca/ca.crt
-      - CORDUM_GATEWAY_URL=${CORDUM_GATEWAY_URL:-https://cordum-api-gateway:8081}
-      - LLMCHAT_BASE_URL=http://ollama:11434/v1
-      - LLMCHAT_MODEL=qwen2.5:7b-instruct-q4_K_M-ctx8k
-      - LLMCHAT_PROVIDER=openai
-      - LLMCHAT_TOOL_TEMPERATURE=${LLMCHAT_TOOL_TEMPERATURE:-0.3}
-      - LLMCHAT_TOOL_TOP_P=${LLMCHAT_TOOL_TOP_P:-0.9}
-      - LLMCHAT_SUMMARY_TEMPERATURE=${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}
-      - LLMCHAT_SUMMARY_TOP_P=${LLMCHAT_SUMMARY_TOP_P:-0.8}
-      # CPU first-inference on a 4 GB Docker host loads the GGUF weights
-      # into RAM (~30-60s) before generation starts, so the default 60s
-      # wall-clock cap kills the very first turn. Subsequent turns hit
-      # the warm cache and finish in <10s. 5m gives headroom for the
-      # cold path. Operators on the GPU profile see <5s first-inference
-      # and don't need this override.
-      - LLMCHAT_MAX_WALL_CLOCK_PER_TURN=${LLMCHAT_MAX_WALL_CLOCK_PER_TURN:-5m}
-      - LLMCHAT_TENANT=${CORDUM_TENANT_ID:-default}
-      # KP DISABLED on the Ollama profile. KnowledgePackLoader.applyBudget
-      # in core/llmchat/knowledgepack.go:225 truncates the source KP
-      # (568,792 bytes for cordum-api openapi) via a raw byte slice
-      # `raw[:maxBytes]` — no JSON-aware boundary, so any budget < the
-      # full KP size produces malformed JSON in the system prompt. The
-      # 3B model then spends 5+ minutes trying to parse the broken
-      # prompt and trips the LLMCHAT_MAX_WALL_CLOCK_PER_TURN budget. Tool
-      # definitions are shipped independently of the KP, so disabling
-      # KP does NOT affect tool-call quality. GPU + vLLM-CPU profiles
-      # have 32K-131K context and don't truncate, so KP stays enabled
-      # there. Re-enable here only if `core/llmchat/knowledgepack.go`
-      # gains a JSON-aware truncator (filed as out-of-scope follow-up).
-      - LLMCHAT_KNOWLEDGE_PACK_ENABLED=${LLMCHAT_KNOWLEDGE_PACK_ENABLED:-false}
-      # Budget is irrelevant when ENABLED=false but kept for the rare
-      # case an operator flips ENABLED=true on a 32K-context model
-      # variant; budget is in TOKENS (×4 = bytes via approximateBytesPerToken).
-      - LLMCHAT_KNOWLEDGE_PACK_BUDGET=${LLMCHAT_KNOWLEDGE_PACK_BUDGET:-1000}
-      - LLMCHAT_OPENAPI_PATH=/etc/cordum-llm-chat/openapi.yaml
-      - LLMCHAT_CORDUM_IO_PATH=/etc/cordum-llm-chat/cordum-io
-      # The default system prompt (config/llmchat/system-prompt.md) is
-      # 7.5KB / ~1.8K tokens of nuanced guidance written for the 30B
-      # GPU baseline. The 3B Q4 model on this profile responds better
-      # to a shorter, more directive prompt that mandates tool use on
-      # every Cordum-data turn — without it the model treats
-      # `tool_choice:"auto"` as permission to answer from training
-      # memory and emits zero tool_calls (live evidence:
-      # `summary_phase_started tool_calls=0` after a clean prompt).
-      - LLMCHAT_SYSTEM_PROMPT_PATH=${LLMCHAT_SYSTEM_PROMPT_PATH:-/home/cordum/config/llmchat/system-prompt-ollama.md}
-    volumes:
-      - ./certs:/etc/cordum/tls:ro
-      - ./config/llmchat:/home/cordum/config/llmchat:ro
-      - ./docs/api/openapi/cordum-api.yaml:/etc/cordum-llm-chat/openapi.yaml:ro
-      - ./docs-site/docs/concepts:/etc/cordum-llm-chat/cordum-io/concepts:ro
-      - ./docs-site/docs/getting-started:/etc/cordum-llm-chat/cordum-io/getting-started:ro
-      - ./docs-site/docs/operations:/etc/cordum-llm-chat/cordum-io/operations:ro
-    ports:
-      # Distinct from llm-chat (8090) and llm-chat-cpu (8091) so all three
-      # profiles can coexist without port collisions on a multi-tenant host.
-      - "8092:8090"
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8090/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 15s
 
 volumes:
   nats_data:
@@ -1049,9 +908,9 @@ volumes:
   # CPU/AWQ profile cache. Kept separate from FP8 cache so CPU probe runs do
   # not evict or mutate production GPU weights.
   qwen_cpu_hf_cache:
-  # Ollama models cache. Holds the pulled `qwen2.5:7b-instruct-q4_K_M-ctx8k`
+  # Ollama models cache. Holds the pulled `qwen2.5-coder:3b-instruct-q4_K_M-ctx32k`
   # (~2 GB) so cold restarts do not re-download it. Kept separate from the
   # vLLM caches because the on-disk layouts are unrelated. Operators with
-  # >=8 GB Docker memory can override LLMCHAT_MODEL on llm-chat-ollama and
+  # more Docker memory can override LLMCHAT_MODEL on llm-chat and
   # pre-pull a larger variant; the cache sticks as long as this volume lives.
   ollama_models:

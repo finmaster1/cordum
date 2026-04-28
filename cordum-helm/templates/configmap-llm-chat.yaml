@@ -7,16 +7,17 @@ metadata:
     {{- include "cordum.labels" . | nindent 4 }}
     app.kubernetes.io/component: llm-chat
 data:
-  LLMCHAT_TOOL_TEMPERATURE: {{ .Values.llmChat.sampling.toolTemperature | quote }}
-  LLMCHAT_TOOL_TOP_P: {{ .Values.llmChat.sampling.toolTopP | quote }}
   LLMCHAT_SUMMARY_TEMPERATURE: {{ .Values.llmChat.sampling.summaryTemperature | quote }}
   LLMCHAT_SUMMARY_TOP_P: {{ .Values.llmChat.sampling.summaryTopP | quote }}
-  LLMCHAT_MAX_TOOL_CALLS_PER_TURN: {{ .Values.llmChat.budgets.maxToolCallsPerTurn | quote }}
   LLMCHAT_MAX_WALL_CLOCK_PER_TURN: {{ .Values.llmChat.budgets.maxWallClockPerTurn | quote }}
   LLMCHAT_MAX_ASSISTANT_BYTES: {{ .Values.llmChat.budgets.maxAssistantBytes | quote }}
   LLMCHAT_SYSTEM_PROMPT_PATH: /etc/cordum/llmchat/system-prompt.md
   LLMCHAT_KNOWLEDGE_PACK_ENABLED: {{ .Values.llmChat.knowledgePack.enabled | quote }}
-  LLMCHAT_KNOWLEDGE_PACK_BUDGET: {{ .Values.llmChat.knowledgePack.budget | quote }}
+  LLMCHAT_KNOWLEDGE_API_SPEC_PATH: {{ .Values.llmChat.knowledgePack.apiSpecPath | quote }}
+  LLMCHAT_KNOWLEDGE_SITE_PATH: {{ .Values.llmChat.knowledgePack.sitePath | quote }}
+  LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS: {{ .Values.llmChat.knowledgePack.includeGlobs | quote }}
+  LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS: {{ .Values.llmChat.knowledgePack.excludeGlobs | quote }}
+  LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS: {{ .Values.llmChat.knowledgePack.maxPromptTokens | quote }}
   system-prompt.md: |-
 {{ .Values.llmChat.systemPrompt | indent 4 }}
 {{- end }}

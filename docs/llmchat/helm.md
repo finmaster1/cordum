@@ -1,197 +1,82 @@
 # LLM Chat Assistant — Helm + Compose deployment
 
-The chat assistant ships as two new services on top of the existing
-Cordum stack:
+Cordum ships the LLM chat assistant as a local, zero-egress service. The default backend is **Ollama + Qwen2.5-Coder-3B** on CPU. vLLM + Qwen3-Coder-30B is preserved as an explicit GPU opt-in.
 
-- `llm-chat` — the chat-loop service (Go, ports 8090 HTTP)
-- `qwen-inference` — vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8 (port 8000, OpenAI-compatible)
+## Docker Compose default
 
-Both are gated behind feature flags. Default-enabled in the Helm chart;
-opt-in via the `llmchat` profile in Docker Compose.
-
-## Docker Compose
-
-The default `make dev-up` flow does NOT bring up the chat assistant —
-the `qwen-inference` service requires an NVIDIA GPU and `make dev-up`
-runs on every contributor's laptop. Bring it up explicitly:
+Plain Compose starts the default informational chat path:
 
 ```bash
-COMPOSE_PROFILES=llmchat docker compose up -d
-# or
-docker compose --profile llmchat up -d
+export CORDUM_API_KEY=$(openssl rand -hex 32)
+export REDIS_PASSWORD=$(openssl rand -hex 16)
+docker compose up -d
 ```
 
-This starts `qwen-inference` (loopback-bound on `127.0.0.1:8000:8000`)
-and `llm-chat` (HTTP on `:8090`). The first start pulls ~30GB of FP8
-weights into the named volume `qwen_hf_cache` and takes 3-5 minutes
-to become healthy; subsequent restarts are seconds.
+Default services include:
 
-The Compose `qwen-inference` healthcheck has `start_period: 300s` to
-cover the cold load. `llm-chat` uses `depends_on.qwen-inference.condition: service_started`
-(NOT `service_healthy`) so the chat container starts immediately and
-its `/readyz` reports not-ready until vLLM is up — that gates the
-dashboard chat button automatically.
+- `ollama` — local OpenAI-compatible inference at `127.0.0.1:11434` on the host and `http://ollama:11434/v1` inside Compose.
+- `llm-chat` — `cordum-llm-chat` HTTP service on `:8090`, pointed at Ollama by default.
 
-For contributor rebuilds, layer the dev override:
+The default path does not pull or start the vLLM image.
+
+## Compose opt-in vLLM GPU backend
+
+For GPU-equipped customers wanting the larger model:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml \
-  --profile llmchat up --build
+export LLMCHAT_OPS_BACKEND=vllm-gpu
+export LLMCHAT_BASE_URL=http://qwen-inference:8000/v1
+export LLMCHAT_MODEL=qwen3-coder
+docker compose --profile gpu up -d
 ```
 
-The dev override changes `llm-chat` to `cordum/llm-chat:dev` with
-`SERVICE=cordum-llm-chat` and resets the production NVIDIA reservation
-so laptops without the NVIDIA runtime can still validate Compose
-syntax. Add a local override if you want dev-mode GPU reservation
-enforcement.
+The `qwen-inference` service remains pinned to the vLLM v0.16.0 digest and binds its host port to `127.0.0.1:8000:8000`. The container listens on the bridge interface so `llm-chat` can reach it by Docker DNS; the host exposure remains loopback-only.
 
-For production Compose deployments, use the TLS-mandatory release file:
+## Development override
 
 ```bash
-export CORDUM_TLS_DIR=/path/to/tls
-export CORDUM_API_KEY="$(openssl rand -hex 32)"
-export REDIS_PASSWORD="$(openssl rand -hex 32)"
-export SAFETY_POLICY_PUBLIC_KEY=...
-export SAFETY_POLICY_SIGNATURE=...
-docker compose -f docker-compose.release.yml --profile llmchat up -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-## Helm
+The dev override replaces the default Ollama service with a small local OpenAI-compatible Python mock. This keeps dashboard/chat health checks testable without downloading model weights.
 
-Install with the GPU-enabled defaults:
+## Helm default
+
+The Helm chart defaults to CPU-local Ollama:
 
 ```bash
-helm install cordum cordum-helm/ \
+helm upgrade --install cordum ./cordum-helm \
+  -n cordum --create-namespace \
   --set secrets.apiKey=$(openssl rand -hex 32) \
   --set redis.auth.password=$(openssl rand -hex 32)
 ```
 
-Both `llmChat.enabled` and `qwenInference.enabled` default to `true`.
-The `qwen-inference` Pod requires an NVIDIA GPU node; install the
-[nvidia-device-plugin](https://github.com/NVIDIA/k8s-device-plugin)
-DaemonSet on your GPU nodes first, and label the nodes to match
-`qwenInference.gpu.nodeSelector` (default: `accelerator: nvidia`).
-The chat-loop sampling, turn budgets, knowledge-pack settings, and
-stub system prompt render through `templates/configmap-llm-chat.yaml`.
+Default value:
 
-### External vLLM mode
-
-If you have an existing vLLM cluster (or a separate inference team),
-point `llm-chat` at it and disable the bundled vLLM:
-
-```bash
-helm install cordum cordum-helm/ \
-  --set llmChat.externalBaseUrl=https://vllm.internal/v1 \
-  --set qwenInference.enabled=false \
-  ...
+```yaml
+inference:
+  backend: ollama-cpu
 ```
 
-The dashboard chat button still gates on `/api/v1/chat/healthz`, so
-the UX matches the bundled-vLLM path.
+Default render includes `ollama-inference` and does not render `qwen-inference`.
 
-### Disable entirely
-
-For deployments that don't want the chat assistant at all (Community
-tier, regulated environments, etc.):
+## Helm opt-in vLLM GPU backend
 
 ```bash
-helm install cordum cordum-helm/ \
-  --set llmChat.enabled=false \
-  --set qwenInference.enabled=false \
-  ...
+helm upgrade --install cordum ./cordum-helm \
+  -n cordum --create-namespace \
+  --set secrets.apiKey=$(openssl rand -hex 32) \
+  --set redis.auth.password=$(openssl rand -hex 32) \
+  --set inference.backend=vllm-gpu \
+  --set qwenInference.gpu.nodeSelector.accelerator=nvidia
 ```
 
-The license entitlement (`LLMChatAssistant` in `core/licensing/license.go`)
-is the authoritative gate at the API layer regardless — Compose/Helm
-flags are convenience for skipping the resource overhead.
+GPU requirements:
 
-## Hardware tiers
+- NVIDIA GPU node with the NVIDIA device plugin installed.
+- H100-class hardware is the primary target for the FP8 model; A100 is supported but slower/no native FP8. Expect ~40 GB memory budget for the Qwen3-Coder-30B FP8 path.
+- `qwen-inference` Service type remains `ClusterIP`; do not expose inference via `NodePort` or `LoadBalancer`.
 
-Pick the tier matching your GPU. The default values target Tier 1.
+## External endpoint override
 
-### Tier 1 — H100 80GB (recommended)
-
-- **Model:** `Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8` (default)
-- FP8 weights are ~34-36GB at runtime
-- `--gpu-memory-utilization 0.9` leaves ~36-37GB headroom for KV cache
-- Comfortable concurrency: **16 concurrent copilot sessions**
-- Stress ceiling: **32 concurrent**
-- AWS instance: `p5.xlarge` or equivalent
-
-### Tier 2 — RTX 5090 / PRO 6000 (Ada/Blackwell consumer cards)
-
-These cards lack native FP8 tensor cores at the H100 level. Swap the
-checkpoint to the AWQ quant:
-
-```bash
-helm install cordum cordum-helm/ \
-  --set qwenInference.model=QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ \
-  ...
-```
-
-- Throughput budget: **988-1207 tok/s** with FP8 KV cache enabled
-- Tool-calling parity with Tier 1 (qwen3_xml parser unchanged)
-
-### Tier 3 — A100 80GB
-
-A100 has no native FP8 tensor cores; vLLM falls back to INT8 / BF16.
-The chat assistant is **supported but slower** on A100. For new
-deployments where Tier 1 is available, prefer it. For brownfield A100
-fleets, the chat assistant works at degraded latency — exact
-throughput depends on workload mix.
-
-### Unsupported
-
-- GPUs with <24GB VRAM (FP8 weights don't fit)
-- CPU-only inference (Qwen3-Coder-30B is impractical to serve from CPU)
-
-## Parser pinning — DO NOT CHANGE
-
-The vLLM `--tool-call-parser qwen3_xml` flag is **load-bearing**. The
-upstream Qwen model card historically recommended `qwen3_coder`, but
-that parser produces infinite `!!!!!!!!` token streams on long
-tool-heavy conversations. vLLM's own docs supersede the model card
-here. `qwen3_xml` is what you want.
-
-If a future contributor opens a PR changing the parser, that PR is
-wrong unless it also changes `cordum-helm/values.yaml`'s
-`qwenInference.toolCallParser` AND ships a regression test against
-the long-tool-conversation failure mode. Phase 10 of this epic
-(task-d8000ffb) ships a CI lint that fails any PR mentioning
-`qwen3_coder` or `hermes` in the compose / helm files.
-
-## Network exposure boundary
-
-Two-layer defense for the inference endpoint:
-
-- **Compose:** `qwen-inference` ports map `127.0.0.1:8000:8000` —
-  loopback only on the host. Other containers reach vLLM via the
-  Docker network's intra-network DNS (`http://qwen-inference:8000/v1`).
-- **Helm:** `Service.type: ClusterIP` only. Never `LoadBalancer` or
-  `NodePort`. The `llm-chat` Pod is the sole legitimate client.
-  Inside the container, vLLM binds `0.0.0.0:8000` (so the pod IP is
-  reachable from the Service); the Kubernetes Service boundary is the
-  defense, not the bind address.
-
-External exposure of the inference endpoint is a P0 finding. The
-security review (task-6cda949c) probes for both forms in Compose and
-Helm-rendered output.
-
-## HF weight cache
-
-The chart provisions a `PersistentVolumeClaim` for `/root/.cache/huggingface`
-when `qwenInference.hfCache.enabled=true` (default, 50Gi). Re-pulling
-30GB of FP8 weights on every Pod restart is unacceptable; the PVC
-keeps the cache across rollouts.
-
-For ephemeral test deployments where you don't mind the cold-load
-penalty, set `qwenInference.hfCache.enabled=false` to fall back to
-an `emptyDir`.
-
-## Audit and observability
-
-The packaging itself emits no audit events. The chat-session lifecycle
-(`chat.session_started`, `chat.session_closed`, `chat.bootstrap_registered`)
-is implemented in phase 5 (task-d47a47ea). Tool invocations through the
-MCP path emit `mcp.tool_invocation` events via the existing
-`ToolInvocationAuditor`.
+External OpenAI-compatible endpoints are opt-in only. Set `LLMCHAT_BASE_URL` in Compose or `llmChat.externalBaseUrl` in Helm intentionally, and document the egress/security review for that deployment.

@@ -46,8 +46,6 @@ type chatSessionStore interface {
 	Get(ctx context.Context, id string) (*Session, error)
 	Create(ctx context.Context, in Session) (Session, error)
 	AppendMessage(ctx context.Context, id string, msg SessionMessage) error
-	SetDelegation(ctx context.Context, id string, d *SessionDelegation) error
-	SetPendingToolCall(ctx context.Context, id string, ref *ToolCallRef) error
 	ListSessions(ctx context.Context, filter SessionListFilter) (SessionListPage, error)
 }
 
@@ -57,10 +55,6 @@ type chatEntitlementResolver interface {
 
 type chatPermissionEnforcer interface {
 	RequirePermission(r *http.Request, permission string) error
-}
-
-type chatDelegationIssuer interface {
-	ForSession(ctx context.Context, userPrincipal string, current SessionDelegation) (SessionDelegation, error)
 }
 
 type chatAuditSender interface {
@@ -83,10 +77,9 @@ func (r chatPostRequest) userMessage() string {
 
 // chatPostResponse is returned by POST /api/v1/chat.
 type chatPostResponse struct {
-	SessionID string            `json:"session_id"`
-	Assistant string            `json:"assistant"`
-	ToolCalls []FrameToolDetail `json:"tool_calls,omitempty"`
-	Frames    []Frame           `json:"frames"`
+	SessionID string  `json:"session_id"`
+	Assistant string  `json:"assistant"`
+	Frames    []Frame `json:"frames"`
 }
 
 // ChatHandlers carries dependencies shared by the phase-5 chat endpoints.
@@ -95,10 +88,7 @@ type ChatHandlers struct {
 	sessions     chatSessionStore
 	entitlements chatEntitlementResolver
 	permissions  chatPermissionEnforcer
-	delegations  chatDelegationIssuer
 	audit        chatAuditSender
-	approvals    *ApprovalResumer
-	redactor     Redactor
 	metrics      *Metrics
 
 	upgrader websocket.Upgrader
@@ -117,10 +107,7 @@ type ChatHandlersConfig struct {
 	Sessions        chatSessionStore
 	Entitlements    chatEntitlementResolver
 	Permissions     chatPermissionEnforcer
-	Delegations     chatDelegationIssuer
 	Audit           chatAuditSender
-	Approvals       *ApprovalResumer
-	Redactor        Redactor
 	Metrics         *Metrics
 	AgentID         string
 	UserPrincipalFn func(r *http.Request) string
@@ -135,9 +122,6 @@ func NewChatHandlers(cfg ChatHandlersConfig) *ChatHandlers {
 	if cfg.TenantFn == nil {
 		cfg.TenantFn = defaultTenant
 	}
-	if cfg.Redactor == nil {
-		cfg.Redactor = NewRedactor()
-	}
 	if cfg.Metrics == nil {
 		cfg.Metrics = NewNopMetrics()
 	}
@@ -146,10 +130,7 @@ func NewChatHandlers(cfg ChatHandlersConfig) *ChatHandlers {
 		sessions:        cfg.Sessions,
 		entitlements:    cfg.Entitlements,
 		permissions:     cfg.Permissions,
-		delegations:     cfg.Delegations,
 		audit:           cfg.Audit,
-		approvals:       cfg.Approvals,
-		redactor:        cfg.Redactor,
 		metrics:         cfg.Metrics,
 		agentID:         cfg.AgentID,
 		userPrincipalFn: cfg.UserPrincipalFn,
@@ -191,7 +172,7 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID == "" {
 		req.SessionID = r.Header.Get(HeaderChatSessionID)
 	}
-	session, bearer, err := h.sessionAndDelegation(r.Context(), r, req.SessionID)
+	session, err := h.resolveOrCreateSession(r.Context(), r, req.SessionID)
 	if err != nil {
 		h.metrics.IncError(errorKindForChatError(err))
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
@@ -199,16 +180,12 @@ func (h *ChatHandlers) HandleChatPost(w http.ResponseWriter, r *http.Request) {
 	}
 	h.metrics.IncSessions()
 	defer h.metrics.DecSessions()
-	frames := h.collectTurnFrames(r.Context(), session, msg, bearer)
+	frames := h.collectTurnFrames(r.Context(), session, msg)
 	resp := chatPostResponse{SessionID: session.ID, Frames: frames}
 	for _, frame := range frames {
 		switch frame.Type {
 		case FrameFinal:
 			resp.Assistant = frame.Text
-		case FrameToolCall:
-			if frame.ToolCall != nil {
-				resp.ToolCalls = append(resp.ToolCalls, *frame.ToolCall)
-			}
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -231,7 +208,7 @@ func (h *ChatHandlers) HandleChatStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	sessionID := firstNonEmpty(r.URL.Query().Get("session_id"), r.Header.Get(HeaderChatSessionID))
-	session, bearer, err := h.sessionAndDelegation(r.Context(), r, sessionID)
+	session, err := h.resolveOrCreateSession(r.Context(), r, sessionID)
 	if err != nil {
 		h.metrics.IncError(errorKindForChatError(err))
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
@@ -243,7 +220,7 @@ func (h *ChatHandlers) HandleChatStream(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
-	for _, frame := range h.collectTurnFrames(r.Context(), session, msg, bearer) {
+	for _, frame := range h.collectTurnFrames(r.Context(), session, msg) {
 		raw, err := json.Marshal(frame)
 		if err != nil {
 			slog.Warn("llmchat: marshal SSE frame failed", "error", err, "session_id", session.ID)
@@ -267,7 +244,7 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := firstNonEmpty(r.URL.Query().Get("session_id"), r.Header.Get(HeaderChatSessionID))
-	session, bearer, err := h.sessionAndDelegation(r.Context(), r, sessionID)
+	session, err := h.resolveOrCreateSession(r.Context(), r, sessionID)
 	if err != nil {
 		h.metrics.IncError(errorKindForChatError(err))
 		writeChatError(w, httpStatusForChatError(err), chatErrorCode(err), err.Error())
@@ -289,9 +266,8 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 
 	startedAt := time.Now()
 	turnCount := 0
-	totalToolCalls := 0
 	h.emitSessionStarted(session)
-	defer func() { h.emitSessionClosed(session, turnCount, totalToolCalls, time.Since(startedAt)) }()
+	defer func() { h.emitSessionClosed(session, turnCount, time.Since(startedAt)) }()
 
 	out := make(chan Frame, wsWriteQueueSize)
 	done := make(chan struct{})
@@ -328,23 +304,8 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		turnCount++
-		frames := h.collectTurnFrames(r.Context(), session, userMsg, bearer)
+		frames := h.collectTurnFrames(r.Context(), session, userMsg)
 		for _, frame := range frames {
-			if frame.Type == FrameToolCall {
-				totalToolCalls++
-			}
-			if frame.Type == FrameApprovalRequired && h.approvals != nil {
-				approvalID := frame.ApprovalID
-				h.approvals.Register(ApprovalPending{
-					ApprovalID:  approvalID,
-					AgentID:     session.AgentID,
-					Session:     session,
-					BearerToken: bearer,
-					Emit: func(f Frame) bool {
-						return h.emitToWS(out, h.decorateFrame(session, f))
-					},
-				})
-			}
 			if !h.emitToWS(out, frame) {
 				break
 			}
@@ -354,12 +315,12 @@ func (h *ChatHandlers) HandleChatWS(w http.ResponseWriter, r *http.Request) {
 	<-done
 }
 
-func (h *ChatHandlers) collectTurnFrames(ctx context.Context, session *Session, message, bearer string) []Frame {
+func (h *ChatHandlers) collectTurnFrames(ctx context.Context, session *Session, message string) []Frame {
 	frames := make([]Frame, 0, 8)
 	if h.agent == nil {
 		return []Frame{{Type: FrameError, ErrorCode: ErrorCodeProviderFailed, ErrorMsg: "agent not configured", SessionID: session.ID}}
 	}
-	for frame := range h.agent.Turn(ctx, TurnInput{Session: session, UserMessage: message, BearerToken: bearer}) {
+	for frame := range h.agent.Turn(ctx, TurnInput{Session: session, UserMessage: message}) {
 		frames = append(frames, h.decorateFrame(session, frame))
 	}
 	return frames
@@ -370,9 +331,6 @@ func (h *ChatHandlers) decorateFrame(session *Session, frame Frame) Frame {
 		frame.SessionID = session.ID
 	}
 	h.recordFrameMetrics(frame)
-	if frame.Type == FrameToolResult && h.redactor != nil && frame.ToolResult != "" {
-		frame.ToolResult = string(h.redactor.RedactToolResult([]byte(frame.ToolResult)))
-	}
 	return frame
 }
 
@@ -380,10 +338,7 @@ func (h *ChatHandlers) recordFrameMetrics(frame Frame) {
 	if h == nil || h.metrics == nil {
 		return
 	}
-	switch frame.Type {
-	case FrameApprovalRequired:
-		h.metrics.IncApprovalRequired()
-	case FrameError:
+	if frame.Type == FrameError {
 		h.metrics.IncError(errorKindForFrameError(frame.ErrorCode))
 	}
 }
@@ -399,18 +354,6 @@ func (h *ChatHandlers) emitToWS(out chan<- Frame, frame Frame) bool {
 		}
 		return false
 	}
-}
-
-func (h *ChatHandlers) sessionAndDelegation(ctx context.Context, r *http.Request, sessionID string) (*Session, string, error) {
-	session, err := h.resolveOrCreateSession(ctx, r, sessionID)
-	if err != nil {
-		return nil, "", err
-	}
-	bearer, err := h.ensureDelegation(ctx, session)
-	if err != nil {
-		return nil, "", err
-	}
-	return session, bearer, nil
 }
 
 func (h *ChatHandlers) resolveOrCreateSession(ctx context.Context, r *http.Request, sessionID string) (*Session, error) {
@@ -463,31 +406,6 @@ func sessionVisibleToUser(sess *Session, user, tenant string) bool {
 	return sess.UserPrincipal == user && sess.Tenant == tenant
 }
 
-func (h *ChatHandlers) ensureDelegation(ctx context.Context, session *Session) (string, error) {
-	if session == nil {
-		return "", errSessionMissing
-	}
-	current := SessionDelegation{}
-	if session.Delegation != nil {
-		current = *session.Delegation
-	}
-	if h.delegations == nil {
-		return current.Token, nil
-	}
-	delegation, err := h.delegations.ForSession(ctx, session.UserPrincipal, current)
-	if err != nil {
-		return "", fmt.Errorf("issue delegation: %w", err)
-	}
-	session.Delegation = &delegation
-	session.DelegationJTI = delegation.JTI
-	if h.sessions != nil {
-		if err := h.sessions.SetDelegation(ctx, session.ID, &delegation); err != nil {
-			return "", fmt.Errorf("persist delegation: %w", err)
-		}
-	}
-	return delegation.Token, nil
-}
-
 func (h *ChatHandlers) requireChatEntitlement(w http.ResponseWriter) bool {
 	if h != nil && h.entitlements != nil {
 		entitlements := h.entitlements.Entitlements()
@@ -513,7 +431,7 @@ func (h *ChatHandlers) emitSessionStarted(s *Session) {
 	})
 }
 
-func (h *ChatHandlers) emitSessionClosed(s *Session, turnCount, totalToolCalls int, dur time.Duration) {
+func (h *ChatHandlers) emitSessionClosed(s *Session, turnCount int, dur time.Duration) {
 	if h == nil || h.audit == nil || s == nil {
 		return
 	}
@@ -522,7 +440,7 @@ func (h *ChatHandlers) emitSessionClosed(s *Session, turnCount, totalToolCalls i
 		TenantID: s.Tenant, AgentID: s.AgentID, Identity: s.UserPrincipal, Action: audit.SIEMActionChatSessionClosed,
 		Extra: map[string]string{
 			"session_id": s.ID, "turn_count": fmt.Sprintf("%d", turnCount),
-			"total_tool_calls": fmt.Sprintf("%d", totalToolCalls), "duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
+			"duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
 		},
 	})
 }
@@ -603,8 +521,6 @@ func errorKindForChatError(err error) string {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "delegation"):
-		return ErrorKindDelegationMintFailed
 	case strings.Contains(msg, "session") || strings.Contains(msg, "redis") || strings.Contains(msg, "persist"):
 		return ErrorKindRedisFailed
 	default:
@@ -616,10 +532,6 @@ func errorKindForFrameError(code string) string {
 	switch code {
 	case ErrorCodeProviderFailed:
 		return ErrorKindVLLMCallFailed
-	case ErrorCodeToolCallFailed, ErrorCodeListToolsFailed:
-		return ErrorKindMCPCallFailed
-	case ErrorCodeRepeatToolCall:
-		return ErrorKindRepeatCallDetected
 	default:
 		return ErrorKindOther
 	}

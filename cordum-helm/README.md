@@ -63,6 +63,57 @@ helm install cordum ./cordum-helm \
   --set external.redisUrl=redis://redis.example.com:6379
 ```
 
+### Inference backend (LLM Chat Assistant)
+
+The chart defaults to the informational-only local backend:
+`inference.backend=ollama-cpu`. This renders Ollama plus
+Qwen2.5-Coder-3B and runs on CPU-only Kubernetes hosts with 4 GB+ RAM.
+
+Opt into the larger vLLM/Qwen3-Coder-30B GPU backend only on clusters
+with an NVIDIA GPU node:
+
+```bash
+helm upgrade --install cordum ./cordum-helm \
+  -n cordum --create-namespace \
+  --set secrets.apiKey=$(openssl rand -hex 32) \
+  --set redis.auth.password=$(openssl rand -hex 32) \
+  --set inference.backend=vllm-gpu \
+  --set qwenInference.gpu.nodeSelector.accelerator=nvidia
+```
+
+The vLLM path preserves the pinned v0.16.0 image, GPU resource request
+(`nvidia.com/gpu: 1`), and ClusterIP-only service. Informational-only chat
+does not render LLM tool-parser flags.
+It is opt-in; the default install does not render or pull the vLLM image.
+
+### LLM chat knowledge pack
+
+The LLM chat assistant is informational-only and is grounded by a local
+knowledge pack. By default the `llm-chat` image includes:
+
+- `/etc/cordum/openapi.yaml` — the Cordum OpenAPI 3 spec.
+- `/etc/cordum/site-content` — checked-in docs content from `docs-site/docs`.
+
+The chart propagates these values into the `cordum-llm-chat` pod:
+
+```yaml
+llmChat:
+  knowledgePack:
+    enabled: true
+    apiSpecPath: /etc/cordum/openapi.yaml
+    sitePath: /etc/cordum/site-content
+    includeGlobs: "concepts/*.md,getting-started/*.md,operations/*.md"
+    excludeGlobs: "concepts/adr/**"
+    maxPromptTokens: 24000
+```
+
+To use a custom knowledge pack, build an `llm-chat` image that bakes your
+OpenAPI file and docs directory into the paths above, or mount equivalent
+read-only volumes at custom paths and set `llmChat.knowledgePack.apiSpecPath`
+and `llmChat.knowledgePack.sitePath` to match. The service refuses to start
+when the enabled knowledge pack is missing or exceeds the token budget; it does
+not fetch content from the internet at runtime.
+
 Use an external safety kernel:
 
 ```bash

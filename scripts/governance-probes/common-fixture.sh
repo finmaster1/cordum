@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Common fixture for the LLM-chat governance senior-review probes
-# (task-931eaea2). Source this from each probe-NN.sh.
+# (task-01aaa6bd scope-reduced surviving probes). Source this from each probe-NN.sh.
 #
 # Required env:
 #   CORDUM_API_KEY    — admin API key (default reads from cordum/.env if unset)
@@ -46,7 +46,7 @@ api_post() {
 }
 
 audit_count() {
-  # NOTE: endpoint corrected per task-931eaea2 step-2 finding F5
+  # NOTE: endpoint corrected per historical governance finding F5
   # path is /api/v1/audit/query, NOT /api/v1/audit/events
   local type="$1"
   api_get "/api/v1/audit/query?type=${type}&limit=1" | jq -r '.total // 0'

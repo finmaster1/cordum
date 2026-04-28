@@ -304,8 +304,11 @@ services:
       retries: 3
       start_period: 10s
 
+  # Opt-in vLLM GPU backend. Demoted from the production default on
+  # 2026-04-28 per Yaron's informational-only directive and task-d38e26c0;
+  # run explicitly with `--profile gpu` and set LLMCHAT_OPS_BACKEND=vllm-gpu.
   qwen-inference:
-    profiles: [llmchat]
+    profiles: [gpu]
     # Pinned to vLLM v0.16.0@sha256:48011517 per task-991597a4.
     # Bump only via tools/scripts/vllm_pin_digest.sh + supply-chain CI.
     # Upgrade procedure: docs/llmchat/supply-chain.md.
@@ -316,9 +319,6 @@ services:
       - Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
       - --served-model-name
       - qwen3-coder
-      - --enable-auto-tool-choice
-      - --tool-call-parser
-      - qwen3_xml
       - --max-model-len
       - "131072"
       - --kv-cache-dtype
@@ -356,8 +356,44 @@ services:
       retries: 5
       start_period: 300s
 
+  ollama:
+    image: "ollama/ollama@sha256:7e672211886f8bd4448a98ed577e26c816b9e8b052112860564afaa2c105800e"
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: 24h
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_CONTEXT_LENGTH: "32768"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull qwen2.5-coder:3b-instruct-q4_K_M
+        cat > /tmp/Modelfile <<MFEOF
+        FROM qwen2.5-coder:3b-instruct-q4_K_M
+        PARAMETER num_ctx 32768
+        MFEOF
+        ollama create qwen2.5-coder:3b-instruct-q4_K_M-ctx32k -f /tmp/Modelfile
+        wait
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 600s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+
   llm-chat:
-    profiles: [llmchat]
     image: ghcr.io/cordum-io/cordum/llm-chat:${CORDUM_VERSION:-latest}
     restart: unless-stopped
     read_only: true
@@ -367,7 +403,7 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     depends_on:
-      qwen-inference:
+      ollama:
         condition: service_started
       api-gateway:
         condition: service_healthy
@@ -391,18 +427,24 @@ services:
       NATS_TLS_CERT: /etc/cordum/tls/client/tls.crt
       NATS_TLS_KEY: /etc/cordum/tls/client/tls.key
       NATS_TLS_SERVER_NAME: nats
-      LLMCHAT_BASE_URL: http://qwen-inference:8000/v1
-      LLMCHAT_MODEL: qwen3-coder
+      LLMCHAT_BASE_URL: "${LLMCHAT_BASE_URL:-http://ollama:11434/v1}"
+      LLMCHAT_OPS_BACKEND: "${LLMCHAT_OPS_BACKEND:-ollama-cpu}"
+      LLMCHAT_MODEL: "${LLMCHAT_MODEL:-qwen2.5-coder:3b-instruct-q4_K_M-ctx32k}"
       LLMCHAT_PROVIDER: openai
-      LLMCHAT_TOOL_TEMPERATURE: "${LLMCHAT_TOOL_TEMPERATURE:-0.3}"
-      LLMCHAT_TOOL_TOP_P: "${LLMCHAT_TOOL_TOP_P:-0.9}"
       LLMCHAT_SUMMARY_TEMPERATURE: "${LLMCHAT_SUMMARY_TEMPERATURE:-0.7}"
       LLMCHAT_SUMMARY_TOP_P: "${LLMCHAT_SUMMARY_TOP_P:-0.8}"
-      LLMCHAT_MAX_TOOL_CALLS_PER_TURN: "${LLMCHAT_MAX_TOOL_CALLS_PER_TURN:-12}"
       LLMCHAT_MAX_WALL_CLOCK_PER_TURN: "${LLMCHAT_MAX_WALL_CLOCK_PER_TURN:-60s}"
       LLMCHAT_MAX_ASSISTANT_BYTES: "${LLMCHAT_MAX_ASSISTANT_BYTES:-32768}"
+      LLMCHAT_KNOWLEDGE_PACK_ENABLED: "${LLMCHAT_KNOWLEDGE_PACK_ENABLED:-true}"
+      LLMCHAT_KNOWLEDGE_API_SPEC_PATH: /etc/cordum/openapi.yaml
+      LLMCHAT_KNOWLEDGE_SITE_PATH: /etc/cordum/site-content
+      LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS: "${LLMCHAT_KNOWLEDGE_INCLUDE_GLOBS:-concepts/*.md,getting-started/*.md,operations/*.md}"
+      LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS: "${LLMCHAT_KNOWLEDGE_EXCLUDE_GLOBS:-concepts/adr/**}"
+      LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS: "${LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS:-24000}"
     volumes:
       - "${CORDUM_TLS_DIR:?error: CORDUM_TLS_DIR is not set}:/etc/cordum/tls:ro"
+      - "${CORDUM_OPENAPI_SPEC_PATH:-./docs/api/openapi/cordum-api.yaml}:/etc/cordum/openapi.yaml:ro"
+      - "${CORDUM_SITE_CONTENT_PATH:-./docs-site/docs}:/etc/cordum/site-content:ro"
     ports:
       - "8090:8090"
     deploy:
@@ -421,3 +463,4 @@ volumes:
   nats_data:
   redis_data:
   qwen_hf_cache:
+  ollama_models:

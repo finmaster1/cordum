@@ -29,11 +29,9 @@ describe("ConfigStore.logout() resets ChatAssistantStore", () => {
           id: "u-1",
           role: "user",
           text: "hi",
-          toolCalls: [],
           at: "2026-01-01T00:00:00Z",
         },
       ],
-      pendingApprovalIds: ["appr-leak-1"],
       unreadCount: 3,
     });
     await flushPersist();
@@ -48,7 +46,6 @@ describe("ConfigStore.logout() resets ChatAssistantStore", () => {
     expect(after.sessionId).toBeNull();
     expect(after.messages).toHaveLength(0);
     expect(after.panelOpen).toBe(false);
-    expect(after.pendingApprovalIds).toHaveLength(0);
     expect(after.unreadCount).toBe(0);
   });
 
@@ -83,7 +80,6 @@ describe("ConfigStore.logout() resets ChatAssistantStore", () => {
     expect(afterSecond.sessionId).toBeNull();
     expect(afterSecond.messages).toHaveLength(0);
     expect(afterSecond.panelOpen).toBe(false);
-    expect(afterSecond.pendingApprovalIds).toHaveLength(0);
     expect(afterSecond.unreadCount).toBe(0);
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
   });

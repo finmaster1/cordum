@@ -33,30 +33,14 @@ type Script struct {
 }
 
 // Turn is one scripted assistant turn served as a sequence of streaming
-// deltas terminated by FinishReason.
+// text deltas terminated by FinishReason.
 type Turn struct {
 	// TextDeltas are the assistant content chunks emitted in order.
-	// Empty slice is allowed for tool-only turns.
 	TextDeltas []string
 
-	// ToolCalls are emitted as a single delta frame after the text
-	// deltas. Each ToolCallDelta becomes one element of the openai
-	// stream `tool_calls` array.
-	ToolCalls []ToolCallDelta
-
 	// FinishReason is sent on the terminal frame of this turn. Use
-	// "stop" for a clean text turn, "tool_calls" when ToolCalls is
-	// populated, "length" for max-tokens, etc.
+	// "stop" for a clean text turn, "length" for max-tokens, etc.
 	FinishReason string
-}
-
-// ToolCallDelta is one element of the openai-compat tool_calls delta
-// emitted on a single SSE frame. ID + Name + Arguments map directly to
-// what provider_openai.go's openaiStreamToolCall expects.
-type ToolCallDelta struct {
-	ID        string
-	Name      string
-	Arguments string
 }
 
 // Server wraps an httptest.Server with a turn counter. Callers should
@@ -154,24 +138,6 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		writeFrame(w, flusher, frame)
 	}
-	if len(turn.ToolCalls) > 0 {
-		tcs := make([]streamToolCall, 0, len(turn.ToolCalls))
-		for i, tc := range turn.ToolCalls {
-			tcs = append(tcs, streamToolCall{
-				Index: i,
-				ID:    tc.ID,
-				Type:  "function",
-				Function: streamToolCallBody{
-					Name:      tc.Name,
-					Arguments: tc.Arguments,
-				},
-			})
-		}
-		writeFrame(w, flusher, streamFrame{
-			Choices: []streamChoice{{Delta: streamDelta{ToolCalls: tcs}}},
-		})
-	}
-
 	finish := turn.FinishReason
 	if finish == "" {
 		finish = "stop"
@@ -236,19 +202,6 @@ type streamChoice struct {
 }
 
 type streamDelta struct {
-	Role      string           `json:"role,omitempty"`
-	Content   string           `json:"content,omitempty"`
-	ToolCalls []streamToolCall `json:"tool_calls,omitempty"`
-}
-
-type streamToolCall struct {
-	Index    int                `json:"index"`
-	ID       string             `json:"id,omitempty"`
-	Type     string             `json:"type,omitempty"`
-	Function streamToolCallBody `json:"function"`
-}
-
-type streamToolCallBody struct {
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
 }

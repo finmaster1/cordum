@@ -1,3 +1,4 @@
+{{- $backend := include "cordum.inferenceBackend" . }}
 {{- if .Values.llmChat.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -58,18 +59,28 @@ spec:
             - name: NATS_URL
               value: {{ include "cordum.natsUrl" . | quote }}
             - name: LLMCHAT_BASE_URL
+              {{- if eq $backend "vllm-gpu" }}
               {{- if .Values.qwenInference.enabled }}
               value: "http://{{ include "cordum.fullname" . }}-qwen-inference:8000/v1"
-              {{- else if .Values.ollamaInference.enabled }}
+              {{- else }}
+              value: {{ required "llmChat.externalBaseUrl is required when inference.backend=vllm-gpu and qwenInference.enabled=false" .Values.llmChat.externalBaseUrl | quote }}
+              {{- end }}
+              {{- else if eq $backend "ollama-cpu" }}
+              {{- if .Values.ollamaInference.enabled }}
               value: "http://{{ include "cordum.fullname" . }}-ollama-inference:{{ .Values.ollamaInference.service.port }}/v1"
               {{- else }}
-              value: {{ required "llmChat.externalBaseUrl is required when both qwenInference.enabled and ollamaInference.enabled are false" .Values.llmChat.externalBaseUrl | quote }}
+              value: {{ required "llmChat.externalBaseUrl is required when inference.backend=ollama-cpu and ollamaInference.enabled=false" .Values.llmChat.externalBaseUrl | quote }}
               {{- end }}
+              {{- else }}
+              value: {{ required "llmChat.externalBaseUrl is required for external inference backends" .Values.llmChat.externalBaseUrl | quote }}
+              {{- end }}
+            - name: LLMCHAT_OPS_BACKEND
+              value: {{ $backend | quote }}
             - name: LLMCHAT_MODEL
-              {{- if .Values.qwenInference.enabled }}
+              {{- if eq $backend "vllm-gpu" }}
               value: {{ .Values.qwenInference.servedModelName | quote }}
-              {{- else if .Values.ollamaInference.enabled }}
-              value: {{ .Values.ollamaInference.model | quote }}
+              {{- else if eq $backend "ollama-cpu" }}
+              value: {{ .Values.ollamaInference.servedModelName | quote }}
               {{- else }}
               value: {{ .Values.qwenInference.servedModelName | quote }}
               {{- end }}

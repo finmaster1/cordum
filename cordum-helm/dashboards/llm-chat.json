@@ -52,13 +52,12 @@
     },
     {
       "type": "timeseries",
-      "title": "Legacy tool/approval counters (should be zero for informational-only)",
+      "title": "Informational response throughput",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
-        { "expr": "sum(rate(chat_tool_calls_total[5m])) by (tool)", "legendFormat": "tool={{tool}}", "refId": "A" },
-        { "expr": "sum(rate(chat_approval_required_total[5m]))", "legendFormat": "approval_required", "refId": "B" }
+        { "expr": "sum(rate(chat_token_budget_used_total[5m]))", "legendFormat": "assistant bytes/sec", "refId": "A" }
       ],
-      "fieldConfig": { "defaults": { "unit": "ops", "noValue": "No data" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "Bps", "noValue": "No data" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
     },
     {

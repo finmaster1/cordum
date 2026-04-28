@@ -31,7 +31,6 @@ func TestSessionStore_CreatePersists(t *testing.T) {
 		UserPrincipal: "alice@cordum.io",
 		Tenant:        "tenant-a",
 		AgentID:       "chat-assistant-1",
-		DelegationJTI: "jti-1",
 	}
 	out, err := store.Create(ctx, in)
 	if err != nil {
@@ -55,7 +54,7 @@ func TestSessionStore_GetExistingRoundTrip(t *testing.T) {
 	store, _ := newTestSessionStore(t)
 	ctx := context.Background()
 
-	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -89,7 +88,7 @@ func TestSessionStore_AppendMessageBumpsActivityAndTTL(t *testing.T) {
 	store, srv := newTestSessionStore(t)
 	ctx := context.Background()
 
-	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -133,7 +132,7 @@ func TestSessionStore_AppendMessageCapsAt50(t *testing.T) {
 	store, _ := newTestSessionStore(t)
 	ctx := context.Background()
 
-	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestSessionStore_SlidingTTLExpiry(t *testing.T) {
 	store, srv := newTestSessionStore(t)
 	ctx := context.Background()
 
-	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestSessionStore_TwoReplicasNoDataLoss(t *testing.T) {
 	storeB := NewSessionStoreFromClient(clientB)
 	ctx := context.Background()
 
-	in, err := storeA.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	in, err := storeA.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -225,115 +224,11 @@ func TestSessionStore_TwoReplicasNoDataLoss(t *testing.T) {
 	}
 }
 
-// TestSessionStore_SetDelegation verifies the JWT/JTI/expiry round-trip
-// through the session metadata. QA explicitly required Session to
-// persist the delegation token (not just the JTI) so phase-5 WS
-// handlers can recover the bearer token after a process restart.
-func TestSessionStore_SetDelegation(t *testing.T) {
-	store, _ := newTestSessionStore(t)
-	ctx := context.Background()
-
-	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	delegation := &SessionDelegation{
-		Token:      "eyJ-fake-jwt",
-		JTI:        "jti-abc",
-		ExpiresAt:  time.Now().UTC().Add(15 * time.Minute),
-		ChainDepth: 1,
-	}
-	if err := store.SetDelegation(ctx, in.ID, delegation); err != nil {
-		t.Fatalf("SetDelegation: %v", err)
-	}
-
-	got, err := store.Get(ctx, in.ID)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Delegation == nil || got.Delegation.Token != "eyJ-fake-jwt" {
-		t.Errorf("Delegation.Token = %v, want eyJ-fake-jwt", got.Delegation)
-	}
-	if got.DelegationJTI != "jti-abc" {
-		t.Errorf("DelegationJTI = %q, want jti-abc (mirror of Delegation.JTI)", got.DelegationJTI)
-	}
-}
-
-// TestSessionStore_SetDelegationDoesNotClobberAppend verifies the
-// QA-flagged race: SetDelegation and AppendMessage running
-// concurrently from independent clients (modelling two replicas) must
-// both persist. The fix is HSET on disjoint fields (delegation_json
-// vs last_active_at), so neither caller reads/rewrites the other's
-// state. Regression guard for the JSON-blob design QA rejected at
-// 2026-04-26T08:03:36Z.
-func TestSessionStore_SetDelegationDoesNotClobberAppend(t *testing.T) {
-	srv, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("miniredis: %v", err)
-	}
-	t.Cleanup(srv.Close)
-
-	clientA := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	clientB := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	t.Cleanup(func() { _ = clientA.Close() })
-	t.Cleanup(func() { _ = clientB.Close() })
-
-	storeA := NewSessionStoreFromClient(clientA)
-	storeB := NewSessionStoreFromClient(clientB)
-	ctx := context.Background()
-
-	in, err := storeA.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Replica A pumps SetDelegation; replica B pumps AppendMessage.
-	// Each races against the other; both writes must persist.
-	var wg sync.WaitGroup
-	delegation := &SessionDelegation{
-		Token:      "fake-jwt",
-		JTI:        "jti-set-delegation",
-		ExpiresAt:  time.Now().UTC().Add(15 * time.Minute),
-		ChainDepth: 1,
-	}
-	for i := range 10 {
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			if err := storeA.SetDelegation(ctx, in.ID, delegation); err != nil {
-				t.Errorf("SetDelegation: %v", err)
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			if err := storeB.AppendMessage(ctx, in.ID, SessionMessage{Role: "user", Text: fmt.Sprintf("m-%d", i)}); err != nil {
-				t.Errorf("AppendMessage: %v", err)
-			}
-		}()
-	}
-	wg.Wait()
-
-	got, err := storeA.Get(ctx, in.ID)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Delegation == nil || got.Delegation.JTI != "jti-set-delegation" {
-		t.Errorf("Delegation lost under concurrent AppendMessage; got %+v", got.Delegation)
-	}
-	if got.DelegationJTI != "jti-set-delegation" {
-		t.Errorf("DelegationJTI = %q, want jti-set-delegation", got.DelegationJTI)
-	}
-	if len(got.Messages) != 10 {
-		t.Errorf("expected 10 messages after concurrent SetDelegation+AppendMessage, got %d (no data loss is QA-mandated)", len(got.Messages))
-	}
-}
-
 func TestSessionStore_ConcurrentAppendMessage(t *testing.T) {
 	store, _ := newTestSessionStore(t)
 	ctx := context.Background()
 
-	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a", DelegationJTI: "j"})
+	in, err := store.Create(ctx, Session{UserPrincipal: "p", Tenant: "t", AgentID: "a"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

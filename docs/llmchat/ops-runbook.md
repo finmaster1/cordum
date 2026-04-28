@@ -15,7 +15,7 @@ Production default inference is local Ollama with Qwen2.5-Coder-3B through the O
 1. Create a production `.env` with at least `CORDUM_API_KEY`, Redis/NATS secrets, and the Enterprise license token/public key that includes `llm_chat_assistant`.
 2. Start the default CPU-local chat profile:
    ```bash
-   docker compose --profile llmchat-ollama up -d --build
+   docker compose up -d --build
    ```
 3. Confirm the gateway points at the active chat service and that only one chat backend profile is exposed to users.
 4. Keep the knowledge-pack mounts read-only: OpenAPI under `/etc/cordum-llm-chat/openapi.yaml` and curated cordum.io docs under `/etc/cordum-llm-chat/cordum-io`.

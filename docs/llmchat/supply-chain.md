@@ -49,7 +49,7 @@ When a new vLLM version becomes available:
 
 1. **Compatibility check.** Verify the new version still supports
    the runtime config we depend on:
-   - `--tool-call-parser qwen3_xml` (epic rail #6 / phase-7 lint).
+   - Informational-only vLLM no longer requires tool-call parser flags; do not reintroduce legacy parser overrides.
    - The deployment flags that landed in
      [`task-6a8680fc`](#) (e.g. the `--disable-log-requests` flag
      replacement / vLLM CLI changes).
@@ -155,7 +155,7 @@ the Trivy step in the same commit as the waiver population.
   (`Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8` via image digest). No
   user-controlled model-load path → no malicious-model-repo vector.
 - **Cordum gateway upstream of vLLM** — JWT validation, delegation
-  tokens, and tool-call grammar enforcement all happen in Cordum
+  tokens and prompt-safety enforcement happen in Cordum
   before traffic reaches vLLM. PyJWT/xgrammar/policy paths inside
   vLLM are not exercised on the request hot path.
 

@@ -1,17 +1,11 @@
 // Package-level chat-assistant agent bootstrap.
 //
 // On first boot the cordum-llm-chat process registers a "chat-assistant"
-// agent identity with Cordum so that every subsequent CallTool carries
-// the same CAP-tagged AgentIdentity any other Cordum agent does — this
-// is the dogfooding integration point per task rail #1.
+// identity with Cordum for audit attribution and entitlement governance. The
+// informational-only assistant does not receive MCP tool permissions.
 //
-// Registration goes through the CAP SDK's AgentClient
-// (capsdk.AgentClient, shipped in cap PR #44 / commit aad9445). The
-// SDK wraps the same control-plane endpoints (POST/GET/PUT
-// /api/v1/agents) the gateway exposes — same audit chain, same
-// approval-gate path. The earlier MCP-tool bootstrap fallback was
-// removed per pre-GA / no-compat-shim policy
-// (feedback_no_backwards_compat).
+// Registration goes through the CAP SDK's AgentClient, which wraps the same
+// control-plane endpoints (POST/GET/PUT /api/v1/agents) the gateway exposes.
 package llmchat
 
 import (
@@ -23,7 +17,6 @@ import (
 
 	capsdk "github.com/cordum-io/cap/v2/sdk/go"
 	"github.com/cordum/cordum/core/audit"
-	"github.com/cordum/cordum/core/mcp"
 )
 
 // AuditEmitter is the slice of audit.Chainer the bootstrap needs.
@@ -72,45 +65,17 @@ func NewBootstrapper(registry AgentRegistry, tenant string, emitter AuditEmitter
 	return &Bootstrapper{registry: registry, tenant: tenant, emitter: emitter}
 }
 
-// expectedAllowedTools is the canonical AllowedTools list for the
-// chat-assistant agent identity. Includes ALL read-only MCP tools from
-// core/mcp/tools.go (lines 25-38) plus the four mutating tools the
-// chat-assistant is permitted to invoke. Any drift is caught by the
-// scope-divergence check in Boot.
+// expectedAllowedTools is intentionally empty: the informational-only
+// chat-assistant answers from its prompt + local knowledge pack and never calls
+// MCP tools.
 func expectedAllowedTools() []string {
-	return []string{
-		// All read-only discovery tools (core/mcp/tools.go:25-38).
-		mcp.ToolListJobs,
-		mcp.ToolGetJob,
-		mcp.ToolListRuns,
-		mcp.ToolGetRun,
-		mcp.ToolRunTimeline,
-		mcp.ToolListWorkflows,
-		mcp.ToolListPacks,
-		mcp.ToolListTopics,
-		mcp.ToolListWorkers,
-		mcp.ToolListAgents,
-		mcp.ToolListPendingApprovals,
-		mcp.ToolAuditQuery,
-		mcp.ToolAuditVerify,
-		mcp.ToolStatus,
-		// Policy query (read-only inspection of policy bundles).
-		mcp.ToolQueryPolicy,
-		// Mutating tools: submit_job is the ONLY pre-approved one
-		// (rail #2); the rest traverse the approval gate per call.
-		mcp.ToolSubmitJob,
-		mcp.ToolApproveJob,
-		mcp.ToolRejectJob,
-		mcp.ToolCancelJob,
-		mcp.ToolTriggerWorkflow,
-	}
+	return nil
 }
 
-// expectedPreapprovedMutatingTools pins the preapproved-mutating set
-// to EXACTLY [cordum_submit_job]. Widening requires an admin policy-
-// bundle update post-ship, not a code change (rail #2).
+// expectedPreapprovedMutatingTools is intentionally empty because chat does not
+// perform mutations. Approval gates remain available to other MCP clients.
 func expectedPreapprovedMutatingTools() []string {
-	return []string{mcp.ToolSubmitJob}
+	return nil
 }
 
 // expectedDataClassifications is the canonical data-classification
@@ -218,7 +183,7 @@ func (b *Bootstrapper) emitRegisteredAuditEvent(ctx context.Context, agentID str
 			Reason:    "chat-assistant first-boot bootstrap registration via CAP SDK control-plane wrappers",
 			Extra: map[string]string{
 				"chat_assistant_agent_id":          agentID,
-				"preapproved_mutating_tools_count": "1",
+				"preapproved_mutating_tools_count": "0",
 			},
 		}
 	}
@@ -255,10 +220,9 @@ func (b *Bootstrapper) lookupChatAssistant(ctx context.Context) (*capsdk.AgentId
 	return nil, fmt.Errorf("llmchat/bootstrap: lookup chat-assistant: %w", err)
 }
 
-// verifyScope rejects a divergent existing chat-assistant. The check
-// is set-equality on AllowedTools (order-insensitive) + exact match on
-// PreapprovedMutatingTools=[cordum_submit_job] (rail #2: widening
-// requires policy-bundle update post-ship, not code).
+// verifyScope rejects a divergent existing chat-assistant. The check is
+// set-equality on empty AllowedTools and empty PreapprovedMutatingTools so stale
+// older identities fail closed until an operator reconciles scope.
 func (b *Bootstrapper) verifyScope(existing *capsdk.AgentIdentity) error {
 	if !setsEqual(existing.AllowedTools, expectedAllowedTools()) {
 		return fmt.Errorf(
@@ -267,7 +231,7 @@ func (b *Bootstrapper) verifyScope(existing *capsdk.AgentIdentity) error {
 	}
 	if !setsEqual(existing.PreapprovedMutatingTools, expectedPreapprovedMutatingTools()) {
 		return fmt.Errorf(
-			"llmchat/bootstrap: divergent preapproved_mutating_tools on chat-assistant id=%s; got=%v want=%v (rail #2)",
+			"llmchat/bootstrap: divergent preapproved_mutating_tools on chat-assistant id=%s; got=%v want=%v",
 			existing.ID, existing.PreapprovedMutatingTools, expectedPreapprovedMutatingTools())
 	}
 	return nil
@@ -290,17 +254,14 @@ func setsEqual(a, b []string) bool {
 	return true
 }
 
-// register creates a new chat-assistant identity. The CAP SDK's
-// Register method deliberately omits PreapprovedMutatingTools per
-// rail #2 (post-registration SetScope privilege only) — the
-// preapproved set is applied by the follow-up setScope call.
+// register creates a new chat-assistant identity with no tool privileges.
 func (b *Bootstrapper) register(ctx context.Context) (string, error) {
 	id, err := b.registry.Register(ctx, capsdk.AgentSpec{
 		Name:                "chat-assistant",
-		Description:         "Cordum self-hosted chat assistant (Qwen3-Coder via vLLM)",
+		Description:         "Cordum self-hosted informational chat assistant",
 		Owner:               "system",
 		Team:                "system",
-		RiskTier:            "medium",
+		RiskTier:            "low",
 		AllowedTools:        expectedAllowedTools(),
 		DataClassifications: expectedDataClassifications(),
 	})
@@ -313,10 +274,9 @@ func (b *Bootstrapper) register(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-// setScope applies the canonical allowed-tools + preapproved-mutating
-// + data-classification scope to a freshly-registered chat-assistant.
-// PreapprovedMutatingTools is sent explicitly (capsdk.SetScope always
-// transmits it for deterministic revoke semantics).
+// setScope applies the canonical no-tool scope to a freshly-registered
+// chat-assistant. PreapprovedMutatingTools is sent explicitly for deterministic
+// revoke semantics on upgrades from older builds.
 func (b *Bootstrapper) setScope(ctx context.Context, agentID string) error {
 	return b.registry.SetScope(ctx, capsdk.AgentScopeUpdate{
 		AgentID:                  agentID,

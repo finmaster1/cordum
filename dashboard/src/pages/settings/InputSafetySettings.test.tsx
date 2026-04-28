@@ -180,6 +180,7 @@ describe("InputSafetySettings page", () => {
       if (select) {
         const valueSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
         valueSetter?.call(select, "open");
+        select.dispatchEvent(new Event("input", { bubbles: true }));
         select.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });

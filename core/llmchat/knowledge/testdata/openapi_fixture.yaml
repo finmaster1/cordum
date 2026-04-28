@@ -1,0 +1,100 @@
+openapi: 3.0.3
+info:
+  title: Cordum Fixture API
+  version: test
+security:
+  - ApiKeyAuth: []
+paths:
+  /api/v1/jobs:
+    get:
+      operationId: listJobs
+      summary: List jobs
+      parameters:
+        - $ref: '#/components/parameters/TenantID'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Job list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      operationId: submitJob
+      summary: Submit a new job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              verbose:
+                value:
+                  topic: should_not_appear
+            schema:
+              $ref: '#/components/schemas/SubmitJobRequest'
+      responses:
+        '200':
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitJobResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /healthz:
+    get:
+      summary: Service health
+      security: []
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    TenantID:
+      name: X-Cordum-Tenant
+      in: header
+      required: true
+      description: Tenant routing key
+      schema:
+        type: string
+  responses:
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          description: Seconds until the rate limit resets
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    JobListResponse:
+      description: Paginated list of Cordum jobs with sample AKIA1234567890ABCDEF
+      type: object
+    SubmitJobRequest:
+      description: Job submission payload
+      type: object
+      properties:
+        topic:
+          type: string
+        api_key:
+          type: string
+          description: AKIA1234567890ABCDEF must be redacted
+    SubmitJobResponse:
+      description: Accepted job envelope
+      type: object
+    Error:
+      description: Standard error envelope
+      type: object

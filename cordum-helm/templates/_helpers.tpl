@@ -103,6 +103,14 @@ redisPassword
 {{- printf "%s-audit-datadog" (include "cordum.fullname" .) -}}
 {{- end -}}
 
+{{- define "cordum.inferenceBackend" -}}
+{{- $backend := default "ollama-cpu" .Values.inference.backend -}}
+{{- if not (or (eq $backend "ollama-cpu") (eq $backend "vllm-gpu")) -}}
+{{- fail (printf "unsupported inference.backend=%s; allowed: ollama-cpu, vllm-gpu" $backend) -}}
+{{- end -}}
+{{- $backend -}}
+{{- end -}}
+
 {{/*
 Shared environment injected into every control-plane container. Keep this
 list to cross-cutting runtime knobs only; service-specific endpoints and

@@ -512,6 +512,12 @@
   from { transform: translateY(-20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+/* Chat-assistant "thinking" indicator: dots fade up and back so a row
+   of three with staggered animation-delay reads as a sweep. */
+@keyframes thinking-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
 .animate-rise {
   animation: rise-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }

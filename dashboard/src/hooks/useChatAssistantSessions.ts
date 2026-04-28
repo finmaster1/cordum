@@ -30,8 +30,6 @@ interface BackendMessage {
   role?: "user" | "assistant";
   text?: string;
   at?: string;
-  toolCalls?: unknown[];
-  tool_calls?: unknown[];
 }
 
 function normalizeSummary(raw: BackendSessionSummary): ChatAssistantSessionSummary {
@@ -52,7 +50,6 @@ function normalizeDetail(raw: BackendSessionDetail): ChatAssistantSessionDetail 
       id: m.id ?? "",
       role: (m.role ?? "assistant") as "user" | "assistant",
       text: m.text ?? "",
-      toolCalls: [],
       at: m.at ?? "",
     })),
   };

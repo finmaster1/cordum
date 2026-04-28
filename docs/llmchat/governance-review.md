@@ -1,436 +1,164 @@
-# LLM Chat Assistant — Governance Senior Review
+# LLM Chat Assistant — Informational-Only Governance Review
 
-Dogfooding QA for `cordum-llm-chat`: the chat copilot is itself a Cordum agent, so its tool calls MUST traverse the same policy / approval / audit pipeline as any other MCP client. This page records the senior-review evidence for the 13 governance probes specified in `task-931eaea2`.
+> **SCOPE REDUCED 2026-04-28** — task-01aaa6bd retired the original chat→MCP tool-calling design under Yaron's directive captured in `project_llm_chat_informational_only` / Moe memory `mem-e6484160`: the LLM chat assistant is now an informational Q&A helper grounded in Cordum API docs + cordum.io content. It does **not** call MCP tools, submit jobs, approve/reject work, trigger workflows, or mutate state.
 
-> **Scope note:** task-931eaea2's plan calls for 13 probes covering identity, audit, gating, and tenancy. Several pre-execution findings (recorded in step-2 of the task plan) require corrections to the probe procedures before execution; see [Pre-execution findings](#pre-execution-findings) below.
+This page replaces the historical 13-probe tool-calling governance review from `task-931eaea2`. Retired probes are removed rather than left as blocked work because their premise no longer exists. The surviving probes verify the governance surfaces that still matter for informational chat: identity bootstrap, entitlement/auth, dashboard provenance, session isolation, audit-chain continuity, and operational recovery.
 
 ## Status summary
 
-Verdicts as of 2026-04-27 after the two filed P0s landed (`task-5b755f42` audit/query handler + `task-f13505cc` dashboard agent_id parity) and the scope CLI follow-up started (`task-754d09bf`); the remaining gaps are operational (no deterministic LLM tool-call stub in the dev mock, shared-stack restart risk).
+| Category | Surviving probes | Current status | Notes |
+| --- | --- | --- | --- |
+| Identity / entitlement | 1, 2, 7 | STATIC PASS / LIVE RE-RUN RECOMMENDED | Chat-assistant registers as a low-risk identity with empty tool scope; dashboard still shows the chat affordance only when licensed and healthy. |
+| Audit / chain integrity | 4, 11 | STATIC PASS / LIVE RE-RUN RECOMMENDED | Chat emits `chat.session_started` / `chat.session_closed`; no tool-invocation audit path remains for chat. |
+| Session / tenancy | 9 | STATIC PASS / LIVE RE-RUN RECOMMENDED | Session ownership remains principal+tenant-bound; per-session delegation tokens are gone. |
 
-|              | Identity (1, 2, 7) | Audit (3, 4, 11) | Gating (5, 6, 12, 13) | Tenancy (8, 9, 10) |
-| ------------ | ------------------ | ---------------- | --------------------- | ------------------ |
-| Pass         | 1 (probe 2)        | 0                | 0                     | 0                  |
-| Partial pass | 1 (probe 1)        | 1 (probe 4)      | 1 (probe 12)          | 1 (probe 9)        |
-| Blocked      | 1 (probe 7)        | 1 (probe 3)      | 3 (probes 5, 6, 13)   | 2 (probes 8, 10)   |
-| Deferred     | 0                  | 1 (probe 11)     | 0                     | 0                  |
-| Fail         | 0                  | 0                | 0                     | 0                  |
+Totals after scope reduction: **6 surviving probes / 7 retired probes / 0 open P0 from retired tool-calling paths**.
 
-Totals across all 13 probes: **1 PASS / 4 PARTIAL PASS / 7 BLOCKED / 1 DEFERRED / 0 FAIL**.
+## Retired probes
 
-Audit-chain integrity (DoD #2): `/api/v1/audit/verify` → `status=ok`, `total_events=10000`, `verified_events=10000`, `gaps=[]`, `retention_window_hours=168`, `first_seq=1`, `last_seq=10000` (probe 4 evidence). **No chain breaks observed.**
+The following historical probes were deleted from `scripts/governance-probes/` because they depended on chat invoking MCP tools or approval-gated mutations:
 
-Chain-verify p99 latency under chat load (DoD #3): **not measurable in this stack.** The chat-load backbone (probe 3 — 100 chat turns through real tool calls) is BLOCKED on the dev mock LLM; without that load source we cannot characterise the verify endpoint's p99 *under chat-induced load*. What we did measure on a 10K-event chain:
-
-- Baseline serial verify: p99 ≈ 241 ms (5 calls: 199 / 206 / 215 / 222 / 241 ms).
-- 20 concurrent verify calls: p50 = 1660 ms, p95 = 2325 ms, p99 = 2354 ms (overall wall-clock 2690 ms for 20 parallel).
-- The verify endpoint re-hashes all 10K events on every call — its absolute latency is at the second scale, two orders of magnitude above the DoD's 10 ms-regression budget. The "≤ 10 ms regression under chat load" budget is unmeasurable until (a) a live chat-load generator exists *and* (b) verify is rebuilt for hot-path use (cached or partial verification).
-
-P0 / P1 / P2 follow-up tasks filed and tracked:
-
-| Severity | Task / Finding                                                                                                                                                              | Status                                          |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| P0       | `task-5b755f42` — wire `/api/v1/audit/query` gateway handler                                                                                                                | **DONE**                                        |
-| P0       | `task-f13505cc` — dashboard Jobs page render `agent_id` column for visual parity                                                                                            | **DONE**                                        |
-| P1       | F1 — no safe operator CLI for AgentIdentity scope mutation                                                                                                            | Addressed by `task-754d09bf` (this change)      |
-| P1       | F7 — `config/llmchat/policy-default.yaml` not auto-loaded; operator must POST it after stack boot OR rely on AgentIdentity scope                                            | Captured in this doc; not separately filed yet  |
-| P1       | Audit-verify endpoint concurrency scaling — p99 jumps 10× from baseline at 20 parallel; verify is not designed for hot-path / load-test usage                               | `task-4102015f` BACKLOG                         |
-| P1       | Deterministic-LLM stub for QA — dev `qwen-inference` mock returns hardcoded text and never emits a `tool_call`, blocking probes 3, 5, 6, 8, 10, 12-active, 13               | `task-314fe304` BACKLOG                         |
-| P2       | DataClassifications metadata not surfaced in `/api/v1/agents` JSON response (probe 8 cannot read the chat-assistant's `[public, internal]` classification through that API) | Captured in probe 8 evidence                    |
-| P2       | Redis TLS client path inside `cordum-redis-1` — operator-runbook clarity gap (probe 9 runtime test could not authenticate to Redis)                                         | Captured in probe 9 evidence                    |
-| P2       | `cordumctl tenant` subcommand existence not verified (needed for probe 10 fixture)                                                                                          | Captured in probe 10 evidence                   |
-
-## Pre-execution findings
-
-Recorded in `task-931eaea2` step-2 (worker-e2a9, 2026-04-26). Each finding affects probe procedure; do not execute the affected probe without applying the correction.
-
-| #   | Finding                                                                                                                                                          | Affected probe(s) | Severity                          | Action                                                                                                                                                                                                                                                                                                                                                         |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1  | `cordumctl agent set-scope` did NOT exist when the probes were first written                                                                                     | 7, 13             | P1 — addressed by `task-754d09bf` | Use `cordumctl agent set-scope <name> --allowed-tools=...` (wraps `capsdk.AgentClient.SetScope`) instead of curling the CAP control-plane endpoint directly.                                                                                                                                       |
-| F2  | `cordumctl license generate --tier enterprise` does NOT exist                                                                                                    | step-1(e)         | P2                                | Skip; chat-assistant entitlement already active in this stack                                                                                                                                                                                                                                                                                                  |
-| F3  | `cordumctl run <id>` is actually `cordumctl run start <workflow_id>`                                                                                             | 6                 | P2                                | Update probe procedure                                                                                                                                                                                                                                                                                                                                         |
-| F4  | Probe 1 acceptance criteria references `cap.agent_registered` SIEM event but the actual constant is `chat.bootstrap_registered` (`core/audit/siem_actions.go:9`) | 1                 | P2                                | Update probe procedure to grep for `chat.bootstrap_registered`                                                                                                                                                                                                                                                                                                 |
-| F5  | Audit query endpoint is `/api/v1/audit/query` (NOT `/api/v1/audit/events` as the task description says)                                                          | 3                 | P2                                | Update probe procedure                                                                                                                                                                                                                                                                                                                                         |
-| F6  | Dashboard `JobsPage.tsx:700-756` originally did NOT render an `agent_id` column.                                                                                 | 2                 | **P0 — FIXED IN `task-f13505cc`** | Jobs now render a visible Agent column, support `?agentId=` filtering, and show chat-assistant lineage on job detail. Evidence: `JobsPage.agentid.test.tsx`, `JobFiltersBar.test.tsx`, `JobDetailPage.parentbanner.test.tsx`.                                                                                                                                  |
-| F7  | `config/llmchat/policy-default.yaml` is NOT auto-loaded; operator must POST to `/api/v1/policy/bundles` after first stack boot                                   | 12                | P1                                | Either auto-load on chat-assistant boot OR document the manual step in the deployment runbook + add a smoke check                                                                                                                                                                                                                                              |
-| F8  | **Historical `/api/v1/audit/query` 404** — the gateway initially did not register the endpoint that MCP `audit_query` calls.                                     | 1, 3, 4, 5, 7, 11 | **P0 — FIXED IN `task-5b755f42`** | Gateway now registers `/api/v1/audit/query`; OpenAPI route coverage passes; `since` / `until` accept RFC3339 or unix-ms; `type` filters `SIEMEvent.EventType` with legacy `Action` fallback. Original live evidence: `curl https://localhost:8081/api/v1/audit/query?type=chat.bootstrap_registered → 404`; rerun requires deploying the fixed gateway binary. |
-
-### F8 follow-up verification (worker-7a6d, 2026-04-26)
-
-`task-5b755f42` re-open verification removed F8 as a code blocker for the affected governance probes. Evidence from the fixed code path:
-
-- `go test ./core/controlplane/gateway -run 'Test(OpenAPICoverage|RouteCoverage_AllRegisteredRoutesAppearInOpenAPI|HandleAuditQuery)' -count=3` → PASS.
-- `go test ./core/controlplane/gateway/... -count=1` → PASS.
-- `go test ./core/mcp/... -count=1` → PASS.
-- `go vet ./core/controlplane/gateway/...` → PASS.
-
-Rerun verdicts for probes previously blocked by F8:
-
-| Probe | F8 sub-check after fix                                                                                       | Overall probe verdict after rerun                               | Remaining blocker(s)                                                                                                  |
-| ----- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 1     | PASS by route/OpenAPI/RFC3339 contract tests                                                                 | PARTIAL PASS; still BLOCKED for fresh-boot idempotency evidence | Docker mount issue prevents `cordum-llm-chat` restart in the shared stack                                             |
-| 3     | PASS by `TestHandleAuditQuery_FiltersByEventType` (`type=mcp.tool_invocation` matches `SIEMEvent.EventType`) | BLOCKED, but no longer by F8                                    | Live 100-turn chat-MCP run still needs a deterministic LLM/tool-call harness or real vLLM runner                      |
-| 4     | PASS by audit-query contract tests plus existing `/api/v1/audit/verify` evidence                             | PARTIAL PASS; chat-load regression budget still BLOCKED         | Probe 3 live chat-load backbone is not available in the shared mock-LLM stack                                         |
-| 5     | PASS for ability to read back `safety.decision` / `mcp.tool_*` audit event types                             | BLOCKED, but no longer by F8                                    | Mock LLM never emits the required tool call, so the chat→MCP→safety-kernel path is not exercised                      |
-| 7     | PASS for audit readback primitive and CLI procedure now exists via `cordumctl agent set-scope`                 | BLOCKED, but no longer by F8/F1                                 | Mutating shared chat-assistant scope would affect other workers; rerun in an isolated stack                          |
-| 11    | PASS for per-call audit visibility primitive                                                                 | DEFERRED, but no longer by F8                                   | Scheduler restart is destructive in the shared stack; requires a dedicated clean stack                                |
+| Retired probe | Historical title | Why removed |
+| --- | --- | --- |
+| 3 | Every MCP call produces an `mcp.tool_invocation` SIEMEvent | Chat no longer calls MCP tools. Other MCP clients still own tool-invocation audit coverage. |
+| 5 | Safety kernel actually gates | Chat does not submit jobs or invoke tools, so safety-kernel enforcement is not on the chat path. |
+| 6 | Approval gate wire-through | `approval_required` frames and inline approvals were removed from chat. Approval gates remain for existing dashboard/CLI/MCP mutation paths. |
+| 8 | Data classification scope deny | Chat has no tool/data scope to exercise; retrieved knowledge redaction is covered by knowledge-pack work. |
+| 10 | Cross-tenant isolation through tool calls | Chat no longer lists/submits tenant data via tools; session ownership isolation remains in probe 9. |
+| 12 | Policy bundle default enforced | The chat-assistant tool policy bundle is obsolete with `AllowedTools=[]`. |
+| 13 | Zero-trust safety defense-in-depth through wildcard scope | Tool scope is empty by construction; wildcard-scope adversarial setup is no longer a supported chat state. |
 
 ## Probe template
 
-Each probe section follows this template:
+Each surviving probe keeps the historical evidence format:
 
 ```
 ## Probe N — <title>
 **Expected:** <criteria>
 **Procedure:** <steps>
-**Actual:** <to be filled>
-**Verdict:** [PASS|FAIL|BLOCKED]
-**Evidence:** <links to logs, audit query results, screenshots>
+**Actual:** <evidence or latest static check>
+**Verdict:** [PASS|PARTIAL|BLOCKED|RETIRED]
+**Evidence:** <commands, logs, screenshots, task IDs>
 **P0/P1 task filed:** <task ID if FAIL>
 ```
 
 ---
 
-## Probe 1 — CAP SDK agent-identity round-trip
+## Probe 1 — Chat-assistant identity bootstrap is idempotent and no-tool scoped
 
-**Expected:** chat-assistant registers via `core/auth/delegation` + `cap/sdk/go/agent.go` on first boot (idempotent). On first boot, an audit event for the registration is emitted with `agent_id=chat-assistant@<tenant>`, `risk_tier=medium`, `preapproved_mutating_tools=[cordum_submit_job]`. On restart, no duplicate registration. Every subsequent tool call carries the CAP-tagged AgentIdentity in the audit record.
-
-**Procedure (corrected per F4):**
-
-1. `docker compose restart cordum-llm-chat` and capture timestamp `T0`.
-2. `cordumctl audit query --type chat.bootstrap_registered --since T0 --limit 5` (or hit `/api/v1/audit/query?type=chat.bootstrap_registered&since=T0`).
-3. Restart again at `T1`; query `/api/v1/audit/query?type=chat.bootstrap_registered&since=T1` → expect zero new events.
-4. Drive a chat-driven `cordum_list_jobs` call; query `/api/v1/audit/query?type=mcp.tool_invocation&since=<call-time>` and assert the audit row carries `agent_id=chat-assistant@<tenant>` field.
-
-**Actual (worker-e2a9, 2026-04-26T17:20Z):**
-
-- (a) chat-assistant agent IS registered in `/api/v1/agents`: 1 entry (no duplicate ⇒ idempotent boot worked at least once across the stack lifetime), `id=d2315a95-7b08-40a1-8bdc-7b96858f41e6`, `risk_tier=medium` ✓ (matches plan spec), `owner=system`, `allowed_tools=20` (matches `config/llmchat/policy-default.yaml`), `preapproved_mutating_tools=['cordum_submit_job']` ✓ (matches epic rail #4).
-- (b) Restart for idempotency check: `docker restart cordum-llm-chat-1` failed with `Error response from daemon: Cannot restart container cordum-llm-chat-1: error while creating mount source path '/run/desktop/mnt/host/d/Cordum/cordum-llm-debug/config/llmchat': mkdir /run/desktop/mnt/host/d/Cordum/cordum-llm-debug: file exists`. Environmental issue (orphan mount from another worker session); does NOT invalidate (a) but blocks fresh-boot test.
-- (c) F8 follow-up: audit emission verification is no longer blocked by endpoint plumbing in the fixed code path. `/api/v1/audit/query` is registered and covered by OpenAPI route tests; RFC3339 `since` / `until` and `type=SIEMEvent.EventType` filtering are covered by gateway tests. Live re-run still requires deploying the fixed gateway binary.
-- (d) Chain integrity: `GET /api/v1/audit/verify` → `{"status":"ok"}` (response is just `{status}`; no `valid`/`chain_depth`/`verified_count` fields).
-
-**Verdict:** PARTIAL PASS for (a), BLOCKED on (b) by Docker mount issue. F8 is fixed at the gateway-contract layer; live audit-emission re-run is deployment-gated.
-**Evidence:** Live API responses captured in step-4 worker note for the original failure. F8 fix evidence: gateway/OpenAPI/audit-query tests listed in [F8 follow-up verification](#f8-follow-up-verification-worker-7a6d-2026-04-26). Code refs: `core/audit/siem_actions.go:9` (constant exists), `core/llmchat/bootstrap.go:126,190` (boot + emission), `core/controlplane/gateway/handlers_audit_query.go` (query handler).
-**P0/P1 task filed:** F8 filed and fixed as `task-5b755f42`; no new P0/P1 for the endpoint plumbing after the contract tests pass.
-
----
-
----
-
-## Probe 2 — Chat-driven calls in dashboard Jobs + Audit pages
-
-**Expected:** Open `/jobs` in tab A, chat widget in tab B; submit "$40 transfer in demo-mock-bank"; the job appears in `/jobs` with an `agent_id=chat-assistant@<tenant>` indicator and is clickable to a detail page showing full lineage.
-
-**Procedure (updated by `task-f13505cc`):** Use a jobs response containing `actor_id=chat-assistant@tenant-default`. Open `/jobs`; verify the visible Agent column renders `chat-assistant` with tooltip/accessible label `chat-assistant@tenant-default`. Type `chat-assistant` in the Agent ID filter after both chat and workflow jobs are visible; verify only the chat-assistant job remains. Open the job detail page and verify the lineage banner says `Submitted by chat-assistant@tenant-default`. Audit visual parity remains covered by the Audit Log page's existing `agent_id` filter and tests.
-
-**Actual (worker-e112, 2026-04-26):** F6 is fixed in `task-f13505cc` on commit `cbf50e60` plus the reopen fix. `JobsPage.tsx` now inserts a sortable Agent column after Origin, renders `actorId` as a truncated visible agent name with full tooltip/ARIA label, and flags `chat-assistant` / `chat-assistant@...` rows with a copilot badge. `JobFiltersBar.tsx` adds a debounced Agent ID filter backed by `?agentId=`; `JobsPage.tsx` filters the already-loaded rows when the typed filter changes. `JobDetailPage.tsx` shows a `Submitted by chat-assistant@tenant-default` banner for chat-assistant-submitted jobs and `Submitted by` metadata for all jobs.
-**Verdict:** PASS for the F6 visual-parity blocker (Jobs table + detail lineage + Audit page agent filter coverage).
-**Evidence:** `npx vitest run src/pages/JobsPage.agentid.test.tsx src/components/jobs/JobFiltersBar.test.tsx src/pages/JobDetailPage.parentbanner.test.tsx` exercises the visible Agent column, full tooltip/ARIA identity, no-actor fallback, copilot badge predicate, URL and typed Agent ID filtering, Agent sorting, and detail banner. `dashboard/src/pages/AuditLogPage.test.tsx` already covers `/policy/audit?...&agent_id=...` query construction for Audit page parity.
-**P0/P1 task filed:** F6 fixed by `task-f13505cc`; no open P0/P1 remains for this probe's dashboard visual-parity blocker.
-
----
-
-## Probe 3 — Every MCP call produces a `mcp.tool_invocation` SIEMEvent
-
-**Expected:** Run 100 diverse chat messages covering all 22 MCP tools. Audit count of `mcp.tool_invocation` events grows by exactly 100. Zero drops.
-
-**Procedure (corrected per F5):**
-
-1. Capture baseline count: `before=$(curl -sk "$BASE/api/v1/audit/query?type=mcp.tool_invocation&limit=1" | jq '.total')`.
-2. Drive 100 chat turns via the mockvllm script harness (phase-9 fixture).
-3. Capture: `after=$(curl -sk "$BASE/api/v1/audit/query?type=mcp.tool_invocation&limit=1" | jq '.total')`.
-4. Assert `after - before == 100`.
-
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** Originally BLOCKED hard by F8 — neither `/api/v1/audit/query` nor `/api/v1/audit/events` existed in the gateway.
-
-**F8 follow-up (worker-7a6d, 2026-04-26):** Endpoint plumbing is fixed in code: route registration is covered by OpenAPI route tests, and `type=mcp.tool_invocation` filtering now matches `SIEMEvent.EventType` (with legacy `Action` fallback). The full 100-turn live chat run was not executed in this shared stack because the available governance probe scripts are placeholders and the dev mock LLM does not emit deterministic tool calls.
-**Verdict:** F8 sub-check PASS; full probe remains BLOCKED on non-F8 live chat/tool-call harness availability.
-**Evidence:** Historical live confirmation: `curl https://localhost:8081/api/v1/audit/query?type=mcp.tool_invocation → 404`. Fix evidence: `TestHandleAuditQuery_FiltersByEventType`, OpenAPI route coverage, and MCP package tests pass.
-**P0/P1 task filed:** F8 fixed by `task-5b755f42`; remaining deterministic LLM harness gap is lower-severity follow-up from probes 5/6.
-
----
-
-## Probe 4 — Chain integrity across chat-driven load
-
-**Expected:** Run probe 3 + concurrent governance + security stress; `GET /api/v1/audit/verify` returns `status=ok`, no chain breaks. Document chain depth + verify p99 latency.
+**Expected:** `cordum-llm-chat` registers or reuses a `chat-assistant` identity through the CAP SDK control-plane path. The identity is low risk, tenant-scoped, and has `AllowedTools=[]` plus `PreapprovedMutatingTools=[]`.
 
 **Procedure:**
+1. Start or restart `cordum-llm-chat`.
+2. Query `/api/v1/agents?name=chat-assistant` or the equivalent CAP SDK wrapper.
+3. Assert exactly one identity exists for the tenant.
+4. Assert `risk_tier=low`, `allowed_tools=[]`, `preapproved_mutating_tools=[]`.
+5. Restart again and assert no duplicate registration.
 
-1. Start probe 3 in background.
-2. Concurrently run integration_case_a + integration_case_b stress fixtures.
-3. After completion, `curl -sk "$BASE/api/v1/audit/verify?tenant=default" | jq '.status, .valid'`.
-4. Capture `time` of 3 successive verify calls; record p99.
+**Actual:** task-01aaa6bd production code changed `core/llmchat/bootstrap.go` so `expectedAllowedTools()` and `expectedPreapprovedMutatingTools()` both return nil/empty, registration uses `RiskTier: "low"`, and existing divergent tool-scoped identities fail closed through `verifyScope`.
 
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** PARTIAL PASS.
-
-- Chain integrity: `status=ok, total_events=10000, verified_events=10000, gaps=[], retention_window_hours=168, first_seq=1, last_seq=10000`. Hash chain is intact across 10000 events.
-- Baseline serial latency (5 calls): 199, 206, 215, 222, 241 ms — p99 ≈ 241ms.
-- 20 concurrent calls: p50=1660ms, p95=2325ms, p99=2354ms (overall wall-clock 2690ms for 20 parallel).
-- DoD #3 budget says "≤ p99 10ms regression" under chat load. The verify operation re-hashes 10K events on each call — absolute latency is 199-2354ms range; the 10ms regression budget is unmeasurable here without (a) a live chat-induced load generator, AND (b) a proper baseline-vs-load comparison harness. The verify endpoint's poor concurrency scaling (10× from baseline at 20 parallel) is itself a finding worth filing — verify is not designed for hot-path / load-test usage.
-- F8 follow-up: the audit-query primitive needed by the probe-3 backbone now passes handler/OpenAPI/MCP contract tests; the chat-load component remains blocked on the live tool-call harness, not endpoint plumbing.
-
-**Verdict:** PARTIAL PASS (chain integrity verified ok); regression-budget portion remains BLOCKED by missing live chat-load harness. F8 is fixed at the endpoint-contract layer.
-**Evidence:** Live curl outputs in step-5 worker note. Verify endpoint's concurrency scaling characterized.
-**P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend P1 follow-up "audit-verify endpoint concurrency scaling — investigate whether re-hashing 10K events per call is the intended hot-path design".
-
-`task-4102015f` follow-up: verify endpoint now coalesces concurrent identical calls via singleflight; new `cordum_audit_verify_*` metrics expose the regression budget. Re-run with the same 20-concurrent harness should show p99 within 1.5x single-call baseline.
+**Verdict:** STATIC PASS; live restart re-run recommended in the next clean compose/Helm validation.
+**Evidence:** `core/llmchat/bootstrap.go`, task-01aaa6bd step 2 grep/build evidence.
+**P0/P1 task filed:** none.
 
 ---
 
-## Probe 5 — Safety kernel actually gates
+## Probe 2 — Dashboard chat affordance is informational and health/entitlement gated
 
-**Expected:** A chat-driven mutating call that fails the default policy (e.g. `cordum_update_policy_bundle` with a malformed bundle) returns canonical `-32099 approval_required` OR `-32000 policy_denied`; audit event has `decision=SafetyDeny` + the exact rule_id.
+**Expected:** The dashboard chat button appears only when the `LLMChatAssistant` entitlement and chat health checks allow it. The widget does not render tool-call cards, approval prompts, or approval badges. The persistent disclaimer says chat is informational-only and directs state changes to dashboard/CLI paths.
 
 **Procedure:**
+1. Run dashboard tests for `ChatHeaderButton`, `ChatWidget`, `ChatStream`, and `useChatAssistantStore`.
+2. Grep chat-assistant UI/state/types for retired frame names.
+3. Manually verify the widget copy in the browser when a live dashboard is available.
 
-1. Craft chat message that maps to `cordum_update_policy_bundle` with bundle missing required patterns.
-2. Capture MCP error code + audit row.
+**Actual:** task-01aaa6bd step 3 removed `ApprovalInlinePrompt`, `ToolCallCard`, pending approval badge state, and retired frame parsing. The grep below returns no hits:
 
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** Originally BLOCKED on mock-LLM + F8.
+```bash
+grep -RInE 'approval_required|ApprovalInline|pendingApprovalIds|toolCallId|toolCalls|ToolCallCard|tool_call|tool_result' \
+  dashboard/src/components/chat-assistant dashboard/src/state/chatAssistant.ts dashboard/src/types/chatAssistant.ts \
+  dashboard/src/hooks/useChatAssistantSession.ts dashboard/src/hooks/useChatAssistantSessions.ts --include='*.ts' --include='*.tsx'
+```
 
-- The dev stack runs a Python mock LLM (`docker-compose.dev.yml`) that always returns hardcoded `"Cordum dev mock LLM is healthy."` — it NEVER emits a tool_call request, so a chat user message cannot map to `cordum_update_policy_bundle`.
-- F8 follow-up: audit readback is no longer a code blocker; the fixed handler supports `type=safety.decision` / `type=mcp.tool_*` event-type filtering and RFC3339 bounds.
-- Workaround: bypass chat path and POST a malformed bundle directly to `/api/v1/policy/bundles` (admin endpoint) to test the policy validator. But that tests the policy validator, NOT the chat→MCP→safety-kernel pipeline that the probe is meant to exercise.
-
-**Verdict:** BLOCKED on mock-LLM only; F8 endpoint-contract sub-check PASS.
-**Evidence:** N/A.
-**P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend P2 follow-up "QA dev stack should ship a deterministic LLM stub that emits scripted tool_calls for governance probes".
-
----
-
-## Probe 6 — Approval gate wire-through
-
-**Expected:** Chat user says "approve job-abc"; `cordum_approve_job` fires; WS emits `approval_required` frame; programmatic accept; original call retries; `approval_granted` audit event chained to the original via trace_id.
-
-**Procedure (corrected per F3):**
-
-1. Pre-create pending approval ($200 mock-bank transfer).
-2. Chat user requests approval; capture WS frame.
-3. POST `/api/v1/approvals/{id}/approve` as admin.
-4. Verify retry of original + audit chain via trace_id.
-
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** BLOCKED on mock-LLM (cannot emit `cordum_approve_job` from a chat turn).
-
-- `cordumctl approval job <id> --approve` CLI does exist (verified F3, `cmd/cordumctl/main.go:192-227`); the API path also exists.
-- The chat→approval-gate→retry loop test specifically requires the LLM to emit `cordum_approve_job` in response to "approve job-X" — the mock cannot.
-
-**Verdict:** BLOCKED on mock-LLM.
-**Evidence:** Static endpoint existence verified.
-**P0/P1 task filed:** Same P2 follow-up as Probe 5 — deterministic-LLM stub for QA.
+**Verdict:** PASS by code/test evidence.
+**Evidence:** task-01aaa6bd step 3: targeted vitest 28/28; full `npx vitest run` 1776/1776; tsc and build exit 0.
+**P0/P1 task filed:** none.
 
 ---
 
-## Probe 7 — AgentIdentity AllowedTools enforcement (scope-first deny)
+## Probe 4 — Audit chain integrity across informational chat sessions
 
-**Expected:** Narrow chat-assistant's AllowedTools to read-only; chat "submit a $40 transfer" returns scope-filter error BEFORE policy bundle; audit reason=`agent_identity_scope_deny`.
-
-**Procedure (corrected per F1 / `task-754d09bf`):**
-
-1. Snapshot current AgentIdentity (`GET /api/v1/agents/<id>`).
-2. Narrow to read-only through the operator CLI (this preserves existing preapproved tools unless explicitly replaced, but the read-only deny is enforced because `cordum_submit_job` leaves `AllowedTools`):
-
-   ```bash
-   cordumctl agent set-scope chat-assistant \
-     --allowed-tools=cordum_list_jobs,cordum_get_job,cordum_status \
-     --idempotency-key=governance-probe-7-narrow
-   ```
-
-3. Chat user requests submit; capture MCP error + audit row.
-4. Restore the canonical chat-assistant scope before leaving the stack:
-
-   ```bash
-   cordumctl agent set-scope chat-assistant \
-     --allowed-tools=cordum_list_jobs,cordum_get_job,cordum_list_runs,cordum_get_run,cordum_run_timeline,cordum_list_workflows,cordum_list_packs,cordum_list_topics,cordum_list_workers,cordum_list_agents,cordum_list_pending_approvals,cordum_audit_query,cordum_audit_verify,cordum_status,cordum_query_policy,cordum_submit_job,cordum_approve_job,cordum_reject_job,cordum_cancel_job,cordum_trigger_workflow \
-     --preapproved-mutating-tools=cordum_submit_job \
-     --idempotency-key=governance-probe-7-restore
-   ```
-
-**Actual (worker-e2a9, 2026-04-26T17:20Z):** Originally BLOCKED by F1 (no `cordumctl agent set-scope` CLI command) AND F8 (could not confirm audit reason via /audit/query). The static code path is correct (scope-first ordering verified at `core/mcp/registry.go:274,303`).
-
-**F8 / F1 follow-up (worker-7a6d, 2026-04-26; CLI cross-link updated in `task-754d09bf`):** Audit readback is no longer a code blocker; the fixed handler can query by event type and RFC3339 bounds. Scope mutation now has a safe operator path via `cordumctl agent set-scope`, but the live chat-driven probe still needs a deterministic tool-calling LLM and an isolated stack so the temporary scope override cannot disrupt other workers.
-**Verdict:** BLOCKED on mock-LLM + shared-stack risk (F1 CLI path addressed by `task-754d09bf`).
-**Evidence:** Order confirmed by code: scope filter at `core/mcp/registry.go:274` runs before approval gate at `core/mcp/registry.go:303`.
-**P0/P1 task filed:** F8 fixed by `task-5b755f42`; F1 addressed by `task-754d09bf`; remaining runtime blocker is deterministic-LLM / isolated-stack availability.
-
----
-
-## Probe 8 — Data classification scope deny
-
-**Expected:** chat-assistant tagged `[public, internal]`; a query touching `pii` (e.g. "list all users with emails") is scope-denied; audit records the attempt with classification=`pii`.
+**Expected:** Chat session lifecycle events (`chat.session_started`, `chat.session_closed`) append to the audit chain without gaps. `/api/v1/audit/verify` remains `status=ok` after normal chat use.
 
 **Procedure:**
+1. Start a chat session, send at least one informational prompt, and close the WS.
+2. Wait for async audit flushing.
+3. Query audit events for session lifecycle actions.
+4. Call `/api/v1/audit/verify` and assert `status=ok` / no gaps.
 
-1. Confirm chat-assistant DataClassifications via `GET /api/v1/agents/<id>`.
-2. Drive chat query that maps to a pii-classified tool.
-3. Capture MCP error + audit row classification field.
+**Actual:** task-01aaa6bd preserves lifecycle auditing in `core/llmchat/chat_handlers.go` and removes only the obsolete `total_tool_calls` metadata. Historical chain verification from task-931eaea2 was `status=ok` on 10,000 events; live re-run should be done after this retirement PR deploys.
 
-**Actual (worker-e2a9, 2026-04-26T17:30Z):** BLOCKED on mock-LLM + F8.
-
-- The chat-assistant agent record from `/api/v1/agents` does NOT include a `data_classifications` field in the JSON response (only id/name/description/owner/team/risk_tier/allowed_tools shown). The classification metadata may be set elsewhere (CAP scope) — needs separate verification.
-- Driving a chat query that maps to a pii-classified tool requires real LLM (mock blocks).
-- F8 follow-up: audit row capture is no longer blocked by missing endpoint code; the fixed handler supports event-type filtering. Runtime capture is still blocked by the mock LLM and missing classification metadata path.
-
-**Verdict:** BLOCKED on mock-LLM + classification metadata not surfaced in /api/v1/agents response. F8 endpoint-contract sub-check PASS.
-**Evidence:** Agent JSON shape verified — no `data_classifications` key.
-**P0/P1 task filed:** F8 fixed by `task-5b755f42`; P2 follow-up to surface DataClassifications in /api/v1/agents API response.
+**Verdict:** STATIC PASS; live post-deploy re-run recommended.
+**Evidence:** `core/llmchat/chat_handlers.go`; historical task-931eaea2 chain verify evidence; task-01aaa6bd step 2 build evidence.
+**P0/P1 task filed:** none.
 
 ---
 
-## Probe 9 — Session-scoped delegation revocation
+## Probe 7 — Empty AgentIdentity tool scope denies chat mutations by construction
 
-**Expected:** Close a chat session → JTI revoked in Redis → reusing the captured token on `/api/v1/jobs` (or another delegation-protected endpoint) returns 401 with `reason=delegation_revoked`.
+**Expected:** The chat-assistant identity cannot invoke any Cordum MCP tool because its registered scope has no allowed tools. Attempts to drive mutations through chat should result in explanatory assistant text, not a tool invocation or approval frame.
 
 **Procedure:**
+1. Verify bootstrap scope is empty (`AllowedTools=[]`, `PreapprovedMutatingTools=[]`).
+2. Ask chat to submit, approve, reject, cancel, or trigger work.
+3. Assert the UI receives only assistant text/error/final frames and no `tool_call` / `approval_required` frame.
+4. Query audit for `mcp.tool_invocation` with chat-assistant agent id during the test window; expect zero.
 
-1. Open chat session; capture JTI from session metadata (Redis `chat:session:{id}` HGET, or admin tool).
-2. Close session via WS close frame.
-3. Verify Redis `delegation:revoked:{jti}` key exists (`core/auth/delegation/revocation.go:14, 84`).
-4. Reuse token on a write endpoint; expect 401 + `reason=delegation_revoked`.
-5. **Adversarial extension (per step-10 self-review):** restart Redis after step 3, repeat step 4 — confirm revocation persists.
+**Actual:** Production chat no longer constructs an MCP client, no longer sends OpenAI tools, and the dashboard parser ignores retired frames. Static greps in task-01aaa6bd step 2 returned zero non-test hits for `mcp\.Client|tools/call|tool_call_id` and zero non-test `approval_required|ApprovalRequired` hits in `core/llmchat` + `cmd/cordum-llm-chat`.
 
-**Actual (worker-e2a9, 2026-04-26T17:30Z):** PARTIAL PASS by code-path verification, runtime BLOCKED.
-
-- Static evidence: revocation API at `core/auth/delegation/revocation.go:47` `(s *RedisRevocationStore) Revoke(ctx, jti, expiresAt)`. Redis key pattern `delegation:revoked:{jti}` confirmed at `revocation.go:14, 84`.
-- Runtime tests blocked: (i) Redis TLS client access from container fails with `Invalid CA Certificate File/Directory` (TLS cert path mismatch); (ii) opening + closing a chat session requires a WS client tied to the dashboard's session_id flow (out of scope without a browser/JS client); (iii) adversarial Redis restart in shared dev stack would disrupt other workers.
-
-**Verdict:** PARTIAL PASS (static); runtime BLOCKED on env (Redis TLS) + shared-stack risk.
-**Evidence:** Code refs above.
-**P0/P1 task filed:** P2 doc — Redis TLS client path inside cordum-redis-1 needs operator-runbook clarity (the TLS files are referenced but the in-container path mapping is broken in this dev env).
+**Verdict:** STATIC PASS; live adversarial prompt re-run recommended.
+**Evidence:** task-01aaa6bd steps 2 and 3.
+**P0/P1 task filed:** none.
 
 ---
 
-## Probe 10 — Cross-tenant isolation
+## Probe 9 — Session ownership and expiry remain tenant/principal scoped
 
-**Expected:** Open chat sessions as tenant-A user and tenant-B user; tenant-B "list jobs" does NOT return tenant-A's jobs; audit shows tenant-scoped filter.
+**Expected:** A persisted session ID can be resumed only by the same principal+tenant. Forged or cross-tenant session IDs are rejected. Idle sessions expire gracefully after the configured TTL. No per-session delegation token is minted, stored, or required.
 
 **Procedure:**
+1. Create a session as tenant A / principal A.
+2. Try to resume it as tenant B / principal B; expect not-found/forbidden semantics.
+3. Expire the Redis `chat:session:{id}` key and attempt resume; expect graceful session-expired/not-found handling.
+4. Inspect Redis session metadata; no delegation token/JTI fields should be present.
 
-1. `cordumctl tenant create A` and `B` (or use existing test tenants).
-2. Open two chat sessions, one per tenant.
-3. Tenant-A submits job-A; tenant-B asks "list jobs".
-4. Assert tenant-B response does NOT contain job-A.
-5. **Adversarial extension:** repeat with concurrent submit + list to test race.
+**Actual:** task-01aaa6bd removed delegation fields from `Session`, Redis metadata fields, `SetDelegation`, and handler-side delegation issuance. `sessionVisibleToUser` still enforces principal+tenant matching before resume.
 
-**Actual (worker-e2a9, 2026-04-26T17:30Z):** BLOCKED on mock-LLM + tenant-fixture absence.
-
-- `cordumctl tenant` subcommand existence not verified (likely via `cordumctl users` or organizations API). Step-7 plan assumed CLI shape; needs CLI inventory like F1.
-- Driving "list jobs" via chat requires real LLM emitting `cordum_list_jobs` (mock blocks).
-- The tenant-scoping code path itself is verified by gateway middleware at `core/controlplane/gateway/gateway.go:1498-1509` (tenant route prefixes including `/api/v1/jobs`); MCP scope filter for tenant likely at `core/mcp/registry.go` near the existing scope-filter call.
-
-**Verdict:** BLOCKED on mock-LLM + tenant-CLI inventory gap.
-**Evidence:** Tenant route prefixes confirmed in gateway.
-**P0/P1 task filed:** Mock-LLM follow-up (P2); audit cordumctl for `tenant` subcommand existence (P2 doc).
+**Verdict:** STATIC PASS; live Redis TTL re-run recommended.
+**Evidence:** `core/llmchat/session.go`, `core/llmchat/chat_handlers.go`; task-01aaa6bd step 2 grep evidence for no non-test delegation hits.
+**P0/P1 task filed:** none.
 
 ---
 
-## Probe 11 — Audit chain survives scheduler restart
+## Probe 11 — Audit/session continuity across scheduler or worker restarts
 
-**Expected:** Long-running chat session; mid-session `docker compose restart cordum-scheduler`; in-flight tool calls either complete OR get audit-logged with `reason=aborted`; chain integrity preserved.
+**Expected:** Because informational chat does not route work through scheduler/worker MCP mutation paths, scheduler or worker restarts must not corrupt chat sessions or audit-chain continuity. In-flight chat streams should either complete or return a structured provider/session error; audit chain verification remains green.
 
 **Procedure:**
+1. Start an informational chat session and keep the WS open.
+2. Restart scheduler or a worker in an isolated stack.
+3. Continue the chat session and close it.
+4. Verify session lifecycle audit events and `/api/v1/audit/verify`.
 
-1. Start mockvllm script with 5-second sleeps between turns.
-2. After 30s, `docker compose restart cordum-scheduler`.
-3. Wait for completion; verify all tool calls accounted for in audit (completed + aborted = total).
-4. Run `/api/v1/audit/verify` → expect status=ok.
+**Actual:** Static code shows no scheduler/worker dependency in the chat turn path; chat depends on Redis, the local inference provider, gateway trusted-forwarder auth, and audit chainer. Live destructive restart remains a clean-stack validation item.
 
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** DEFERRED.
-
-- F8 follow-up: the per-call audit visibility primitive is fixed in code (`/api/v1/audit/query` can list `mcp.tool_invocation` events by type/since). The destructive restart test still requires a dedicated stack running the fixed gateway binary.
-- Restarting `cordum-scheduler-1` in the SHARED dev stack would disrupt other workers concurrently working on this stack (multiple parallel agents per the chat log). Cannot run the destructive part of this probe without a dedicated stack.
-- Static prerequisite: chain integrity is verified intact (10000/10000 verified, no gaps) — see Probe 4 evidence.
-
-**Verdict:** DEFERRED on shared-stack risk; F8 endpoint-contract sub-check PASS.
-**Evidence:** F8 fix evidence from gateway/OpenAPI/MCP tests; would re-use Probe 4 verify output post-restart on a dedicated stack.
-**P0/P1 task filed:** F8 fixed by `task-5b755f42`; still recommend dedicated test stack for destructive probes.
-
----
-
-## Probe 12 — Policy bundle default enforced
-
-**Expected:** `config/llmchat/policy-default.yaml` is loaded AND ENFORCED.
-
-**Procedure (corrected per F7):**
-
-1. Confirm file present at `config/llmchat/policy-default.yaml`.
-2. Confirm chat-assistant AgentIdentity reflects the file's allow_tools (already verified in step-1: 20 allowed_tools match).
-3. Drive a chat call to a tool NOT in `allow_tools` → expect scope-deny.
-4. **Note:** the file is NOT auto-loaded into `/api/v1/policy/bundles`. Either (a) deploy step posts the file via `cordumctl policy bundle import`, OR (b) we depend on AgentIdentity scope to enforce. Both paths must be documented.
-
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** PARTIAL PASS by static evidence.
-
-- File `config/llmchat/policy-default.yaml` IS present (verified step-1).
-- chat-assistant AgentIdentity has exactly 20 allowed_tools matching the file: `cordum_approve_job, cordum_audit_query, cordum_audit_verify, cordum_cancel_job, cordum_get_job, cordum_get_run, cordum_list_agents, cordum_list_jobs, cordum_list_packs, cordum_list_pending_approvals, cordum_list_runs, cordum_list_topics, cordum_list_workers, cordum_list_workflows, cordum_query_policy, cordum_reject_job, cordum_run_timeline, cordum_status, cordum_submit_job, cordum_trigger_workflow`.
-- Total MCP tools: 27. So 7 admin/destructive tools (e.g. `cordum_install_pack`, `cordum_uninstall_pack`, `cordum_update_policy_bundle`, `cordum_register_agent`, etc.) are deliberately NOT in chat-assistant's scope. The restricted subset IS the policy bundle being applied at the AgentIdentity layer.
-- ACTIVE enforcement test (calling one of the 7 disallowed tools as chat-assistant and expecting scope-deny at runtime) is BLOCKED on mock-LLM (cannot drive chat→MCP calls via the mock backend).
-- F7 partially mitigated: file content IS reflected in live AgentIdentity. The unanswered piece is whether the scope-filter at `core/mcp/registry.go:274` denies the 7 disallowed tools at runtime when chat-assistant attempts them.
-
-**Verdict:** PARTIAL PASS (file present + scope is restricted subset = passive evidence of loading); active enforcement BLOCKED on mock-LLM.
-**Evidence:** Live `/api/v1/agents` query shows curated 20-of-27 scope.
-**P0/P1 task filed:** F7 (P1) reframe; mock-LLM follow-up (P2).
-
----
-
-## Probe 13 — Zero-trust verification (defense in depth)
-
-**Expected:** Even if AgentIdentity scoping is misconfigured, safety kernel is the last line and denies unauthorized mutations.
-
-**Procedure (corrected per F1 / `task-754d09bf`):**
-
-1. Widen chat-assistant AllowedTools through the operator CLI so the AgentIdentity scope filter no longer blocks the unauthorized mutation before the safety kernel sees it:
-
-   ```bash
-   cordumctl agent set-scope chat-assistant \
-     --allowed-tools=cordum_list_jobs,cordum_get_job,cordum_list_runs,cordum_get_run,cordum_run_timeline,cordum_list_workflows,cordum_list_packs,cordum_list_topics,cordum_list_workers,cordum_list_agents,cordum_list_pending_approvals,cordum_audit_query,cordum_audit_verify,cordum_status,cordum_query_policy,cordum_submit_job,cordum_approve_job,cordum_reject_job,cordum_cancel_job,cordum_trigger_workflow,cordum_uninstall_pack,cordum_install_pack,cordum_register_agent,cordum_update_policy_bundle \
-     --idempotency-key=governance-probe-13-widen
-   ```
-
-2. Drive an unauthorized mutation (e.g. `cordum_uninstall_pack`).
-3. Confirm SAFETY KERNEL still denies via policy bundle (audit row `decision=SafetyDeny`, same `trace_id`, and a concrete `safety_rule_id`).
-4. Restore the canonical chat-assistant scope before leaving the stack:
-
-   ```bash
-   cordumctl agent set-scope chat-assistant \
-     --allowed-tools=cordum_list_jobs,cordum_get_job,cordum_list_runs,cordum_get_run,cordum_run_timeline,cordum_list_workflows,cordum_list_packs,cordum_list_topics,cordum_list_workers,cordum_list_agents,cordum_list_pending_approvals,cordum_audit_query,cordum_audit_verify,cordum_status,cordum_query_policy,cordum_submit_job,cordum_approve_job,cordum_reject_job,cordum_cancel_job,cordum_trigger_workflow \
-     --preapproved-mutating-tools=cordum_submit_job \
-     --idempotency-key=governance-probe-13-restore
-   ```
-
-**Actual (worker-e2a9, 2026-04-26T17:25Z):** BLOCKED.
-
-- F1 follow-up: `cordumctl agent set-scope` (task-754d09bf) is now the documented operator path, so future live runs do not need to curl the CAP endpoint directly.
-- Mock-LLM blocks driving the unauthorized mutation through the chat path.
-- F8 follow-up: reading back the SafetyDeny audit row is no longer blocked by missing endpoint code; runtime remains blocked by mock-LLM and shared-stack safety.
-
-**Verdict:** BLOCKED on mock-LLM + shared-stack risk. F1 CLI path and F8 endpoint-contract sub-checks PASS once this change lands.
-**Evidence:** N/A until rerun in an isolated stack.
-**P0/P1 task filed:** F1 addressed by `task-754d09bf`, mock-LLM follow-up (P2). F8 fixed by `task-5b755f42`; shared-stack risk recommends dedicated test env.
-
----
-
-## Adversarial self-review (step-10)
-
-Walked 2026-04-27 by worker-ef86, reading the documented probe outcomes as a hostile reviewer rather than the author. Each of the 9 checks below is either a documented PASS, a fix applied in this round, or an explicit follow-up procedure that must run when the underlying probe is unblocked.
-
-| # | Hostile check | Status | Notes |
-| - | ------------- | ------ | ----- |
-| 1 | Probe 7: scope-narrowing applied atomically — no TOCTOU window where the chat could submit a mutating call between the read of the old scope and the write of the new one. | DEFERRED to first probe-7 live run. | Probe 7 itself was BLOCKED in the original governance session (then F1 + shared-stack risk); F1 is addressed by task-754d09bf, but shared-stack risk remains. The atomicity of `SetScope` is a separate property of `cap/sdk/go/agent.go` — `PUT /api/v1/agents/{id}` accepts an `Idempotency-Key` header but the gateway does NOT serialise concurrent SetScope calls today, so a TOCTOU window is theoretically possible if two operators narrow scope concurrently. **Procedure addition for the live re-run:** before issuing SetScope, capture `scope_revision` (from GET); after SetScope, GET again and assert `revision = revision_before + 1` and the response reflects the narrowed AllowedTools. Only after that confirmation should the chat-driven submit be issued. Filed as a procedure note, not a P0 — narrowing scope is an admin-only path, not chat-driven, so the practical TOCTOU surface is small. |
-| 2 | Probe 9: revocation persists across Redis restart (durability), not just in-memory. | FIX APPLIED to procedure. | Probe 9 procedure now includes an adversarial extension: `docker compose restart redis` after the Revoke succeeds, then retry the captured token on a write endpoint and confirm 401 still. Verified statically: `delegation:revoked:{jti}` is a normal Redis key (not in-memory only); persistence depends on Redis RDB/AOF config in `core/infra/store`. Filed as **P2**: confirm `cordum-redis-1` is configured with `appendonly yes` (AOF) so revocations survive even between RDB snapshots. |
-| 3 | Probe 10: cross-tenant isolation HOLDS under concurrent submit + list race. | DEFERRED to first probe-10 live run. | Probe 10 was BLOCKED on mock-LLM + tenant-fixture absence. **Procedure addition for the live re-run:** spawn two goroutines / shells — tenant-A submits in a tight 50× loop while tenant-B simultaneously polls `cordum_list_jobs` 50×. Assert tenant-B never observes any tenant-A job_id. The static reasoning argues this is safe (tenant_id is in the request JWT, no shared mutable state), but a race condition in shared cache or a query that forgets to filter would only show under contention. |
-| 4 | Probe 4: audit-verify ran AFTER buffer flush (audit buffer is async; allow 5s). | PASS. | Probe-4 evidence was captured against a stack that had been running with 10K events accumulated for hours — the async audit buffer (`core/audit/buffer.go`) had long since flushed every event. **Procedure addition** for any future probe that runs verify immediately after generating events: insert a 5s sleep before verify, and re-issue verify three times to detect any sequence gap that closes within the flush interval. |
-| 5 | Probe 13: confirmed safety kernel denies (vs. scope filter denying first). | DEFERRED to first probe-13 live run. | Procedure already requires setting AllowedTools to wildcard so scope filter passes; assertion must read `decision=SafetyDeny` from the audit row (not `agent_identity_scope_deny`). **Procedure addition:** assert audit row carries `safety_rule_id=<actual-rule>` and is tied to the same `trace_id` as the chat tool call — otherwise we cannot prove the deny came from the safety kernel and not from a different gate. |
-| 6 | Probe 11: in-flight delegation tokens preserved across scheduler restart, or invalidated. | DEFERRED to first probe-11 live run. | Delegation tokens live in Redis (`core/auth/delegation/`), not in scheduler memory, so scheduler restart should not invalidate them. **Procedure addition:** the probe-11 reproducer should explicitly capture a delegation JWT before the restart, attempt to use it after the restart, and document whether the JTI is still valid (expected: yes; unexpected: scheduler caches token validation in-memory and the cache empties on restart). |
-| 7 | Residual state cleaned (test agents, test tenants, test sessions). | PASS. | Step-9 (docs + cross-link) made no runtime mutations. Earlier sessions (steps 4-7) did not successfully mutate AgentIdentity scope (probe 7 / 13 blocked), did not create test tenants (probe 10 blocked), and did not open + leave open chat sessions (mock-LLM blocked). The single environmental residual is the orphan Docker mount at `/run/desktop/mnt/host/d/Cordum/cordum-llm-debug/` that prevented `cordum-llm-chat-1` restart during probe 1(b); that mount predates this task and is **not** a residual of this work. |
-| 8 | No real PII / API keys / tenant data leaked into evidence files. | PASS. | Grep confirms `governance-review.md` and `cap/docs/agent-registration.md` do not contain `Authorization: Bearer <real-token>`, `X-API-Key: <real-key>`, real customer names, or real PII. The chat-assistant UUID `d2315a95-7b08-40a1-8bdc-7b96858f41e6` is a dev-stack generated identifier, not sensitive. Tenant references throughout the doc are placeholders (`tenant-default`, `tenant-A`, `tenant-B`). |
-| 9 | Any temporary scope override fully reverted. | PASS. | No scope overrides were applied in this session — probes 7 and 13 were both BLOCKED before any mutating call. There is nothing to revert. The plan's hypothetical `LLMCHAT_DISABLE_SCOPE_CHECK` env var was never introduced (no such flag exists in the codebase per step-2 finding) and was never set. |
-
-**Step-10 outcome:** 4 PASS (checks 4, 7, 8, 9), 1 fix-applied-to-procedure (check 2 — Redis restart durability extension + new P2 to confirm `cordum-redis-1` AOF mode), 4 DEFERRED-to-live-run procedure additions (checks 1, 3, 5, 6). No probe needs a re-run *for the adversarial check itself* in this session because most probes are still BLOCKED at the operational layer (mock-LLM and shared-stack restart risk; F1 CLI is addressed by task-754d09bf).
+**Verdict:** STATIC PASS; destructive live restart deferred to clean stack.
+**Evidence:** `cmd/cordum-llm-chat/main.go`, `core/llmchat/agent.go`, `core/llmchat/chat_handlers.go`.
+**P0/P1 task filed:** none.
 
 ## Cross-links
 
-- [x] **cordum-site `docs-site/docs/concepts/audit.md`** — added `:::info Governance dogfooding` callout linking back to this review.
-- [x] **cordum-site `docs-site/docs/concepts/agent-protocol.md`** — added bullet under `:::info Protocol surfaces` linking to `cap/docs/agent-registration.md` and this review.
-- [x] **`cap/docs/agent-registration.md`** (new file) — documents the `AgentClient` surface and points back to this review as the senior-review dogfooding evidence. Lands as a separate cap-repo PR per the plan.
-- [x] **`cordum/CHANGELOG.md`** — Unreleased entry for governance senior review with verdict tally + filed P0/P1/P2 follow-ups.
-- [x] **`cap/CHANGELOG.md`** — Unreleased entry adding `docs/agent-registration.md` with bi-directional cross-link to this review.
-- [x] **Supply-chain gate now enforcing** — task-2cf6b514 triaged the initial 15 CRITICAL+HIGH+fixable Trivy findings against the pinned vLLM image and removed `continue-on-error: true` from the Trivy step. Per-CVE reachability analysis in [`docs/llmchat/supply-chain.md`](supply-chain.md) §4a "Initial Waiver Review".
+- Moe memory `mem-e6484160` / `project_llm_chat_informational_only` — authoritative 2026-04-28 scope-reduction directive.
+- task-01aaa6bd — implementation task that removed chat tool-calling code paths.
+- task-a72bdedf — knowledge-pack ingestion, the primary remaining deliverable for informational Q&A grounding.
+- Historical governance task: task-931eaea2. Use it only for audit-chain background; its tool-calling probes are superseded by this document.

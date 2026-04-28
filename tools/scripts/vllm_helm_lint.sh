@@ -63,9 +63,10 @@ if ! "$HELM_BIN" template "$CHART_ARG" \
 	"${values_args[@]}" \
 	--set secrets.apiKey=lint-dummy \
 	--set redis.auth.password=lint-dummy \
+	--set inference.backend=vllm-gpu \
 	>"$RENDER_TMP" 2>/dev/null; then
 	echo "[ERROR] helm template render failed for ${CHART_DIR}; cannot lint" >&2
-	"$HELM_BIN" template "$CHART_ARG" "${values_args[@]}" --set secrets.apiKey=lint-dummy --set redis.auth.password=lint-dummy >&2 || true
+	"$HELM_BIN" template "$CHART_ARG" "${values_args[@]}" --set secrets.apiKey=lint-dummy --set redis.auth.password=lint-dummy --set inference.backend=vllm-gpu >&2 || true
 	exit 2
 fi
 
@@ -74,13 +75,11 @@ expected_model=$(vllm_lint_tier_model_name)
 vllm_lint_assert_present "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+\"?${expected_model}\"?[[:space:]]*$" \
 	"helm-model-must-match-tier" "rendered Deployment must have vLLM model '${expected_model}'"
 
-# Rule: parser must be qwen3_xml; hermes + qwen3_coder forbidden.
-vllm_lint_assert_present "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+\"?qwen3_xml\"?[[:space:]]*$" \
-	"helm-parser-must-be-qwen3-xml" "rendered Deployment missing '- qwen3_xml' parser arg"
-vllm_lint_assert_absent "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+\"?hermes\"?[[:space:]]*$" \
-	"helm-parser-disallowed-hermes" "rendered Deployment must not use 'hermes' parser"
-vllm_lint_assert_absent "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+\"?qwen3_coder\"?[[:space:]]*$" \
-	"helm-parser-disallowed-qwen3-coder" "rendered Deployment must not use non-existent 'qwen3_coder' parser"
+# Rule: informational-only vLLM no longer advertises LLM tool-parser flags in Helm.
+vllm_lint_assert_absent "$RENDER_TMP" "^[[:space:]]*-[[:space:]]+--enable-auto-tool-choice[[:space:]]*$" \
+	"helm-auto-tool-choice-disallowed" "rendered Deployment must not enable auto tool choice"
+vllm_lint_assert_absent "$RENDER_TMP" "^[[:space:]]*-[[:space:]]+--tool-call-parser[[:space:]]*$" \
+	"helm-tool-call-parser-disallowed" "rendered Deployment must not configure a tool-call parser"
 
 # Rule: --max-model-len 131072.
 vllm_lint_assert_present "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+--max-model-len[[:space:]]*$" \
@@ -101,28 +100,6 @@ vllm_lint_assert_present "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+--enable-prefi
 # Rule: --disable-log-requests present.
 vllm_lint_assert_present "$RENDER_TMP" "^[[:space:]]+-[[:space:]]+--disable-log-requests[[:space:]]*$" \
 	"helm-disable-log-requests" "rendered Deployment missing --disable-log-requests (vLLM must not log prompts/request bodies)"
-
-# Rule: operator cannot flip parser via values/env override. Render once with a
-# malicious override and assert the template remains hard-pinned to qwen3_xml.
-OVERRIDE_RENDER_TMP="$(mktemp -t vllm-helm-lint-override-XXXX.yaml)"
-trap 'rm -f "${RENDER_TMP}" "${OVERRIDE_RENDER_TMP}"' EXIT
-if ! "$HELM_BIN" template "$CHART_ARG" \
-	"${values_args[@]}" \
-	--set secrets.apiKey=lint-dummy \
-	--set redis.auth.password=lint-dummy \
-	--set qwenInference.toolCallParser=qwen3_coder \
-	>"$OVERRIDE_RENDER_TMP" 2>/dev/null; then
-	echo "[ERROR] helm template render with parser override failed for ${CHART_DIR}; cannot lint fail-closed override" >&2
-	"$HELM_BIN" template "$CHART_ARG" "${values_args[@]}" \
-		--set secrets.apiKey=lint-dummy \
-		--set redis.auth.password=lint-dummy \
-		--set qwenInference.toolCallParser=qwen3_coder >&2 || true
-	exit 2
-fi
-vllm_lint_assert_present "$OVERRIDE_RENDER_TMP" "^[[:space:]]+-[[:space:]]+\"?qwen3_xml\"?[[:space:]]*$" \
-	"helm-parser-override-pinned-qwen3-xml" "parser override must still render qwen3_xml"
-vllm_lint_assert_absent "$OVERRIDE_RENDER_TMP" "^[[:space:]]+-[[:space:]]+\"?qwen3_coder\"?[[:space:]]*$" \
-	"helm-parser-override-disallowed-qwen3-coder" "parser override leaked qwen3_coder into rendered Deployment"
 
 # Rule: qwen-inference Service must be ClusterIP. Wildcard exposure
 # (LoadBalancer / NodePort) would break the zero-egress invariant.
@@ -163,7 +140,7 @@ for vf in "${VALUES_FILES[@]}"; do
 		continue
 	fi
 
-	for key in toolCallParser maxModelLen kvCacheDtype enablePrefixCaching gpuMemoryUtilization; do
+	for key in maxModelLen kvCacheDtype enablePrefixCaching gpuMemoryUtilization; do
 		if vllm_lint_have_yq; then
 			got=$(yq -r ".qwenInference.${key}" "$vf" 2>/dev/null || echo "<missing>")
 			if [ "$got" = "null" ] || [ "$got" = "<missing>" ]; then

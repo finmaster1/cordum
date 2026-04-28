@@ -1,84 +1,21 @@
-# Cordum LLM Chat Assistant — default policy bundle
+# Cordum LLM Chat Assistant � informational-only default policy bundle
 #
-# Imports the canonical scope for the `chat-assistant` agent identity
-# that cordum-llm-chat registers at boot (phase-3 task-4dbbc5c0). Apply
-# via the existing policy-bundle endpoint:
-#
-#   curl -X POST $BASE_URL/api/v1/policy/bundles \
-#     -H "Content-Type: application/json" \
-#     -H "X-API-Key: $CORDUM_API_KEY" \
-#     -d "$(yq -o=json . config/llmchat/policy-default.yaml)"
-#
-# The bundle MUST match the chat-assistant AgentIdentity byte-for-byte
-# on the preapproved-mutating set. Drift = operator confusion when the
-# UI surfaces an approval prompt for a tool the operator believed was
-# preapproved (or vice versa).
-#
-# Rail #4 (epic): PreapprovedMutatingTools starts at [cordum_submit_job]
-# only. Widening this list is an admin-policy-bundle update, not a
-# code change. Edit the `allow_tools` block below to widen, but do NOT
-# move tools into the preapproved bucket without a written rationale —
-# every preapproved-mutating tool is a fresh attack surface.
-#
-# Rail #3 (epic): no top-level `description` key on this bundle. Use
-# the `reason` metadata field plus YAML comments for documentation.
+# The chat-assistant identity is retained for entitlement, audit attribution,
+# and tenant-scoped session ownership. It has no Cordum action scope: the chat
+# service answers questions from the local knowledge pack and never invokes MCP
+# or mutates platform state. Approval gates and preapproval policies remain in
+# the main Cordum MCP/dashboard/CLI paths, not in llm-chat.
 
 version: 1
 metadata:
-  name: chat-assistant-default
-  reason: "Default scopes for the Cordum chat-assistant service (cordum-llm-chat)."
+  name: chat-assistant-informational-only
+  reason: "Yaron 2026-04-28 scope reduction: llm-chat answers documentation/configuration questions only."
 
-# Subjects this bundle applies to. The chat-assistant identity is
-# tenant-scoped at registration; the wildcard tenant pattern here means
-# the bundle applies to every tenant's chat-assistant instance.
 subjects:
   - agent_id: chat-assistant
     tenant: '*'
 
-# Read-only discovery + preapproved mutation. The chat-assistant gets
-# every list/get tool plus cordum_query_policy (so it can explain why a
-# job was denied) plus cordum_submit_job (the only preapproved
-# mutation per epic rail #4).
-allow_tools:
-  # Read-only discovery (no approval required).
-  - cordum_list_jobs
-  - cordum_get_job
-  - cordum_list_runs
-  - cordum_get_run
-  - cordum_run_timeline
-  - cordum_list_workflows
-  - cordum_list_packs
-  - cordum_list_topics
-  - cordum_list_workers
-  - cordum_list_agents
-  - cordum_list_pending_approvals
-  - cordum_audit_query
-  - cordum_audit_verify
-  - cordum_status
-  # Read-only policy inspection (no approval required).
-  - cordum_query_policy
-  # PREAPPROVED mutation: cordum_submit_job ONLY. The chat assistant
-  # can submit a job without an approval prompt; downstream policy
-  # rules (pack policy, safety kernel, workflow engine) still gate
-  # the actual job execution. Adding ANY other mutation to this list
-  # bypasses the inline approval-prompt UX.
-  - cordum_submit_job
-
-# Approval-gated mutations. The chat assistant can request these but
-# the user sees an inline Approve / Reject prompt in the dashboard
-# widget. After human approval, the tool call resumes via the WS
-# `approval_required` → `tool_result` round trip.
-approval_required_tools:
-  - cordum_approve_job
-  - cordum_reject_job
-  - cordum_cancel_job
-  - cordum_trigger_workflow
-
-# Data classifications the assistant is allowed to surface in tool
-# results. PII / restricted classifications are filtered by the gateway
-# redactor before reaching the LLM context (epic rail #7); this list
-# is the operator-facing allow-list. Widening to `restricted` requires
-# a separate policy bundle plus written justification.
+allow_tools: []
 data_classifications:
   - public
   - internal

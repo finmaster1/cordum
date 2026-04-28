@@ -159,7 +159,7 @@ the chat panel.
   `since`/`until` cursors for hot-path callers, and remove the spurious
   `chain_root` example field that the API never emitted. Closes
   task-4102015f; driven by the 10K-event p99 measurements in
-  [`docs/llmchat/governance-review.md` probe 4](../llmchat/governance-review.md#probe-4--chain-integrity-across-chat-driven-load).
+  [`docs/llmchat/governance-review.md` probe 4](../llmchat/governance-review.md#probe-4--audit-chain-integrity-across-informational-chat-sessions).
 
 ## Security
 

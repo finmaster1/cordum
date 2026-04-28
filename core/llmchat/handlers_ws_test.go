@@ -1,7 +1,6 @@
 package llmchat
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -130,84 +129,5 @@ func TestChatWSOversizeMessageClosesWithErrorFrame(t *testing.T) {
 	}
 	if frame.Type != FrameError || frame.ErrorCode != "message_too_large" {
 		t.Fatalf("frame=%+v want message_too_large error", frame)
-	}
-}
-
-func TestApprovalResumeResolvedAndRejectedOverFakeBus(t *testing.T) {
-	bus := newFakeApprovalBus()
-	runner := &scriptedChatRunner{
-		frames: [][]Frame{
-			{{Type: FrameApprovalRequired, ApprovalID: "appr-7"}},
-			{{Type: FrameApprovalRequired, ApprovalID: "appr-8"}},
-		},
-		resumeFrames: [][]Frame{
-			{{Type: FrameToolResult, ToolResult: `{"ok":true}`}, {Type: FrameFinal, Text: "approved done"}},
-			{{Type: FrameToolResult, ToolResult: "denied by human reviewer", IsError: true}, {Type: FrameFinal, Text: "The reviewer denied it."}},
-		},
-	}
-	sessions := newFakeChatSessionStore()
-	h := newTestChatHandlers(runner, sessions, true)
-	h.approvals = NewApprovalResumer(ApprovalResumerConfig{Bus: bus, Runner: runner})
-	defer func() { _ = h.approvals.Close() }()
-
-	server := httptest.NewServer(http.HandlerFunc(h.HandleChatWS))
-	defer server.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-	if err := conn.WriteJSON(chatPostRequest{Message: "mutate"}); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	var approval Frame
-	if err := conn.ReadJSON(&approval); err != nil {
-		t.Fatalf("read approval: %v", err)
-	}
-	if approval.Type != FrameApprovalRequired || approval.ApprovalID != "appr-7" {
-		t.Fatalf("approval frame=%+v", approval)
-	}
-	bus.Publish(ApprovalEvent{ApprovalID: "appr-7", AgentID: "chat-assistant", SessionID: approval.SessionID, Status: ApprovalStatusResolved})
-	got := readWSFramesUntilFinal(t, conn, 2*time.Second)
-	if got[0].Type != FrameToolResult || got[len(got)-1].Text != "approved done" {
-		t.Fatalf("resolved frames=%+v", got)
-	}
-
-	if err := conn.WriteJSON(chatPostRequest{Message: "mutate again"}); err != nil {
-		t.Fatalf("write second message: %v", err)
-	}
-	var approval2 Frame
-	if err := conn.ReadJSON(&approval2); err != nil {
-		t.Fatalf("read second approval: %v", err)
-	}
-	if approval2.Type != FrameApprovalRequired || approval2.ApprovalID != "appr-8" {
-		t.Fatalf("approval2 frame=%+v", approval2)
-	}
-	bus.Publish(ApprovalEvent{ApprovalID: "appr-8", AgentID: "chat-assistant", SessionID: approval.SessionID, Status: ApprovalStatusRejected})
-	got = readWSFramesUntilFinal(t, conn, 2*time.Second)
-	if got[0].Type != FrameToolResult || !got[0].IsError || got[0].ToolResult != "denied by human reviewer" {
-		raw, _ := json.Marshal(got)
-		t.Fatalf("rejected frames=%s want synthetic error tool_result first", raw)
-	}
-	if got[len(got)-1].Type != FrameFinal || got[len(got)-1].Text == "denied by human reviewer" {
-		t.Fatalf("rejected final=%+v want LLM-narrated continuation", got[len(got)-1])
-	}
-}
-
-func readWSFramesUntilFinal(t *testing.T, conn *websocket.Conn, timeout time.Duration) []Frame {
-	t.Helper()
-	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		t.Fatalf("set read deadline: %v", err)
-	}
-	var frames []Frame
-	for {
-		var f Frame
-		if err := conn.ReadJSON(&f); err != nil {
-			t.Fatalf("read frame before final: %v; frames=%+v", err, frames)
-		}
-		frames = append(frames, f)
-		if f.Type == FrameFinal {
-			return frames
-		}
 	}
 }

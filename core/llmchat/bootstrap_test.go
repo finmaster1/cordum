@@ -142,7 +142,7 @@ func existingChatAssistant(id, tenant string) *capsdk.AgentIdentity {
 		Name:                     "chat-assistant",
 		Owner:                    "system",
 		Team:                     "system",
-		RiskTier:                 "medium",
+		RiskTier:                 "low",
 		AllowedTools:             expectedAllowedTools(),
 		PreapprovedMutatingTools: expectedPreapprovedMutatingTools(),
 		DataClassifications:      expectedDataClassifications(),
@@ -188,8 +188,8 @@ func TestBootstrap_LookupMiss_RegistersAndSetsScope(t *testing.T) {
 		if spec.Name != "chat-assistant" {
 			t.Errorf("Register name = %q, want chat-assistant", spec.Name)
 		}
-		if spec.RiskTier != "medium" {
-			t.Errorf("Register risk_tier = %q, want medium", spec.RiskTier)
+		if spec.RiskTier != "low" {
+			t.Errorf("Register risk_tier = %q, want low", spec.RiskTier)
 		}
 		// The Register payload MUST hit the AgentSpec shape, which
 		// has no PreapprovedMutatingTools field at all (rail #2: only
@@ -210,7 +210,7 @@ func TestBootstrap_LookupMiss_RegistersAndSetsScope(t *testing.T) {
 			t.Errorf("SetScope AgentID = %q, want chat-assistant-new", update.AgentID)
 		}
 		if !setsEqual(update.PreapprovedMutatingTools, expectedPreapprovedMutatingTools()) {
-			t.Errorf("SetScope preapproved_mutating_tools = %v, want [cordum_submit_job] only",
+			t.Errorf("SetScope preapproved_mutating_tools = %v, want empty informational-only scope",
 				update.PreapprovedMutatingTools)
 		}
 		if !setsEqual(update.AllowedTools, expectedAllowedTools()) {
@@ -315,9 +315,9 @@ func TestBootstrap_DivergentScopeRejected(t *testing.T) {
 		return &capsdk.AgentIdentity{
 			ID:                       "chat-assistant-bad",
 			Name:                     "chat-assistant",
-			RiskTier:                 "medium",
-			AllowedTools:             []string{"cordum_list_jobs"}, // missing the rest
-			PreapprovedMutatingTools: []string{"cordum_submit_job", "cordum_approve_job"},
+			RiskTier:                 "low",
+			AllowedTools:             []string{"cordum_list_jobs"}, // informational-only must be empty
+			PreapprovedMutatingTools: []string{"cordum_submit_job"},
 			DataClassifications:      []string{"public"},
 		}, nil
 	}

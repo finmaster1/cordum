@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Probe 11: Audit chain survives scheduler restart
-# task-931eaea2, see docs/llmchat/governance-review.md for full procedure.
+# Probe 11: Audit/session continuity across scheduler or worker restarts
+# task-01aaa6bd scope-reduced review; see docs/llmchat/governance-review.md.
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common-fixture.sh

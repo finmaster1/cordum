@@ -53,6 +53,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 RUN adduser -D -u 65532 cordum
+
+# LLM chat's informational-only knowledge pack is baked into the image for
+# Helm/default deployments; Docker Compose can override these with read-only
+# bind mounts for local development. The files are small (~1.1 MiB total) and
+# harmless for the shared service image.
+RUN mkdir -p /etc/cordum/site-content
+COPY --from=builder --chown=cordum:cordum /src/docs/api/openapi/cordum-api.yaml /etc/cordum/openapi.yaml
+COPY --from=builder --chown=cordum:cordum /src/docs-site/docs /etc/cordum/site-content
+
 USER cordum
 WORKDIR /home/cordum
 

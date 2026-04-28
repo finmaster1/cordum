@@ -47,6 +47,10 @@ cd cordum
 ≥ 4 GB RAM allocated), Go 1.24+ (for first-run cert generation), and
 `curl`. On Windows use MSYS2 / Git Bash / WSL.
 
+The optional LLM Chat Assistant uses Ollama + Qwen2.5-Coder-3B by default
+and also runs on a 4 GB+ Docker host. GPU-backed vLLM + Qwen3-Coder-30B
+is available only as an explicit opt-in profile.
+
 **What you get at the end:**
 - Dashboard at http://localhost:8082 (admin / admin123).
 - Gateway at http://localhost:8081 with a generated `CORDUM_API_KEY` in
@@ -179,6 +183,11 @@ export REDIS_PASSWORD=$(openssl rand -hex 16)
 docker compose pull         # pulls every Cordum service from ghcr.io
 docker compose up -d        # starts the stack — no source build needed
 ```
+
+`docker compose up -d` uses the CPU-local LLM backend (Ollama +
+Qwen2.5-Coder-3B). To opt into the larger GPU backend, set
+`LLMCHAT_OPS_BACKEND=vllm-gpu`, `LLMCHAT_BASE_URL=http://qwen-inference:8000/v1`,
+`LLMCHAT_MODEL=qwen3-coder`, and run `docker compose --profile gpu up -d`.
 
 **Dashboard:** http://localhost:8082
 **Login:** `admin` / `admin123` (change in `.env` → `CORDUM_ADMIN_PASSWORD`)
@@ -323,7 +332,7 @@ Other useful contributor commands:
 | `make build SERVICE=cordumctl` | Build a single service. |
 | `make test` | Run the full Go test suite. |
 | `make smoke` | Quick post-deploy smoke against a running stack. |
-| `go test -tags=eval ./tests/eval/...` | Run the LLM-chat tool-call eval harness against `EVAL_LLMCHAT_URL` + `EVAL_VLLM_URL` with eval trusted-identity env and an Enterprise/eval license enabling `llm_chat_assistant`. See [`docs/llmchat/model-version-bump.md`](docs/llmchat/model-version-bump.md) before bumping `qwenInference.model`. |
+| `go test -tags=eval ./tests/eval/...` | Run the LLM-chat eval harness against `EVAL_LLMCHAT_URL` plus the selected local inference backend. See [`docs/llmchat/model-version-bump.md`](docs/llmchat/model-version-bump.md) before changing the chat model. |
 
 ## Key Features
 

@@ -15,8 +15,6 @@ func TestNewMetrics_ExportsRequiredFamilies(t *testing.T) {
 	families := gatherMetricFamilies(t, reg)
 	required := []string{
 		"chat_sessions_active",
-		"chat_tool_calls_total",
-		"chat_approval_required_total",
 		"chat_vllm_latency_seconds",
 		"chat_token_budget_used_total",
 		"chat_errors_total",
@@ -53,27 +51,12 @@ func TestNewMetrics_LabelNamesBoundedAndSafe(t *testing.T) {
 			}
 
 			switch family.GetName() {
-			case "chat_tool_calls_total":
-				assertLabelNames(t, family.GetName(), metric.GetLabel(), "tool")
 			case "chat_errors_total":
 				assertLabelNames(t, family.GetName(), metric.GetLabel(), "kind")
 			default:
 				assertLabelNames(t, family.GetName(), metric.GetLabel())
 			}
 		}
-	}
-}
-
-func TestMetrics_RejectsUnknownToolValues(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	m := NewMetrics(reg)
-
-	m.IncToolCall("some_unknown_tool")
-
-	family := gatherMetricFamilies(t, reg)["chat_tool_calls_total"]
-	metric := findMetricByLabelValue(t, family, "tool", "unknown")
-	if got := metric.GetCounter().GetValue(); got != 1 {
-		t.Fatalf("unknown tool counter = %v, want 1", got)
 	}
 }
 

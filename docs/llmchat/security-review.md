@@ -8,9 +8,17 @@ Scope: `cordum-llm-chat`, dashboard chat widget, qwen-inference/vLLM packaging, 
 
 ## Executive summary
 
-Result: **BLOCKED for the live senior-security checkpoint**.
+Result: **PENDING LIVE EVIDENCE ON CPU STACK**.
 
-The static/unit-backed harness is still useful and currently passes, but QA reopen #1 correctly identified that several attack surfaces require live clean-compose evidence. This document must not be read as a production PASS until `LLMCHAT_SECURITY_REQUIRE_LIVE=1` succeeds on an owned runner with real local vLLM/Qwen3-Coder (not the dev mock).
+Yaron's 2026-04-26 directive is to **switch to a CPU LLM model for now**. This is the same formal scope decision captured by `task-a5d09fad`: the GPU/H100 security rerun is deferred to the GPU-staging follow-up, while the interim live security checkpoint runs on the owned CPU vLLM stack. The CPU stack is still real local vLLM/Qwen3-Coder, **not** the `docker-compose.dev.yml` Python mock:
+
+- Compose profile: `llmchat-cpu`
+- Inference service: `qwen-inference-cpu`
+- Chat service: `llm-chat-cpu`
+- Model: `Qwen/Qwen3-Coder-30B-A3B-Instruct-AWQ`
+- Parser: `qwen3_xml` (same pinned tool-call parser as the GPU path)
+
+The static/unit-backed harness is still useful and currently passes, but QA reopen #1 correctly identified that several attack surfaces require live clean-compose evidence. This document must not be read as a production PASS until `LLMCHAT_SECURITY_REQUIRE_LIVE=1` succeeds on the owned CPU stack with real local vLLM/Qwen3-Coder (or later on the GPU stack), with no `not_run`/`not_asserted` evidence markers.
 
 | Metric | Count |
 | --- | ---: |
@@ -59,7 +67,7 @@ cd cordum
 bash tests/security/llmchat_run_all.sh
 ```
 
-Clean Compose/live review on a dedicated runner:
+Clean Compose/live review on a dedicated CPU runner:
 
 ```bash
 cd cordum
@@ -68,6 +76,9 @@ LLMCHAT_SECURITY_COMPOSE_UP=1 \
 LLMCHAT_SECURITY_LIVE=1 \
 LLMCHAT_SECURITY_RUN_LOAD=1 \
 LLMCHAT_SECURITY_RUN_FLOOD=1 \
+LLMCHAT_SECURITY_BACKEND=cpu-vllm-awq \
+LLMCHAT_SECURITY_COMPOSE_PROFILE=llmchat-cpu \
+LLMCHAT_QWEN_CONTAINER=cordum-qwen-inference-cpu-1 \
 bash tests/security/llmchat_run_all.sh
 ```
 

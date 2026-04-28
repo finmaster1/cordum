@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# vllm_config_lint.sh â€” phase-10 hard gate against vLLM config drift in
-# docker-compose. Asserts the qwen-inference service ships the exact
-# parser, model, sampling flags, and host-port boundary the LLM-chat
-# epic prescribes. If ANY rule violates, exits non-zero (count of
-# violations) so CI fails the PR.
-#
-# Rules are deliberately strict: phase-7 shipped the wrong parser
-# (`hermes` instead of `qwen3_xml`) before this gate existed and burned
-# a QA cycle. The lint exists to make that class of bug impossible to
-# re-introduce.
+# vllm_config_lint.sh — hard gate against vLLM config drift in
+# docker-compose. Asserts the qwen-inference service ships the expected
+# model, context/cache flags, log-suppression flag, and host-port boundary.
+# Informational-only chat must not render LLM tool-parser flags.
 #
 # Usage: bash tools/scripts/vllm_config_lint.sh [compose-file ...]
 # Default targets: docker-compose.yml + docker-compose.release.yml.
@@ -53,15 +47,11 @@ for file in "${TARGETS[@]}"; do
 	vllm_lint_assert_present "$file" "^[[:space:]]*-[[:space:]]+${expected_model}[[:space:]]*$" \
 		"model-must-match-tier" "expected vLLM model '${expected_model}' (CORDUM_LLMCHAT_TIER=${CORDUM_LLMCHAT_TIER:-1})"
 
-	# Rule: parser must be qwen3_xml. The phase-7 incident shipped
-	# `hermes` which produces malformed tool-call deltas; `qwen3_coder`
-	# is not an upstream-vLLM parser at all.
-	vllm_lint_assert_present "$file" "^[[:space:]]*-[[:space:]]+qwen3_xml[[:space:]]*$" \
-		"parser-must-be-qwen3-xml" "missing '- qwen3_xml' parser arg"
-	vllm_lint_assert_absent "$file" "^[[:space:]]*-[[:space:]]+hermes[[:space:]]*$" \
-		"parser-disallowed-hermes" "disallowed parser '- hermes' present (use qwen3_xml)"
-	vllm_lint_assert_absent "$file" "^[[:space:]]*-[[:space:]]+qwen3_coder[[:space:]]*$" \
-		"parser-disallowed-qwen3-coder" "disallowed parser '- qwen3_coder' present (not a real upstream parser; use qwen3_xml)"
+	# Rule: informational-only vLLM no longer advertises LLM tool-parser flags.
+	vllm_lint_assert_absent "$file" "^[[:space:]]*-[[:space:]]+--enable-auto-tool-choice[[:space:]]*$" \
+		"auto-tool-choice-disallowed" "informational-only vLLM must not enable auto tool choice"
+	vllm_lint_assert_absent "$file" "^[[:space:]]*-[[:space:]]+--tool-call-parser[[:space:]]*$" \
+		"tool-call-parser-disallowed" "informational-only vLLM must not configure a tool-call parser"
 
 	# Rule: --max-model-len 131072 (the model's full context window).
 	vllm_lint_assert_present "$file" "^[[:space:]]*-[[:space:]]+--max-model-len[[:space:]]*$" \
@@ -79,9 +69,8 @@ for file in "${TARGETS[@]}"; do
 	vllm_lint_assert_present "$file" "^[[:space:]]*-[[:space:]]+--enable-prefix-caching[[:space:]]*$" \
 		"enable-prefix-caching" "missing '--enable-prefix-caching' flag"
 
-	# Rule: --disable-log-requests. vLLM must not log chat prompts/tool
-	# results because probe traffic intentionally contains synthetic JWT/API-key
-	# shapes and production traffic can contain tenant secrets.
+	# Rule: --disable-log-requests. vLLM must not log chat prompts because
+	# production traffic can contain tenant secrets.
 	vllm_lint_assert_present "$file" "^[[:space:]]*-[[:space:]]+--disable-log-requests[[:space:]]*$" \
 		"disable-log-requests" "missing '--disable-log-requests' (vLLM must not log prompts/request bodies)"
 

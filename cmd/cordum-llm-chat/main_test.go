@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/pem"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,10 +27,8 @@ func TestRegisterMetricsHandlerExposesPrometheusEndpoint(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := llmchat.NewMetrics(reg)
 	metrics.IncSessions()
-	metrics.IncApprovalRequired()
 	metrics.ObserveVLLMLatency(250 * time.Millisecond)
 	metrics.IncTokenBudgetUsed(42)
-	metrics.IncToolCall("cordum_list_jobs")
 	metrics.IncError("vllm_call_failed")
 
 	mux := http.NewServeMux()
@@ -53,8 +52,6 @@ func TestRegisterMetricsHandlerExposesPrometheusEndpoint(t *testing.T) {
 	body := string(rawBody)
 	for _, name := range []string{
 		"chat_sessions_active",
-		"chat_tool_calls_total",
-		"chat_approval_required_total",
 		"chat_vllm_latency_seconds_bucket",
 		"chat_token_budget_used_total",
 		"chat_errors_total",
@@ -65,18 +62,18 @@ func TestRegisterMetricsHandlerExposesPrometheusEndpoint(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFromEnv_DefaultsWhenOnlyRequiredSet(t *testing.T) {
+func TestLoadConfigFromEnv_DefaultsToOllamaCPUBackend(t *testing.T) {
 	cfg, err := loadConfigFromEnv(fakeEnv(map[string]string{
 		"REDIS_URL": "redis://localhost:6379/0",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if cfg.Backend != backendOllamaCPU {
+		t.Fatalf("Backend = %q, want %q", cfg.Backend, backendOllamaCPU)
+	}
 	if cfg.ChatAssistantAgentID != "" {
 		t.Errorf("ChatAssistantAgentID = %q, want empty (unpinned)", cfg.ChatAssistantAgentID)
-	}
-	if cfg.DelegationTTL != defaultDelegationTTL {
-		t.Errorf("DelegationTTL = %v, want %v", cfg.DelegationTTL, defaultDelegationTTL)
 	}
 	if cfg.HTTPAddr != defaultHTTPAddr {
 		t.Fatalf("HTTPAddr = %q, want %q", cfg.HTTPAddr, defaultHTTPAddr)
@@ -84,32 +81,17 @@ func TestLoadConfigFromEnv_DefaultsWhenOnlyRequiredSet(t *testing.T) {
 	if cfg.Provider.Kind != defaultProvider {
 		t.Fatalf("Provider.Kind = %q, want %q", cfg.Provider.Kind, defaultProvider)
 	}
-	if cfg.Provider.BaseURL != defaultBaseURL {
-		t.Fatalf("Provider.BaseURL = %q, want %q", cfg.Provider.BaseURL, defaultBaseURL)
+	if cfg.Provider.BaseURL != defaultOllamaBaseURL {
+		t.Fatalf("Provider.BaseURL = %q, want %q", cfg.Provider.BaseURL, defaultOllamaBaseURL)
 	}
-	if cfg.Provider.Model != defaultModel {
-		t.Fatalf("Provider.Model = %q, want %q", cfg.Provider.Model, defaultModel)
+	if cfg.Provider.Model != defaultOllamaModel {
+		t.Fatalf("Provider.Model = %q, want %q", cfg.Provider.Model, defaultOllamaModel)
 	}
-	if cfg.Provider.ToolTemperature != defaultToolTemperature {
-		t.Fatalf("ToolTemperature = %v, want %v", cfg.Provider.ToolTemperature, defaultToolTemperature)
+	if cfg.Provider.ResponseTemperature != defaultResponseTemperature {
+		t.Fatalf("ResponseTemperature = %v, want %v", cfg.Provider.ResponseTemperature, defaultResponseTemperature)
 	}
-	if cfg.Provider.ToolTopP != defaultToolTopP {
-		t.Fatalf("ToolTopP = %v, want %v", cfg.Provider.ToolTopP, defaultToolTopP)
-	}
-	if cfg.Provider.SummaryTemperature != defaultSummaryTemperature {
-		t.Fatalf("SummaryTemperature = %v, want %v", cfg.Provider.SummaryTemperature, defaultSummaryTemperature)
-	}
-	if cfg.Provider.SummaryTopP != defaultSummaryTopP {
-		t.Fatalf("SummaryTopP = %v, want %v", cfg.Provider.SummaryTopP, defaultSummaryTopP)
-	}
-	if cfg.Budget.MaxToolCallsPerTurn != defaultMaxToolCallsPerTurn {
-		t.Fatalf("MaxToolCallsPerTurn = %d, want %d", cfg.Budget.MaxToolCallsPerTurn, defaultMaxToolCallsPerTurn)
-	}
-	if cfg.Budget.MaxWallClockPerTurn != defaultMaxWallClockPerTurn {
-		t.Fatalf("MaxWallClockPerTurn = %v, want %v", cfg.Budget.MaxWallClockPerTurn, defaultMaxWallClockPerTurn)
-	}
-	if cfg.Budget.MaxAssistantBytes != defaultMaxAssistantBytes {
-		t.Fatalf("MaxAssistantBytes = %d, want %d", cfg.Budget.MaxAssistantBytes, defaultMaxAssistantBytes)
+	if cfg.Provider.ResponseTopP != defaultResponseTopP {
+		t.Fatalf("ResponseTopP = %v, want %v", cfg.Provider.ResponseTopP, defaultResponseTopP)
 	}
 }
 
@@ -123,29 +105,58 @@ func TestLoadConfigFromEnv_MissingRedisURL(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromEnv_VLLMGPUBackendDefaults(t *testing.T) {
+	cfg, err := loadConfigFromEnv(fakeEnv(map[string]string{
+		"REDIS_URL":           "redis://localhost:6379/0",
+		"LLMCHAT_OPS_BACKEND": "vllm-gpu",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Backend != backendVLLMGPU {
+		t.Fatalf("Backend = %q, want %q", cfg.Backend, backendVLLMGPU)
+	}
+	if cfg.Provider.BaseURL != defaultVLLMBaseURL {
+		t.Fatalf("Provider.BaseURL = %q, want %q", cfg.Provider.BaseURL, defaultVLLMBaseURL)
+	}
+	if cfg.Provider.Model != defaultVLLMModel {
+		t.Fatalf("Provider.Model = %q, want %q", cfg.Provider.Model, defaultVLLMModel)
+	}
+}
+
+func TestLoadConfigFromEnv_RejectsInvalidBackend(t *testing.T) {
+	_, err := loadConfigFromEnv(fakeEnv(map[string]string{
+		"REDIS_URL":           "redis://localhost:6379/0",
+		"LLMCHAT_OPS_BACKEND": "llamacpp",
+	}))
+	if err == nil {
+		t.Fatal("expected invalid backend error, got nil")
+	}
+	want := "unsupported LLMCHAT_OPS_BACKEND=llamacpp; allowed: ollama-cpu, vllm-gpu"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestLoadConfigFromEnv_AllOverridesRead(t *testing.T) {
 	cfg, err := loadConfigFromEnv(fakeEnv(map[string]string{
 		"REDIS_URL":                       "redis://custom:6379/1",
-		"NATS_URL":                        "nats://nats:4222",
 		"CORDUM_API_KEY":                  "sekret",
 		"CORDUM_GATEWAY_URL":              "https://gateway.internal:8443",
 		"CORDUM_LLM_CHAT_ADDR":            ":9090",
 		"CORDUM_LLM_CHAT_TLS_CERT_FILE":   "/tls/tls.crt",
 		"CORDUM_LLM_CHAT_TLS_KEY_FILE":    "/tls/tls.key",
+		"LLMCHAT_OPS_BACKEND":             "vllm-gpu",
 		"LLMCHAT_PROVIDER":                "openai",
-		"LLMCHAT_BASE_URL":                "http://vllm:8000/v1",
-		"LLMCHAT_MODEL":                   "qwen3-coder",
+		"LLMCHAT_BASE_URL":                "https://vllm.internal/v1",
+		"LLMCHAT_MODEL":                   "qwen3-custom",
 		"LLMCHAT_API_KEY":                 "token",
-		"LLMCHAT_TOOL_TEMPERATURE":        "0.35",
-		"LLMCHAT_TOOL_TOP_P":              "0.88",
 		"LLMCHAT_SUMMARY_TEMPERATURE":     "0.72",
 		"LLMCHAT_SUMMARY_TOP_P":           "0.81",
-		"LLMCHAT_MAX_TOOL_CALLS_PER_TURN": "24",
 		"LLMCHAT_MAX_WALL_CLOCK_PER_TURN": "90s",
 		"LLMCHAT_MAX_ASSISTANT_BYTES":     "65536",
 		"LLMCHAT_CHAT_ASSISTANT_AGENT_ID": "chat-assistant-prod",
 		"LLMCHAT_TENANT":                  "tenant-a",
-		"LLMCHAT_DELEGATION_TTL_SECONDS":  "1200",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -162,32 +173,23 @@ func TestLoadConfigFromEnv_AllOverridesRead(t *testing.T) {
 	if cfg.GatewayURL != "https://gateway.internal:8443" {
 		t.Fatalf("GatewayURL = %q, want https://gateway.internal:8443", cfg.GatewayURL)
 	}
-	if cfg.NATSURL != "nats://nats:4222" {
-		t.Fatalf("NATSURL = %q, want nats://nats:4222", cfg.NATSURL)
+	if cfg.Backend != backendVLLMGPU {
+		t.Fatalf("Backend = %q, want %q", cfg.Backend, backendVLLMGPU)
+	}
+	if cfg.Provider.BaseURL != "https://vllm.internal/v1" {
+		t.Fatalf("BaseURL = %q, want override", cfg.Provider.BaseURL)
+	}
+	if cfg.Provider.Model != "qwen3-custom" {
+		t.Fatalf("Model = %q, want qwen3-custom", cfg.Provider.Model)
 	}
 	if cfg.Provider.APIKey != "token" {
 		t.Fatalf("APIKey = %q, want token", cfg.Provider.APIKey)
 	}
-	if cfg.Provider.ToolTemperature != 0.35 {
-		t.Fatalf("ToolTemperature = %v, want 0.35", cfg.Provider.ToolTemperature)
+	if cfg.Provider.ResponseTemperature != 0.72 {
+		t.Fatalf("ResponseTemperature = %v, want 0.72", cfg.Provider.ResponseTemperature)
 	}
-	if cfg.Provider.ToolTopP != 0.88 {
-		t.Fatalf("ToolTopP = %v, want 0.88", cfg.Provider.ToolTopP)
-	}
-	if cfg.Provider.SummaryTemperature != 0.72 {
-		t.Fatalf("SummaryTemperature = %v, want 0.72", cfg.Provider.SummaryTemperature)
-	}
-	if cfg.Provider.SummaryTopP != 0.81 {
-		t.Fatalf("SummaryTopP = %v, want 0.81", cfg.Provider.SummaryTopP)
-	}
-	if cfg.Budget.MaxToolCallsPerTurn != 24 {
-		t.Fatalf("MaxToolCallsPerTurn = %d, want 24", cfg.Budget.MaxToolCallsPerTurn)
-	}
-	if cfg.Budget.MaxWallClockPerTurn != 90*time.Second {
-		t.Fatalf("MaxWallClockPerTurn = %v, want 90s", cfg.Budget.MaxWallClockPerTurn)
-	}
-	if cfg.Budget.MaxAssistantBytes != 65536 {
-		t.Fatalf("MaxAssistantBytes = %d, want 65536", cfg.Budget.MaxAssistantBytes)
+	if cfg.Provider.ResponseTopP != 0.81 {
+		t.Fatalf("ResponseTopP = %v, want 0.81", cfg.Provider.ResponseTopP)
 	}
 	if cfg.ChatAssistantAgentID != "chat-assistant-prod" {
 		t.Errorf("ChatAssistantAgentID = %q, want chat-assistant-prod", cfg.ChatAssistantAgentID)
@@ -195,8 +197,33 @@ func TestLoadConfigFromEnv_AllOverridesRead(t *testing.T) {
 	if cfg.Tenant != "tenant-a" {
 		t.Errorf("Tenant = %q, want tenant-a", cfg.Tenant)
 	}
-	if cfg.DelegationTTL != 1200*time.Second {
-		t.Errorf("DelegationTTL = %v, want 1200s", cfg.DelegationTTL)
+}
+
+func TestLogActiveBackend(t *testing.T) {
+	cfg := runtimeConfig{
+		Backend: backendOllamaCPU,
+		Provider: llmchat.ProviderConfig{
+			BaseURL: defaultOllamaBaseURL,
+			Model:   defaultOllamaModel,
+		},
+	}
+	var buf strings.Builder
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(orig)
+
+	logActiveBackend(cfg)
+
+	got := buf.String()
+	for _, want := range []string{
+		`msg="llm-chat backend active"`,
+		`backend=ollama-cpu`,
+		`base_url=http://ollama:11434/v1`,
+		`model=qwen2.5-coder:3b-instruct-q4_K_M`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("log output %q missing %s", got, want)
+		}
 	}
 }
 
@@ -209,16 +236,6 @@ func TestLoadConfigFromEnv_AcceptsMissingAgentIDPin(t *testing.T) {
 	}
 	if cfg.ChatAssistantAgentID != "" {
 		t.Errorf("ChatAssistantAgentID = %q, want empty (pin is optional; bootstrap resolves it)", cfg.ChatAssistantAgentID)
-	}
-}
-
-func TestLoadConfigFromEnv_RejectsZeroDelegationTTL(t *testing.T) {
-	_, err := loadConfigFromEnv(fakeEnv(map[string]string{
-		"REDIS_URL":                      "redis://localhost:6379/0",
-		"LLMCHAT_DELEGATION_TTL_SECONDS": "0",
-	}))
-	if err == nil {
-		t.Fatal("expected error for zero LLMCHAT_DELEGATION_TTL_SECONDS")
 	}
 }
 
@@ -242,11 +259,8 @@ func TestLoadConfigFromEnv_TLSPairMustMatch(t *testing.T) {
 
 func TestLoadConfigFromEnv_RejectsMalformedNumbers(t *testing.T) {
 	cases := map[string]string{
-		"LLMCHAT_TOOL_TEMPERATURE":        "not-a-float",
-		"LLMCHAT_TOOL_TOP_P":              "abc",
 		"LLMCHAT_SUMMARY_TEMPERATURE":     "inf!",
 		"LLMCHAT_SUMMARY_TOP_P":           "oops",
-		"LLMCHAT_MAX_TOOL_CALLS_PER_TURN": "twelve",
 		"LLMCHAT_MAX_WALL_CLOCK_PER_TURN": "sixty",
 		"LLMCHAT_MAX_ASSISTANT_BYTES":     "big",
 	}

@@ -69,12 +69,76 @@ services:
       args:
         SERVICE: cordum-llm-chat
 
+  ollama:
+    # Contributor default: replace the real Ollama pull with a tiny
+    # OpenAI-compatible local mock so `docker compose -f docker-compose.yml
+    # -f docker-compose.dev.yml up --build` exercises the default
+    # Ollama/Qwen2.5-Coder path without downloading model weights.
+    image: python:3.12-alpine
+    command:
+      - sh
+      - -c
+      - |
+        cat >/tmp/mock_openai.py <<'PY'
+        import json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        MODEL = "qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                return
+
+            def _json(self, status, payload):
+                raw = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_GET(self):
+                if self.path == "/api/tags":
+                    self._json(200, {"models": [{"name": MODEL}]})
+                    return
+                if self.path == "/v1/models":
+                    self._json(200, {
+                        "object": "list",
+                        "data": [{"id": MODEL, "object": "model", "owned_by": "cordum-dev-mock"}],
+                    })
+                    return
+                self._json(404, {"error": "not found"})
+
+            def do_POST(self):
+                if self.path != "/v1/chat/completions":
+                    self._json(404, {"error": "not found"})
+                    return
+                self.rfile.read(int(self.headers.get("Content-Length", "0") or "0"))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                frame = {"choices": [{"index": 0, "delta": {"content": "Cordum dev mock LLM is healthy."}, "finish_reason": "stop"}]}
+                self.wfile.write(("data: " + json.dumps(frame) + "\n\n").encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+
+        ThreadingHTTPServer(("0.0.0.0", 11434), Handler).serve_forever()
+        PY
+        python /tmp/mock_openai.py
+    volumes: !reset []
+    ports: !reset []
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:11434/api/tags >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 2s
+
   qwen-inference:
     # Dev machines often do not have an NVIDIA runtime. The base compose file
-    # keeps production on real vLLM/Qwen; this contributor override replaces it
-    # with a tiny local OpenAI-compatible mock so the dashboard chat health gate
-    # can be exercised without CUDA or any external egress. Operators testing
-    # real vLLM should omit docker-compose.dev.yml or provide their own override.
+    # keeps the opt-in gpu profile on real vLLM/Qwen; this contributor override
+    # replaces it with a tiny local OpenAI-compatible mock for `--profile gpu`
+    # config/smoke runs. The default dev path uses the ollama mock above.
     image: python:3.12-alpine
     command:
       - sh

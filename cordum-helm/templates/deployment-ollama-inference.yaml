@@ -1,4 +1,5 @@
-{{- if .Values.ollamaInference.enabled }}
+{{- $backend := include "cordum.inferenceBackend" . }}
+{{- if and (eq $backend "ollama-cpu") .Values.ollamaInference.enabled }}
 {{- if .Values.ollamaInference.modelsCache.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -44,10 +45,9 @@ spec:
     spec:
       containers:
         - name: ollama-inference
-          # Pin floor: 0.5.7 — first stable tag that emits OpenAI streaming
-          # `delta.tool_calls[]` arrays. Earlier tags embed tool calls as
-          # JSON in the content field and silently break the chat-loop
-          # tool dispatch. Bump only via tools/scripts/ollama_pin_digest.sh.
+          # Pin floor: 0.5.7 - stable OpenAI-compatible streaming support
+          # for local informational Q&A. Bump only via
+          # tools/scripts/ollama_pin_digest.sh.
           image: "{{ .Values.ollamaInference.image.repository }}:{{ .Values.ollamaInference.image.tag }}"
           imagePullPolicy: {{ .Values.ollamaInference.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
@@ -56,6 +56,11 @@ spec:
               ollama serve &
               until ollama list >/dev/null 2>&1; do sleep 1; done
               ollama pull {{ .Values.ollamaInference.model | quote }}
+              cat > /tmp/Modelfile <<'MFEOF'
+              FROM {{ .Values.ollamaInference.model }}
+              PARAMETER num_ctx {{ .Values.ollamaInference.contextLength }}
+              MFEOF
+              ollama create {{ .Values.ollamaInference.servedModelName | quote }} -f /tmp/Modelfile
               wait
           env:
             - name: OLLAMA_HOST
@@ -71,6 +76,8 @@ spec:
               value: "1"
             - name: OLLAMA_MAX_LOADED_MODELS
               value: "1"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: {{ .Values.ollamaInference.contextLength | quote }}
           ports:
             - name: openai
               containerPort: 11434
@@ -81,7 +88,7 @@ spec:
             - name: models
               mountPath: /root/.ollama
           {{- end }}
-          # First pull is a single ~4.5 GB download; budget the readiness
+          # First pull is a single ~2 GB download; budget the readiness
           # probe so the kubelet does not kill the pod before the model
           # registers in /api/tags.
           readinessProbe:

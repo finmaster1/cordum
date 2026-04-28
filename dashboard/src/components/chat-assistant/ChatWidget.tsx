@@ -8,14 +8,11 @@ import { useChatAssistantAvailability } from "@/hooks/useChatAssistantAvailabili
 import { ChatStream } from "./ChatStream";
 import { ChatComposer } from "./ChatComposer";
 
-// OWASP LLM09 — operator-overreliance affordance. The disclaimer is
-// rendered persistently below the composer so it stays in view even
-// when the transcript scrolls. Copy is intentionally specific: it names
-// the two real defense layers (approval gate + audit chain) so an
-// operator cannot reasonably claim they thought the assistant could
-// act unilaterally.
+// OWASP LLM09 — operator-overreliance affordance. The disclaimer is rendered
+// persistently below the composer so users never mistake informational guidance
+// for an executed Cordum action.
 const ADVISORY_DISCLAIMER =
-  "Assistant suggestions are advisory. Cordum's approval gate and audit chain are what execute and record actions — verify args before approving any state-changing tool call.";
+  "Informational only: this chat explains Cordum docs and configuration, but does not execute actions. Use the dashboard or CLI for jobs, workflows, and approvals.";
 
 export function ChatWidget() {
   const availability = useChatAssistantAvailability();

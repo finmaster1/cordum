@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// FEATURE_FLAGS reads import.meta.env at module load — by the time tests
-// run the values are frozen, so each test toggles the flag via this mock.
 const flagsMock = vi.hoisted(() => ({
   FEATURE_FLAGS: {
     governanceTimeline: false,
@@ -55,7 +53,6 @@ describe("ChatHeaderButton", () => {
       http.get("*/api/v1/chat/healthz", () => HttpResponse.json({}, { status: 200 })),
     );
     renderWithProviders(<ChatHeaderButton />);
-    // Allow useLicense + healthz polling to settle.
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByRole("button", { name: /chat assistant/i })).toBeNull();
   });
@@ -92,20 +89,13 @@ describe("ChatHeaderButton", () => {
     expect(screen.queryByRole("button", { name: /chat assistant/i })).toBeNull();
   });
 
-  it("toggles the panel via store on click and shows badge for pending approvals", async () => {
+  it("toggles the panel via store on click and shows unread badge only", async () => {
     server.use(
       http.get("*/api/v1/license", () => HttpResponse.json(enterpriseLicense)),
       http.get("*/api/v1/chat/healthz", () => HttpResponse.json({}, { status: 200 })),
     );
     act(() => {
-      useChatAssistantStore.getState().applyFrame({
-        type: "approval_required",
-        id: "msg-1",
-        toolCallId: "tc-1",
-        approvalId: "appr-1",
-        tool: "cordum_approve_job",
-        args: {},
-      });
+      useChatAssistantStore.getState().applyFrame({ type: "assistant_delta", id: "msg-1", delta: "hello" });
     });
     renderWithProviders(<ChatHeaderButton />);
     const btn = await screen.findByRole("button", { name: /open chat assistant/i });

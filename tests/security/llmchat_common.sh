@@ -11,6 +11,36 @@ GATEWAY_URL="${LLMCHAT_GATEWAY_URL:-http://127.0.0.1:8081}"
 LLMCHAT_DIRECT_URL="${LLMCHAT_DIRECT_URL:-http://127.0.0.1:8090}"
 VLLM_URL="${LLMCHAT_VLLM_URL:-http://127.0.0.1:8000}"
 CURL_TIMEOUT_SECONDS="${LLMCHAT_CURL_TIMEOUT_SECONDS:-10}"
+# LLMCHAT_SECURITY_BACKEND legal values:
+#   ollama-cpu     — production default: Ollama + Qwen2.5-Coder-3B (CPU)
+#   vllm-gpu/gpu-fp8 — opt-in GPU profile: vLLM + Qwen3-Coder-30B-FP8
+#   cpu-vllm-awq   — legacy/interim CPU vLLM profile; non-default
+#   ""             — backward-compatible alias for ollama-cpu
+LLMCHAT_SECURITY_BACKEND="${LLMCHAT_SECURITY_BACKEND:-ollama-cpu}"
+if [ "${LLMCHAT_SECURITY_BACKEND}" = "cpu-vllm-awq" ] && [ -z "${LLMCHAT_CURL_TIMEOUT_SECONDS:-}" ]; then
+  CURL_TIMEOUT_SECONDS="120"
+fi
+if [ "${LLMCHAT_SECURITY_BACKEND}" = "cpu-vllm-awq" ] && [ -z "${LLMCHAT_VLLM_URL:-}" ]; then
+  VLLM_URL="http://127.0.0.1:8001"
+fi
+if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -z "${LLMCHAT_CURL_TIMEOUT_SECONDS:-}" ]; then
+  CURL_TIMEOUT_SECONDS="600"
+fi
+if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -z "${LLMCHAT_VLLM_URL:-}" ]; then
+  # Kept as VLLM_URL for backward-compatible probe variable names; this is
+  # Ollama's OpenAI-compatible /v1 surface.
+  VLLM_URL="http://127.0.0.1:11434"
+fi
+if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -z "${LLMCHAT_DIRECT_URL:-}" ]; then
+  LLMCHAT_DIRECT_URL="http://127.0.0.1:8092"
+fi
+# Convenience for local clean-compose probes: source non-sensitive runtime
+# values from .env without echoing them into evidence. curl_status_body
+# redacts auth-bearing headers before logging commands.
+if [ -z "${CORDUM_API_KEY:-}" ] && [ -f "${REPO_ROOT}/.env" ]; then
+  CORDUM_API_KEY="$(grep -E '^CORDUM_API_KEY=' "${REPO_ROOT}/.env" | tail -1 | cut -d= -f2-)"
+  export CORDUM_API_KEY
+fi
 PYTHON_BIN="${LLMCHAT_PYTHON_BIN:-}"
 if [ -z "${PYTHON_BIN}" ]; then
   if command -v python >/dev/null 2>&1; then
@@ -57,6 +87,10 @@ probe_init() {
   log_evidence "probe=${PROBE_ID}"
   log_evidence "repo_root=${REPO_ROOT}"
   log_evidence "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  log_evidence "backend=${LLMCHAT_SECURITY_BACKEND:-any-real}"
+  if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ]; then
+    require_real_vllm
+  fi
 }
 
 log_evidence() {
@@ -88,24 +122,33 @@ probe_skip() {
   exit 77
 }
 
+probe_retired() {
+  local msg="${1:-retired/superseded by informational-only rescope}"
+  log_evidence "scope=retired"
+  log_evidence "status=RETIRED message=${msg}"
+  exit 0
+}
+
 live_evidence_not_run() {
   local key="$1"
   shift
   local reason="$*"
-  log_evidence "${key}=not_run reason=${reason}"
   if [ "${LLMCHAT_SECURITY_REQUIRE_LIVE:-0}" = "1" ]; then
+    log_evidence "${key}=not_run reason=${reason}"
     probe_skip "live evidence required but ${key} was not run: ${reason}"
   fi
+  log_evidence "${key}=optional_not_run reason=${reason}"
 }
 
 live_evidence_inconclusive() {
   local key="$1"
   shift
   local reason="$*"
-  log_evidence "${key}=not_asserted reason=${reason}"
   if [ "${LLMCHAT_SECURITY_REQUIRE_LIVE:-0}" = "1" ]; then
+    log_evidence "${key}=not_asserted reason=${reason}"
     probe_fail "live evidence required but ${key} was inconclusive: ${reason}"
   fi
+  log_evidence "${key}=optional_not_asserted reason=${reason}"
 }
 
 require_cmd() {
@@ -198,7 +241,10 @@ curl_status_body() {
   local body_file="$2"
   shift 2
   record_section "curl ${label}"
-  log_evidence "+ curl $*"
+  local redacted_args
+  redacted_args="$*"
+  redacted_args=$(printf '%s' "${redacted_args}" | sed -E 's/(Authorization: (Bearer )?)[^"[:space:]]+/\1<redacted>/g; s/(X-API-Key: )[A-Za-z0-9._:-]+/\1<redacted>/g')
+  log_evidence "+ curl ${redacted_args}"
   set +e
   local status
   status=$(curl -k -sS --max-time "${CURL_TIMEOUT_SECONDS}" -o "${body_file}" -w '%{http_code}' "$@" 2>>"${EVIDENCE_FILE}")
@@ -250,14 +296,111 @@ require_live_stack() {
   if [ "${LLMCHAT_SECURITY_LIVE:-0}" != "1" ]; then
     probe_skip "live stack probe disabled; rerun with LLMCHAT_SECURITY_LIVE=1 after clean compose-up"
   fi
+  require_real_vllm
+}
+
+require_real_vllm() {
+  case "${LLMCHAT_SECURITY_BACKEND}" in
+    ""|ollama-cpu|vllm-gpu|gpu-fp8|cpu-vllm-awq) ;;
+    *) probe_fail "unsupported LLMCHAT_SECURITY_BACKEND=${LLMCHAT_SECURITY_BACKEND}; allowed: ollama-cpu, vllm-gpu/gpu-fp8, cpu-vllm-awq, or empty" ;;
+  esac
+
+  local default_container="cordum-ollama-1"
+  local expected_model="qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
+  local require_qwen_parser="0"
+  local backend_label="real Ollama"
+  if [ "${LLMCHAT_SECURITY_BACKEND}" = "cpu-vllm-awq" ]; then
+    default_container="cordum-qwen-inference-cpu-1"
+    expected_model="Qwen/Qwen3-Coder-30B-A3B-Instruct-AWQ"
+  elif [ "${LLMCHAT_SECURITY_BACKEND}" = "gpu-fp8" ] || [ "${LLMCHAT_SECURITY_BACKEND}" = "vllm-gpu" ]; then
+    default_container="cordum-qwen-inference-1"
+    expected_model="Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"
+  elif [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] || [ -z "${LLMCHAT_SECURITY_BACKEND}" ]; then
+    default_container="cordum-ollama-1"
+    expected_model="qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
+    require_qwen_parser="0"
+    backend_label="real Ollama"
+  fi
+
+  local cmdline_file="${PROBE_OUT_DIR}/qwen-cmdline.txt"
+  if command -v docker >/dev/null 2>&1; then
+    docker exec "${LLMCHAT_QWEN_CONTAINER:-${default_container}}" sh -c "tr '\000' ' ' </proc/1/cmdline" >"${cmdline_file}" 2>>"${EVIDENCE_FILE}" || true
+  fi
+  if [ ! -s "${cmdline_file}" ]; then
+    log_evidence "qwen_cmdline=unavailable"
+    probe_skip "${backend_label} cmdline unavailable; run with a matching inference container"
+  fi
+  sed -e 's/^/qwen_cmdline: /' "${cmdline_file}" >>"${EVIDENCE_FILE}"
+
+  if grep -E 'mock_openai|python.*mock|python:3' "${cmdline_file}" >/dev/null 2>&1; then
+    probe_skip "inference service is the dev Python mock, not ${backend_label}; security evidence would be invalid"
+  fi
+  if [ "${require_qwen_parser}" = "1" ]; then
+    grep -q -- '--tool-call-parser qwen3_xml' "${cmdline_file}" || probe_fail "real vLLM parser is not qwen3_xml"
+    if [ -n "${expected_model}" ]; then
+      grep -q -- "${expected_model}" "${cmdline_file}" || probe_fail "real vLLM model does not match ${expected_model} for backend=${LLMCHAT_SECURITY_BACKEND}"
+    fi
+  else
+    grep -E 'ollama|/bin/sh|ollama serve' "${cmdline_file}" >/dev/null 2>&1 || probe_fail "Ollama backend cmdline is not recognizable"
+  fi
+
+  local models_file="${PROBE_OUT_DIR}/vllm-models.json"
+  curl -sS --max-time "${CURL_TIMEOUT_SECONDS}" "${VLLM_URL}/v1/models" >"${models_file}" 2>>"${EVIDENCE_FILE}" || true
+  if [ ! -s "${models_file}" ]; then
+    log_evidence "inference_models=unavailable url=${VLLM_URL}/v1/models"
+    probe_skip "${backend_label} /v1/models unavailable at ${VLLM_URL}; live security evidence cannot be asserted"
+  fi
+  sed -e 's/^/models: /' "${models_file}" >>"${EVIDENCE_FILE}"
+  if grep -E '"owned_by"[[:space:]]*:[[:space:]]*"cordum-dev-mock"|cordum-dev-mock' "${models_file}" >/dev/null 2>&1; then
+    probe_skip "inference /v1/models is the dev mock (owned_by=cordum-dev-mock), not ${backend_label}"
+  fi
+  if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ] && [ -n "${expected_model}" ]; then
+    grep -q -- "${expected_model}" "${models_file}" || probe_fail "Ollama model list does not include ${expected_model}"
+  fi
 }
 
 compose_clean_up() {
-  local profile="${LLMCHAT_SECURITY_COMPOSE_PROFILE:-llmchat}"
+  local profile="${LLMCHAT_SECURITY_COMPOSE_PROFILE:-}"
+  if [ -z "${profile}" ]; then
+    if [ "${LLMCHAT_SECURITY_BACKEND}" = "cpu-vllm-awq" ]; then
+      profile="llmchat-cpu"
+    elif [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ]; then
+      profile="llmchat-ollama"
+    else
+      profile="llmchat"
+    fi
+  fi
   record_section "clean compose baseline"
   log_evidence "profile=${profile}"
-  run_capture "docker compose down -v" docker compose --profile "${profile}" down -v || return $?
+  if [ "${LLMCHAT_SECURITY_BACKEND}" = "ollama-cpu" ]; then
+    run_capture "docker compose down -v all llmchat profiles" docker compose --profile llmchat --profile llmchat-cpu --profile llmchat-ollama down -v || return $?
+  else
+    run_capture "docker compose down -v" docker compose --profile "${profile}" down -v || return $?
+  fi
   run_capture "docker compose up -d --build" docker compose --profile "${profile}" up -d --build || return $?
+  wait_inference_ready
+}
+
+wait_inference_ready() {
+  local timeout="${LLMCHAT_SECURITY_READY_TIMEOUT_SECONDS:-900}"
+  local start now status
+  start=$(date +%s)
+  record_section "wait inference ready"
+  log_evidence "url=${VLLM_URL}/v1/models timeout_seconds=${timeout}"
+  while true; do
+    status=$(curl -k -sS --max-time 5 -o "${PROBE_OUT_DIR}/models-wait.json" -w '%{http_code}' "${VLLM_URL}/v1/models" 2>>"${EVIDENCE_FILE}" || true)
+    if [ "${status}" = "200" ]; then
+      sed -e 's/^/models_ready: /' "${PROBE_OUT_DIR}/models-wait.json" >>"${EVIDENCE_FILE}" || true
+      log_evidence "inference_ready_status=200"
+      return 0
+    fi
+    now=$(date +%s)
+    if [ $((now - start)) -ge "${timeout}" ]; then
+      log_evidence "inference_ready_status=${status}"
+      return 1
+    fi
+    sleep 5
+  done
 }
 
 jwt_payload_decode() {

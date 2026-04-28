@@ -16,7 +16,7 @@ CURL_TIMEOUT_SECONDS="${LLMCHAT_CURL_TIMEOUT_SECONDS:-10}"
 #   gpu-fp8        — vLLM + Qwen3-Coder-30B-FP8 (production GPU profile)
 #   cpu-vllm-awq   — vLLM + Qwen3-Coder-30B-AWQ (CPU/16-24GB RAM)
 #   ollama-cpu     — Ollama + Qwen2.5-Coder-3B-Q4_K_M (CPU/~2GB RAM, default)
-LLMCHAT_OPS_BACKEND="${LLMCHAT_OPS_BACKEND:-gpu-fp8}"
+LLMCHAT_OPS_BACKEND="${LLMCHAT_OPS_BACKEND:-ollama-cpu}"
 
 PYTHON_BIN="${LLMCHAT_PYTHON_BIN:-}"
 if [ -z "${PYTHON_BIN}" ]; then

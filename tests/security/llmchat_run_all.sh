@@ -22,6 +22,27 @@ PROBES=(
   llmchat_probe_12_entitlement_bypass.sh
 )
 
+# 2026-04-28 informational-only/Ollama rescope: these historical
+# tool-calling/vLLM-parser/MCP-flood probes still emit evidence, but are not
+# scored as production blockers. Retained probes continue to fail closed.
+RETIRED_PROBES=(
+  llmchat_probe_03_preapproved_mutation
+  llmchat_probe_04_prompt_injection
+  llmchat_probe_05_parser_pinning
+  llmchat_probe_10_rate_limit
+)
+
+is_retired_probe() {
+  local probe="$1"
+  local retired
+  for retired in "${RETIRED_PROBES[@]}"; do
+    if [ "${probe}" = "${retired}" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 mkdir -p "${SECURITY_OUT_DIR}"
 RESULTS_TSV="${SECURITY_OUT_DIR}/security-review-results.tsv"
 RESULTS_JSON="${SECURITY_OUT_DIR}/security-review-results.json"
@@ -38,6 +59,7 @@ fi
 pass=0
 fail=0
 skip=0
+retired=0
 live_missing=0
 
 for probe in "${PROBES[@]}"; do
@@ -59,6 +81,9 @@ for probe in "${PROBES[@]}"; do
     set -e
     if [ "${code}" -eq 0 ]; then
       status="PASS"
+      if is_retired_probe "${name}"; then
+        status="RETIRED"
+      fi
     elif [ "${code}" -eq 77 ]; then
       status="SKIP"
     else
@@ -70,6 +95,7 @@ for probe in "${PROBES[@]}"; do
   duration=$((end - start))
   case "${status}" in
     PASS) pass=$((pass + 1)) ;;
+    RETIRED) retired=$((retired + 1)) ;;
     SKIP) skip=$((skip + 1)) ;;
     FAIL) fail=$((fail + 1)) ;;
   esac
@@ -84,7 +110,7 @@ while IFS=$'\t' read -r probe status code duration evidence stdout stderr; do
   fi
 done <"${RESULTS_TSV}"
 
-${PYTHON_BIN} - "${RESULTS_TSV}" "${RESULTS_JSON}" "${pass}" "${fail}" "${skip}" "${live_missing}" <<'PY'
+${PYTHON_BIN} - "${RESULTS_TSV}" "${RESULTS_JSON}" "${pass}" "${fail}" "${skip}" "${retired}" "${live_missing}" <<'PY'
 import csv, json, sys
 rows = []
 with open(sys.argv[1], newline='', encoding='utf-8') as f:
@@ -105,8 +131,10 @@ summary = {
     "pass": int(sys.argv[3]),
     "fail": int(sys.argv[4]),
     "skip": int(sys.argv[5]),
-    "live_missing": int(sys.argv[6]),
+    "retired": int(sys.argv[6]),
+    "live_missing": int(sys.argv[7]),
     "total": len(rows),
+    "scored_total": int(sys.argv[3]) + int(sys.argv[4]) + int(sys.argv[5]),
     "live_required": bool(__import__('os').environ.get('LLMCHAT_SECURITY_REQUIRE_LIVE') == '1'),
 }
 with open(sys.argv[2], 'w', encoding='utf-8') as f:
@@ -132,9 +160,9 @@ fi
 # green PASS is not mistaken for full DoD coverage. The previous behavior printed
 # only "OK: pass=N" which let live_missing markers go unnoticed in CI/PR review.
 if [ "${live_missing}" -gt 0 ]; then
-  echo "[llmchat_run_all] PARTIAL: pass=${pass} skip=${skip} fail=${fail}, live_missing=${live_missing} (set LLMCHAT_SECURITY_REQUIRE_LIVE=1 on a GPU/clean-stack runner to gate-check live probes); results=${RESULTS_JSON}"
+  echo "[llmchat_run_all] PARTIAL: pass=${pass} retired=${retired} skip=${skip} fail=${fail}, live_missing=${live_missing} (set LLMCHAT_SECURITY_REQUIRE_LIVE=1 on an owned clean-stack runner to gate-check retained live probes); results=${RESULTS_JSON}"
   exit 0
 fi
 
-echo "[llmchat_run_all] OK: pass=${pass} skip=${skip} fail=${fail}; results=${RESULTS_JSON}"
+echo "[llmchat_run_all] OK: pass=${pass} retired=${retired} skip=${skip} fail=${fail}; results=${RESULTS_JSON}"
 exit 0

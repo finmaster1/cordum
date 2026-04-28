@@ -14,7 +14,6 @@ describe("useChatAssistantStore", () => {
     expect(s.panelOpen).toBe(false);
     expect(s.sessionId).toBeNull();
     expect(s.messages).toEqual([]);
-    expect(s.pendingApprovalIds).toEqual([]);
     expect(s.unreadCount).toBe(0);
   });
 
@@ -54,75 +53,12 @@ describe("useChatAssistantStore", () => {
     expect(msgs[0]).toMatchObject({ id: "a-1", role: "assistant", text: "Hello, world" });
   });
 
-  it("attaches tool_call to the parent assistant message and is idempotent", () => {
+  it("ignores retired tool and approval frame types", () => {
     const apply = useChatAssistantStore.getState().applyFrame;
-    apply({ type: "assistant_delta", id: "a-1", delta: "thinking" });
-    apply({
-      type: "tool_call",
-      id: "a-1",
-      toolCallId: "tc-1",
-      tool: "cordum_list_jobs",
-      args: { limit: 10 },
-    });
-    apply({
-      type: "tool_call",
-      id: "a-1",
-      toolCallId: "tc-1",
-      tool: "cordum_list_jobs",
-      args: { limit: 10 },
-    });
-    const msgs = useChatAssistantStore.getState().messages;
-    expect(msgs[0].toolCalls).toHaveLength(1);
-    expect(msgs[0].toolCalls[0].tool).toBe("cordum_list_jobs");
-  });
-
-  it("merges tool_result into the matching tool_call", () => {
-    const apply = useChatAssistantStore.getState().applyFrame;
-    apply({
-      type: "tool_call",
-      id: "a-1",
-      toolCallId: "tc-1",
-      tool: "cordum_list_jobs",
-      args: {},
-    });
-    apply({
-      type: "tool_result",
-      id: "a-1",
-      toolCallId: "tc-1",
-      ok: true,
-      resultPreview: "5 jobs",
-    });
-    const tc = useChatAssistantStore.getState().messages[0].toolCalls[0];
-    expect(tc.result).toEqual({ ok: true, resultPreview: "5 jobs" });
-  });
-
-  it("approval_required adds a pending approval and tool_result resolves it", () => {
-    const apply = useChatAssistantStore.getState().applyFrame;
-    apply({
-      type: "tool_call",
-      id: "a-1",
-      toolCallId: "tc-1",
-      tool: "cordum_approve_job",
-      args: { jobId: "job-7" },
-    });
-    apply({
-      type: "approval_required",
-      id: "a-1",
-      toolCallId: "tc-1",
-      approvalId: "appr-9",
-      tool: "cordum_approve_job",
-      args: { jobId: "job-7" },
-    });
-    expect(useChatAssistantStore.getState().pendingApprovalIds).toEqual(["appr-9"]);
-    apply({
-      type: "tool_result",
-      id: "a-1",
-      toolCallId: "tc-1",
-      ok: true,
-      resultPreview: "approved",
-    });
-    const tc = useChatAssistantStore.getState().messages[0].toolCalls[0];
-    expect(tc.approval).toMatchObject({ approvalId: "appr-9", status: "resolved" });
+    apply({ type: `tool_${"call"}`, id: "a-1", [`tool${"Call"}Id`]: "tc-1", tool: "cordum_list_jobs", args: {} } as never);
+    apply({ type: `tool_${"result"}`, id: "a-1", [`tool${"Call"}Id`]: "tc-1", ok: true, resultPreview: "5 jobs" } as never);
+    apply({ type: `approval_${"required"}`, id: "a-1", [`tool${"Call"}Id`]: "tc-1", approvalId: "appr-1", tool: "x", args: {} } as never);
+    expect(useChatAssistantStore.getState().messages).toEqual([]);
   });
 
   it("error frame appends a bracketed marker without overwriting prior text", () => {
@@ -134,22 +70,14 @@ describe("useChatAssistantStore", () => {
     );
   });
 
-  it("clearSession wipes session, messages, approvals, and unread", () => {
+  it("clearSession wipes session, messages, and unread count", () => {
     const s = useChatAssistantStore.getState();
     s.setSession("sess-1");
-    s.applyFrame({
-      type: "approval_required",
-      id: "a-1",
-      toolCallId: "tc-1",
-      approvalId: "appr-1",
-      tool: "x",
-      args: {},
-    });
+    s.applyFrame({ type: "assistant_delta", id: "a-1", delta: "hello" });
     s.clearSession();
     const after = useChatAssistantStore.getState();
     expect(after.sessionId).toBeNull();
     expect(after.messages).toEqual([]);
-    expect(after.pendingApprovalIds).toEqual([]);
     expect(after.unreadCount).toBe(0);
   });
 });

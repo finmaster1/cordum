@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Removed
+
+#### LLM Chat Assistant — informational-only scope reduction (task-01aaa6bd)
+- Removed chat-to-MCP execution paths, chat approval-frame handling, per-session chat delegation tokens, chat action-parser deployment flags, obsolete governance probes 03/05/06/08/10/12/13, and dashboard inline approval/action cards after Yaron's 2026-04-28 directive (`project_llm_chat_informational_only`) that llm-chat should answer Cordum docs/API/configuration questions only.
+- The chat-assistant CAP identity now boots as low-risk with empty action scope; mutations remain available through the existing dashboard, CLI, and MCP clients outside llm-chat.
+
 ### Added
 
 #### LLM Chat Assistant — Senior ops review evidence (task-8eab552b)
@@ -282,6 +288,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **LLM Chat Assistant default backend (task-d38e26c0)** — production inference default switched from vLLM + Qwen3-Coder-30B to Ollama + Qwen2.5-Coder-3B. vLLM remains available as an explicit opt-in via `--profile gpu` (Compose) / `inference.backend: vllm-gpu` (Helm). Driven by Yaron’s 2026-04-28 informational-only directive and architect-9b28’s “u decide” backend decision.
 - **core: extracted Unix-timestamp → RFC3339 formatter into `core/infra/timeutil` (task-e396a874)** — 5 inline formatters migrated: `FormatUnixAuto` (handlers_chat.go magnitude cascade) + typed `FromSeconds`/`FromMillis`/`FromMicros`/`FromNanos` for compile-time-known units. Byte-for-byte identical output; empty string on `ts<=0` preserved per site.
 - **core: extracted `proto.Clone((*pb.JobRequest))` guard-pattern into `core/protocol/protoutil.CloneJobRequest` (task-625b2ed1)** — 4 inline call sites migrated to one helper with typed ok-check + nil guard. See the paired `Fixed` entry for the latent saga.go:322 nil-deref this closed. JobMetadata clone sites in saga.go not migrated (different type, separate follow-up if drift emerges).
 - **gateway: removed packs_compat.go + policy_compat.go (task-a828e179)** — 233 lines of pure-alias shims deleted. Every caller (~40 files) now imports `core/controlplane/gateway/packs` or `core/controlplane/gateway/policybundles` directly and uses the fully-qualified `packs.PascalCase` / `policybundles.PascalCase` shape. `resolveAgentForAudit` moved to `handlers_agents.go`. Internal refactor; no public API change.

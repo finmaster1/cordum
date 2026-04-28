@@ -17,7 +17,7 @@ func TestMockProvider_ScriptedChunks(t *testing.T) {
 
 	ch, err := m.Complete(context.Background(), CompleteRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
-	}, SamplingModeSummary)
+	}, SamplingModeResponse)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestMockProvider_CapturesRequestAndMode(t *testing.T) {
 	m := NewMockProvider()
 	req := CompleteRequest{Messages: []Message{{Role: "user", Content: "ping"}}}
 
-	ch, err := m.Complete(context.Background(), req, SamplingModeToolCalls)
+	ch, err := m.Complete(context.Background(), req, SamplingModeResponse)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -57,8 +57,8 @@ func TestMockProvider_CapturesRequestAndMode(t *testing.T) {
 	if len(gotReq.Messages) != 1 || gotReq.Messages[0].Content != "ping" {
 		t.Errorf("captured request = %+v, want one user message 'ping'", gotReq)
 	}
-	if gotMode != SamplingModeToolCalls {
-		t.Errorf("captured mode = %v, want %v", gotMode, SamplingModeToolCalls)
+	if gotMode != SamplingModeResponse {
+		t.Errorf("captured mode = %v, want %v", gotMode, SamplingModeResponse)
 	}
 	if got := m.Calls(); got != 1 {
 		t.Errorf("Calls = %d, want 1", got)
@@ -69,7 +69,7 @@ func TestMockProvider_EmptyScriptStillCloses(t *testing.T) {
 	t.Parallel()
 
 	m := NewMockProvider()
-	ch, err := m.Complete(context.Background(), CompleteRequest{}, SamplingModeSummary)
+	ch, err := m.Complete(context.Background(), CompleteRequest{}, SamplingModeResponse)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -87,7 +87,6 @@ func TestMockProvider_ContextCancel(t *testing.T) {
 	t.Parallel()
 
 	m := NewMockProvider()
-	// Long script so the goroutine will block on out<- past the cancel.
 	long := make([]Chunk, 0, 32)
 	for range 32 {
 		long = append(long, Chunk{Delta: "tick"})
@@ -95,14 +94,13 @@ func TestMockProvider_ContextCancel(t *testing.T) {
 	m.SetScript(long)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel before draining
+	cancel()
 
-	ch, err := m.Complete(ctx, CompleteRequest{}, SamplingModeSummary)
+	ch, err := m.Complete(ctx, CompleteRequest{}, SamplingModeResponse)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
-	// Drain whatever the mock emits; the channel must close.
 	for c := range ch {
 		if c.Err != nil && !errors.Is(c.Err, context.Canceled) {
 			t.Fatalf("unexpected err on chunk = %v", c.Err)

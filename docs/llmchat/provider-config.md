@@ -1,115 +1,51 @@
-# LLM Chat Assistant — Provider + sampling configuration
+# LLM Chat provider configuration
 
-Every operator-tunable knob for the `cordum-llm-chat` service is an
-environment variable. This page documents all of them with defaults
-and the reasoning behind each.
+`cordum-llm-chat` reads provider configuration from environment variables at startup. Invalid backend selection fails closed so operators see a clear misconfiguration instead of a silent fallback.
 
-## Core provider
+## Backend selection
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `LLMCHAT_PROVIDER` | `openai` | Inference provider adapter. Currently only `openai` (which speaks the OpenAI-compatible API that vLLM serves). |
-| `LLMCHAT_BASE_URL` | `http://qwen-inference:8000/v1` | OpenAI-compatible endpoint URL. Default points at the in-cluster vLLM sidecar. Override to point at a shared inference cluster (loses zero-egress posture; see `helm.md` external-vLLM mode). |
-| `LLMCHAT_MODEL` | `qwen3-coder` | The `--served-model-name` vLLM was launched with. The chat-assistant uses this verbatim in the OpenAI `model` field. |
-| `LLMCHAT_API_KEY` | empty | Optional. Forwarded as `Authorization: Bearer ...` to the inference endpoint when set. Unset for in-cluster vLLM (no auth needed). |
+| Env var | Default | Description |
+|---|---:|---|
+| `LLMCHAT_OPS_BACKEND` | `ollama-cpu` | Backend identity. Allowed values: `ollama-cpu`, `vllm-gpu`. Invalid values abort startup with `unsupported LLMCHAT_OPS_BACKEND=<value>; allowed: ollama-cpu, vllm-gpu`. |
+| `LLMCHAT_PROVIDER` | `openai` | Provider implementation. The local Ollama and vLLM paths both use the OpenAI-compatible API. |
+| `LLMCHAT_BASE_URL` | backend-specific | OpenAI-compatible `/v1` root. Default is `http://ollama:11434/v1` for `ollama-cpu`, `http://qwen-inference:8000/v1` for `vllm-gpu`. |
+| `LLMCHAT_MODEL` | backend-specific | Default is `qwen2.5-coder:3b-instruct-q4_K_M` in the binary; Compose/Helm set the ctx32k local Ollama tag. vLLM served model name is `qwen3-coder`. |
+| `LLMCHAT_API_KEY` | empty | Optional bearer token for external/shared inference endpoints. Local Ollama/vLLM do not require it. |
 
-## Two-pass sampling
+## Informational-answer sampling
 
-The chat agent runs each turn in **two phases** with different
-sampling parameters. The split exists because tool-call args and
-natural-language summaries have opposite quality bars.
+| Env var | Default | Description |
+|---|---:|---|
+| `LLMCHAT_SUMMARY_TEMPERATURE` | `0.7` | Response temperature for the single informational-answer path. |
+| `LLMCHAT_SUMMARY_TOP_P` | `0.8` | Top-p for the informational-answer path. |
+| `LLMCHAT_MAX_WALL_CLOCK_PER_TURN` | `60s` | Per-turn wall-clock guardrail. Compose raises this for local CPU inference. |
+| `LLMCHAT_MAX_ASSISTANT_BYTES` | `32768` | Maximum assistant output bytes per turn. |
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `LLMCHAT_TOOL_TEMPERATURE` | `0.3` | Temperature for the **tool-call phase**. Low so tool args are deterministic — `{"limit": 50}` instead of `{"limit": 47}` on the same prompt. Drift in tool args breaks idempotency and confuses the audit log. |
-| `LLMCHAT_TOOL_TOP_P` | `0.9` | Top-p for the tool-call phase. Pairs with the low temperature to cut the long tail. |
-| `LLMCHAT_SUMMARY_TEMPERATURE` | `0.7` | Temperature for the **natural-language summarization phase** (the prose the user reads). Higher so explanations don't feel robotic — same job-deny outcome can be narrated 3 different ways across sessions. |
-| `LLMCHAT_SUMMARY_TOP_P` | `0.8` | Top-p for the summary phase. |
+Tool-calling knobs from the original design are retired for chat. Mutations remain in the dashboard, CLI, and normal API workflows.
 
-**Why two phases.** A single phase forces a tradeoff: low-temp gives
-correct-but-monotone prose; high-temp gives lively prose that
-randomizes filter values. The two-pass split lets us pin tool args
-deterministically while keeping summaries fresh.
+## Knowledge pack
 
-If a customer reports "tool arguments are flaky", verify
-`LLMCHAT_TOOL_TEMPERATURE ≤ 0.3`. If they report "the explanations
-all sound the same", `LLMCHAT_SUMMARY_TEMPERATURE` may be too low.
+| Env var | Default | Description |
+|---|---:|---|
+| `LLMCHAT_KNOWLEDGE_PACK_ENABLED` | `true` | Enables local OpenAPI/docs substitution into the prompt. |
+| `LLMCHAT_KNOWLEDGE_PACK_BUDGET` | `65536` | Per-blob token budget used by the knowledge-pack loader. |
+| `LLMCHAT_OPENAPI_PATH` | `/etc/cordum-llm-chat/openapi.yaml` | Local OpenAPI spec path. |
+| `LLMCHAT_CORDUM_IO_PATH` | `/etc/cordum-llm-chat/cordum-io` | Local curated docs path. |
 
-## Per-turn budgets
+## Examples
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `LLMCHAT_MAX_TOOL_CALLS_PER_TURN` | `12` | Hard ceiling on tool calls per user message. Stops runaway loops where the LLM keeps calling `cordum_get_job` on the same id. |
-| `LLMCHAT_MAX_WALL_CLOCK_PER_TURN` | `60s` | Per-turn timeout. Aborts the loop if the model + tool calls exceed this. |
-| `LLMCHAT_MAX_ASSISTANT_BYTES` | `32768` | Truncates the final assistant text to keep responses readable. Raise for chat sessions doing big-data summarization. |
-
-## vLLM command (correct flag form)
-
-The `qwen-inference` sidecar must be launched with this exact flag
-form. Phase 7 ships these in `docker-compose.yml` and
-`cordum-helm/templates/deployment-qwen-inference.yaml`; the values are
-also pinned in `cordum-helm/values.yaml.qwenInference.*`.
-
-```text
-vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8 \
-  --served-model-name qwen3-coder \
-  --enable-auto-tool-choice \
-  --tool-call-parser qwen3_xml \
-  --max-model-len 131072 \
-  --kv-cache-dtype fp8 \
-  --enable-prefix-caching \
-  --gpu-memory-utilization 0.9 \
-  --host 0.0.0.0 \
-  --port 8000
-```
-
-(In-container `--host` is `0.0.0.0` so the llm-chat pod can reach
-vLLM via the Service ClusterIP. The host port mapping in compose
-restricts external exposure to loopback. See `helm.md` for the
-network exposure boundary detail.)
-
-### Anti-example: do NOT use these values
-
-```text
-# WRONG — every line below is a real failure mode that customers have hit
-vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct \           # missing -FP8 suffix
-  --tool-call-parser hermes \                            # different parser family — output schema doesn't match
-  --tool-call-parser qwen3_coder \                       # known broken — emits infinite "!!!!!!!!" stream on long tool conversations
-  --host 0.0.0.0 --port 8000                             # OK in container, but if you map "0.0.0.0:8000:8000" on the host you've exposed inference externally
-```
-
-- `Qwen3-Coder-30B-A3B-Instruct` (no `-FP8`) is the BF16 checkpoint;
-  it does not fit on an H100 80GB at 128k context.
-- `hermes` is a different tool-call parser that doesn't match this
-  model's output schema. Tool calls round-trip as raw text.
-- `qwen3_coder` (mentioned in early Qwen model cards) emits
-  infinite `!!!!!!!!` token streams on long tool-heavy conversations.
-  vLLM's docs supersede the Qwen model card here. See
-  `troubleshooting.md` entry 1.
-- `0.0.0.0:8000:8000` host port mapping exposes the inference
-  endpoint externally. Use `127.0.0.1:8000:8000` (compose) or
-  `Service.type: ClusterIP` (helm).
-
-## External inference cluster mode
-
-To point at an existing vLLM cluster instead of the in-cluster
-sidecar:
+Default Ollama CPU:
 
 ```bash
-# Compose
-COMPOSE_PROFILES=llmchat \
-LLMCHAT_BASE_URL=https://vllm.internal.example/v1 \
-docker compose up -d cordum-llm-chat
-# (qwen-inference will still come up under the llmchat profile;
-# stop/skip it explicitly if you don't want it running.)
-
-# Helm
-helm install cordum cordum-helm/ \
-  --set llmChat.externalBaseUrl=https://vllm.internal.example/v1 \
-  --set qwenInference.enabled=false \
-  ...
+LLMCHAT_OPS_BACKEND=ollama-cpu \
+LLMCHAT_BASE_URL=http://ollama:11434/v1 \
+LLMCHAT_MODEL=qwen2.5-coder:3b-instruct-q4_K_M-ctx32k
 ```
 
-Caveat: the chat assistant is no longer zero-egress when pointed at
-an external endpoint. The `helm.md` "External vLLM mode" section
-covers the security implications.
+Opt-in vLLM GPU:
+
+```bash
+LLMCHAT_OPS_BACKEND=vllm-gpu \
+LLMCHAT_BASE_URL=http://qwen-inference:8000/v1 \
+LLMCHAT_MODEL=qwen3-coder
+```

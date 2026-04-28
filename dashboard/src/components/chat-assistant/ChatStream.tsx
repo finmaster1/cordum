@@ -1,13 +1,20 @@
 import { useEffect, useRef } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { ToolCallCard } from "./ToolCallCard";
-import { ApprovalInlinePrompt } from "./ApprovalInlinePrompt";
 import type { ChatAssistantMessage } from "@/types/chatAssistant";
 
 interface ChatStreamProps {
   messages: ChatAssistantMessage[];
   emptyHint?: string;
   onSuggestionClick?: (text: string) => void;
+}
+
+// isAwaitingAssistantText returns true when the latest exchange has a user
+// message but no assistant text yet. The indicator disappears as soon as the
+// first assistant delta arrives.
+function isAwaitingAssistantText(messages: ChatAssistantMessage[]): boolean {
+  if (messages.length === 0) return false;
+  return messages[messages.length - 1].role === "user";
 }
 
 const EMPTY_SUGGESTIONS: readonly string[] = [
@@ -36,8 +43,7 @@ export function ChatStream({ messages, emptyHint, onSuggestionClick }: ChatStrea
       <div className="flex h-full flex-col items-center justify-center px-6 text-center">
         <div className="font-display text-base font-semibold text-foreground">Ask Cordum</div>
         <p className="mt-2 max-w-[28ch] text-xs text-muted-foreground/80">
-          {emptyHint ??
-            "Pick a suggestion below or ask anything. Mutating actions still go through approvals."}
+          {emptyHint ?? "Pick a suggestion below or ask anything about Cordum configuration."}
         </p>
         <ul
           className="mt-4 flex w-full max-w-[18rem] flex-col gap-2"
@@ -61,14 +67,65 @@ export function ChatStream({ messages, emptyHint, onSuggestionClick }: ChatStrea
     );
   }
 
+  const thinking = isAwaitingAssistantText(messages);
+
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-3 py-3">
       <div className="space-y-3">
         {messages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}
+        {thinking && <ThinkingBubble />}
       </div>
     </div>
+  );
+}
+
+// ThinkingBubble renders an assistant-styled bubble with three dots
+// pulsing in sequence while the backend is composing a response. Lives
+// in the same column the next assistant message will land in, so when
+// the first delta arrives the dots are replaced by content without a
+// layout shift.
+function ThinkingBubble() {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
+      role="status"
+      aria-live="polite"
+      aria-label="Cordum is thinking"
+      className="flex flex-col items-start"
+    >
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-1 px-3 py-2.5 text-sm leading-relaxed text-muted-foreground">
+        <span className="sr-only">Cordum is thinking…</span>
+        <span aria-hidden="true" className="flex items-center gap-1">
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full bg-cordum/70",
+              !reduceMotion && "motion-safe:animate-[thinking-dot_1.2s_ease-in-out_infinite]",
+            )}
+            style={!reduceMotion ? { animationDelay: "0ms" } : undefined}
+          />
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full bg-cordum/70",
+              !reduceMotion && "motion-safe:animate-[thinking-dot_1.2s_ease-in-out_infinite]",
+            )}
+            style={!reduceMotion ? { animationDelay: "180ms" } : undefined}
+          />
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full bg-cordum/70",
+              !reduceMotion && "motion-safe:animate-[thinking-dot_1.2s_ease-in-out_infinite]",
+            )}
+            style={!reduceMotion ? { animationDelay: "360ms" } : undefined}
+          />
+        </span>
+        <span className="text-xs font-mono tracking-wide text-muted-foreground/80">thinking</span>
+      </div>
+    </motion.div>
   );
 }
 
@@ -90,16 +147,6 @@ function MessageBubble({ message }: MessageBubbleProps) {
       >
         {message.text || (isUser ? "" : "…")}
       </div>
-      {!isUser && message.toolCalls.length > 0 && (
-        <div className="w-full max-w-[85%]">
-          {message.toolCalls.map((tc) => (
-            <div key={tc.toolCallId}>
-              <ToolCallCard toolCall={tc} />
-              <ApprovalInlinePrompt toolCall={tc} />
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

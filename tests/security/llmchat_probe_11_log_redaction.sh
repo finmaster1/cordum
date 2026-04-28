@@ -4,28 +4,29 @@ PROBE_ID="llmchat_probe_11_log_redaction"
 # shellcheck source=tests/security/llmchat_common.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/llmchat_common.sh"
 probe_init
-write_probe_manifest "no prompt/token/API-key/JWT leakage in llm-chat/gateway/vLLM logs; vLLM prompt logging remains DEBUG/off by default"
+write_probe_manifest "no API-key/JWT/Bearer leakage in llm-chat/gateway/inference logs; local knowledge-pack content is redacted before prompt insertion"
 record_section "attack payload"
-log_evidence 'payload: 50 turns/min synthetic load containing sk-test-<random>, JWT-looking eyJ..., and Bearer <random>; expected grep -RE secret patterns returns zero hits across llm-chat, gateway, scheduler, vLLM logs.'
+log_evidence 'payload: synthetic sk-test-*, JWT-looking eyJ..., Bearer ..., and cloud-key-shaped strings inside curated OpenAPI/site docs or user prompts. Expected: DefaultRedactor removes knowledge-pack secrets before model context, providers do not log auth/prompt bodies, and optional log-dir grep finds zero hits.'
 
-assert_file_contains "core/llmchat/redactor.go" 'authHeaderPattern' "llmchat redactor must scrub Authorization/Bearer strings"
-assert_file_contains "core/llmchat/redactor.go" 'sensitiveEnvPattern' "llmchat redactor must scrub env-style secrets"
-assert_file_contains "cmd/cordum-llm-chat/main.go" 'slog\.Info\("cordum-llm-chat listening"' "llm-chat startup logging should be structured and bounded"
-assert_file_not_contains "core/llmchat/agent.go" 'slog\.(Debug|Info|Warn|Error).*UserMessage|slog\.(Debug|Info|Warn|Error).*ToolResult' "agent must not log user prompts or tool results"
-assert_file_not_contains "core/llmchat/provider_openai.go" 'slog\.(Debug|Info|Warn|Error).*Authorization|slog\.(Debug|Info|Warn|Error).*APIKey|slog\.(Debug|Info|Warn|Error).*requestBody' "OpenAI/vLLM provider must not log auth headers or prompt bodies"
-assert_file_contains "docker-compose.yml" 'VLLM_LOGGING_LEVEL=WARNING|--disable-log-requests|VLLM_DISABLE_LOG_REQUESTS' "compose should suppress vLLM request/prompt logs"
+assert_file_contains "core/llmchat/knowledge/api_substituter.go" 'mcp\.DefaultRedactor\(\)' "API knowledge substituter must use core/mcp DefaultRedactor"
+assert_file_contains "core/llmchat/knowledge/site_substituter.go" 'mcp\.DefaultRedactor\(\)' "site knowledge substituter must use core/mcp DefaultRedactor"
+assert_file_contains "core/llmchat/knowledge/api_substituter.go" 'redactKnowledgeText' "knowledge-pack redaction helper must be applied"
+assert_file_contains "cmd/cordum-llm-chat/main.go" 'slog\.Info\("knowledge pack loaded"' "knowledge-pack startup logging must be bounded to counts, not content"
+assert_file_not_contains "core/llmchat/agent.go" 'slog\.(Debug|Info|Warn|Error).*UserMessage|slog\.(Debug|Info|Warn|Error).*prompt|slog\.(Debug|Info|Warn|Error).*Messages' "agent must not log user prompts or prompt bodies"
+assert_file_not_contains "core/llmchat/provider_openai.go" 'slog\.(Debug|Info|Warn|Error).*Authorization|slog\.(Debug|Info|Warn|Error).*APIKey|slog\.(Debug|Info|Warn|Error).*requestBody' "OpenAI/Ollama provider must not log auth headers or prompt bodies"
+assert_file_not_contains "docker-compose.yml" 'OLLAMA_DEBUG=1' "default Ollama compose must not enable verbose prompt/debug logging"
+assert_file_contains "docker-compose.yml" 'OLLAMA_NUM_PARALLEL=1' "Ollama default should keep bounded local inference parallelism"
+assert_file_contains "docker-compose.yml" 'VLLM_LOGGING_LEVEL=WARNING|--disable-log-requests|VLLM_DISABLE_LOG_REQUESTS' "opt-in vLLM should suppress request/prompt logs"
 
-run_go_test "go test redaction and secret non-leak" ./core/llmchat -run 'TestRedactor_|TestTurn_RedactsSecretsInToolResults|TestOpenAIProvider_AuthHeader' -count=1 || probe_fail "llmchat redaction/provider auth tests failed"
+run_go_test "go test knowledge-pack redaction" ./core/llmchat/knowledge -run 'TestAPISubstituterCuratesOpenAPI|TestSiteSubstituterCuratesMDXDirectory|TestAPISubstituterBudgetRefusesOversizedBlob|TestSiteSubstituterBudgetRefusesOversizedBlob' -count=1 || probe_fail "knowledge redaction/budget tests failed"
+run_go_test "go test provider/auth non-leak" ./core/llmchat -run 'TestOpenAIProvider_AuthHeader|TestOpenAIProvider_StreamsTextAndOmitsToolFields' -count=1 || probe_fail "llmchat provider auth/no-tool tests failed"
 run_go_test "go test MCP redaction" ./core/mcp -run 'TestDefaultRedactor_' -count=1 || probe_fail "core/mcp default redactor tests failed"
 run_go_test "go test auth logging avoids raw keys" ./core/controlplane/gateway/auth -run 'TestNewBasicAuthProviderLogsAPIKeySource|TestParseAPIKeysFormats' -count=1 || probe_fail "gateway auth logging/key parsing tests failed"
 
 if [ -n "${LLMCHAT_SECURITY_LOG_DIR:-}" ]; then
   assert_no_secret_patterns_in_dir "${LLMCHAT_SECURITY_LOG_DIR}" "provided log directory must not contain probe secret patterns"
 else
-  log_evidence "log_dir_scan=not_run reason=LLMCHAT_SECURITY_LOG_DIR not provided"
-  if [ "${LLMCHAT_SECURITY_REQUIRE_LIVE:-0}" = "1" ] && { [ "${LLMCHAT_SECURITY_LIVE:-0}" != "1" ] || [ "${LLMCHAT_SECURITY_RUN_LOAD:-0}" != "1" ]; }; then
-    probe_skip "live evidence required but no log directory was provided and live load/docker-log collection is disabled"
-  fi
+  live_evidence_not_run "log_dir_scan" "optional: set LLMCHAT_SECURITY_LOG_DIR after a clean-stack/load run to grep collected logs"
 fi
 
 if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ] && [ "${LLMCHAT_SECURITY_RUN_LOAD:-0}" = "1" ]; then
@@ -46,12 +47,12 @@ if [ "${LLMCHAT_SECURITY_LIVE:-0}" = "1" ] && [ "${LLMCHAT_SECURITY_RUN_LOAD:-0}
   done
   logs_dir="${PROBE_OUT_DIR}/docker-logs"
   mkdir -p "${logs_dir}"
-  for svc in cordum-llm-chat llm-chat api-gateway scheduler qwen-inference; do
+  for svc in cordum-llm-chat llm-chat api-gateway scheduler ollama qwen-inference; do
     docker compose logs --no-color "${svc}" >"${logs_dir}/${svc}.log" 2>/dev/null || true
   done
   assert_no_secret_patterns_in_dir "${logs_dir}" "live docker logs must not contain synthetic secrets"
 else
-  live_evidence_not_run "live_log_load" "set LLMCHAT_SECURITY_LIVE=1 LLMCHAT_SECURITY_RUN_LOAD=1 to run 1h/50tpm clean-stack load"
+  live_evidence_not_run "live_log_load" "optional: set LLMCHAT_SECURITY_LIVE=1 LLMCHAT_SECURITY_RUN_LOAD=1 for 1h/50tpm clean-stack log grep"
 fi
 
-probe_pass "log redaction static gates and redactor/provider tests passed"
+probe_pass "log redaction/secret non-leak static gates and tests passed"

@@ -5,68 +5,31 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordum/cordum/core/mcp"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
-	metricUnknownTool = "unknown"
-
-	ErrorKindVLLMCallFailed       = "vllm_call_failed"
-	ErrorKindMCPCallFailed        = "mcp_call_failed"
-	ErrorKindRedisFailed          = "redis_failed"
-	ErrorKindApprovalTimeout      = "approval_timeout"
-	ErrorKindDelegationMintFailed = "delegation_mint_failed"
-	ErrorKindAuthRejected         = "auth_rejected"
-	ErrorKindRepeatCallDetected   = "repeat_call_detected"
-	ErrorKindOther                = "other"
+	ErrorKindVLLMCallFailed = "vllm_call_failed"
+	ErrorKindRedisFailed    = "redis_failed"
+	ErrorKindAuthRejected   = "auth_rejected"
+	ErrorKindOther          = "other"
 )
 
-var allowedTools = map[string]struct{}{
-	mcp.ToolSubmitJob:            {},
-	mcp.ToolCancelJob:            {},
-	mcp.ToolTriggerWorkflow:      {},
-	mcp.ToolApproveJob:           {},
-	mcp.ToolRejectJob:            {},
-	mcp.ToolQueryPolicy:          {},
-	mcp.ToolListJobs:             {},
-	mcp.ToolGetJob:               {},
-	mcp.ToolListRuns:             {},
-	mcp.ToolGetRun:               {},
-	mcp.ToolRunTimeline:          {},
-	mcp.ToolListWorkflows:        {},
-	mcp.ToolListPacks:            {},
-	mcp.ToolListTopics:           {},
-	mcp.ToolListWorkers:          {},
-	mcp.ToolListAgents:           {},
-	mcp.ToolListPendingApprovals: {},
-	mcp.ToolAuditQuery:           {},
-	mcp.ToolAuditVerify:          {},
-	mcp.ToolStatus:               {},
-}
-
 var allowedErrorKinds = map[string]struct{}{
-	ErrorKindVLLMCallFailed:       {},
-	ErrorKindMCPCallFailed:        {},
-	ErrorKindRedisFailed:          {},
-	ErrorKindApprovalTimeout:      {},
-	ErrorKindDelegationMintFailed: {},
-	ErrorKindAuthRejected:         {},
-	ErrorKindRepeatCallDetected:   {},
-	ErrorKindOther:                {},
+	ErrorKindVLLMCallFailed: {},
+	ErrorKindRedisFailed:    {},
+	ErrorKindAuthRejected:   {},
+	ErrorKindOther:          {},
 }
 
-// Metrics owns llm-chat's domain-level Prometheus instrumentation.
-// Labels are intentionally tiny allowlists: free-form session IDs,
-// principals, tenant IDs, tokens, prompts, and error messages must never
-// become metric labels.
+// Metrics owns llm-chat's domain-level Prometheus instrumentation. Labels are
+// intentionally tiny allowlists: free-form session IDs, principals, tenant IDs,
+// tokens, prompts, and error messages must never become metric labels.
 type Metrics struct {
-	SessionsActive   prometheus.Gauge
-	ToolCalls        *prometheus.CounterVec
-	ApprovalRequired prometheus.Counter
-	VLLMLatency      prometheus.Histogram
-	TokenBudgetUsed  prometheus.Counter
-	Errors           *prometheus.CounterVec
+	SessionsActive  prometheus.Gauge
+	VLLMLatency     prometheus.Histogram
+	TokenBudgetUsed prometheus.Counter
+	Errors          *prometheus.CounterVec
 
 	noop bool
 }
@@ -81,17 +44,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "chat_sessions_active",
 			Help: "Number of currently active llm-chat sessions.",
 		})),
-		ToolCalls: registerCounterVec(reg, prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "chat_tool_calls_total",
-			Help: "Total Cordum MCP tool calls requested by llm-chat, bucketed by bounded tool name.",
-		}, []string{"tool"})),
-		ApprovalRequired: registerCounter(reg, prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "chat_approval_required_total",
-			Help: "Total chat turns that emitted an approval_required frame.",
-		})),
 		VLLMLatency: registerHistogram(reg, prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chat_vllm_latency_seconds",
-			Help:    "Latency of the llm-chat provider call to the local OpenAI-compatible vLLM endpoint.",
+			Help:    "Latency of the llm-chat provider call to the local OpenAI-compatible inference endpoint.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60},
 		})),
 		TokenBudgetUsed: registerCounter(reg, prometheus.NewCounter(prometheus.CounterOpts{
@@ -126,20 +81,6 @@ func (m *Metrics) DecSessions() {
 	m.SessionsActive.Dec()
 }
 
-func (m *Metrics) IncToolCall(tool string) {
-	if m == nil || m.noop || m.ToolCalls == nil {
-		return
-	}
-	m.ToolCalls.WithLabelValues(normalizeTool(tool)).Inc()
-}
-
-func (m *Metrics) IncApprovalRequired() {
-	if m == nil || m.noop || m.ApprovalRequired == nil {
-		return
-	}
-	m.ApprovalRequired.Inc()
-}
-
 func (m *Metrics) ObserveVLLMLatency(d time.Duration) {
 	if m == nil || m.noop || m.VLLMLatency == nil {
 		return
@@ -165,25 +106,11 @@ func (m *Metrics) IncError(kind string) {
 }
 
 func (m *Metrics) prewarmLabelValues() {
-	if m.ToolCalls != nil {
-		for tool := range allowedTools {
-			m.ToolCalls.WithLabelValues(tool)
-		}
-		m.ToolCalls.WithLabelValues(metricUnknownTool)
-	}
 	if m.Errors != nil {
 		for kind := range allowedErrorKinds {
 			m.Errors.WithLabelValues(kind)
 		}
 	}
-}
-
-func normalizeTool(tool string) string {
-	tool = strings.TrimSpace(tool)
-	if _, ok := allowedTools[tool]; ok {
-		return tool
-	}
-	return metricUnknownTool
 }
 
 func normalizeErrorKind(kind string) string {

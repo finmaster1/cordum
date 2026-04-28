@@ -18,10 +18,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { assertNoSeriousAxeViolations } from "@/test-utils/a11y";
 import { ChatWidget } from "./ChatWidget";
 import { ChatHeaderButton } from "./ChatHeaderButton";
-import { ApprovalInlinePrompt } from "./ApprovalInlinePrompt";
 import { resetChatAssistantStore, useChatAssistantStore } from "@/state/chatAssistant";
 import { useConfigStore } from "@/state/config";
-import type { AttachedToolCall } from "@/types/chatAssistant";
 
 const enterpriseLicense = {
   plan: "enterprise",
@@ -65,47 +63,17 @@ describe("Chat assistant accessibility (axe-core, jsdom)", () => {
     act(() => {
       const store = useChatAssistantStore.getState();
       store.openPanel();
-      store.applyFrame({
-        type: "user",
-        id: "msg-user-1",
-        text: "list my failing jobs",
-      });
+      store.applyFrame({ type: "user", id: "msg-user-1", text: "how do I configure approvals?" });
       store.applyFrame({
         type: "assistant_delta",
         id: "msg-assistant-1",
-        delta: "Here are the failing jobs in the last 24h.",
-      });
-      store.applyFrame({
-        type: "tool_call",
-        id: "msg-assistant-1",
-        toolCallId: "tc-1",
-        tool: "cordum_list_jobs",
-        args: { status: "FAILED", limit: 10 },
-      });
-      store.applyFrame({
-        type: "tool_result",
-        id: "msg-assistant-1",
-        toolCallId: "tc-1",
-        ok: true,
-        resultPreview: '{"items":[{"id":"job-1","status":"FAILED"}]}',
+        delta: "Use the dashboard approval settings or the CLI policy commands.",
       });
     });
     const { container } = renderWithProviders(<ChatWidget />);
     await waitFor(() => {
-      expect(screen.queryByText(/list my failing jobs/i)).not.toBeNull();
+      expect(screen.queryByText(/configure approvals/i)).not.toBeNull();
     });
-    await assertNoSeriousAxeViolations(container);
-  });
-
-  it("has zero serious axe violations when the approval-required inline prompt is rendered", async () => {
-    const toolCall: AttachedToolCall = {
-      toolCallId: "tc-approval-1",
-      tool: "cordum_approve_job",
-      args: { job_id: "job-abc", reason: "investigated" },
-      approval: { approvalId: "appr-1", status: "pending" },
-    };
-    const { container } = renderWithProviders(<ApprovalInlinePrompt toolCall={toolCall} />);
-    await screen.findByRole("region", { name: /approval required/i });
     await assertNoSeriousAxeViolations(container);
   });
 

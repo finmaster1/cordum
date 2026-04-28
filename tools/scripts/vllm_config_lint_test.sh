@@ -62,9 +62,6 @@ correct_cmd() {
       - Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
       - --served-model-name
       - qwen3-coder
-      - --enable-auto-tool-choice
-      - --tool-call-parser
-      - qwen3_xml
       - --max-model-len
       - "131072"
       - --kv-cache-dtype
@@ -115,34 +112,39 @@ run_case() {
 # Each case runs 3× to flush flake. Counter still accumulates pass/fail
 # at this granularity so a single intermittent case shows up.
 for run in 1 2 3; do
-	# (i) hermes parser injection — replaces qwen3_xml with hermes.
-	hermes_cmd=$(correct_cmd | sed 's/qwen3_xml/hermes/')
-	fix=$(write_fixture "hermes_parser_${run}" "$hermes_cmd" "$(correct_ports)" "300s")
-	run_case "hermes-parser run=${run}" "$fix" "parser-disallowed-hermes"
+	# (i) stale auto-tool-choice flag should fail after informational-only scope reduction.
+	auto_tool_cmd=$(correct_cmd | awk '1; /--served-model-name/ { print "      - --enable-auto-tool-choice" }')
+	fix=$(write_fixture "auto_tool_choice_${run}" "$auto_tool_cmd" "$(correct_ports)" "300s")
+	run_case "auto-tool-choice run=${run}" "$fix" "auto-tool-choice-disallowed"
 
-	# (ii) host 0.0.0.0 in *port mapping* (the actual rule is on the
+	# (ii) stale parser flag should fail; no parser is needed for direct text Q&A.
+	parser_cmd=$(correct_cmd | awk '1; /--served-model-name/ { print "      - --tool-call-parser"; print "      - stale_parser" }')
+	fix=$(write_fixture "parser_flag_${run}" "$parser_cmd" "$(correct_ports)" "300s")
+	run_case "parser-flag run=${run}" "$fix" "tool-call-parser-disallowed"
+
+	# (iii) host 0.0.0.0 in *port mapping* (the actual rule is on the
 	# port mapping, not the bind address — the bind 0.0.0.0 is correct
 	# for container DNS). Negative: replace ports with 0.0.0.0:8000:8000.
 	bad_ports=$(printf '      - "0.0.0.0:8000:8000"\n')
 	fix=$(write_fixture "host_wildcard_${run}" "$(correct_cmd)" "$bad_ports" "300s")
 	run_case "ports-wildcard run=${run}" "$fix" "ports-disallow-wildcard"
 
-	# (iii) missing --kv-cache-dtype fp8 — drop the two lines.
+	# (iv) missing --kv-cache-dtype fp8 — drop the two lines.
 	missing_kv_cmd=$(correct_cmd | sed '/--kv-cache-dtype/d; /^      - fp8/d')
 	fix=$(write_fixture "missing_kv_cache_${run}" "$missing_kv_cmd" "$(correct_ports)" "300s")
 	run_case "missing-kv-cache run=${run}" "$fix" "kv-cache-dtype-flag"
 
-	# (iv) start_period: 600s — wrong duration.
+	# (v) start_period: 600s — wrong duration.
 	fix=$(write_fixture "wrong_start_period_${run}" "$(correct_cmd)" "$(correct_ports)" "600s")
 	run_case "wrong-start-period run=${run}" "$fix" "start-period-must-be-300s"
 
-	# (v) ports binding 0.0.0.0:8000:8000 (already covered by (ii));
+	# (vi) ports binding 0.0.0.0:8000:8000 (already covered by (ii));
 	# add a parallel bare 8000:8000 negative for completeness.
 	bare_ports=$(printf '      - "8000:8000"\n')
 	fix=$(write_fixture "bare_ports_${run}" "$(correct_cmd)" "$bare_ports" "300s")
 	run_case "bare-ports run=${run}" "$fix" "ports-disallow-bare"
 
-	# (vi) request logging enabled by omission — vLLM must not emit
+	# (vii) request logging enabled by omission — vLLM must not emit
 	# prompt/request bodies to logs.
 	missing_log_suppression_cmd=$(correct_cmd | sed '/--disable-log-requests/d')
 	fix=$(write_fixture "missing_log_suppression_${run}" "$missing_log_suppression_cmd" "$(correct_ports)" "300s")

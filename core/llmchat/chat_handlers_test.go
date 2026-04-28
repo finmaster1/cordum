@@ -18,11 +18,9 @@ import (
 )
 
 type scriptedChatRunner struct {
-	mu           sync.Mutex
-	frames       [][]Frame
-	resumeFrames [][]Frame
-	inputs       []TurnInput
-	resumeInputs []ApprovalResumeInput
+	mu     sync.Mutex
+	frames [][]Frame
+	inputs []TurnInput
 }
 
 func (r *scriptedChatRunner) Turn(_ context.Context, in TurnInput) <-chan Frame {
@@ -37,24 +35,11 @@ func (r *scriptedChatRunner) Turn(_ context.Context, in TurnInput) <-chan Frame 
 	return frameChan(frames)
 }
 
-func (r *scriptedChatRunner) ResumeApproval(_ context.Context, in ApprovalResumeInput) <-chan Frame {
-	r.mu.Lock()
-	r.resumeInputs = append(r.resumeInputs, in)
-	idx := len(r.resumeInputs) - 1
-	frames := []Frame{{Type: FrameToolResult, ToolResult: "{}"}, {Type: FrameFinal, Text: "resumed"}}
-	if idx < len(r.resumeFrames) {
-		frames = append([]Frame(nil), r.resumeFrames[idx]...)
-	}
-	r.mu.Unlock()
-	return frameChan(frames)
-}
-
-func (r *scriptedChatRunner) snapshot() ([]TurnInput, []ApprovalResumeInput) {
+func (r *scriptedChatRunner) snapshot() ([]TurnInput, []struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turns := append([]TurnInput(nil), r.inputs...)
-	resumes := append([]ApprovalResumeInput(nil), r.resumeInputs...)
-	return turns, resumes
+	return turns, nil
 }
 
 func frameChan(frames []Frame) <-chan Frame {
@@ -119,33 +104,6 @@ func (s *fakeChatSessionStore) AppendMessage(_ context.Context, id string, msg S
 	return nil
 }
 
-func (s *fakeChatSessionStore) SetDelegation(_ context.Context, id string, d *SessionDelegation) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := s.byID[id]
-	if stored == nil {
-		return errors.New("missing session")
-	}
-	stored.Delegation = d
-	if d == nil {
-		stored.DelegationJTI = ""
-	} else {
-		stored.DelegationJTI = d.JTI
-	}
-	return nil
-}
-
-func (s *fakeChatSessionStore) SetPendingToolCall(_ context.Context, id string, ref *ToolCallRef) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := s.byID[id]
-	if stored == nil {
-		return errors.New("missing session")
-	}
-	stored.PendingToolCall = ref
-	return nil
-}
-
 func (s *fakeChatSessionStore) ListSessions(_ context.Context, filter SessionListFilter) (SessionListPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +121,6 @@ func (s *fakeChatSessionStore) ListSessions(_ context.Context, filter SessionLis
 		}
 		items = append(items, SessionSummary{ID: sess.ID, Tenant: sess.Tenant, UserPrincipal: sess.UserPrincipal, AgentID: sess.AgentID, CreatedAt: sess.CreatedAt, LastActiveAt: sess.LastActiveAt})
 	}
-	// deterministic enough for tests seeded with lexicographic ids.
 	if len(items) > limit {
 		return SessionListPage{Items: items[:limit], NextCursor: items[limit-1].ID}, nil
 	}
@@ -207,21 +164,11 @@ func (f fakePermissionEnforcer) RequirePermission(_ *http.Request, permission st
 	return nil
 }
 
-type fakeDelegationIssuer struct{}
-
-func (fakeDelegationIssuer) ForSession(_ context.Context, principal string, current SessionDelegation) (SessionDelegation, error) {
-	if current.Token != "" {
-		return current, nil
-	}
-	return SessionDelegation{Token: "delegation-for-" + principal, JTI: "jti-" + principal, ExpiresAt: time.Now().Add(time.Hour), ChainDepth: 1}, nil
-}
-
 func newTestChatHandlers(runner *scriptedChatRunner, sessions *fakeChatSessionStore, enabled bool) *ChatHandlers {
 	return NewChatHandlers(ChatHandlersConfig{
 		Agent:           runner,
 		Sessions:        sessions,
 		Entitlements:    fakeEntitlements{enabled: enabled},
-		Delegations:     fakeDelegationIssuer{},
 		AgentID:         "chat-assistant",
 		UserPrincipalFn: func(_ *http.Request) string { return "alice" },
 		TenantFn:        func(_ *http.Request) string { return "tenant-a" },
@@ -250,11 +197,9 @@ func TestChatHandlers_LicenseGateAppliesToPostSSEAndWS(t *testing.T) {
 	}
 }
 
-func TestChatHandlers_PostSingleShotReturnsFinalAndToolCalls(t *testing.T) {
+func TestChatHandlers_PostSingleShotReturnsFinalAndFrames(t *testing.T) {
 	runner := &scriptedChatRunner{frames: [][]Frame{{
 		{Type: FrameUser, Text: "hi"},
-		{Type: FrameToolCall, ToolCall: &FrameToolDetail{Name: "cordum_list_jobs", Arguments: json.RawMessage(`{"limit":5}`)}},
-		{Type: FrameToolResult, ToolResult: `{"jobs":[]}`},
 		{Type: FrameAssistantDelta, Text: "No jobs"},
 		{Type: FrameFinal, Text: "No jobs found."},
 	}}}
@@ -274,12 +219,12 @@ func TestChatHandlers_PostSingleShotReturnsFinalAndToolCalls(t *testing.T) {
 	if resp.SessionID == "" || resp.Assistant != "No jobs found." {
 		t.Fatalf("resp=%+v want session id and final assistant", resp)
 	}
-	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "cordum_list_jobs" {
-		t.Fatalf("tool_calls=%+v want one cordum_list_jobs", resp.ToolCalls)
+	if got := frameTypes(resp.Frames); !sameFrameTypes(got, []FrameType{FrameUser, FrameAssistantDelta, FrameFinal}) {
+		t.Fatalf("frame types=%v want informational-only frames", got)
 	}
 	turns, _ := runner.snapshot()
-	if len(turns) != 1 || turns[0].BearerToken != "delegation-for-alice" {
-		t.Fatalf("turns=%+v want delegation bearer token", turns)
+	if len(turns) != 1 || turns[0].UserMessage != "hi" {
+		t.Fatalf("turns=%+v want one user turn", turns)
 	}
 }
 
@@ -398,11 +343,8 @@ func TestChatFrameSchemaPinned(t *testing.T) {
 	frames := []Frame{
 		{Type: FrameUser, Text: "hello", SessionID: "sess-1"},
 		{Type: FrameAssistantDelta, Text: "hel"},
-		{Type: FrameToolCall, ToolCall: &FrameToolDetail{Name: "cordum_list_jobs", Arguments: json.RawMessage(`{"limit":1}`)}},
-		{Type: FrameToolResult, ToolResult: `{"ok":true}`},
-		{Type: FrameApprovalRequired, ApprovalID: "appr-1"},
 		{Type: FrameFinal, Text: "done"},
-		{Type: FrameError, ErrorCode: "boom", ErrorMsg: "nope"},
+		{Type: FrameError, IsError: true, ErrorCode: "boom", ErrorMsg: "nope"},
 	}
 	for _, frame := range frames {
 		raw, err := json.Marshal(frame)
@@ -418,19 +360,11 @@ func TestChatFrameSchemaPinned(t *testing.T) {
 		}
 		switch frame.Type {
 		case FrameUser:
-			assertJSONKeys(t, got, "type", "text", "session_id")
-		case FrameAssistantDelta:
-			assertJSONKeys(t, got, "type", "text")
-		case FrameToolCall:
-			assertJSONKeys(t, got, "type", "tool_call")
-		case FrameToolResult:
-			assertJSONKeys(t, got, "type", "tool_result")
-		case FrameApprovalRequired:
-			assertJSONKeys(t, got, "type", "approval_id")
-		case FrameFinal:
+			assertJSONKeys(t, got, "type", "session_id", "text")
+		case FrameAssistantDelta, FrameFinal:
 			assertJSONKeys(t, got, "type", "text")
 		case FrameError:
-			assertJSONKeys(t, got, "type", "error_code", "error_msg")
+			assertJSONKeys(t, got, "type", "is_error", "error_code", "error_msg")
 		}
 	}
 }
@@ -462,7 +396,7 @@ func TestChatHandlers_AuditSessionStartedAndClosed(t *testing.T) {
 	sess := &Session{ID: "sess-test", UserPrincipal: "alice", Tenant: "tenant-a", AgentID: "chat-assistant"}
 
 	h.emitSessionStarted(sess)
-	h.emitSessionClosed(sess, 3, 2, 250*time.Millisecond)
+	h.emitSessionClosed(sess, 3, 250*time.Millisecond)
 
 	events := sink.snapshot()
 	if len(events) != 2 {
@@ -474,8 +408,11 @@ func TestChatHandlers_AuditSessionStartedAndClosed(t *testing.T) {
 	if events[0].Extra["session_id"] != "sess-test" || events[0].TenantID != "tenant-a" || events[0].Identity != "alice" {
 		t.Fatalf("started event context wrong: %#v", events[0])
 	}
-	if events[1].Action != audit.SIEMActionChatSessionClosed || events[1].Extra["turn_count"] != "3" || events[1].Extra["total_tool_calls"] != "2" {
+	if events[1].Action != audit.SIEMActionChatSessionClosed || events[1].Extra["turn_count"] != "3" || events[1].Extra["duration_ms"] == "" {
 		t.Fatalf("closed event wrong: %#v", events[1])
+	}
+	if _, ok := events[1].Extra["total_"+"tool_"+"calls"]; ok {
+		t.Fatalf("closed event contains retired action-count metadata: %#v", events[1])
 	}
 }
 

@@ -48,13 +48,6 @@ function stringField(raw: Record<string, unknown>, ...keys: string[]): string {
   return "";
 }
 
-function objectField(raw: Record<string, unknown>, key: string): Record<string, unknown> {
-  const value = raw[key];
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 function safeParseFrame(raw: string, assistantFrameIdRef: { current: string | null }): ChatFrame | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -80,38 +73,6 @@ function safeParseFrame(raw: string, assistantFrameIdRef: { current: string | nu
           delta: stringField(parsed, "delta", "text"),
           at,
         };
-      case "tool_call": {
-        const toolCall = objectField(parsed, "tool_call");
-        return {
-          type: "tool_call",
-          id: stringField(parsed, "id") || assistantId(),
-          toolCallId: stringField(toolCall, "id", "tool_call_id") || generateUUID(),
-          tool: stringField(parsed, "tool") || stringField(toolCall, "name"),
-          args: (toolCall.arguments as Record<string, unknown>) ?? {},
-          at,
-        };
-      }
-      case "tool_result":
-        return {
-          type: "tool_result",
-          id: stringField(parsed, "id") || assistantId(),
-          toolCallId: stringField(parsed, "tool_call_id") || "tool-result",
-          ok: parsed.is_error !== true,
-          resultPreview: stringField(parsed, "resultPreview", "tool_result"),
-          at,
-        };
-      case "approval_required": {
-        const toolCall = objectField(parsed, "tool_call");
-        return {
-          type: "approval_required",
-          id: stringField(parsed, "id") || assistantId(),
-          toolCallId: stringField(toolCall, "id", "tool_call_id") || stringField(parsed, "tool_call_id") || generateUUID(),
-          approvalId: stringField(parsed, "approvalId", "approval_id"),
-          tool: stringField(parsed, "tool") || stringField(toolCall, "name"),
-          args: (toolCall.arguments as Record<string, unknown>) ?? {},
-          at,
-        };
-      }
       case "final":
         return { type: "final", id: stringField(parsed, "id") || assistantId(), at };
       case "error":

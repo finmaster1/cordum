@@ -1,19 +1,12 @@
 /**
  * Wire-format types for the Cordum LLM chat assistant.
  *
- * The shapes here mirror the server-side frame schema pinned by phase-5
- * (cordum/docs/llmchat/overview.md) — the dashboard must not drift, since
- * the WebSocket payloads are the public contract between the two.
+ * Informational-only chat frames mirror the server-side schema: user echoes,
+ * assistant deltas, final, and structured errors. Action and approval frames
+ * are intentionally absent from the chat widget contract.
  */
 
-export type ChatFrame =
-  | UserFrame
-  | AssistantDeltaFrame
-  | ToolCallFrame
-  | ToolResultFrame
-  | ApprovalRequiredFrame
-  | FinalFrame
-  | ErrorFrame;
+export type ChatFrame = UserFrame | AssistantDeltaFrame | FinalFrame | ErrorFrame;
 
 export interface UserFrame {
   type: "user";
@@ -26,34 +19,6 @@ export interface AssistantDeltaFrame {
   type: "assistant_delta";
   id: string;
   delta: string;
-  at?: string;
-}
-
-export interface ToolCallFrame {
-  type: "tool_call";
-  id: string;
-  toolCallId: string;
-  tool: string;
-  args: Record<string, unknown>;
-  at?: string;
-}
-
-export interface ToolResultFrame {
-  type: "tool_result";
-  id: string;
-  toolCallId: string;
-  ok: boolean;
-  resultPreview: string;
-  at?: string;
-}
-
-export interface ApprovalRequiredFrame {
-  type: "approval_required";
-  id: string;
-  toolCallId: string;
-  approvalId: string;
-  tool: string;
-  args: Record<string, unknown>;
   at?: string;
 }
 
@@ -71,28 +36,12 @@ export interface ErrorFrame {
   at?: string;
 }
 
-/**
- * One assistant turn or user message in the rendered transcript. ToolCalls
- * are attached to the assistant message that produced them so the UI can
- * render them inline below the assistant bubble.
- */
+/** One assistant turn or user message in the rendered transcript. */
 export interface ChatAssistantMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
-  toolCalls: AttachedToolCall[];
   at: string;
-}
-
-export interface AttachedToolCall {
-  toolCallId: string;
-  tool: string;
-  args: Record<string, unknown>;
-  result?: { ok: boolean; resultPreview: string };
-  approval?: {
-    approvalId: string;
-    status: "pending" | "resolved" | "rejected";
-  };
 }
 
 export interface ChatAssistantSessionSummary {
@@ -124,9 +73,4 @@ export type AvailabilityReason =
   | "unentitled"
   | "unknown";
 
-export type ChatConnectionStatus =
-  | "idle"
-  | "connecting"
-  | "open"
-  | "reconnecting"
-  | "closed";
+export type ChatConnectionStatus = "idle" | "connecting" | "open" | "reconnecting" | "closed";

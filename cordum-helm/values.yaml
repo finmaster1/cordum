@@ -570,12 +570,24 @@ networkPolicy:
       app.kubernetes.io/name: ingress-nginx
 
 # =============================================================================
+# Local inference backend for the informational-only LLM Chat Assistant.
+#
+# Default is `ollama-cpu`: Ollama + Qwen2.5-Coder-3B, CPU-runnable, no external
+# egress, suitable for any Docker/Kubernetes host with 4 GB+ RAM.
+#
+# Opt-in for GPU customers: `--set inference.backend=vllm-gpu`. That renders the
+# pinned vLLM/Qwen3-Coder-30B path below and expects a GPU nodeSelector plus GPU
+# resource request. vLLM remains supported but is no longer the production
+# default as of 2026-04-28 (task-d38e26c0).
+# =============================================================================
+inference:
+  backend: ollama-cpu
+
+# =============================================================================
 # LLM Chat Assistant (cordum-llm-chat) — Gmail-style chat copilot that
-# drives Cordum's REST + MCP surface. Default-enabled at the chart level;
-# the dashboard chat button hides whenever the inference backend is
-# unreachable. Operators with no GPU node can either (a) point at an
-# external vLLM via llmChat.externalBaseUrl + qwenInference.enabled=false,
-# or (b) disable both with --set llmChat.enabled=false.
+# answers informational questions from local Cordum docs/API knowledge. It does
+# not call MCP tools or mutate state. Default-enabled at the chart level; the
+# dashboard chat button hides whenever the inference backend is unreachable.
 # =============================================================================
 llmChat:
   enabled: true
@@ -593,38 +605,43 @@ llmChat:
       cpu: "500m"
   service:
     port: 8090
-  # When set + qwenInference.enabled=false, llm-chat talks to this
-  # external OpenAI-compatible endpoint instead of the in-cluster vLLM.
+  # Optional external OpenAI-compatible endpoint. Use intentionally; the default
+  # `ollama-cpu` and opt-in `vllm-gpu` backends run locally with zero egress.
   externalBaseUrl: ""
   sampling:
-    # Two-pass sampling: deterministic args on the tool-call phase,
-    # warmer prose on the natural-language summarization phase. See
-    # docs/llmchat/helm.md for the rationale.
-    toolTemperature: 0.3
-    toolTopP: 0.9
+    # Single-pass informational answer sampling.
     summaryTemperature: 0.7
     summaryTopP: 0.8
   budgets:
-    maxToolCallsPerTurn: 12
     maxWallClockPerTurn: 60s
     maxAssistantBytes: 32768
   knowledgePack:
     enabled: true
-    budget: 24576
+    # Paths are baked into the llm-chat image by default. Override only when
+    # mounting a custom local knowledge pack into the pod.
+    apiSpecPath: /etc/cordum/openapi.yaml
+    sitePath: /etc/cordum/site-content
+    includeGlobs: "concepts/*.md,getting-started/*.md,operations/*.md"
+    excludeGlobs: "concepts/adr/**"
+    maxPromptTokens: 24000
   systemPrompt: |-
-    You are the Cordum chat assistant. Use the Cordum MCP tools and REST
-    read APIs to answer questions about jobs, workflows, workers, agents,
-    approvals, policies, and audit records. Never invent job IDs, workflow
-    IDs, approval IDs, or tool names. When explaining denials or failures,
-    read the audit trail before summarizing. Never echo secrets from tool
-    results; the service redacts results before they enter model context.
+    You are the Cordum chat assistant. You are informational-only: answer
+    questions about Cordum concepts, API endpoints, configuration, workflows,
+    approval gates, policies, audit behavior, and troubleshooting using the
+    local knowledge context below. Do not call MCP tools, submit jobs, trigger
+    workflows, approve/reject anything, or mutate Cordum state. If a user asks
+    for a state change, explain the dashboard or CLI path they should use.
+    Never invent IDs, endpoint names, config keys, or policy names. Never echo
+    secrets; treat API keys, passwords, bearer tokens, JWTs, kubeconfigs,
+    private keys, and certificates as <redacted>.
     {{api_summary}}
     {{cordum_io_summary}}
 
 # =============================================================================
-# vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8. Tier 1 (H100 80GB) is
-# the recommended target. See docs/llmchat/helm.md for Tier 2 (RTX 5090
-# / PRO 6000 with the AWQ swap) and Tier 3 (A100 — no native FP8) paths.
+# Opt-in vLLM serving Qwen3-Coder-30B-A3B-Instruct-FP8. Rendered only when
+# `inference.backend=vllm-gpu` (and `qwenInference.enabled=true`). Tier 1
+# (H100 80GB) is the recommended target. See docs/llmchat/helm.md for Tier 2
+# (RTX 5090 / PRO 6000 with the AWQ swap) and Tier 3 (A100 — no native FP8).
 # =============================================================================
 qwenInference:
   enabled: true
@@ -643,8 +660,6 @@ qwenInference:
   # qwenInference.model to this for RTX 5090 / PRO 6000 deployments.
   tier2AwqModel: "QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ"
   servedModelName: "qwen3-coder"
-  # MUST be qwen3_xml; the task rail forbids alternate parser families.
-  toolCallParser: "qwen3_xml"
   maxModelLen: 131072
   kvCacheDtype: "fp8"
   enablePrefixCaching: true
@@ -684,32 +699,25 @@ qwenInference:
     storageClass: ""  # empty → cluster default
 
 # =============================================================================
-# Ollama inference (community-tier, CPU-friendly). Mirrors the docker-compose
-# `llmchat-ollama` profile for clusters without a GPU. Production deployments
-# should keep this DISABLED and run the qwenInference (vLLM/GPU) profile above.
-#
-# When enabled with `ollamaInference.enabled=true` AND
-# `qwenInference.enabled=false`, the chart renders an Ollama Deployment +
-# Service + PVC and points llm-chat at it via LLMCHAT_BASE_URL. See
-# docs/llmchat/ollama-runtime.md for sizing guidance + model-swap procedure.
+# Ollama inference (default, CPU-friendly). Rendered when
+# `inference.backend=ollama-cpu` and `ollamaInference.enabled=true`.
+# Mirrors the default docker-compose path for clusters without a GPU.
 # =============================================================================
 ollamaInference:
-  enabled: false
+  enabled: true
   replicas: 1
-  # Pin floor: 0.5.7 — first stable tag that emits OpenAI streaming
-  # `delta.tool_calls[]` arrays. Earlier tags embed tool calls as JSON in
-  # the content field and silently break the chat-loop tool dispatch.
-  # Bump only via tools/scripts/ollama_pin_digest.sh.
+  # Pin floor: 0.5.7 — verified with the OpenAI-compatible streaming surface
+  # consumed by cordum-llm-chat. Bump only via tools/scripts/ollama_pin_digest.sh
+  # after live smoke.
   image:
     repository: "ollama/ollama"
     tag: "0.5.7"
     pullPolicy: IfNotPresent
-  # Default model: ~2 GB resident, Apache 2.0, native OpenAI tool_calls.
-  # Fits inside 4 GB Docker Desktop default. Operators with headroom
-  # should switch to qwen2.5-coder:7b-instruct-q4_K_M (~4.5 GB resident)
-  # for materially better tool-call quality on multi-tool prompts; bump
-  # resources accordingly.
+  # Base model pulled from Ollama, then re-tagged with contextLength as
+  # servedModelName so long local knowledge-pack prompts do not truncate.
   model: "qwen2.5-coder:3b-instruct-q4_K_M"
+  servedModelName: "qwen2.5-coder:3b-instruct-q4_K_M-ctx32k"
+  contextLength: 32768
   service:
     port: 11434
   resources:

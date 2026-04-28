@@ -1255,7 +1255,18 @@ func (s *server) requireStoreAndRole(w http.ResponseWriter, r *http.Request, rol
 //
 // This preserves historical admin/operator/viewer behavior when RBAC is off,
 // while allowing custom roles to work in production when RBAC is on.
+//
+// Requests originating from the in-process MCP service bridge
+// (invokeMCPJSONHandler / invokeMCPAnyHandler) are exempt: the MCP scope
+// filter has already authorized the call against the calling agent's
+// AllowedTools / RiskTier / DataClassifications. Re-checking the
+// dashboard user's role here would false-deny tools the chat-assistant
+// is explicitly scoped to call. The bypass key cannot be set externally;
+// only the in-process bridge (which is unreachable over HTTP) sets it.
 func (s *server) requirePermissionOrRole(w http.ResponseWriter, r *http.Request, permission string, legacyRoles ...string) bool {
+	if r != nil && mcpBridgeBypassFromContext(r.Context()) {
+		return true
+	}
 	if strings.TrimSpace(permission) == "" {
 		if len(legacyRoles) == 0 {
 			return true

@@ -1,4 +1,5 @@
-{{- if .Values.qwenInference.enabled }}
+{{- $backend := include "cordum.inferenceBackend" . }}
+{{- if and (eq $backend "vllm-gpu") .Values.qwenInference.enabled }}
 {{- $cpuMode := .Values.qwenInference.cpuMode.enabled }}
 {{- if .Values.qwenInference.hfCache.enabled }}
 apiVersion: v1
@@ -67,7 +68,8 @@ spec:
             - name: VLLM_CPU_KVCACHE_SPACE
               value: {{ .Values.qwenInference.cpuMode.kvCacheSpaceGB | quote }}
           {{- end }}
-          # vLLM command. DO NOT swap qwen3_xml.
+          # vLLM command for the opt-in GPU/CPU inference profiles.
+          # Informational-only chat uses direct text completions only.
           # GPU mode must keep the -FP8 model suffix (BF16 won't fit H100 at
           # 128K context). CPU mode intentionally uses the AWQ model declared
           # under qwenInference.cpuMode.model for interim QA-only runs.
@@ -76,12 +78,6 @@ spec:
             - {{ ternary .Values.qwenInference.cpuMode.model .Values.qwenInference.model $cpuMode | quote }}
             - --served-model-name
             - {{ .Values.qwenInference.servedModelName | quote }}
-            - --enable-auto-tool-choice
-            - --tool-call-parser
-            # SECURITY: hardcoded per llm-chat rail/task-6cda949c. Do not make
-            # this values/env-driven; unsupported parser regressions can create
-            # infinite tool-call streams and context-exhaustion DoS.
-            - "qwen3_xml"
             - --max-model-len
             - {{ ternary .Values.qwenInference.cpuMode.maxModelLen .Values.qwenInference.maxModelLen $cpuMode | quote }}
             {{- if not $cpuMode }}

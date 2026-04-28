@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Probe 04: Audit chain integrity across chat-driven load
-# task-931eaea2, see docs/llmchat/governance-review.md for full procedure.
+# Probe 04: Audit chain integrity across informational chat sessions
+# task-01aaa6bd scope-reduced review; see docs/llmchat/governance-review.md.
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common-fixture.sh
