@@ -22,6 +22,16 @@ groups:
           summary: "LLM chat error rate is elevated"
           description: "chat_errors_total is increasing above baseline. Inspect chat_errors_total{kind}, redacted logs, and inference readiness."
           runbook_url: "docs/llmchat/ops-runbook.md#common-alerts"
+      - alert: LLMChatHighP95Latency
+        expr: histogram_quantile(0.95, sum(rate(chat_vllm_latency_seconds_bucket[5m])) by (le)) > 60
+        for: 5m
+        labels:
+          severity: ticket
+          service: llm-chat
+        annotations:
+          summary: "LLM chat p95 provider latency exceeds 60s"
+          description: "The llm-chat provider-call latency p95 is above 60 seconds for 5 minutes. Check Ollama CPU saturation, prompt/context size, and inference readiness."
+          runbook_url: "docs/llmchat/production-readiness.md#resource-sizing-and-concurrent-session-ceiling"
       - alert: LLMChatNoSessionsFor30m
         expr: sum(max_over_time(chat_sessions_active[30m])) == 0
         for: 30m

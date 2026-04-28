@@ -135,6 +135,7 @@ func main() {
 	// without grounded Cordum knowledge is a product misconfiguration.
 	basePromptLoader := llmchat.NewFilePromptLoader("")
 	promptLoader := basePromptLoader
+	var knowledgeCheck func(context.Context) error
 	if envOrDefault(os.Getenv, "LLMCHAT_KNOWLEDGE_PACK_ENABLED", "true") == "true" {
 		maxKnowledgePromptTokens, err := envIntOrDefault(os.Getenv, "LLMCHAT_KNOWLEDGE_MAX_PROMPT_TOKENS", 24000)
 		if err != nil {
@@ -173,6 +174,10 @@ func main() {
 			"site_tokens", stats.SiteTokens,
 			"combined_tokens", stats.CombinedTokens)
 		promptLoader = kp
+		knowledgeCheck = knowledgePathCheck(
+			envOrDefault(os.Getenv, knowledge.EnvAPISpecPath, knowledge.DefaultAPISpecPath),
+			envOrDefault(os.Getenv, knowledge.EnvSitePath, knowledge.DefaultSitePath),
+		)
 	}
 
 	auditChainer := audit.NewChainer(redisClient, "audit:chain:")
@@ -227,7 +232,7 @@ func main() {
 	}), llmchat.TracingRunnerConfig{Backend: cfg.Backend})
 	auditSender := llmchat.NewTracingAuditSender(llmchat.NewChainedAuditSender(auditChainer, nil))
 
-	handlers := llmchat.NewHandlers(provider, redisClient, readyzProbeTimeout)
+	handlers := llmchat.NewHandlers(provider, redisClient, readyzProbeTimeout, llmchat.WithKnowledgeCheck(knowledgeCheck))
 	chatHandlers := llmchat.NewChatHandlers(llmchat.ChatHandlersConfig{
 		Agent:        agent,
 		Sessions:     sessionStore,
@@ -241,6 +246,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handlers.Healthz)
 	mux.HandleFunc("/readyz", handlers.Readyz)
+	mux.HandleFunc("/livez", handlers.Livez)
 	mux.HandleFunc("/api/v1/chat/healthz", handlers.Readyz)
 	registerMetricsHandler(mux, prometheus.DefaultGatherer)
 
@@ -435,6 +441,32 @@ func logActiveBackend(cfg runtimeConfig) {
 		"base_url", cfg.Provider.BaseURL,
 		"model", cfg.Provider.Model,
 	)
+}
+
+func knowledgePathCheck(apiSpecPath, sitePath string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		apiInfo, err := os.Stat(apiSpecPath)
+		if err != nil {
+			return fmt.Errorf("api_spec %s: %w", apiSpecPath, err)
+		}
+		if apiInfo.IsDir() {
+			return fmt.Errorf("api_spec %s: expected file, got directory", apiSpecPath)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		siteInfo, err := os.Stat(sitePath)
+		if err != nil {
+			return fmt.Errorf("site_content %s: %w", sitePath, err)
+		}
+		if !siteInfo.IsDir() {
+			return fmt.Errorf("site_content %s: expected directory, got file", sitePath)
+		}
+		return nil
+	}
 }
 
 func openRedis(redisURL string) (*redis.Client, error) {

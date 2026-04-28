@@ -47,5 +47,6 @@ The vLLM path remains local/self-hosted and keeps the pinned v0.16.0 image plus 
 - [Helm + Compose deployment](helm.md)
 - [Provider configuration](provider-config.md)
 - [Ollama runtime](ollama-runtime.md)
+- [Production readiness runbook](production-readiness.md)
 - [Hardware tiers / opt-in vLLM](hardware-tiers.md)
 - [Troubleshooting](troubleshooting.md)

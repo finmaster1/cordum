@@ -1,6 +1,7 @@
 package llmchat
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -42,18 +43,77 @@ func TestHandlers_Healthz(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
-	resp := rec.Result()
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	body := decodeReadyBody(t, rec.Result())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%+v", rec.Code, body)
 	}
+	if body.Status != "ok" || body.Vllm != "ok" || body.Knowledge != "ok" {
+		t.Errorf("body = %+v, want provider+knowledge ok", body)
+	}
+}
 
-	var body healthBody
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
+func TestHandlers_Healthz_ProviderDown(t *testing.T) {
+	t.Parallel()
+
+	rdb, _ := newMiniredisClient(t)
+	mockProv := NewMockProvider()
+	mockProv.SetHealthErr(errors.New("ollama down"))
+	h := NewHandlers(mockProv, rdb, time.Second)
+
+	rec := httptest.NewRecorder()
+	h.Healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	body := decodeReadyBody(t, rec.Result())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body=%+v", rec.Code, body)
 	}
-	if body.Status != "ok" || body.Service != "cordum-llm-chat" {
-		t.Errorf("body = %+v, want status=ok service=cordum-llm-chat", body)
+	if !strings.Contains(body.Vllm, "ollama down") {
+		t.Errorf("vllm = %q, want provider error", body.Vllm)
+	}
+	if body.Knowledge != "ok" {
+		t.Errorf("knowledge = %q, want ok", body.Knowledge)
+	}
+}
+
+func TestHandlers_Healthz_KnowledgeDown(t *testing.T) {
+	t.Parallel()
+
+	rdb, _ := newMiniredisClient(t)
+	h := NewHandlers(NewMockProvider(), rdb, time.Second, WithKnowledgeCheck(func(_ context.Context) error {
+		return errors.New("missing openapi")
+	}))
+
+	rec := httptest.NewRecorder()
+	h.Healthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	body := decodeReadyBody(t, rec.Result())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body=%+v", rec.Code, body)
+	}
+	if body.Vllm != "ok" {
+		t.Errorf("vllm = %q, want ok", body.Vllm)
+	}
+	if !strings.Contains(body.Knowledge, "missing openapi") {
+		t.Errorf("knowledge = %q, want missing openapi", body.Knowledge)
+	}
+}
+
+func TestHandlers_Livez_ProcessOnly(t *testing.T) {
+	t.Parallel()
+
+	rdb, mr := newMiniredisClient(t)
+	mr.Close()
+	mockProv := NewMockProvider()
+	mockProv.SetHealthErr(errors.New("provider down"))
+	h := NewHandlers(mockProv, rdb, time.Second, WithKnowledgeCheck(func(_ context.Context) error {
+		return errors.New("knowledge down")
+	}))
+
+	rec := httptest.NewRecorder()
+	h.Livez(rec, httptest.NewRequest(http.MethodGet, "/livez", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
 
@@ -71,7 +131,7 @@ func TestHandlers_Readyz_AllOK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%+v", rec.Code, body)
 	}
-	if body.Status != "ok" || body.Redis != "ok" || body.Vllm != "ok" {
+	if body.Status != "ok" || body.Redis != "ok" || body.Vllm != "ok" || body.Knowledge != "ok" {
 		t.Errorf("body = %+v, want all ok", body)
 	}
 	if got := mockProv.HealthCalls(); got != 1 {
