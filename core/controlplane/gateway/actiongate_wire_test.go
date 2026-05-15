@@ -81,6 +81,51 @@ func TestEncodeActionDescriptorLabel_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestStripReservedActionDescriptorLabel_BlocksClientInjection asserts
+// the defense-in-depth strip drops a client-supplied descriptor label.
+// Without this, a client could submit the gateway's reserved label
+// directly in their HTTP body, bypass the authenticated descriptor
+// path (req.Action), and inject attacker-controlled descriptor data
+// into the kernel-side extractor's audit/gate code path.
+func TestStripReservedActionDescriptorLabel_BlocksClientInjection(t *testing.T) {
+	t.Parallel()
+	in := map[string]string{
+		labelActionDescriptorJSON: `{"kind":"file","verb":"delete","target_path":"/etc/shadow"}`,
+		"benign_key":              "kept",
+		"_content.prompt":         "kept-because-different-key",
+	}
+	out := stripReservedActionDescriptorLabel(in)
+	if _, present := out[labelActionDescriptorJSON]; present {
+		t.Fatal("client-supplied descriptor label was not stripped")
+	}
+	if out["benign_key"] != "kept" {
+		t.Fatalf("benign label lost in strip: %v", out)
+	}
+	if out["_content.prompt"] != "kept-because-different-key" {
+		t.Fatalf("unrelated underscore label was incorrectly stripped: %v", out)
+	}
+}
+
+func TestStripReservedActionDescriptorLabel_NoOpWhenAbsent(t *testing.T) {
+	t.Parallel()
+	in := map[string]string{"normal_key": "v"}
+	out := stripReservedActionDescriptorLabel(in)
+	// No reserved key present -> implementation returns original map
+	// (no allocation cost on hot path).
+	if &out == &in { // map header pointers differ; compare via content
+	}
+	if len(out) != 1 || out["normal_key"] != "v" {
+		t.Fatalf("strip mutated label set unexpectedly: %v", out)
+	}
+}
+
+func TestStripReservedActionDescriptorLabel_NilInputNilOutput(t *testing.T) {
+	t.Parallel()
+	if out := stripReservedActionDescriptorLabel(nil); out != nil {
+		t.Fatalf("nil input should produce nil output, got %v", out)
+	}
+}
+
 func TestEncodeActionDescriptorLabel_NilReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	encoded, err := encodeActionDescriptorLabel(nil)

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"os"
 	"reflect"
@@ -432,7 +431,17 @@ func buildPolicyCheckRequest(ctx context.Context, req *policyCheckRequest, cfgSv
 	// label-clean loop in this package (see clean loop in injectContentLabels)
 	// so it never leaks back to clients. The kernel's
 	// safetykernel.actionDescriptorFromRequest extractor reads this key.
-	labels := req.Labels
+	//
+	// Defense-in-depth: ALWAYS strip the descriptor key from the client-
+	// supplied Labels first, then re-inject only when this gateway has
+	// authenticated/validated a real Action from the parsed HTTP body.
+	// Without the strip, a client could set `_action.descriptor_json`
+	// directly with `req.Action=nil` and the kernel-side extractor
+	// would consume attacker-controlled descriptor data, allowing
+	// confused-deputy audit log poisoning (target_type values surface
+	// in SIEM events) and unverified gate decisions on the kernel
+	// defensive path.
+	labels := stripReservedActionDescriptorLabel(req.Labels)
 	if req.Action != nil {
 		encoded, err := encodeActionDescriptorLabel(req.Action)
 		if err != nil {
@@ -441,10 +450,6 @@ func buildPolicyCheckRequest(ctx context.Context, req *policyCheckRequest, cfgSv
 		if encoded != "" {
 			if labels == nil {
 				labels = make(map[string]string, 1)
-			} else {
-				next := make(map[string]string, len(labels)+1)
-				maps.Copy(next, labels)
-				labels = next
 			}
 			labels[labelActionDescriptorJSON] = encoded
 		}

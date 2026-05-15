@@ -21,6 +21,30 @@ import (
 // with safetykernel.LabelActionDescriptorJSON.
 const labelActionDescriptorJSON = "_action.descriptor_json"
 
+// stripReservedActionDescriptorLabel returns a copy of labels with the
+// gateway-reserved descriptor key removed. Defends against a client
+// who places `_action.descriptor_json` directly in their HTTP body's
+// Labels map to bypass the gateway's authenticated descriptor path and
+// inject attacker-controlled data into the kernel-side extractor.
+// Returns the original map (no allocation) when the key is absent so
+// the common case stays cheap.
+func stripReservedActionDescriptorLabel(labels map[string]string) map[string]string {
+	if labels == nil {
+		return nil
+	}
+	if _, hasReserved := labels[labelActionDescriptorJSON]; !hasReserved {
+		return labels
+	}
+	out := make(map[string]string, len(labels)-1)
+	for k, v := range labels {
+		if k == labelActionDescriptorJSON {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // encodeActionDescriptorLabel marshals an ActionDescriptor for transport
 // in a Labels map entry. Enforces the same serialized-bytes cap the
 // gateway uses for tool arg payloads so an oversized descriptor cannot
