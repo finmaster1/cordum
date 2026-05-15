@@ -26,6 +26,10 @@ type URLGate struct {
 	resCacheMu  sync.Mutex
 	resCache    map[string]resolverCacheEntry
 	resCacheTTL time.Duration
+	// resCacheMax bounds the resolver cache so attacker-influenced host
+	// inputs cannot grow it without limit. Inserts past the cap evict
+	// expired entries first, then drop the soonest-to-expire entry.
+	resCacheMax int
 }
 
 type resolverCacheEntry struct {
@@ -34,14 +38,22 @@ type resolverCacheEntry struct {
 	expiry time.Time
 }
 
+// defaultResolverCacheMax bounds the URL gate's resolver cache. Sized
+// large enough to absorb realistic traffic spikes (a few hundred unique
+// hosts per minute) while small enough to cap memory growth at a few
+// hundred KiB even when every entry holds the maximum IP set.
+const defaultResolverCacheMax = 4096
+
 // URLGateOptions configures the URL gate. Resolver is required for DNS
 // rebinding tests; DomainSeen is optional and feeds the REQUIRE_HUMAN
 // path for PII POSTs to never-before-seen hosts (returns true for hosts
-// already cached as approved).
+// already cached as approved). ResolverCacheMax bounds the resolver
+// cache; zero or negative leaves the default in place.
 type URLGateOptions struct {
-	Resolver    HostResolver
-	DomainSeen  func(host string) bool
-	ResolverTTL time.Duration
+	Resolver         HostResolver
+	DomainSeen       func(host string) bool
+	ResolverTTL      time.Duration
+	ResolverCacheMax int
 }
 
 // NewURLGate constructs a URLGate. Resolver defaults to a net.LookupHost
@@ -55,11 +67,16 @@ func NewURLGate(opts URLGateOptions) *URLGate {
 	if ttl == 0 {
 		ttl = 60 * time.Second
 	}
+	maxEntries := opts.ResolverCacheMax
+	if maxEntries <= 0 {
+		maxEntries = defaultResolverCacheMax
+	}
 	return &URLGate{
 		resolver:    resolver,
 		domainSeen:  opts.DomainSeen,
 		resCache:    make(map[string]resolverCacheEntry),
 		resCacheTTL: ttl,
+		resCacheMax: maxEntries,
 	}
 }
 
