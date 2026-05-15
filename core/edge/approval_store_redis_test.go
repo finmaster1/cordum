@@ -1619,6 +1619,153 @@ func TestRedisStoreLookupByActionHashReturnsMostRecentApproved(t *testing.T) {
 	}
 }
 
+// TestApprovalConsumePolicySnapshotMismatch is a regression guard for the
+// existing approvalClaimMatches contract: when an approval was minted
+// against policy_snapshot "policy-v1" and the consume call presents
+// "policy-v2", ClaimApproval MUST refuse with ErrApprovalConflict. The
+// behaviour is already implemented (approvalClaimMatches checks PolicySnapshot)
+// but no test pinned it explicitly — this case is asserted via the args/
+// input pair tests but never policy-snapshot in isolation. EDGE-103 surfaces
+// the same mismatch as -32096 error.data.kind=policy_mismatch at the MCP
+// entry-path layer; this test prevents a future refactor from silently
+// dropping the store-level guard that backs that wire-level error.
+func TestApprovalConsumePolicySnapshotMismatch(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 15, 19, 0, 0, 0, time.UTC)
+	store, _, _, cleanup := newRedisEdgeStore(t, WithClock(func() time.Time { return base }))
+	defer cleanup()
+
+	createApprovalParents(t, ctx, store, "tenant-a", "sess-pol", "exec-pol", "event-pol", base)
+	req := validApprovalRequest("tenant-a", "sess-pol", "exec-pol", "event-pol", base)
+	req.PolicySnapshot = "policy-v1"
+	approval, err := store.EnqueueApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("EnqueueApproval: %v", err)
+	}
+	if _, err := store.ApproveApproval(ctx, ApprovalResolution{
+		TenantID:    req.TenantID,
+		ApprovalRef: approval.ApprovalRef,
+		ResolverID:  "reviewer",
+		ResolvedBy:  "reviewer@example.invalid",
+		Reason:      "approve for policy drift test",
+		ResolvedAt:  base.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("ApproveApproval: %v", err)
+	}
+
+	claimed, ok, err := store.ClaimApproval(ctx, ApprovalClaimRequest{
+		TenantID:       req.TenantID,
+		ApprovalRef:    approval.ApprovalRef,
+		SessionID:      req.SessionID,
+		ExecutionID:    req.ExecutionID,
+		EventID:        req.EventID,
+		ActionHash:     req.ActionHash,
+		InputHash:      req.InputHash,
+		PolicySnapshot: "policy-v2",
+		ConsumedAt:     base.Add(2 * time.Minute),
+	})
+	if !errors.Is(err, ErrApprovalConflict) || ok || claimed != nil {
+		t.Fatalf("ClaimApproval with drifted policy_snapshot = (%#v,%v,%v); want ErrApprovalConflict nil,false", claimed, ok, err)
+	}
+}
+
+// TestApprovalConsumeRejectsSelfApprovalAtStore is a TDD RED test for the
+// store-level self-approval guard architect-cd323a16 mandated in EDGE-103
+// (comment-f1d377b1 section D — defense in depth at BOTH store and entry).
+// Today the MutationGate enforces requester != approver but the store does
+// not; if a refactor moves that check up out of MutationGate or bypasses it,
+// the store path silently allows self-consume. The intended fix is to
+// extend ApprovalClaimRequest with CallerAgentID and reject when the
+// caller matches approval.Requester or approval.ResolverID.
+//
+// Until that step-3 work lands this test FAILS — ClaimApproval will return
+// a non-nil approval with err=nil, instead of (nil,false,ErrApprovalConflict).
+func TestApprovalConsumeRejectsSelfApprovalAtStore(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 15, 19, 5, 0, 0, time.UTC)
+	store, _, _, cleanup := newRedisEdgeStore(t, WithClock(func() time.Time { return base }))
+	defer cleanup()
+
+	createApprovalParents(t, ctx, store, "tenant-a", "sess-self", "exec-self", "event-self", base)
+	req := validApprovalRequest("tenant-a", "sess-self", "exec-self", "event-self", base)
+	req.Requester = "principal-a"
+	approval, err := store.EnqueueApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("EnqueueApproval: %v", err)
+	}
+	// Approve by the SAME principal who requested — this is the self-approval
+	// scenario the store-level guard MUST reject when Consume happens.
+	if _, err := store.ApproveApproval(ctx, ApprovalResolution{
+		TenantID:    req.TenantID,
+		ApprovalRef: approval.ApprovalRef,
+		ResolverID:  "principal-a",
+		ResolvedBy:  "principal-a@example.invalid",
+		Reason:      "self-approve attempt",
+		ResolvedAt:  base.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("ApproveApproval: %v", err)
+	}
+
+	// Caller is the same principal as the requester+approver — store must
+	// recognize this as a self-approval attempt and refuse to consume.
+	// Architect amendment D: this is enforced via the new ApprovalClaimRequest
+	// CallerAgentID field + approvalClaimMatches check in step-3. The store
+	// owns the typed-error surface; the entry-path layer composes it.
+	claimed, ok, err := store.ClaimApproval(ctx, ApprovalClaimRequest{
+		TenantID:       req.TenantID,
+		ApprovalRef:    approval.ApprovalRef,
+		SessionID:      req.SessionID,
+		ExecutionID:    req.ExecutionID,
+		EventID:        req.EventID,
+		ActionHash:     req.ActionHash,
+		InputHash:      req.InputHash,
+		PolicySnapshot: req.PolicySnapshot,
+		ConsumedAt:     base.Add(2 * time.Minute),
+		CallerAgentID:  "principal-a",
+	})
+	if !errors.Is(err, ErrApprovalConflict) || ok || claimed != nil {
+		t.Fatalf("ClaimApproval with self-approval caller = (%#v,%v,%v); want ErrApprovalConflict nil,false (store-level defense-in-depth per EDGE-103 amendment D)",
+			claimed, ok, err)
+	}
+}
+
+// TestApprovalCreateClipsExpiresAtToConfiguredMaxTTL is a TDD RED test for
+// the ApprovalMaxTTL config field the architect's plan step-3 introduces.
+// When a caller supplies an ExpiresAt beyond the configured maximum, the
+// store MUST clip ExpiresAt to (createdAt + ApprovalMaxTTL) so a malicious
+// or buggy caller cannot park an approval indefinitely. The clip happens
+// AT CREATION; consume-time cannot extend.
+//
+// Step-3 wires `cfg.Edge.ApprovalMaxTTL` (default 30 min) + a store option
+// that propagates the cap. Until then this test FAILS — EnqueueApproval
+// stores the caller's 24-hour ExpiresAt unmodified.
+func TestApprovalCreateClipsExpiresAtToConfiguredMaxTTL(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 15, 19, 10, 0, 0, time.UTC)
+	const maxTTL = 30 * time.Minute
+	store, _, _, cleanup := newRedisEdgeStore(t,
+		WithClock(func() time.Time { return base }),
+		WithApprovalMaxTTL(maxTTL),
+	)
+	defer cleanup()
+
+	createApprovalParents(t, ctx, store, "tenant-a", "sess-ttl", "exec-ttl", "event-ttl", base)
+	req := validApprovalRequest("tenant-a", "sess-ttl", "exec-ttl", "event-ttl", base)
+	req.ExpiresAt = base.Add(24 * time.Hour)
+	approval, err := store.EnqueueApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("EnqueueApproval: %v", err)
+	}
+	if approval.ExpiresAt == nil {
+		t.Fatalf("approval.ExpiresAt = nil; want clipped to %v after base", maxTTL)
+	}
+	want := base.Add(maxTTL)
+	if !approval.ExpiresAt.Equal(want) {
+		t.Fatalf("approval.ExpiresAt = %v; want %v (clipped to ApprovalMaxTTL=%v)",
+			approval.ExpiresAt.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano), maxTTL)
+	}
+}
+
 // prewarmRedisClientPool serially pings the redis client enough times to
 // fully populate the connection pool before the test fans out to many
 // concurrent goroutines. It exists to defuse the go-redis v9 lazy-init
