@@ -184,10 +184,10 @@ type server struct {
 	// a stub. nil = action gates disabled (falls through to legacy
 	// safetyClient.Evaluate / Simulate / Explain).
 	actionGatePipeline *actiongates.Pipeline
-	userStore         auth.UserStore
-	keyStore          auth.KeyStore
-	rbacStore         *auth.RBACStore
-	permChecker       *auth.PermissionChecker
+	userStore          auth.UserStore
+	keyStore           auth.KeyStore
+	rbacStore          *auth.RBACStore
+	permChecker        *auth.PermissionChecker
 
 	auditExporter       audit.AuditSender
 	auditChainer        *audit.Chainer

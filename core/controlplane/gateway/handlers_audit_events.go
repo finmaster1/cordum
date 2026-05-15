@@ -244,6 +244,14 @@ func readAuditEventsPage(
 	// cursor for the next page, the latter wants an empty cursor.
 	streamDrained := false
 	lastEmittedID := ""
+	// oldestSeenID tracks the deepest stream ID we visited across all
+	// batches (regardless of filter match). When the page fills via
+	// emitted matches the cursor IS lastEmittedID, but under heavy
+	// filtering we may exhaust maxBatchRoundtrips before the page
+	// fills — and without a forward marker, the client would see an
+	// empty cursor and incorrectly stop paginating. oldestSeenID is
+	// that forward marker so the next page picks up from the right spot.
+	oldestSeenID := ""
 	for round := 0; round < maxBatchRoundtrips && len(out) < limit; round++ {
 		entries, err := client.XRevRangeN(ctx, streamKey, maxID, minID, batchSize).Result()
 		if err != nil {
@@ -253,6 +261,7 @@ func readAuditEventsPage(
 			streamDrained = true
 			break
 		}
+		oldestSeenID = entries[len(entries)-1].ID
 
 		for _, msg := range entries {
 			// "event" is the Redis Stream field name used by the audit
@@ -288,10 +297,17 @@ func readAuditEventsPage(
 	}
 
 	if streamDrained && len(out) < limit {
-		// We drained the stream without filling the page. No more pages.
+		// Drained the stream without filling the page — no more pages.
 		return out, "", nil
 	}
-	return out, lastEmittedID, nil
+	if lastEmittedID != "" {
+		return out, lastEmittedID, nil
+	}
+	// Search exhausted maxBatchRoundtrips with zero matches but the
+	// stream had more entries we never reached. Hand the client a
+	// forward cursor (oldest entry we walked past) so the next page
+	// resumes deeper instead of looping at the top.
+	return out, oldestSeenID, nil
 }
 
 // matchesFilters applies the in-process predicate set. Returns true when

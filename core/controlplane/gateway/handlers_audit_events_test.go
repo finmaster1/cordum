@@ -422,6 +422,80 @@ func TestHandleAuditEvents_MetaAudit(t *testing.T) {
 	}
 }
 
+// TestHandleAuditEvents_HeavyFilterPagesForward pins the cursor-forward
+// guarantee under heavy filter pressure: when a single XRevRange scan
+// (limit * auditEventsFetchMultiplier * maxBatchRoundtrips entries)
+// produces zero matches because every entry is dropped by the filter
+// chain, the response must hand back a cursor that lets the client
+// resume DEEPER in the stream. Returning an empty cursor here would
+// silently lose any matching events older than the scan window.
+//
+// Regression for the adversarial-self-review finding: the original
+// readAuditEventsPage only tracked lastEmittedID, so a heavily-filtered
+// page exited with cursor="" and the client incorrectly stopped paging.
+func TestHandleAuditEvents_HeavyFilterPagesForward(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	const pageLimit = 2
+	// Seed enough non-matching entries to force the search to exit on
+	// maxBatchRoundtrips without finding any matches in the first page:
+	// scanWindow = pageLimit * auditEventsFetchMultiplier * maxBatchRoundtrips = 2 * 4 * 8 = 64.
+	// Pad to 80 non-matching so the matches sit beyond the first page's window.
+	const nonMatching = pageLimit*auditEventsFetchMultiplier*8 + 16
+	events := make([]audit.SIEMEvent, 0, nonMatching+pageLimit)
+	// Matching events (older) first — they were appended earlier.
+	for i := 0; i < pageLimit; i++ {
+		events = append(events, audit.SIEMEvent{
+			EventType: audit.EventMCPToolInvocation,
+			Severity:  audit.SeverityInfo,
+			Action:    "matching-" + itoa(i),
+		})
+	}
+	// Non-matching events newest (appended after matches).
+	for i := 0; i < nonMatching; i++ {
+		events = append(events, audit.SIEMEvent{
+			EventType: audit.EventSafetyDecision,
+			Severity:  audit.SeverityInfo,
+			Action:    "filler-" + itoa(i),
+		})
+	}
+	seedAuditEvents(t, s, "default", events)
+
+	cursor := ""
+	seen := 0
+	const maxPages = 30
+	for page := 0; page < maxPages && seen < pageLimit; page++ {
+		url := "/api/v1/audit/events?tenant=default&event_type=" +
+			audit.EventMCPToolInvocation + "&limit=" + itoa(pageLimit)
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		rec := httptest.NewRecorder()
+		req := adminCtx(httptest.NewRequest(http.MethodGet, url, nil))
+		s.handleListAuditEvents(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page %d: status=%d body=%s", page, rec.Code, rec.Body.String())
+		}
+		resp := decodeAuditEventsResponse(t, rec)
+		seen += len(resp.Items)
+		if resp.NextCursor == "" {
+			if seen < pageLimit {
+				t.Fatalf("page %d returned empty cursor with %d/%d matches seen "+
+					"— heavy-filter pagination dropped events (the bug this test guards)",
+					page, seen, pageLimit)
+			}
+			break
+		}
+		if resp.NextCursor == cursor {
+			t.Fatalf("page %d cursor did not advance (cursor=%q) — would loop forever",
+				page, cursor)
+		}
+		cursor = resp.NextCursor
+	}
+	if seen != pageLimit {
+		t.Errorf("saw %d matches across paginated scan, want %d", seen, pageLimit)
+	}
+}
+
 // itoa is a small i→string helper to keep test bodies readable without
 // pulling strconv into every line.
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
