@@ -28,6 +28,13 @@ const (
 	// as a missing WithMCPCallMetadata before dispatch. Distinct from
 	// -32603 so operators can page on it specifically.
 	jsonRPCGatewayMisconfiguredCode = -32097
+	// jsonRPCApprovalLifecycleErrorCode is returned when a tool call carries
+	// `_approval_ref` and the approval-store claim fails (not_found / rejected
+	// / expired / consumed / args_mismatch / policy_mismatch / self_approval
+	// / cross_tenant). The specific failure family rides in error.data.kind
+	// per the edge.ApprovalConflictKind snake_case enum. Distinct from
+	// -32099 (initial approval_required) so clients can branch retry logic.
+	jsonRPCApprovalLifecycleErrorCode = -32096
 )
 
 var (
@@ -87,6 +94,11 @@ type MCPServer struct {
 	// gate consumes (e.g. "cordum.builtin"). Set by WithPolicyGate so
 	// the descriptor's Server field is server-derived, not client-claimed.
 	policyServerName string
+	// approvalHoldDeps, when non-nil, makes handleToolsCall consult the
+	// Edge approval store for an `_approval_ref` arg BEFORE invoking the
+	// tool dispatch path. EDGE-103 wires this via WithApprovalHold; absent
+	// wiring preserves the pre-EDGE-103 path (no resume protocol).
+	approvalHoldDeps *ApprovalHoldDeps
 }
 
 // WithAuditor attaches a ToolInvocationAuditor so the server emits
@@ -126,6 +138,28 @@ func (s *MCPServer) WithPolicyGate(serverName string, deps ToolCallDeps) *MCPSer
 	}
 	s.policyDeps = &deps
 	s.policyServerName = serverName
+	return s
+}
+
+// WithApprovalHold wires the EDGE-103 approval-claim consume path. When
+// configured, handleToolsCall checks each `tools/call` for an
+// `_approval_ref` argument and atomically consumes it via the Edge
+// approval store BEFORE invoking the tool dispatch. On a fail-closed
+// lifecycle conflict (rejected / expired / consumed / args_mismatch /
+// policy_mismatch / self_approval / cross_tenant / not_found) the server
+// returns JSON-RPC -32096 with the typed error.data.kind discriminator.
+//
+// Passing zero-value ApprovalHoldDeps disables the path so legacy
+// servers boot unchanged.
+func (s *MCPServer) WithApprovalHold(deps ApprovalHoldDeps) *MCPServer {
+	if s == nil {
+		return s
+	}
+	if deps.Store == nil {
+		s.approvalHoldDeps = nil
+		return s
+	}
+	s.approvalHoldDeps = &deps
 	return s
 }
 
@@ -365,6 +399,31 @@ func (s *MCPServer) handleToolsCall(ctx context.Context, params json.RawMessage)
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, s.rpcError(jsonRPCInvalidParamsCode, "invalid params", "name is required")
+	}
+	// EDGE-103: when an `_approval_ref` is present in args, consume the
+	// stored approval BEFORE handing off to invokeTool. On a fail-closed
+	// lifecycle conflict we surface JSON-RPC -32096 with typed
+	// error.data.kind; on a successful consume we replace req.Arguments
+	// with the `_approval_ref`-stripped form so the upstream tool handler
+	// and the policy gate both see the originally-authorized payload.
+	if s.approvalHoldDeps != nil {
+		outcome, err := ProcessApprovalClaim(ctx, *s.approvalHoldDeps, req)
+		if err != nil {
+			if errors.Is(err, errMissingMCPMetadata) {
+				return nil, s.rpcError(jsonRPCGatewayMisconfiguredCode, "approval gate misconfigured", "missing_mcp_metadata")
+			}
+			return nil, s.rpcError(jsonRPCInvalidParamsCode, "invalid approval ref", err.Error())
+		}
+		if outcome.ConflictErr != nil {
+			return nil, s.rpcError(jsonRPCApprovalLifecycleErrorCode, "approval lifecycle error", map[string]any{
+				"kind":         string(outcome.ConflictErr.Kind),
+				"approval_ref": outcome.ClaimRef,
+				"reason":       outcome.ConflictErr.Reason,
+			})
+		}
+		if outcome.Consumed && len(outcome.StrippedArgs) > 0 {
+			req.Arguments = outcome.StrippedArgs
+		}
 	}
 	// Bracket every terminal tools/call with the invocation auditor so
 	// success + handler-error + approval-required + scope-deny all

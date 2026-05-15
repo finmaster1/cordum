@@ -76,6 +76,12 @@ type RedisStore struct {
 	// EDGE-054 added the create_execution_aborted_total counter; future store
 	// metrics route through the same field.
 	recorder Recorder
+	// approvalMaxTTL caps the per-approval ExpiresAt at hold-creation. A
+	// caller-supplied ExpiresAt longer than (createdAt + approvalMaxTTL) is
+	// clipped to that ceiling so a malicious or buggy caller cannot park
+	// an approval indefinitely. Zero (unset) preserves the legacy
+	// unclipped behaviour; EDGE-103 sets it via WithApprovalMaxTTL.
+	approvalMaxTTL time.Duration
 }
 
 type redisEventGroup struct {
@@ -207,6 +213,19 @@ func WithRecorder(r Recorder) StoreOption {
 	return func(s *RedisStore) {
 		if r != nil {
 			s.recorder = r
+		}
+	}
+}
+
+// WithApprovalMaxTTL caps the lifespan of any approval the store mints.
+// A caller-supplied ExpiresAt longer than (createdAt + max) is clipped
+// to that ceiling so a malicious or buggy caller cannot park an
+// approval indefinitely. EDGE-103 wires this from cfg.Edge.ApprovalMaxTTL.
+// A non-positive value disables clipping (legacy behaviour).
+func WithApprovalMaxTTL(max time.Duration) StoreOption {
+	return func(s *RedisStore) {
+		if max > 0 {
+			s.approvalMaxTTL = max
 		}
 	}
 }

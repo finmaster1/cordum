@@ -104,6 +104,15 @@ func (s *RedisStore) EnqueueApproval(ctx context.Context, req EdgeApprovalReques
 		if expiresAt.Before(now) {
 			return fmt.Errorf("expires_at must be >= created_at")
 		}
+		// EDGE-103: clip ExpiresAt to (now + approvalMaxTTL) when the store
+		// has a configured maximum. Bound holds the approval to a finite
+		// review window so a malicious or buggy caller cannot park it
+		// indefinitely. Defense-in-depth alongside Redis EXPIREAT.
+		if s.approvalMaxTTL > 0 {
+			if maxExpiresAt := now.Add(s.approvalMaxTTL); expiresAt.After(maxExpiresAt) {
+				expiresAt = maxExpiresAt
+			}
+		}
 
 		approval := EdgeApproval{
 			ApprovalRef:    ref,
@@ -386,11 +395,11 @@ func (s *RedisStore) ClaimApproval(ctx context.Context, req ApprovalClaimRequest
 			consumedAt = s.now().UTC()
 		}
 		if approval.ExpiresAt != nil && consumedAt.After(*approval.ExpiresAt) {
-			claimErr = fmt.Errorf("%w: approval expired", ErrApprovalConflict)
+			claimErr = newApprovalConflict(ApprovalConflictKindExpired, "approval expired")
 			return nil
 		}
-		if !approvalClaimMatches(approval, req) {
-			claimErr = fmt.Errorf("%w: approval tuple mismatch", ErrApprovalConflict)
+		if kind, reason := classifyApprovalClaimMismatch(approval, req); kind != ApprovalConflictKindUnknown {
+			claimErr = newApprovalConflict(kind, reason)
 			return nil
 		}
 		if err := s.validateApprovalRecordActionableTx(ctx, tx, *approval); err != nil {
@@ -941,16 +950,43 @@ func approvalMatchesTuple(approval EdgeApproval, sessionID, executionID, actionH
 		approval.ActionHash == strings.TrimSpace(actionHash)
 }
 
-func approvalClaimMatches(approval *EdgeApproval, req ApprovalClaimRequest) bool {
+// classifyApprovalClaimMismatch inspects an approval against the claim
+// request and returns the specific ApprovalConflictKind that disqualifies
+// the match (or ApprovalConflictKindUnknown if the claim is valid). The
+// helper centralises the field-by-field comparison so ClaimApproval can
+// build a typed ApprovalConflictError downstream callers can dispatch
+// on with errors.As.
+//
+// Ordering follows attacker-surface priority — secret-bearing identity
+// mismatches (self-approval) are tested BEFORE the tuple/args/policy
+// checks so a self-approval attempt cannot be masked by simultaneously
+// mutating a benign field. Tenant separation is handled at the caller
+// (ClaimApproval rejects with kind=not_found by design — leaking
+// tuple existence cross-tenant would help reconnaissance).
+func classifyApprovalClaimMismatch(approval *EdgeApproval, req ApprovalClaimRequest) (ApprovalConflictKind, string) {
 	if approval == nil {
-		return false
+		return ApprovalConflictKindNotFound, "approval missing"
 	}
-	return approval.SessionID == req.SessionID &&
-		approval.ExecutionID == req.ExecutionID &&
-		approval.EventID == req.EventID &&
-		approval.ActionHash == req.ActionHash &&
-		approval.InputHash == req.InputHash &&
-		approval.PolicySnapshot == req.PolicySnapshot
+	if req.CallerAgentID != "" {
+		if approval.Requester != "" && approval.Requester == req.CallerAgentID {
+			return ApprovalConflictKindSelfApproval, "caller is requester"
+		}
+		if approval.ResolverID != "" && approval.ResolverID == req.CallerAgentID {
+			return ApprovalConflictKindSelfApproval, "caller is approver"
+		}
+	}
+	if approval.SessionID != req.SessionID ||
+		approval.ExecutionID != req.ExecutionID ||
+		approval.EventID != req.EventID {
+		return ApprovalConflictKindTupleMismatch, "session/execution/event identity mismatch"
+	}
+	if approval.ActionHash != req.ActionHash || approval.InputHash != req.InputHash {
+		return ApprovalConflictKindArgsMismatch, "canonical args hash differs"
+	}
+	if approval.PolicySnapshot != req.PolicySnapshot {
+		return ApprovalConflictKindPolicyMismatch, "policy snapshot drift"
+	}
+	return ApprovalConflictKindUnknown, ""
 }
 
 func pageApprovals(items []EdgeApproval, start, limit int) ApprovalPage {
