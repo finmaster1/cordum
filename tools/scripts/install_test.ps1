@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = $PSScriptRoot
 $repoRoot = Resolve-Path (Join-Path $scriptDir '..\..')
 $installPs1 = Join-Path $scriptDir 'install.ps1'
 $testKeysDir = Join-Path $repoRoot 'tools\test-keys'
@@ -51,7 +51,7 @@ try {
             Write-Host "FAIL [$Label]: install.ps1 missing (expected step-5)" -ForegroundColor Red
             return $false
         }
-        $out = & pwsh -NoProfile -File $installPs1 --dev-allow-unsigned --release-dir $ReleaseDir 2>&1
+        $out = & pwsh -NoProfile -File $installPs1 -DevAllowUnsigned -ReleaseDir $ReleaseDir 2>&1
         $rc = $LASTEXITCODE
         if ($rc -eq 0) {
             Write-Host "FAIL [$Label]: install.ps1 exit=0; expected nonzero" -ForegroundColor Red

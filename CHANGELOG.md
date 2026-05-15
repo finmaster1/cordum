@@ -53,6 +53,71 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   enterprise-hardening series: EDGE-150 (managed-settings, this
   Unreleased section) and EDGE-151 (binary signing/notarization).
 
+#### EDGE-151 — Hook and agentd binary signing/notarization (2026-05-15, task-909be4cb)
+
+- New `tools/sign/` Go package implements release-time binary integrity:
+  pure-Go OpenPGP detached-signature verification over a cosign-compatible
+  `SHA256SUMS` manifest, per-binary SHA-256 recomputation in constant time
+  via `crypto/subtle`, manifest-path-traversal rejection, and a build-time
+  pinned `PinnedReleaseFingerprint` (`-ldflags '-X
+  github.com/cordum/cordum/tools/sign.PinnedReleaseFingerprint=<hex>'`)
+  that defeats single-file `cordum-release.pub.asc` substitution.
+- Release CI (`.github/workflows/release.yml`) ships a two-tier scheme on
+  every `v*` tag: Tier 1 always-on GPG-signed `SHA256SUMS` manifest
+  produced via `tools/sign/cmd/manifest-cli`, and Tier 2 OS-native code
+  signing (Apple Developer ID `codesign --options runtime --timestamp
+  --deep --strict` + `xcrun notarytool submit --wait` for darwin
+  amd64/arm64; Windows Authenticode `signtool sign /tr digicert /td
+  sha256 /fd sha256` for windows amd64) gated on
+  `github.repository == 'cordum-io/cordum'` and the relevant secrets.
+  Forks without OS-native secrets degrade to Tier 1 with a `::warning::`
+  banner and an unsigned-but-hashed manifest. The 5-platform × 3-binary
+  matrix (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
+  windows/amd64 × cordum-hook, cordum-agentd, cordum-claude) is
+  cross-compiled on `ubuntu-latest` with `CGO_ENABLED=0`.
+- PR-level validation (`.github/workflows/binaries-pr-validation.yml`)
+  runs `tools/sign` unit tests + `make release-local` + synthetic
+  tampered / unsigned scenarios via `tools/scripts/install_test.sh`,
+  plus a key-extension grep guard that fails on any private-key block
+  outside `tools/test-keys/TEST-ONLY-*`. The PEM pattern is constructed
+  at runtime so the workflow file does not self-match.
+- Pre-activation gate in `tools/scripts/install.{sh,ps1}` curls or
+  reads the release-dir, imports the trusted pubkey into an ephemeral
+  GNUPGHOME, refuses on `unsigned manifest` / `gpg signature invalid` /
+  `hash mismatch <name>` / `release pubkey fingerprint <got> does not
+  match pinned <want>` / `manifest path traversal` / `post-activation
+  hash mismatch` / `codesign verify failed`. Atomic same-fs `mv` with
+  cross-fs `cp+rename` fallback, SHA-256 recomputed AFTER move
+  (defence-in-depth against sig-then-swap race), `chmod +x`. Dev mode
+  via `--dev-allow-unsigned` (`-DevAllowUnsigned` on PowerShell)
+  accepts only `tools/test-keys/TEST-ONLY-*` material whose UID carries
+  the literal `TEST-ONLY` marker and whose fingerprint is not equal to
+  the production pin. Audit-event JSON line per outcome emitted to
+  stderr: `{event, hash, path, sig_scheme, fingerprint, reason,
+  exit_code}` — no secrets, no full paths.
+- `make release-local` (alias `tools/scripts/release-local.sh`) produces
+  a host-local dev release in `bin/release-local/` signed by the
+  committed TEST-ONLY key under `tools/test-keys/TEST-ONLY-release.*`.
+  The TEST-ONLY keypair is regenerable via `tools/test-keys/gen.sh
+  [--deterministic]`. Existing hook/agentd fail-closed runtime path
+  unchanged — EDGE-151 is release-time integrity only and does not
+  modify any file under `cmd/cordum-hook/` or `cmd/cordum-agentd/`
+  (task rail #1).
+- Threat model + operator runbook: `docs/security/binary-signing.md`
+  enumerates what the gate prevents (transit tampering, non-root local
+  substitution, accidental corruption) and what it does NOT prevent
+  (full-root coordinated swap, GitHub Actions secret compromise,
+  Developer ID / Authenticode `.pfx` leak, downgrade attack — OUT OF
+  SCOPE per sibling `EDGE-151-DOWNGRADE`, build-environment supply
+  chain). Documents pubkey pinning via `-ldflags`, the dual-sign
+  rotation procedure, and the BINARY-VERIFY-FAIL triage table.
+- Production pubkey provisioning is deferred until Yaron lands the GPG
+  release secret triple (`GPG_RELEASE_KEY_PRIVATE`,
+  `GPG_RELEASE_KEY_PASSPHRASE`, `RELEASE_FINGERPRINT`); until then the
+  install path operates in dev mode only. Dashboard surfacing of
+  binary-verify outcomes is deferred to sibling `EDGE-151-DASHBOARD`;
+  this work touches no `cordum/dashboard/` files.
+
 #### EDGE-150 — Enterprise managed-settings deployment automation (2026-05-15, task-ebed169a)
 
 - New `cordumctl edge managed-settings <export|verify|rollback-template>`

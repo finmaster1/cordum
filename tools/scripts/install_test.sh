@@ -38,7 +38,9 @@ build_release_dir() {
   mkdir -p "$dest"
   printf '#!/bin/sh\nexit 0\n' >"$dest/cordum-hook"
   chmod +x "$dest/cordum-hook"
-  ( cd "$dest" && sha256sum cordum-hook ) >"$dest/SHA256SUMS"
+  # Use --text so MSYS/Windows GnuPG produces the same "<hash>  <path>"
+  # two-space form that GNU coreutils on Linux emits by default.
+  ( cd "$dest" && sha256sum --text cordum-hook ) >"$dest/SHA256SUMS"
   gpg --homedir "$GPG_HOME" --batch --yes --quiet --detach-sign --armor \
     --output "$dest/SHA256SUMS.asc" "$dest/SHA256SUMS"
 }

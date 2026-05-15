@@ -1,0 +1,106 @@
+name: Binaries PR validation
+
+# EDGE-151 — every PR that touches tools/sign/, tools/scripts/install*,
+# tools/test-keys/, .github/workflows/release.yml, .github/workflows/
+# binaries-pr-validation.yml, or the cmd/cordum-{hook,agentd,claude}/
+# binaries must pass the Tier 1 verification gate before merge. This is
+# the gate that runs without production secrets — it uses the TEST-ONLY
+# key under tools/test-keys/ via `make release-local` and asserts that
+# install.sh refuses tampered and unsigned synthetic releases.
+
+on:
+  pull_request:
+    paths:
+      - 'tools/sign/**'
+      - 'tools/scripts/install*'
+      - 'tools/test-keys/**'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/binaries-pr-validation.yml'
+      - 'cmd/cordum-hook/**'
+      - 'cmd/cordum-agentd/**'
+      - 'cmd/cordum-claude/**'
+      - 'Makefile'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verifier-tests:
+    name: tools/sign unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test ./tools/sign/...
+        run: go test ./tools/sign/... -count=3 -timeout 90s
+      - name: gofmt
+        run: |
+          out=$(gofmt -l tools/sign/)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt diff:"
+            echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./tools/sign/...
+
+  install-tamper:
+    name: install_test.sh synthetic-tampered
+    runs-on: ubuntu-latest
+    needs: [verifier-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install GnuPG
+        run: sudo apt-get update && sudo apt-get install -y gnupg
+      - name: make release-local
+        run: make release-local
+      - name: install_test.sh — tamper + unsigned synthetics must FAIL install
+        run: bash tools/scripts/install_test.sh
+
+  no-private-keys-leaked:
+    name: lint — no private keys outside tools/test-keys/TEST-ONLY-*
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: grep guard
+        run: |
+          set -euo pipefail
+          # The only acceptable PRIVATE blocks live under tools/test-keys/
+          # with the TEST-ONLY- prefix. The PEM pattern itself is constructed
+          # at runtime so this workflow file does not self-match. We scan
+          # only key-bearing extensions (.asc/.pem/.key/.crt/.pub/.pfx) so
+          # source files that mention the pattern in regex strings or
+          # detection rules are not flagged.
+          pem_pattern="-----BEGIN .*$(printf 'PRI')VATE|-----BEGIN $(printf 'CER')TIFICATE|-----BEGIN OPENSSH $(printf 'PRI')VATE"
+          mapfile -t candidates < <(find . \
+            \( -name '*.asc' -o -name '*.pem' -o -name '*.key' -o -name '*.crt' -o -name '*.pub' -o -name '*.pfx' \) \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -not -path './bin/*' \
+            -not -path './certs/*' \
+            -not -path '*/.venv/*' \
+            -not -path '*/node_modules/*')
+          hits=""
+          if [ "${#candidates[@]}" -gt 0 ]; then
+            hits=$(printf '%s\n' "${candidates[@]}" \
+              | xargs -r grep -lE -- "$pem_pattern" 2>/dev/null \
+              | grep -v -E '^./tools/test-keys/TEST-ONLY-' \
+              || true)
+          fi
+          if [ -n "$hits" ]; then
+            echo "::error::Private key material in committed key-file outside tools/test-keys/TEST-ONLY-*:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no stray private keys in key-bearing files"
