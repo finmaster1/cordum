@@ -5,6 +5,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+#### EDGE-150 — Enterprise managed-settings deployment automation (2026-05-15, task-ebed169a)
+
+- New `cordumctl edge managed-settings <export|verify|rollback-template>`
+  subcommand renders `managed-settings.json` + `managed-mcp.json` payloads
+  for managed Claude Code workstations, validates a deployed file against
+  the 14 enterprise invariants, and re-renders the template atomically for
+  synthetic-test rollback. The CLI is operator/MDM-script invoked;
+  Cordum never calls Jamf, Intune, or any other MDM API directly.
+  (`cmd/cordumctl/edge_managed_settings.go`,
+  `cmd/cordumctl/edge_managed_settings_test.go`).
+- `core/edge/claude/managed_settings_verify.go` exposes
+  `VerifyManagedSettings`/`VerifyManagedSettingsFromPath`, a pure-function
+  drift detector that enforces every invariant baked into the template
+  generator (`allowManagedHooksOnly`, `disableBypassPermissionsMode`,
+  the six required hook families, the three managed-mode env vars,
+  `CORDUM_AGENTD_URL` shape, and a serialised-form scan that rejects
+  nonce/API-key markers). Bounded by an `io.LimitReader` cap to prevent
+  OOM on hostile input.
+- `cordumctl edge doctor` adds a `managed_settings_compliance` check
+  driven by `--managed-settings-path` /
+  `CORDUM_EDGE_MANAGED_SETTINGS_PATH`. Empty path → `skip` so
+  non-enterprise hosts do not see a spurious failure; missing file,
+  parse error, or any drift → `fail` with a redacted detail line.
+- New end-to-end deployment runbook
+  `docs/edge/managed-settings-deploy.md` covering the macOS/Jamf
+  worked example, Windows/Intune (Settings Catalog + OMA-URI + file),
+  Linux/WSL Ansible, post-deploy verification, drift-detection
+  cadences, MDM-orchestrated rollback (with the explicit "synthetic
+  test fixture only" disclaimer for the CLI rollback path), upgrade
+  flow, and operator troubleshooting. Cross-linked from
+  `docs/edge/README.md`, `docs/edge/managed-settings-template.md`,
+  `docs/edge/cordumctl-edge-doctor.md`, and `docs/edge/cli.md`.
+
 ### Fixed
 
 #### Audit Log dashboard surfaces the full SIEM feed (2026-05-15, task-00b82b90)

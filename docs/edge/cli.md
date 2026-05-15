@@ -128,6 +128,61 @@ is acceptable for developer/demo mode only. Enterprise rollout should use
 managed settings plus service bootstrap/keychain controls so users cannot bypass
 or inspect enforcement credentials.
 
+## `cordumctl edge managed-settings` — enterprise rollout subcommand
+
+`cordumctl edge managed-settings <export|verify|rollback-template>` is the
+enterprise rollout sibling of `cordumctl edge claude`. It is operator/MDM-script
+invoked; Cordum never calls Jamf, Intune, or any other MDM API itself. The
+end-to-end fleet rollout playbook (Jamf, Intune, Linux/WSL), drift-detection
+schedule, and synthetic-rollback test surface live in
+[managed-settings-deploy.md](managed-settings-deploy.md).
+
+### Subcommands
+
+| Subcommand | Purpose |
+| --- | --- |
+| `export` | Render `managed-settings.json` + `managed-mcp.json` into `--output <dir>`. Refuses to overwrite without `--force`. Rejects flag values containing secret markers (`sk-…`, `ghp_…`, bearer tokens). |
+| `verify` | Validate a deployed `managed-settings.json` at `--path <file>` against the 14 enterprise invariants (see [managed-settings-deploy.md § 6](managed-settings-deploy.md#6-verification-reference)). `--json` emits `{ok, drifts[], source}`. |
+| `rollback-template` | **Synthetic test fixture only — not a production rollback.** Atomically regenerates the template at `--path <file>` (mode `0600`) and re-runs `verify`. Production rollback is MDM-orchestrated; see [managed-settings-deploy.md § 8](managed-settings-deploy.md#8-rollback). |
+
+### Common flags
+
+| Flag | Used by | Purpose |
+| --- | --- | --- |
+| `--output <dir>` | `export` | Destination directory for both JSON files. Required. |
+| `--path <file>` | `verify`, `rollback-template` | Deployed `managed-settings.json` to inspect or atomically rewrite. Required. |
+| `--mcp-gateway-url <url>` | `export`, `rollback-template` | Cordum MCP gateway URL to embed. Required. |
+| `--llm-proxy-base-url <url>` | `export`, `rollback-template` | Cordum LLM proxy base URL. Required. |
+| `--api-key-helper-command <cmd>` | `export`, `rollback-template` | Path to `cordum-agentd claude api-key-helper`. Required. |
+| `--hook-command <cmd>` | `export`, `rollback-template` | `cordum-hook` install path. Default `/opt/cordum/bin/cordum-hook`. |
+| `--agentd-url <url>` | `export`, `rollback-template` | Local loopback hook URL. Default `http://127.0.0.1:8765/v1/edge/hooks/claude`. |
+| `--platform <linux\|darwin\|windows>` | `export`, `rollback-template` | Target platform; default `runtime.GOOS`. Determines hook-path normalisation. |
+| `--force` | `export` | Overwrite existing output files (refuse-to-overwrite is the default). |
+| `--json` | `verify` | Emit machine-readable envelope. |
+
+### Exit codes
+
+| Code | Subcommand | Meaning |
+| --- | --- | --- |
+| `0` | all | Success. `export` wrote both files; `verify` reports `ok`; `rollback-template` regenerated and re-verified clean. |
+| `1` | `verify`, `rollback-template` | Drift detected (one line per drift on stderr) or post-rollback verification failed. |
+| `2` | all | Validation error: missing/sensitive flag, missing or unparseable file, unknown subcommand. |
+
+### Quick reference
+
+```bash
+# Generate the payload (operator workstation)
+cordumctl edge managed-settings export \
+  --output ./payload/ \
+  --mcp-gateway-url https://mcp.cordum.example/mcp \
+  --llm-proxy-base-url https://llm-proxy.cordum.example \
+  --api-key-helper-command "/opt/cordum/bin/cordum-agentd claude api-key-helper"
+
+# Verify a deployed file (workstation, no gateway needed)
+cordumctl edge managed-settings verify \
+  --path /etc/claude-code/managed-settings.json
+```
+
 ## Related docs
 
 - [Root Claude Code guide](../edge-claude-code.md)
@@ -136,4 +191,5 @@ or inspect enforcement credentials.
 - [cordumctl edge doctor](cordumctl-edge-doctor.md)
 - [cordum-hook](cordum-hook.md)
 - [cordum-agentd](cordum-agentd.md)
-- [Managed settings template](managed-settings-template.md)
+- [Managed settings template (synthetic excerpt)](managed-settings-template.md)
+- [Managed settings deployment automation](managed-settings-deploy.md)

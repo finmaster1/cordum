@@ -115,6 +115,9 @@ or provider secrets into Edge events, settings files, issue comments, or docs.
 
 Use [managed settings templates](managed-settings-template.md) to understand the
 enterprise shape, but do not treat the developer wrapper as fleet enforcement.
+For the end-to-end fleet rollout playbook (Jamf, Intune, Linux/WSL),
+drift-detection check, and synthetic-rollback test surface, see
+[managed-settings-deploy.md](managed-settings-deploy.md).
 
 ## Demo and operating paths
 

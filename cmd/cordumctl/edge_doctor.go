@@ -18,28 +18,30 @@ const (
 )
 
 type edgeDoctorEnv struct {
-	base         *doctorEnv
-	policyMode   string
-	claudePath   string
-	hookCommand  string
-	agentdPath   string
-	agentdURL    string
-	settingsPath string
-	dashboardURL string
-	lookPath     func(string) (string, error)
-	statFile     func(string) (os.FileInfo, error)
-	readFile     func(string) ([]byte, error)
-	dialTCP      func(context.Context, string) error
+	base                *doctorEnv
+	policyMode          string
+	claudePath          string
+	hookCommand         string
+	agentdPath          string
+	agentdURL           string
+	settingsPath        string
+	managedSettingsPath string
+	dashboardURL        string
+	lookPath            func(string) (string, error)
+	statFile            func(string) (os.FileInfo, error)
+	readFile            func(string) ([]byte, error)
+	dialTCP             func(context.Context, string) error
 }
 
 type edgeDoctorOptions struct {
-	policyMode   string
-	claudePath   string
-	hookCommand  string
-	agentdPath   string
-	agentdURL    string
-	settingsPath string
-	dashboardURL string
+	policyMode          string
+	claudePath          string
+	hookCommand         string
+	agentdPath          string
+	agentdURL           string
+	settingsPath        string
+	managedSettingsPath string
+	dashboardURL        string
 }
 
 type edgeDoctorCheck struct {
@@ -66,17 +68,19 @@ func runEdgeDoctorCmd(args []string, stdout, stderr io.Writer) int {
 	agentdPath := fs.String("agentd-path", firstEnv("CORDUM_AGENTD_PATH"), "cordum-agentd binary path")
 	agentdURL := fs.String("agentd-url", firstEnvDefault(defaultEdgeAgentdURL, "CORDUM_AGENTD_URL", "CORDUM_AGENTD_SOCKET"), "local cordum-agentd hook URL")
 	settingsPath := fs.String("settings-path", firstEnvDefault(defaultClaudeSettingsPath(), "CORDUM_EDGE_SETTINGS_PATH", "CLAUDE_SETTINGS_PATH"), "Claude settings.json path to validate")
+	managedSettingsPath := fs.String("managed-settings-path", firstEnv("CORDUM_EDGE_MANAGED_SETTINGS_PATH"), "managed-settings.json path for the managed_settings_compliance check (empty = skip)")
 	dashboardURL := fs.String("dashboard-url", firstEnv("CORDUM_EDGE_DASHBOARD_URL", "CORDUM_DASHBOARD_URL"), "dashboard URL to probe")
 	fs.ParseArgs(args)
 
 	env, err := buildEdgeDoctorEnv(fs, edgeDoctorOptions{
-		policyMode:   *policyMode,
-		claudePath:   *claudePath,
-		hookCommand:  *hookCommand,
-		agentdPath:   *agentdPath,
-		agentdURL:    *agentdURL,
-		settingsPath: *settingsPath,
-		dashboardURL: *dashboardURL,
+		policyMode:          *policyMode,
+		claudePath:          *claudePath,
+		hookCommand:         *hookCommand,
+		agentdPath:          *agentdPath,
+		agentdURL:           *agentdURL,
+		settingsPath:        *settingsPath,
+		managedSettingsPath: *managedSettingsPath,
+		dashboardURL:        *dashboardURL,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "cordumctl edge doctor: %s\n", edgeDoctorRedact(err.Error(), *fs.apiKey))
@@ -116,18 +120,19 @@ func buildEdgeDoctorEnv(fs *flagSet, opts edgeDoctorOptions) (*edgeDoctorEnv, er
 		return nil, err
 	}
 	return &edgeDoctorEnv{
-		base:         base,
-		policyMode:   strings.TrimSpace(opts.policyMode),
-		claudePath:   strings.TrimSpace(opts.claudePath),
-		hookCommand:  strings.TrimSpace(opts.hookCommand),
-		agentdPath:   strings.TrimSpace(opts.agentdPath),
-		agentdURL:    strings.TrimSpace(opts.agentdURL),
-		settingsPath: strings.TrimSpace(opts.settingsPath),
-		dashboardURL: strings.TrimSpace(opts.dashboardURL),
-		lookPath:     exec.LookPath,
-		statFile:     os.Stat,
-		readFile:     os.ReadFile,
-		dialTCP:      defaultEdgeDoctorDialTCP,
+		base:                base,
+		policyMode:          strings.TrimSpace(opts.policyMode),
+		claudePath:          strings.TrimSpace(opts.claudePath),
+		hookCommand:         strings.TrimSpace(opts.hookCommand),
+		agentdPath:          strings.TrimSpace(opts.agentdPath),
+		agentdURL:           strings.TrimSpace(opts.agentdURL),
+		settingsPath:        strings.TrimSpace(opts.settingsPath),
+		managedSettingsPath: strings.TrimSpace(opts.managedSettingsPath),
+		dashboardURL:        strings.TrimSpace(opts.dashboardURL),
+		lookPath:            exec.LookPath,
+		statFile:            os.Stat,
+		readFile:            os.ReadFile,
+		dialTCP:              defaultEdgeDoctorDialTCP,
 	}, nil
 }
 
@@ -145,6 +150,7 @@ func defaultEdgeDoctorChecks() []edgeDoctorCheck {
 		{id: "edge_demo_policy", label: "Edge demo policy", run: edgeCheckDemoPolicy},
 		{id: "dashboard_reachable", label: "Dashboard reachable", run: edgeCheckDashboardReachable},
 		{id: "policy_mode_implications", label: "Policy mode implications", run: edgeCheckPolicyMode},
+		{id: "managed_settings_compliance", label: "Managed settings compliance", run: edgeCheckManagedSettings},
 	}
 }
 
