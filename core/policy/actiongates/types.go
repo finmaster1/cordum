@@ -21,7 +21,7 @@ const (
 
 // Decision Codes carried on ActionGateDecision. These map to HTTP status at
 // the gateway boundary; do not invent new codes without updating the mapping
-// in handlers_edge_errors.go.
+// in core/controlplane/gateway/actiongates_http.go.
 const (
 	CodeUnauthorized       = "unauthorized"
 	CodeAccessDenied       = "access_denied"
