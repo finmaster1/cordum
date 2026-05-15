@@ -1766,6 +1766,154 @@ func TestApprovalCreateClipsExpiresAtToConfiguredMaxTTL(t *testing.T) {
 	}
 }
 
+// TestGetApprovalsByActionHash_AppliesAuditLimit asserts the bounded-
+// fetch contract added by task-69d1f82b (CodeRabbit PR #274 finding #2).
+// Before this change, GetApprovalsByActionHash used ZRevRange(0,-1)
+// and could fetch thousands of refs for a hot (tenant, action_hash)
+// tuple — unbounded memory + latency. After this change, the cap is
+// maxApprovalsByActionHashAudit = 256, most-recent first. 300 refs in,
+// 256 out (cap), with the most-recent 256 preserved.
+func TestGetApprovalsByActionHash_AppliesAuditLimit(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 15, 21, 0, 0, 0, time.UTC)
+	now := base
+	store, _, _, cleanup := newRedisEdgeStore(t, WithClock(func() time.Time { return now }))
+	defer cleanup()
+
+	tenant := "tenant-limit"
+	sharedHash := "sha256:hot-action"
+
+	const created = 300
+	for i := 0; i < created; i++ {
+		now = base.Add(time.Duration(i) * time.Second)
+		sessID := fmt.Sprintf("sess-%03d", i)
+		execID := fmt.Sprintf("exec-%03d", i)
+		eventID := fmt.Sprintf("event-%03d", i)
+		createApprovalParents(t, ctx, store, tenant, sessID, execID, eventID, now)
+		req := validApprovalRequest(tenant, sessID, execID, eventID, now)
+		req.ActionHash = sharedHash
+		if _, err := store.EnqueueApproval(ctx, req); err != nil {
+			t.Fatalf("EnqueueApproval %d: %v", i, err)
+		}
+	}
+
+	all, err := store.GetApprovalsByActionHash(ctx, tenant, sharedHash)
+	if err != nil {
+		t.Fatalf("GetApprovalsByActionHash: %v", err)
+	}
+	if len(all) != maxApprovalsByActionHashAudit {
+		t.Fatalf("GetApprovalsByActionHash len = %d; want %d (audit cap)", len(all), maxApprovalsByActionHashAudit)
+	}
+	// Most-recent first: index 0 corresponds to event-299 (highest score).
+	if !strings.HasSuffix(all[0].EventID, "-299") {
+		t.Fatalf("most-recent ordering broken: all[0].EventID = %q; want suffix '-299'", all[0].EventID)
+	}
+}
+
+// TestLookupByActionHash_FastPathSemanticsDocumented asserts the
+// fast-path semantics added by task-69d1f82b: LookupByActionHash now
+// scans at most maxApprovalsByActionHashLookup = 64 most-recent entries.
+// If no actionable approval surfaces in that window, the caller sees
+// a clean miss — fail-closed by design. An attacker buring an old
+// APPROVED approval under >64 fresh PENDING records causes the gate
+// to re-fire REQUIRE_HUMAN; the call cannot silently land using the
+// stale grant. (1) PENDING fill up to 100 + APPROVED at index 30 →
+// found. (2) Same fill + APPROVED at index 80 → miss.
+func TestLookupByActionHash_FastPathSemanticsDocumented(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 15, 21, 30, 0, 0, time.UTC)
+	now := base
+	store, _, _, cleanup := newRedisEdgeStore(t, WithClock(func() time.Time { return now }))
+	defer cleanup()
+
+	tenant := "tenant-fastpath"
+
+	t.Run("approved_within_fast_path_returns_match", func(t *testing.T) {
+		sharedHash := "sha256:fast-path-within"
+		const total = 100
+		const approvedAt = 30 // 30 NEWER PENDING in front; reverse-position = total-1-30 = 69 (still within 64-cap from latest? actually NEED approved within 64 most-recent)
+		// Build oldest→newest so score(i)=base+i. ZRevRange returns
+		// newest first (index 0 = i=99). Place APPROVED such that its
+		// reverse-index < 64.
+		const approvedReverseIndex = 30 // approved is the 31st-newest
+		approvedIdx := total - 1 - approvedReverseIndex
+		var approvedRef string
+		for i := 0; i < total; i++ {
+			now = base.Add(time.Duration(i) * time.Second)
+			sessID := fmt.Sprintf("sess-w-%03d", i)
+			execID := fmt.Sprintf("exec-w-%03d", i)
+			eventID := fmt.Sprintf("event-w-%03d", i)
+			createApprovalParents(t, ctx, store, tenant, sessID, execID, eventID, now)
+			req := validApprovalRequest(tenant, sessID, execID, eventID, now)
+			req.ActionHash = sharedHash
+			approval, err := store.EnqueueApproval(ctx, req)
+			if err != nil {
+				t.Fatalf("EnqueueApproval %d: %v", i, err)
+			}
+			if i == approvedIdx {
+				approvedRef = approval.ApprovalRef
+				if _, err := store.ApproveApproval(ctx, ApprovalResolution{
+					TenantID:    tenant,
+					ApprovalRef: approval.ApprovalRef,
+					ResolverID:  "reviewer",
+					ResolvedBy:  "reviewer@example.invalid",
+					Reason:      "approve for fast-path test",
+					ResolvedAt:  now.Add(time.Millisecond),
+				}); err != nil {
+					t.Fatalf("ApproveApproval: %v", err)
+				}
+			}
+		}
+		got, ok, err := store.LookupByActionHash(ctx, tenant, sharedHash)
+		if err != nil || !ok || got == nil {
+			t.Fatalf("LookupByActionHash within-fast-path = (%#v,%v,%v); want match", got, ok, err)
+		}
+		if got.ApprovalRef != approvedRef {
+			t.Fatalf("LookupByActionHash ref = %q; want %q", got.ApprovalRef, approvedRef)
+		}
+	})
+
+	t.Run("approved_outside_fast_path_returns_miss", func(t *testing.T) {
+		sharedHash := "sha256:fast-path-outside"
+		const total = 100
+		// Place APPROVED at reverse-index 80 (well beyond the 64-cap).
+		const approvedReverseIndex = 80
+		approvedIdx := total - 1 - approvedReverseIndex
+		for i := 0; i < total; i++ {
+			now = base.Add(time.Duration(i) * time.Second)
+			sessID := fmt.Sprintf("sess-x-%03d", i)
+			execID := fmt.Sprintf("exec-x-%03d", i)
+			eventID := fmt.Sprintf("event-x-%03d", i)
+			createApprovalParents(t, ctx, store, tenant, sessID, execID, eventID, now)
+			req := validApprovalRequest(tenant, sessID, execID, eventID, now)
+			req.ActionHash = sharedHash
+			approval, err := store.EnqueueApproval(ctx, req)
+			if err != nil {
+				t.Fatalf("EnqueueApproval %d: %v", i, err)
+			}
+			if i == approvedIdx {
+				if _, err := store.ApproveApproval(ctx, ApprovalResolution{
+					TenantID:    tenant,
+					ApprovalRef: approval.ApprovalRef,
+					ResolverID:  "reviewer",
+					ResolvedBy:  "reviewer@example.invalid",
+					Reason:      "approve outside fast path",
+					ResolvedAt:  now.Add(time.Millisecond),
+				}); err != nil {
+					t.Fatalf("ApproveApproval: %v", err)
+				}
+			}
+		}
+		got, ok, err := store.LookupByActionHash(ctx, tenant, sharedHash)
+		if err != nil {
+			t.Fatalf("LookupByActionHash beyond-fast-path err: %v", err)
+		}
+		if ok || got != nil {
+			t.Fatalf("LookupByActionHash beyond-fast-path = (%#v,%v); want miss (fail-closed semantics)", got, ok)
+		}
+	})
+}
+
 // prewarmRedisClientPool serially pings the redis client enough times to
 // fully populate the connection pool before the test fans out to many
 // concurrent goroutines. It exists to defuse the go-redis v9 lazy-init

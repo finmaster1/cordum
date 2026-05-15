@@ -194,12 +194,33 @@ func (s *RedisStore) GetApproval(ctx context.Context, tenantID, approvalRef stri
 	return approval, true, nil
 }
 
-// GetApprovalsByActionHash returns every approval recorded for (tenantID,
-// actionHash), most-recent first. Empty result when either arg is blank
-// or the index is empty — never an error in that case. Used by the
-// action-layer provenance gate to inspect the full history when a single
-// "currently-actionable" lookup is insufficient (e.g. for audit display).
-func (s *RedisStore) GetApprovalsByActionHash(ctx context.Context, tenantID, actionHash string) ([]EdgeApproval, error) {
+// Bounded-fetch caps applied to the action-hash secondary index. The
+// underlying ZSET could grow unbounded for hot (tenantID, actionHash)
+// pairs — every repeat of the same mutation accumulates a new ref.
+// CodeRabbit PR #274 finding #2 flagged the previous `ZRevRange(0,-1)`
+// scan as a memory/latency vector. The caps below split the audit and
+// gate use-cases:
+//
+//   - maxApprovalsByActionHashAudit (256) bounds the surface
+//     GetApprovalsByActionHash returns to UI/audit consumers. Audit
+//     displays don't need more than the most-recent 256 history.
+//   - maxApprovalsByActionHashLookup (64) bounds the gate fast-path.
+//     LookupByActionHash returns the most-recent actionable approval
+//     in this window or signals a clean miss. If no actionable
+//     approval surfaces in the 64 most-recent, the gate re-fires
+//     REQUIRE_HUMAN — fail-closed by design. An attacker burying an
+//     old APPROVED grant under >64 fresh PENDING records cannot
+//     silently land the call using the stale grant.
+const (
+	maxApprovalsByActionHashAudit  = 256
+	maxApprovalsByActionHashLookup = 64
+)
+
+// listApprovalsByActionHash returns up to `limit` approvals for
+// (tenantID, actionHash), most-recent first. Non-positive limit
+// disables the cap (legacy unbounded behaviour); callers should
+// always pass a positive cap. Empty result on blank inputs.
+func (s *RedisStore) listApprovalsByActionHash(ctx context.Context, tenantID, actionHash string, limit int) ([]EdgeApproval, error) {
 	if err := s.ensureReady(); err != nil {
 		return nil, err
 	}
@@ -208,7 +229,11 @@ func (s *RedisStore) GetApprovalsByActionHash(ctx context.Context, tenantID, act
 	if tenantID == "" || actionHash == "" {
 		return nil, nil
 	}
-	refs, err := s.client.ZRevRange(ctx, edgeApprovalActionHashIndexKey(tenantID, actionHash), 0, -1).Result()
+	stop := int64(-1)
+	if limit > 0 {
+		stop = int64(limit - 1)
+	}
+	refs, err := s.client.ZRevRange(ctx, edgeApprovalActionHashIndexKey(tenantID, actionHash), 0, stop).Result()
 	if err != nil {
 		return nil, fmt.Errorf("list approvals by action_hash: %w", err)
 	}
@@ -226,14 +251,29 @@ func (s *RedisStore) GetApprovalsByActionHash(ctx context.Context, tenantID, act
 	return out, nil
 }
 
+// GetApprovalsByActionHash returns approvals recorded for (tenantID,
+// actionHash), most-recent first, capped at maxApprovalsByActionHashAudit
+// (256). Empty result when either arg is blank or the index is empty —
+// never an error in that case. Used by the action-layer provenance gate
+// to inspect history when a single "currently-actionable" lookup is
+// insufficient (e.g. for audit display).
+func (s *RedisStore) GetApprovalsByActionHash(ctx context.Context, tenantID, actionHash string) ([]EdgeApproval, error) {
+	return s.listApprovalsByActionHash(ctx, tenantID, actionHash, maxApprovalsByActionHashAudit)
+}
+
 // LookupByActionHash satisfies the actiongates.ApprovalLookup contract by
 // returning the most-recent approved, not-yet-consumed, not-expired
 // approval bound to (tenantID, actionHash). Returns (nil, false, nil) on
 // miss so the caller can map the miss to a not_found-style decision
 // without ambiguity. Pending / rejected / expired / consumed approvals
 // are skipped — the gate considers them "no actionable approval".
+//
+// The scan is bounded to the maxApprovalsByActionHashLookup (64)
+// most-recent entries. If no actionable approval appears in that
+// window, the gate sees a miss and re-fires REQUIRE_HUMAN — fail-closed
+// by design.
 func (s *RedisStore) LookupByActionHash(ctx context.Context, tenantID, actionHash string) (*EdgeApproval, bool, error) {
-	approvals, err := s.GetApprovalsByActionHash(ctx, tenantID, actionHash)
+	approvals, err := s.listApprovalsByActionHash(ctx, tenantID, actionHash, maxApprovalsByActionHashLookup)
 	if err != nil {
 		return nil, false, err
 	}
