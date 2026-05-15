@@ -17,11 +17,11 @@ import (
 // the right fields (tenant from context, args stripped of _approval_ref,
 // input hash bound to the stripped form).
 type fakeApprovalClaimStore struct {
-	calls      int
-	lastReq    edge.ApprovalClaimRequest
-	approval   *edge.EdgeApproval
-	consumed   bool
-	err        error
+	calls    int
+	lastReq  edge.ApprovalClaimRequest
+	approval *edge.EdgeApproval
+	consumed bool
+	err      error
 }
 
 func (f *fakeApprovalClaimStore) ClaimApproval(_ context.Context, req edge.ApprovalClaimRequest) (*edge.EdgeApproval, bool, error) {

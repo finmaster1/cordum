@@ -53,11 +53,11 @@ type ApprovalHoldDeps struct {
 // (fail-closed); the caller surfaces the conflict to the client as a
 // JSON-RPC error keyed by ConflictErr.Kind.
 type ApprovalClaimOutcome struct {
-	Consumed      bool
-	ClaimRef      string
-	Approval      *edge.EdgeApproval
-	ConflictErr   *edge.ApprovalConflictError
-	StrippedArgs  json.RawMessage
+	Consumed     bool
+	ClaimRef     string
+	Approval     *edge.EdgeApproval
+	ConflictErr  *edge.ApprovalConflictError
+	StrippedArgs json.RawMessage
 }
 
 // ProcessApprovalClaim inspects the tool-call arguments for an
