@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"reflect"
@@ -426,6 +427,29 @@ func buildPolicyCheckRequest(ctx context.Context, req *policyCheckRequest, cfgSv
 	}
 	meta := buildJobMetadata(req.Meta, tenant, strings.TrimSpace(req.PrincipalId))
 
+	// Propagate ActionDescriptor across the gRPC boundary by encoding it
+	// into a reserved Labels key. The `_` prefix is stripped by the
+	// label-clean loop in this package (see clean loop in injectContentLabels)
+	// so it never leaks back to clients. The kernel's
+	// safetykernel.actionDescriptorFromRequest extractor reads this key.
+	labels := req.Labels
+	if req.Action != nil {
+		encoded, err := encodeActionDescriptorLabel(req.Action)
+		if err != nil {
+			return nil, fmt.Errorf("encode action descriptor: %w", err)
+		}
+		if encoded != "" {
+			if labels == nil {
+				labels = make(map[string]string, 1)
+			} else {
+				next := make(map[string]string, len(labels)+1)
+				maps.Copy(next, labels)
+				labels = next
+			}
+			labels[labelActionDescriptorJSON] = encoded
+		}
+	}
+
 	checkReq := &pb.PolicyCheckRequest{
 		JobId:         strings.TrimSpace(req.JobId),
 		Topic:         topic,
@@ -434,7 +458,7 @@ func buildPolicyCheckRequest(ctx context.Context, req *policyCheckRequest, cfgSv
 		EstimatedCost: req.EstimatedCost,
 		Budget:        req.Budget,
 		PrincipalId:   strings.TrimSpace(req.PrincipalId),
-		Labels:        req.Labels,
+		Labels:        labels,
 		MemoryId:      strings.TrimSpace(req.MemoryId),
 		Meta:          meta,
 	}

@@ -1,0 +1,128 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+
+	edgecore "github.com/cordum/cordum/core/edge"
+	"github.com/cordum/cordum/core/infra/config"
+	"github.com/cordum/cordum/core/infra/store"
+	"github.com/cordum/cordum/core/mcp"
+	"github.com/cordum/cordum/core/policy/actiongates"
+)
+
+// labelActionDescriptorJSON is the reserved Labels-map key the gateway
+// uses to propagate the JSON-encoded ActionDescriptor across the gRPC
+// boundary to the safety kernel. The `_` prefix is what the gateway's
+// label-clean path strips before echoing labels back to clients, so the
+// key never escapes the server-side request flow. Must stay in lockstep
+// with safetykernel.LabelActionDescriptorJSON.
+const labelActionDescriptorJSON = "_action.descriptor_json"
+
+// encodeActionDescriptorLabel marshals an ActionDescriptor for transport
+// in a Labels map entry. Enforces the same serialized-bytes cap the
+// gateway uses for tool arg payloads so an oversized descriptor cannot
+// drown the policy request. Returns ("", nil) for a nil input so the
+// caller can use the empty-string sentinel as "no descriptor to send."
+func encodeActionDescriptorLabel(desc *config.ActionDescriptor) (string, error) {
+	if desc == nil {
+		return "", nil
+	}
+	encoded, err := json.Marshal(desc)
+	if err != nil {
+		return "", fmt.Errorf("marshal action descriptor: %w", err)
+	}
+	if len(encoded) > config.ActionArgsMaxSerializedBytes {
+		return "", fmt.Errorf("action descriptor too large: %d bytes (cap %d)", len(encoded), config.ActionArgsMaxSerializedBytes)
+	}
+	return string(encoded), nil
+}
+
+// wireActionGatePipeline installs the production action-gate pipeline
+// on the gateway server. Called once during RunWithAuth after the
+// server fields (edgeStore, agentIdentityStore) are populated. The
+// gateway is the primary enforcement surface: handlers_policy.go fires
+// the pipeline before forwarding to the safety kernel, so a wired
+// pipeline here turns the previously-dead actiongates_http.go and
+// handlers_policy.go gate-firing branches into the live request path.
+//
+// Returns no error: gate construction itself never fails (nil deps
+// degrade individual gates to fail-closed). The function is idempotent
+// — callers that re-invoke at config-reload time receive a fresh
+// pipeline.
+func (s *server) wireActionGatePipeline() {
+	if s == nil {
+		return
+	}
+	pipeline := actiongates.BuildProductionPipeline(actiongates.ProductionPipelineOptions{
+		Approvals:  edgeStoreApprovalLookup{store: s.edgeStore},
+		Identities: gatewayMCPIdentityResolver{store: s.agentIdentityStore},
+	})
+	// actionGatePipeline is set once during boot before any handler can
+	// observe it, so the field assignment needs no lock — Go's
+	// initialization-before-use guarantee covers the publish.
+	s.actionGatePipeline = pipeline
+	slog.Info("gateway: action-gate pipeline wired",
+		"gate_count", len(pipeline.Gates()),
+		"approvals_backend", "edge.RedisStore",
+		"mcp_identity_backend", "store.AgentIdentityStore",
+	)
+}
+
+// edgeStoreApprovalLookup adapts edgecore.RedisStore to the
+// actiongates.ApprovalLookup contract used by mutation + provenance
+// gates. A nil store is treated as a miss (false, nil) per the
+// ApprovalLookup contract — surface-level nil checks happen at wire
+// time so the runtime never panics on a misconfigured deploy.
+type edgeStoreApprovalLookup struct {
+	store edgecore.Store
+}
+
+// LookupByActionHash delegates to the underlying Redis store. The cast
+// to the concrete *edgecore.RedisStore is necessary because the
+// edgecore.Store interface does not expose LookupByActionHash (only
+// the concrete store satisfies actiongates.ApprovalLookup). When the
+// concrete type assertion fails, we return a miss so the caller
+// degrades to the require-human / fail-closed path rather than
+// panicking on a missing method.
+func (a edgeStoreApprovalLookup) LookupByActionHash(ctx context.Context, tenant, actionHash string) (*edgecore.EdgeApproval, bool, error) {
+	if a.store == nil {
+		return nil, false, nil
+	}
+	redisStore, ok := a.store.(*edgecore.RedisStore)
+	if !ok {
+		return nil, false, nil
+	}
+	return redisStore.LookupByActionHash(ctx, tenant, actionHash)
+}
+
+// gatewayMCPIdentityResolver adapts the gateway's persisted agent
+// identity store into the MCP-shaped AgentIdentity the action-gate
+// MCPGate consumes. Reuses mcpIdentityFromStore so revoked/suspended
+// identities are mapped to nil consistently with the existing MCP
+// filter path.
+type gatewayMCPIdentityResolver struct {
+	store *store.AgentIdentityStore
+}
+
+// ResolveMCPIdentity looks up the agent in Redis and adapts the
+// result. Returns (nil, nil) for a miss so the MCPGate's nil-identity
+// fail-closed path takes over. A backend error propagates so the gate
+// can fail closed with Code=service_unavailable.
+//
+// The tenant parameter is part of the actiongates.MCPIdentityResolver
+// contract but the underlying AgentIdentityStore keys agents by
+// globally-unique ID. Cross-tenant agent-ID collisions are guarded by
+// the existing tenant gate (which runs before the MCP gate).
+func (r gatewayMCPIdentityResolver) ResolveMCPIdentity(ctx context.Context, _ string, agentID string) (*mcp.AgentIdentity, error) {
+	if r.store == nil {
+		return nil, nil
+	}
+	identity, err := r.store.Get(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return mcpIdentityFromStore(identity), nil
+}

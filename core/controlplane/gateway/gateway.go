@@ -704,6 +704,14 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 		heartbeatMode:          scheduler.ParseHeartbeatMode(os.Getenv(scheduler.EnvHeartbeatMode)),
 		shutdownCh:             make(chan struct{}),
 	}
+	// Production action-gate pipeline wiring. Must be called after the
+	// server struct is populated (edgeStore + agentIdentityStore must be
+	// non-nil for the gate dependencies to bind) and before any HTTP
+	// handler can fire — so before middleware chain assembly and Serve.
+	// handlers_policy.go consults s.actionGatePipeline; populating it
+	// here turns previously-dead actiongates_http.go and gate-fire
+	// branches into the live request path.
+	s.wireActionGatePipeline()
 	s.syncApprovalQueueDepth(context.Background())
 	defer s.Close()
 	telemetryStore, err := telemetry.NewStore(cfg.RedisURL)

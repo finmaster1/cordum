@@ -376,6 +376,15 @@ func RunWithEntitlements(cfg *config.Config, resolver *licensing.EntitlementReso
 		tagDeriverRegistry: tagRegistry,
 	}
 
+	// Production wiring for the action-layer gate pipeline. Fail-closed
+	// on construction error so a kernel never serves traffic with the
+	// pipeline silently disabled. The kernel's pipeline runs defensive
+	// gates with no backend dependencies; the gateway path holds the
+	// primary enforcement surface with full approval+chain lookups.
+	if err := wireActionGatePipeline(srv, nil); err != nil {
+		return fmt.Errorf("wire action gate pipeline: %w", err)
+	}
+
 	// Phase-2 shadow dual-evaluation: constructs the shadow loader +
 	// evaluator and attaches them to srv via SetShadowEvaluator so
 	// evaluate() can Submit active decisions without a nil-panic. When

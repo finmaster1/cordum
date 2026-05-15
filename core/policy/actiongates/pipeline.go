@@ -2,6 +2,7 @@ package actiongates
 
 import (
 	"context"
+	"maps"
 
 	"github.com/cordum/cordum/core/infra/config"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
@@ -67,6 +68,16 @@ func (p *Pipeline) Gates() []ActionGate {
 // A nil pipeline / nil input / Action-less input returns the zero
 // decision with fired=false so callers can fall through to legacy
 // rule evaluation without an action-layer ambiguity.
+//
+// When every fired gate ALLOWs (DECISION_TYPE_ALLOW or
+// DECISION_TYPE_ALLOW_WITH_CONSTRAINTS) the pipeline returns
+// (mergedExtra, false): fired stays false so the existing "no blocking
+// decision" caller contract is preserved, and the returned decision
+// keeps Decision == UNSPECIFIED (Fired() reports false). The Extra map
+// carries the merged breadcrumbs from every firing gate (mutation
+// gate's `single_use=true`, provenance gate's `provenance_verified=true`,
+// etc.) so audit/observability paths can read constraint signals
+// without losing data when a later gate overwrites an earlier one.
 func (p *Pipeline) Run(ctx context.Context, in *config.PolicyInput) (ActionGateDecision, bool) {
 	if p == nil || len(p.gates) == 0 {
 		return ActionGateDecision{}, false
@@ -74,6 +85,7 @@ func (p *Pipeline) Run(ctx context.Context, in *config.PolicyInput) (ActionGateD
 	if in == nil || in.Action == nil {
 		return ActionGateDecision{}, false
 	}
+	var mergedExtra map[string]string
 	for _, g := range p.gates {
 		select {
 		case <-ctx.Done():
@@ -92,13 +104,15 @@ func (p *Pipeline) Run(ctx context.Context, in *config.PolicyInput) (ActionGateD
 			continue
 		}
 		if dec.Allowed() {
-			// ALLOW / ALLOW_WITH_CONSTRAINTS lets subsequent gates run.
-			// Each gate enforces a different invariant and a downstream
-			// gate may still produce a non-allow decision for the same
-			// input.
+			if len(dec.Extra) > 0 {
+				if mergedExtra == nil {
+					mergedExtra = make(map[string]string, len(dec.Extra))
+				}
+				maps.Copy(mergedExtra, dec.Extra)
+			}
 			continue
 		}
 		return dec, true
 	}
-	return ActionGateDecision{}, false
+	return ActionGateDecision{Extra: mergedExtra}, false
 }

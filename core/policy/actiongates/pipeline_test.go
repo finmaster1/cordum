@@ -242,6 +242,68 @@ func TestPipeline_CanceledContextFailsClosed(t *testing.T) {
 	}
 }
 
+// TestPipeline_AllowedExtraSurvivesPastLaterAllow asserts the QA-flagged
+// invariant: when an early gate emits ALLOW_WITH_CONSTRAINTS with breadcrumb
+// Extras (mutation gate's `single_use=true`) and a later gate also passes,
+// the merged Extra MUST survive on the returned decision even though
+// fired=false. Before the merge fix, the later gate's Allow simply
+// overwrote prior breadcrumbs by returning the zero decision.
+func TestPipeline_AllowedExtraSurvivesPastLaterAllow(t *testing.T) {
+	t.Parallel()
+	act := pipelineDeleteAction()
+	act.ApprovalClaim = &config.ActionApprovalClaim{ApprovalRef: "appr_ok"}
+	hash := CanonicalActionHash(act)
+	approval := &edge.EdgeApproval{
+		ApprovalRef: "appr_ok",
+		TenantID:    "tnt_a",
+		PrincipalID: "p1",
+		ResolverID:  "p2",
+		Status:      edge.ApprovalStatusApproved,
+		Decision:    edge.ApprovalDecisionApprove,
+		ActionHash:  hash,
+	}
+	f := newPipelineFixture(func(f *pipelineFixture) {
+		f.approvals.records["tnt_a:"+hash] = approval
+	})
+	dec, fired := f.pipeline.Run(pipelineAuthCtx(), &config.PolicyInput{Tenant: "tnt_a", Action: act})
+	if fired {
+		t.Fatalf("expected no terminal decision, got fired=%v", fired)
+	}
+	if dec.Fired() {
+		t.Fatalf("merged decision should report Fired()==false, got Decision=%v", dec.Decision)
+	}
+	if got := dec.Extra["single_use"]; got != "true" {
+		t.Fatalf("merged Extra lost mutation gate's single_use breadcrumb; got %q want %q", got, "true")
+	}
+}
+
+// TestPipeline_AllowedExtraEmptyOnPlainAllow verifies that when no gate
+// emits non-empty Extra on the allowed path, the returned Extra map is
+// nil — the merge accumulator is allocated lazily so plain ALLOWs do not
+// leak an empty map into the audit surface.
+func TestPipeline_AllowedExtraEmptyOnPlainAllow(t *testing.T) {
+	t.Parallel()
+	// Use a read action: no destructive verb, no approval lookup required;
+	// only tenant gate runs (and clears) without setting Extras.
+	act := &config.ActionDescriptor{
+		Kind: config.ActionKindMutation,
+		Verb: config.ActionVerbRead,
+		TargetResource: &config.ActionTargetResource{
+			Type:        "doc",
+			ID:          "doc_42",
+			OwnerTenant: "tnt_a",
+		},
+	}
+	f := newPipelineFixture()
+	dec, fired := f.pipeline.Run(pipelineAuthCtx(), &config.PolicyInput{Tenant: "tnt_a", Action: act})
+	if fired || dec.Fired() {
+		t.Fatalf("read action should pass cleanly, got fired=%v dec=%v", fired, dec.Decision)
+	}
+	if len(dec.Extra) != 0 {
+		t.Fatalf("plain allow should not leak Extra entries, got %v", dec.Extra)
+	}
+}
+
 func TestPipeline_GatesReturnsOrderedCopy(t *testing.T) {
 	t.Parallel()
 	f := newPipelineFixture()
