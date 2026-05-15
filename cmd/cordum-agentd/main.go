@@ -13,6 +13,7 @@ import (
 	edgecore "github.com/cordum/cordum/core/edge"
 	agentdcore "github.com/cordum/cordum/core/edge/agentd"
 	"github.com/cordum/cordum/core/edge/claude"
+	"github.com/cordum/cordum/core/edge/keychain"
 	"github.com/cordum/cordum/core/infra/logging"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -22,6 +23,10 @@ type cliOptions struct {
 	Env    map[string]string
 	Stderr io.Writer
 	Run    func(context.Context, runConfig) error
+	// Keyring overrides the default OS-native keychain provider for the
+	// bootstrap secret load. Tests inject a mock; production leaves this
+	// nil so cordum-agentd uses keychain.NewOSKeyring().
+	Keyring keychain.Keyring
 }
 
 type runConfig struct {
@@ -30,6 +35,12 @@ type runConfig struct {
 	SocketPath string
 	FailClosed bool
 	Env        map[string]string
+	// Keyring sources boot-time secrets (CORDUM_AGENTD_NONCE,
+	// CORDUM_API_KEY) from the OS-native credential store before
+	// LoadConfig consumes the env map. Nil falls back to a process-wide
+	// OS keyring; tests inject a mock to exercise strict-mode failure
+	// paths without touching the host keychain.
+	Keyring keychain.Keyring
 }
 
 func main() {
@@ -60,6 +71,7 @@ func runCLI(ctx context.Context, opts cliOptions) int {
 		SocketPath: envValue(env, "CORDUM_AGENTD_SOCKET"),
 		FailClosed: parseBoolEnv(envValue(env, "CORDUM_AGENTD_FAIL_CLOSED")),
 		Env:        env,
+		Keyring:    opts.Keyring,
 	}
 
 	fs := flag.NewFlagSet("cordum-agentd", flag.ContinueOnError)
@@ -117,6 +129,15 @@ func defaultRunOptionsWithRecorder(cfg runConfig, recorder edgecore.Recorder) (a
 	}
 	if cfg.FailClosed {
 		env["CORDUM_AGENTD_FAIL_CLOSED"] = "true"
+	}
+	kr := cfg.Keyring
+	if kr == nil {
+		kr = keychain.NewOSKeyring()
+	}
+	mode := resolveBootstrapMode(env)
+	env, err := loadBootstrapSecrets(context.Background(), kr, mode, env, os.Stderr)
+	if err != nil {
+		return agentdcore.RunOptions{}, err
 	}
 	loaded, err := agentdcore.LoadConfig(env)
 	if err != nil {

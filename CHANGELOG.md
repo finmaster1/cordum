@@ -7,6 +7,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-152 — cordum-agentd keychain + service bootstrap hardening (2026-05-15, task-00320a80)
+
+- New `core/edge/keychain` package wraps the host OS-native credential
+  store (macOS Keychain, Linux Secret Service / libsecret, Windows
+  Credential Manager) behind a small `Keyring` interface with a mock
+  for tests and a `LoadSecret` helper that selects between strict and
+  dev bootstrap policies. Backed by `github.com/zalando/go-keyring
+  v0.2.8`.
+- `cmd/cordum-agentd` now sources `CORDUM_AGENTD_NONCE` +
+  `CORDUM_API_KEY` from the OS keychain at startup before `LoadConfig`
+  consumes the env map. Strict mode
+  (`CORDUM_AGENTD_STRICT=true` or `CORDUM_EDGE_POLICY_MODE=enterprise-strict`)
+  fails closed with a `BOOTSTRAP-FAIL:` diagnostic when the keychain
+  is unavailable or unprovisioned; dev mode emits a structured warn
+  and falls back to the env value (redacted in logs). The pre-existing
+  `redactForStderr` / strict-mode codepath is unchanged. Closes the
+  EDGE-031 P0 tradeoff where same-user `ps -E`, `/proc/<pid>/environ`,
+  and shell history could expose runtime credentials.
+- Service-manager templates: `tools/scripts/launchd/com.cordum.agentd.plist`
+  (user-mode launchd), `tools/scripts/systemd/cordum-agentd.service`
+  (systemd `--user`, hardened with `NoNewPrivileges` /
+  `ProtectSystem=strict` / `SystemCallFilter`), and
+  `tools/scripts/windows/cordum-agentd-service.xml` (WinSW). All three
+  carry only `CORDUM_AGENTD_STRICT=true` + log level — **no
+  secret-bearing env entries**. Provisioning helpers
+  `tools/scripts/agentd-install/install.sh` (macOS / Linux) and
+  `install.ps1` (Windows) read secret values through sealed prompts
+  (`stty -echo` / `Read-Host -AsSecureString`) so values never appear
+  on the operator's command line or in shell history.
+- Adversarial fixture
+  `tools/scripts/agentd-install/synthetic-test/run.sh` provisions
+  synthetic test-only secrets, starts cordum-agentd in strict mode,
+  and `grep -F`s stdout / stderr / journald / committed unit files for
+  the verbatim synthetic bytes. Non-zero exit on any leak.
+- Threat model + ops runbook: `docs/security/agentd-keychain.md`
+  documents the per-platform mapping, strict/dev mode matrix, trust
+  boundary (PREVENTS env-table exposure, shell history, settings.json
+  carrying secrets; DOES NOT PREVENT root keychain dump, memory dump,
+  social engineering), key-rotation ritual, and structured-log audit
+  schema (`keychain.load`, `keychain.env_fallback`,
+  `keychain.load.miss`, `keychain.load.unavailable`).
+- Dashboard surface for agentd bootstrap status is deferred to a
+  sibling task; this work touches no `cordum/dashboard/` files. Sibling
+  enterprise-hardening series: EDGE-150 (managed-settings, this
+  Unreleased section) and EDGE-151 (binary signing/notarization).
+
 #### EDGE-150 — Enterprise managed-settings deployment automation (2026-05-15, task-ebed169a)
 
 - New `cordumctl edge managed-settings <export|verify|rollback-template>`
