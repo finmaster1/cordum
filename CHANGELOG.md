@@ -48,10 +48,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   permission gating, tenant scoping, cursor pagination stability,
   event_type/time-range filters, 503 condition, secret redaction with a
   full-body regex assertion, bounded limit clamp, empty-stream
-  empty-response, and meta-audit emission. Dashboard suite extended with
-  `useAuditEvents.test.ts` (7 cases), `transform.test.ts` `mapAuditEvent`
-  describe block (5 cases), and `AuditLogPage.siem.test.tsx`
-  (render-level SIEM coverage with NuqsTestingAdapter + MSW).
+  empty-response, and meta-audit emission. Plus
+  `TestHandleAuditEvents_HeavyFilterPagesForward` regression for the
+  heavy-filter cursor-forward gap (adversarial-review finding).
+  Dashboard suite extended with `useAuditEvents.test.ts` (9 cases now
+  including two infinite-pagination regressions), `transform.test.ts`
+  `mapAuditEvent` describe block (5 cases), and
+  `AuditLogPage.siem.test.tsx` (render-level SIEM coverage with
+  NuqsTestingAdapter + MSW).
+- Reopen #1 fix (QA finding): Audit Log page now consumes
+  `useInfiniteAuditEvents` (new TanStack `useInfiniteQuery` variant in
+  `src/hooks/useAuditEvents.ts`) so tenants with >200 SIEM events can
+  reach older records via the server's `next_cursor`. A "Load more"
+  button below the table fetches the next page; the running-count line
+  shows "Showing N events · more available" when the cursor is
+  non-empty. The page bundles all loaded pages into a single
+  client-side flat list for filter + render. Trailing-whitespace lint
+  on `docs/audit.md` (CRLF line endings from a pre-existing block plus
+  the new cross-link) resolved by normalising the file to LF.
 
 ### Added
 

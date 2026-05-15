@@ -1,5 +1,11 @@
 import { useMemo } from "react";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  type InfiniteData,
+  type UseInfiniteQueryResult,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { get, ApiError } from "../api/client";
 import type { AuditEntry } from "../api/types";
 import {
@@ -121,6 +127,108 @@ export function useAuditEvents(
     items,
     nextCursor,
     hasNextPage: nextCursor !== "",
+    userMessage,
+  };
+}
+
+// Infinite-query variant of useAuditEvents — paginates through the SIEM
+// feed by chaining the server's `next_cursor` across pages, flattening
+// the pages into a single AuditEntry[] for table rendering. Use this
+// when the consumer needs to surface MORE than one page of events
+// (default page = 100, hard cap = 200 server-side); the bare
+// useAuditEvents above is the one-shot fetch suited for fixed-size
+// surfaces (e.g. a dashboard widget that only ever shows the latest
+// page).
+//
+// The shape mirrors UseInfiniteQueryResult fields most consumers need:
+//   - items: AuditEntry[] flattened from all loaded pages
+//   - hasNextPage: server emitted a non-empty next_cursor on the last page
+//   - isFetchingNextPage: TanStack Query's in-flight indicator for the
+//     subsequent page fetch
+//   - fetchNextPage: call this to load the next page (typically wired to
+//     a "Load more" button or an IntersectionObserver sentinel)
+//   - userMessage: same 503/403 translation as useAuditEvents
+interface UseInfiniteAuditEventsResult
+  extends Omit<
+    UseInfiniteQueryResult<InfiniteData<AuditEventsEnvelope>, ApiError>,
+    "data"
+  > {
+  items: AuditEntry[];
+  // The raw response pages — exposed so consumers that need server
+  // metadata (e.g. the per-page `returned` count, or the most recent
+  // next_cursor for debug-style UI) can read it without reconstructing.
+  pages: AuditEventsEnvelope[];
+  userMessage?: string;
+}
+
+export function useInfiniteAuditEvents(
+  filters: AuditEventsFilters = {},
+): UseInfiniteAuditEventsResult {
+  // Stabilise the filter object across renders so a parent rerender
+  // with new-object-same-content filters doesn't blow away the cached
+  // pages. Drops `cursor` from the dep set because cursor pagination
+  // is internal to this hook — the caller never passes it directly.
+  const stableFilters = useMemo<Omit<AuditEventsFilters, "cursor">>(
+    () => ({
+      eventType: filters.eventType,
+      severity: filters.severity,
+      from: filters.from,
+      to: filters.to,
+      search: filters.search,
+      limit: filters.limit,
+    }),
+    [
+      filters.eventType?.join("|") ?? "",
+      filters.severity?.join("|") ?? "",
+      filters.from ?? "",
+      filters.to ?? "",
+      filters.search ?? "",
+      filters.limit ?? 0,
+    ],
+  );
+
+  const query = useInfiniteQuery<
+    AuditEventsEnvelope,
+    ApiError,
+    InfiniteData<AuditEventsEnvelope>,
+    readonly unknown[],
+    string
+  >({
+    queryKey: ["audit-events-infinite", stableFilters],
+    initialPageParam: "",
+    queryFn: async ({ pageParam }) => {
+      // pageParam comes from the previous page's next_cursor (or "" on
+      // the first request); forward it verbatim to the server so the
+      // opaque Redis Stream ID stays opaque end-to-end.
+      const params: AuditEventsFilters = { ...stableFilters };
+      if (pageParam) {
+        params.cursor = pageParam;
+      }
+      return get<AuditEventsEnvelope>(
+        `/audit/events${buildQueryString(params)}`,
+      );
+    },
+    getNextPageParam: (lastPage) =>
+      lastPage.next_cursor ? lastPage.next_cursor : undefined,
+    staleTime: 15_000,
+  });
+
+  const pages = useMemo<AuditEventsEnvelope[]>(
+    () => query.data?.pages ?? [],
+    [query.data],
+  );
+
+  const items = useMemo<AuditEntry[]>(() => {
+    return pages.flatMap((page) => page.items.map(mapAuditEvent));
+  }, [pages]);
+
+  const userMessage = deriveUserMessage(query.error);
+
+  const { data: _unused, ...rest } = query;
+  return {
+    ...rest,
+    items,
+    pages,
     userMessage,
   };
 }

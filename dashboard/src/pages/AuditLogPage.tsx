@@ -14,9 +14,10 @@ import { useQueryState, parseAsString } from "nuqs";
 import { parseAsSearchTerm } from "@/lib/url-state";
 import type { ColumnDef } from "@tanstack/react-table";
 import { get } from "@/api/client";
-import { useGetAuditEvents } from "@/api/generated/audit-export/audit-export";
-import type { GetAuditEventsParams } from "@/api/generated/model/getAuditEventsParams";
-import type { AuditEvent as SiemAuditEvent } from "@/api/generated/model/auditEvent";
+import {
+  useInfiniteAuditEvents,
+  type AuditEventsFilters,
+} from "@/hooks/useAuditEvents";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -54,10 +55,14 @@ import { useIsAdmin } from "@/hooks/usePermission";
 
 // The page now sources rows from the SIEM-feed `GET /api/v1/audit/events`
 // (full chained feed: MCP, edge, worker, output policy, delegation, ...)
-// via the generated `useGetAuditEvents`. The previous path called
+// via `useInfiniteAuditEvents`. The previous path called
 // `useGetPolicyAudit` which only exposed the policy-bundle audit subset
 // — Yaron's bug report ("I DONT SEE ALL LOGS RECORD IN AUDIT LOG PAGE")
-// pinned that gap. See docs/audit/list-api.md for the contract.
+// pinned that gap. Cursor pagination via the server's `next_cursor` is
+// the next-page mechanism (server caps a single page at 200); the
+// "Load more" button below the table fetches the next page so tenants
+// with > 200 SIEM events can still reach older records. See
+// docs/audit/list-api.md for the contract.
 
 interface AuditEvent {
   id: string;
@@ -128,6 +133,25 @@ function siemResourceTypeFromEventType(eventType: string): string {
   const candidates = [dotIdx, usIdx].filter((i) => i > 0);
   if (candidates.length === 0) return trimmed.toLowerCase();
   return trimmed.slice(0, Math.min(...candidates)).toLowerCase();
+}
+
+// SiemAuditEventInput from the /audit/events response. Keeping this local
+// to the page so the renderer doesn't pull the orval-generated wire type
+// just to translate a few fields into the on-screen shape.
+interface SiemAuditEvent {
+  id: string;
+  seq?: number;
+  timestamp: string;
+  event_type: string;
+  severity?: string;
+  tenant_id?: string;
+  agent_id?: string;
+  job_id?: string;
+  action: string;
+  decision?: string;
+  reason?: string;
+  identity?: string;
+  extra?: Record<string, string>;
 }
 
 function mapEvent(e: SiemAuditEvent): AuditEvent {
@@ -224,22 +248,22 @@ export default function AuditLogPage() {
       });
   }, []);
 
-  // Build typed query params for the generated hook. Unset filters drop
-  // out (orval omits undefined values from the query string). The new
-  // SIEM-feed endpoint takes event_type rather than the legacy `action`
-  // filter; we forward actionFilter as event_type so existing URL state
-  // (?action=...) continues to narrow the page additively. agent_id is
-  // not yet a server-side filter on /audit/events — applied client-side
-  // below.
-  const auditParams = useMemo<GetAuditEventsParams>(() => {
-    const p: GetAuditEventsParams = {
-      // Server caps limit at 200 (MaxAuditEventsLimit). The previous
-      // PAGE_LIMIT=1000 single-shot fetch is intentionally clamped to
-      // the bounded page; cursor pagination via the response's
-      // next_cursor is the next-page mechanism.
+  // Build typed filters for useInfiniteAuditEvents. Unset filters drop
+  // out (undefined values are omitted from the query string by the
+  // hook). The SIEM-feed endpoint takes event_type rather than the
+  // legacy `action` filter; we forward actionFilter as event_type so
+  // existing URL state (?action=...) continues to narrow the page
+  // additively. agent_id is not yet a server-side filter on
+  // /audit/events — applied client-side below.
+  const auditFilters = useMemo<AuditEventsFilters>(() => {
+    const p: AuditEventsFilters = {
+      // Server caps limit at MaxAuditEventsLimit=200. Per-page render
+      // budget is the same; older records are reached via
+      // fetchNextPage (cursor-based pagination through the server's
+      // next_cursor).
       limit: Math.min(PAGE_LIMIT, 200),
     };
-    if (actionFilter) p.event_type = actionFilter;
+    if (actionFilter) p.eventType = [actionFilter];
     if (dateFrom) {
       const d = new Date(dateFrom);
       if (!Number.isNaN(d.getTime())) p.from = d.toISOString();
@@ -252,22 +276,29 @@ export default function AuditLogPage() {
     return p;
   }, [actionFilter, dateFrom, dateTo, search]);
 
-  const { data, isLoading, isError, error, refetch } = useGetAuditEvents(
-    auditParams,
-  );
+  const {
+    pages,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteAuditEvents(auditFilters);
 
   const events: AuditEvent[] = useMemo(() => {
-    const mapped = (data?.items ?? []).map(mapEvent);
+    const raw = pages.flatMap((p) => p.items as SiemAuditEvent[]);
+    const mapped = raw.map(mapEvent);
     if (!agentFilter) return mapped;
     const needle = agentFilter.toLowerCase();
     return mapped.filter((e) => e.actor.toLowerCase().includes(needle));
-  }, [data, agentFilter]);
-  // The new envelope ships `returned` (current page size) rather than
-  // a global total — the previous /policy/audit response shape no
-  // longer applies. Render the page count without a total when the
-  // server hasn't computed one (cursor pagination is unbounded by
-  // design — full counts would require an O(stream) scan).
-  const total = data?.returned;
+  }, [pages, agentFilter]);
+  // Server emits per-page `returned` rather than a global total —
+  // cursor pagination is unbounded by design (a global count would
+  // require an O(stream) scan). The render below shows the running
+  // count across all loaded pages plus "more available" when the
+  // cursor is non-empty; the "Load more" affordance handles depth.
   const expandedEvent = useMemo(
     () => events.find((e) => e.id === expandedEventId) ?? null,
     [events, expandedEventId],
@@ -597,14 +628,11 @@ export default function AuditLogPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-            {total != null ? (
-              <span>
-                Showing {events.length} of {total} events
-                {filtersActive && " (filtered)"}
-              </span>
-            ) : (
-              <span>Showing {events.length} events</span>
-            )}
+            <span>
+              Showing {events.length} event{events.length === 1 ? "" : "s"}
+              {filtersActive && " (filtered)"}
+              {hasNextPage && " · more available"}
+            </span>
             {filtersActive && (
               <span>
                 Narrowed by search, action, agent, or date range filters.
@@ -637,6 +665,19 @@ export default function AuditLogPage() {
               />
             }
           />
+          {hasNextPage && (
+            <div className="flex justify-center border-t border-border bg-surface-1 p-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void fetchNextPage()}
+                disabled={isFetchingNextPage}
+                aria-label="Load more audit events"
+              >
+                {isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
