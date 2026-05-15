@@ -122,7 +122,9 @@ func (noopArtifactStore) Put(_ context.Context, req mcp.ArtifactPutRequest) (*ed
 	return &edge.ArtifactPointer{
 		ArtifactType: req.Type,
 		URI:          "noop://" + string(req.Type),
-		SHA256:       "00000000",
+		// 64-hex-character zero placeholder so downstream consumers
+		// expecting a valid SHA256 shape don't reject the noop pointer.
+		SHA256: "0000000000000000000000000000000000000000000000000000000000000000",
 	}, nil
 }
 

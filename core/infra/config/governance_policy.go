@@ -55,6 +55,12 @@ const (
 	GovernanceRuleScopeEscalation             = "ma_scope_escalation"
 	GovernanceRuleResourceEscalation          = "ma_resource_escalation"
 	GovernanceRuleSharedContextUnverifiedWriter = "ma_shared_context_unverified_writer"
+	// GovernanceRuleIssuerRootNotAllowed denies an issuer chain whose
+	// root is not in the operator-configured allowlist. Distinct from
+	// GovernanceRuleUnverifiedIssuer (which fires when the issuer
+	// signature itself cannot be verified) so SIEM/audit/error envelopes
+	// can route remediation correctly.
+	GovernanceRuleIssuerRootNotAllowed = "ma_issuer_root_not_allowed"
 )
 
 // AgentIdentity is the typed identity of a parent or child agent

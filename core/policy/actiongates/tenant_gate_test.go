@@ -30,7 +30,13 @@ func runTenantGate(t *testing.T, tc tenantGateCase) {
 	if tc.actx != nil {
 		in.Tenant = tc.actx.Tenant
 	}
-	ctx := ctxWithAuth(tc.actx)
+	// Only inject the auth context when the case actually has one —
+	// otherwise the `no_authcontext` case wasn't testing a missing key
+	// at all (ctxWithAuth always wrapped a nil pointer).
+	ctx := context.Background()
+	if tc.actx != nil {
+		ctx = ctxWithAuth(tc.actx)
+	}
 	dec := gate.Evaluate(ctx, in)
 	if dec.Decision != tc.wantDecision {
 		t.Fatalf("decision = %v, want %v (reason=%q subReason=%q)", dec.Decision, tc.wantDecision, dec.Reason, dec.SubReason)

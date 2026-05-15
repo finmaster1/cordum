@@ -95,13 +95,22 @@ func isSharedWriteKind(k pb.MemoryWriteKind) bool {
 // populating TenantId on the wire when shared writes are intended.
 func checkTenantConsistency(req *pb.UpdateMemoryRequest) error {
 	tenant := strings.TrimSpace(req.GetTenantId())
+	memPrefix, memOK := tenantPrefix(req.GetMemoryId())
+	targetPrefix, targetOK := tenantPrefix(req.GetTargetAgentId())
 	if tenant == "" {
+		// Fail closed when the caller offers tenant-scoped identifiers
+		// (`t-victim/...`) but omits the tenant_id claim — otherwise a
+		// shared-mutating write that bypasses gateway tenant injection
+		// could target memories owned by another tenant.
+		if memOK || targetOK {
+			return ErrSharedWriteTenantMismatch
+		}
 		return nil
 	}
-	if prefix, ok := tenantPrefix(req.GetMemoryId()); ok && prefix != tenant {
+	if memOK && memPrefix != tenant {
 		return ErrSharedWriteTenantMismatch
 	}
-	if prefix, ok := tenantPrefix(req.GetTargetAgentId()); ok && prefix != tenant {
+	if targetOK && targetPrefix != tenant {
 		return ErrSharedWriteTenantMismatch
 	}
 	return nil

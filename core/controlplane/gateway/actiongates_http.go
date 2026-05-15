@@ -121,6 +121,14 @@ func writeActionGatePolicyError(w http.ResponseWriter, r *http.Request, mode str
 		_ = json.NewEncoder(w).Encode(body)
 		return
 	}
+	if dec.Code == actiongates.CodeRequireHuman {
+		// Non-simulate flows treat REQUIRE_HUMAN as a blocking policy
+		// outcome: clients must defer the action to an approver. Map to
+		// 409 Conflict so the wire shape carries a clear non-success
+		// envelope instead of the default 200+internal_error fall-through.
+		writeEdgeError(w, r, http.StatusConflict, edgeErrCodeConflict, dec.Reason, sanitizeActionGateDetails(dec))
+		return
+	}
 	status := actionGateHTTPStatus(dec.Code)
 	code := actionGateEdgeErrCode(dec.Code)
 	details := sanitizeActionGateDetails(dec)

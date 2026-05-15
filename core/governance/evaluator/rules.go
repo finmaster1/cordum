@@ -180,7 +180,7 @@ func ruleAllowedIssuerRoots(in *config.GovernanceInput, policy config.Governance
 	}
 	return Decision{
 		Type:      DecisionDeny,
-		RuleID:    config.GovernanceRuleUnverifiedIssuer,
+		RuleID:    config.GovernanceRuleIssuerRootNotAllowed,
 		Reason:    "issuer chain root not in allowlist",
 		Tenant:    in.Tenant,
 		SubReason: "root_not_allowlisted",
