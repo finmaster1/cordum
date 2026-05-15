@@ -1797,9 +1797,21 @@ func TestGetApprovalsByActionHash_AppliesAuditLimit(t *testing.T) {
 		}
 	}
 
+	// DoD #3 latency proof: with 300 approvals indexed the bounded call
+	// must finish well under 100ms even on a cold miniredis fixture.
+	// This guards against a regression that reintroduces the unbounded
+	// ZRevRange(0,-1) — which on a hot index would push latency into the
+	// tens of seconds. miniredis runs in-process so the measurement is
+	// reproducible across CI hardware.
+	start := time.Now()
 	all, err := store.GetApprovalsByActionHash(ctx, tenant, sharedHash)
+	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("GetApprovalsByActionHash: %v", err)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("GetApprovalsByActionHash latency = %v over %d-approval index; DoD #3 requires <100ms (regression risk: unbounded ZRevRange may have been reintroduced)",
+			elapsed, created)
 	}
 	if len(all) != maxApprovalsByActionHashAudit {
 		t.Fatalf("GetApprovalsByActionHash len = %d; want %d (audit cap)", len(all), maxApprovalsByActionHashAudit)
@@ -1831,10 +1843,9 @@ func TestLookupByActionHash_FastPathSemanticsDocumented(t *testing.T) {
 	t.Run("approved_within_fast_path_returns_match", func(t *testing.T) {
 		sharedHash := "sha256:fast-path-within"
 		const total = 100
-		const approvedAt = 30 // 30 NEWER PENDING in front; reverse-position = total-1-30 = 69 (still within 64-cap from latest? actually NEED approved within 64 most-recent)
 		// Build oldest→newest so score(i)=base+i. ZRevRange returns
 		// newest first (index 0 = i=99). Place APPROVED such that its
-		// reverse-index < 64.
+		// reverse-index < 64 (well within the maxApprovalsByActionHashLookup cap).
 		const approvedReverseIndex = 30 // approved is the 31st-newest
 		approvedIdx := total - 1 - approvedReverseIndex
 		var approvedRef string
