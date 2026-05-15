@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/configsvc"
+	"github.com/cordum/cordum/core/governance/evaluator"
 	"github.com/cordum/cordum/core/infra/bus"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/infra/env"
@@ -119,6 +120,20 @@ type server struct {
 	// records the SIEMEvent into the BufferedExporter and appends to the
 	// audit Chainer. Nil = log-only.
 	actionGateAuditSink func(ctx context.Context, event audit.SIEMEvent)
+
+	// governanceEvaluator runs deterministic multi-agent governance
+	// rules over a typed config.GovernanceInput populated by the gateway
+	// from authenticated records. Exposed via the separate
+	// EvaluateGovernance method (not folded into Check) so gateway
+	// callers can short-circuit delegation/handoff/shared-memory ops
+	// before the rule loop. Unset = governance evaluation disabled
+	// (callers receive an unspecified Decision and proceed through
+	// normal rule eval).
+	governanceEvaluator evaluator.Evaluator
+	// governancePolicy is the operator-tunable expression that the
+	// governance evaluator consults. Loaded from safety.yaml; defaults
+	// are fail-closed (config.DefaultGovernancePolicy).
+	governancePolicy config.GovernancePolicy
 }
 
 // ActionDescriptorExtractor maps a PolicyCheckRequest to the structured

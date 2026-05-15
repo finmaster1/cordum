@@ -12,6 +12,7 @@ Source code:
 - `core/audit/cloudwatch.go` — AWS CloudWatch Logs backend
 - `core/audit/nats.go` — NATS-based audit event consumer
 - `core/controlplane/gateway/gateway.go` — HTTP request audit (`AuditEvent`)
+- `core/controlplane/gateway/handlers_audit_events.go` — SIEM-feed list endpoint (`GET /api/v1/audit/events`); see [`audit/list-api.md`](audit/list-api.md) for the contract
 - `core/controlplane/gateway/policybundles/audit.go` — Policy bundle audit entries
 - `dashboard/src/pages/AuditLogPage.tsx` — Audit log dashboard page
 - `dashboard/src/components/audit/` — Audit UI components

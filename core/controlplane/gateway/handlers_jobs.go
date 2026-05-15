@@ -1576,6 +1576,15 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 	jobID := uuid.NewString()
 	traceID := uuid.NewString()
 
+	// Loud reject for the two governance-spoofable prefixes BEFORE the
+	// silent strip below. _governance.* and _ma.* labels can spoof
+	// backend-verified provenance/tenant/issuer-chain fields the
+	// evaluator consults — fail closed with a 400 so a spoofing attempt
+	// surfaces as an explicit client error rather than being swallowed.
+	if err := rejectReservedGovernanceLabels(req.Labels); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Strip reserved labels (underscore prefix) from client input. These are
 	// system-controlled labels used by the gateway and safety kernel (e.g.,
 	// _internal, _content.prompt). Without this, clients can spoof privileged

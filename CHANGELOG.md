@@ -5,6 +5,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+#### Audit Log dashboard surfaces the full SIEM feed (2026-05-15, task-00b82b90)
+
+- The Audit Log page was sourcing only `/policy/audit` (policy-bundle subset:
+  rule edits, bundle deployments, signature events) and silently omitting
+  every other SIEM-chained event family: MCP tool invocations and approvals,
+  Edge action attempts and approvals, worker handshakes and trust changes,
+  output policy decisions, delegation lineage, auth events. Operators using
+  the dashboard could not see the actions they most needed to audit.
+- New `GET /api/v1/audit/events` (`handlers_audit_events.go::handleListAuditEvents`,
+  route registered at `gateway.go` § 2.7.2) walks the per-tenant Redis Stream
+  populated from NATS `sys.audit.export` via `audit.Chainer`. Cursor
+  pagination (opaque Redis Stream IDs), default page 100, hard cap
+  `MaxAuditEventsLimit = 200`. Filters: `event_type`, `severity`, `from`/`to`
+  (RFC3339), `search` (lowercase substring across action / event_type /
+  agent_id / job_id / identity / reason). `auth.PermAuditRead` permission gate.
+  Strict tenant scoping via `resolveTenant` + `requireTenantAccess`. 503
+  `audit_chainer_not_installed` when the chainer is absent. Defense-in-depth
+  `redactExtraSecrets` strips keys matching `(?i)secret|token|password|api[_-]?key|private[_-]?key`
+  before serialization. Every successful read emits an `audit.read.events`
+  meta-event to the same tenant's stream, closing the audit-of-audit loop.
+- OpenAPI spec extended with `getAuditEvents` operation + `AuditEvent` /
+  `AuditEventsEnvelope` schemas (`docs/api/openapi/cordum-api.yaml`); orval
+  regenerated `useGetAuditEvents` (`dashboard/src/api/generated/audit-export/`).
+- Dashboard rewired: `AuditLogPage.tsx` now calls `useGetAuditEvents`,
+  with a new `mapEvent` translating the SIEM shape (`identity || agent_id`
+  → actor, event_type prefix → resource family, `extra.resource_id` chain
+  → resourceId, `reason` → detail, `seq` direct from the chained event) to
+  the existing on-screen `AuditEvent` row shape. Event-type filter dropdown
+  expanded to include Safety / Policy / MCP / Edge / Worker / Topic / Auth /
+  Delegation / License / Action-gates families.
+- `useAuditEvents` hook in `src/hooks/useAuditEvents.ts` translates 503 →
+  human-readable banner ("Audit chain not installed — contact your
+  operator"). The pre-existing `useAudit` hook remains in use for the
+  policy-bundle drilldown, correlation, and export paths.
+- New reference doc: `docs/audit/list-api.md` (contract, tenant scoping,
+  cursor stability under concurrent appends, 503 condition, redaction
+  defense-in-depth, distinction from `/audit/verify` and `/policy/audit`).
+- Tests: 10 backend subtests in `handlers_audit_events_test.go` covering
+  permission gating, tenant scoping, cursor pagination stability,
+  event_type/time-range filters, 503 condition, secret redaction with a
+  full-body regex assertion, bounded limit clamp, empty-stream
+  empty-response, and meta-audit emission. Dashboard suite extended with
+  `useAuditEvents.test.ts` (7 cases), `transform.test.ts` `mapAuditEvent`
+  describe block (5 cases), and `AuditLogPage.siem.test.tsx`
+  (render-level SIEM coverage with NuqsTestingAdapter + MSW).
+
 ### Added
 
 #### EDGE-102 — MCP tool-call policy gate (2026-05-15, task-032e01fa)

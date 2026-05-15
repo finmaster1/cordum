@@ -22,30 +22,46 @@ import { server } from "@/test-utils/msw";
 import { useConfigStore } from "@/state/config";
 import AuditLogPage from "./AuditLogPage";
 
+// Shape consumed by the SIEM-feed endpoint /api/v1/audit/events. Mirrors
+// the OpenAPI `AuditEvent` schema (orval-generated at
+// src/api/generated/model/auditEvent.ts) closely enough that the page's
+// mapEvent helper produces the same on-screen rows as the legacy
+// policy-bundle path; only the wire shape changed.
 interface RawAuditEntry {
   id: string;
-  action: string;
-  actor_id?: string;
-  resource_type?: string;
-  resource_id?: string;
-  message?: string;
-  created_at?: string;
-  decision?: string;
   seq?: number;
+  timestamp: string;
+  event_type: string;
+  severity: string;
+  tenant_id: string;
+  action: string;
+  identity?: string;
+  agent_id?: string;
+  job_id?: string;
+  decision?: string;
+  reason?: string;
+  extra?: Record<string, string>;
 }
 
+// makeEntry deliberately leaves `seq` undefined so the per-test
+// override controls the chain-membership story (the drilldown
+// pending/verified/unverified branches gate on whether `seq` is present
+// and where it falls relative to the cached chain). Tests that exercise
+// chain assertions pass `seq:` explicitly.
 function makeEntry(
   index: number,
   overrides: Partial<RawAuditEntry> = {},
 ): RawAuditEntry {
   return {
     id: `evt-${String(index).padStart(4, "0")}`,
+    timestamp: new Date(Date.now() - index * 60_000).toISOString(),
+    event_type: "job.created",
+    severity: "INFO",
+    tenant_id: "default",
     action: "job.created",
-    actor_id: `user-${index}`,
-    resource_type: "job",
-    resource_id: `job-${index}`,
-    message: `Test event ${index}`,
-    created_at: new Date(Date.now() - index * 60_000).toISOString(),
+    identity: `user-${index}`,
+    extra: { resource_id: `job-${index}` },
+    reason: `Test event ${index}`,
     ...overrides,
   };
 }
@@ -53,7 +69,7 @@ function makeEntry(
 describe("AuditLogPage Block B — DataTable rendering", () => {
   it("decision-identity 3px left edge: rows carry data-decision-tier per decision", async () => {
     server.use(
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [
             makeEntry(1, { decision: "deny", action: "approval.decided" }),
@@ -62,8 +78,8 @@ describe("AuditLogPage Block B — DataTable rendering", () => {
             makeEntry(4),
           ],
           total: 4,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
     );
@@ -102,12 +118,12 @@ describe("AuditLogPage Block B — DataTable rendering", () => {
       makeEntry(i),
     );
     server.use(
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items,
           total: 500,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
     );
@@ -130,12 +146,12 @@ describe("AuditLogPage Block B — DataTable rendering", () => {
       makeEntry(i),
     );
     server.use(
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items,
           total: 25,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
     );
@@ -158,12 +174,12 @@ describe("AuditLogPage Block B — DataTable rendering", () => {
 describe("AuditLogPage Block C — page states", () => {
   it("renders EmptyState when API returns []", async () => {
     server.use(
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [],
           total: 0,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
     );
@@ -181,7 +197,7 @@ describe("AuditLogPage Block C — page states", () => {
 
   it("renders ErrorBanner with retry on 500", async () => {
     server.use(
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json(
           { error: "internal" },
           { status: 500 },
@@ -195,9 +211,20 @@ describe("AuditLogPage Block C — page states", () => {
       </NuqsTestingAdapter>,
     );
 
+    // ErrorBanner renders its default "Something went wrong" header
+    // plus the API error body (`error: "internal"`) and a Retry button.
+    // The page's banner contract is: a 5xx must surface a retryable
+    // error state — assert on the Retry control rather than guessing
+    // which word the upstream error message happens to use.
     await waitFor(() => {
-      expect(container.textContent).toMatch(/failed|error/i);
+      const retryBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.toLowerCase().includes("retry"),
+      );
+      expect(retryBtn).toBeTruthy();
     });
+    expect(container.textContent?.toLowerCase()).toMatch(
+      /something went wrong|failed|error|internal/,
+    );
   });
 });
 
@@ -243,19 +270,19 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [
             makeEntry(1, {
               id: "evt-detail-target",
               action: "policy.updated",
-              actor_id: "alice",
+              identity: "alice",
               decision: "allow",
             }),
           ],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -291,12 +318,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-no-seq" })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -334,12 +361,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-verified", seq: 250 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -378,12 +405,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-tampered", seq: 42 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -421,12 +448,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-trimmed", seq: 5 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -465,12 +492,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole(null);
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-non-admin", seq: 200 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
     );
@@ -503,12 +530,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-pending", seq: 300 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get(
@@ -547,12 +574,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-error", seq: 400 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -590,12 +617,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-out-of-range", seq: 999 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>
@@ -641,12 +668,12 @@ describe("AuditLogPage Block D — drilldown drawer (DoD #4 amended)", () => {
     setUserRole("admin");
     server.use(
       defaultAuthConfigEnforcing(),
-      http.get("*/api/v1/policy/audit", () =>
+      http.get("*/api/v1/audit/events", () =>
         HttpResponse.json({
           items: [makeEntry(1, { id: "evt-empty-chain", seq: 250 })],
           total: 1,
-          has_more: false,
-          offset: 0,
+          next_cursor: "",
+          returned: 0,
         }),
       ),
       http.get("*/api/v1/audit/verify", () =>

@@ -141,6 +141,25 @@ const (
 	EventActionGateDenied = "actiongate.denied"
 	EventEdgeAgentdDegraded    = "edge.agentd_degraded"
 	EventEdgeFailClosed        = "edge.fail_closed"
+
+	// EventGovernanceDecision is emitted by the multi-agent governance
+	// evaluator for every non-ALLOW decision (DENY or REQUIRE_HUMAN).
+	// Extra carries `operation`, `rule_id` (ma_*), `decision`,
+	// `parent_agent_id`, `child_agent_id`, `issuer_root`, `provenance_verified`,
+	// `approval_ref` when present, and `sub_reason`. Raw tokens,
+	// prompts, secrets, and full shared-memory payloads are NEVER
+	// recorded. Severity is HIGH for cross-tenant, child-bypass,
+	// scope/resource escalation, shared-context-unverified-writer, and
+	// approval-bypass-missing-record rules; MEDIUM for REQUIRE_HUMAN
+	// outcomes (recoverable missing provenance).
+	EventGovernanceDecision = "governance.decision"
+
+	// EventGovernanceLabelSpoof is emitted when a client supplied a
+	// reserved `_governance.*` or `_ma.*` label on job submit. Severity
+	// LOW (it's an attempt, not a breach — the strip already blocked
+	// it). SIEM rules pivot on repeated label-spoof attempts from the
+	// same actor as a probe signal.
+	EventGovernanceLabelSpoof = "governance.label_spoof"
 )
 
 // Severity levels for SIEM events.

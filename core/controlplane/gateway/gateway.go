@@ -1293,6 +1293,14 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	// that had /api/v1/audit/verify 404ing on fresh deploys despite the
 	// handler being fully implemented and unit-tested.
 	s.registerRoute(mux, "GET /api/v1/audit/verify", s.instrumented("/api/v1/audit/verify", s.handleAuditVerify))
+
+	// 2.7.2 Audit chain list (audit.read) — SIEM-feed read endpoint for the
+	// dashboard's Audit Log page. Distinct from /audit/verify (integrity
+	// check) and /policy/audit (policy-bundle subset): /audit/events walks
+	// the per-tenant Redis Stream populated from NATS sys.audit.export so
+	// MCP / edge / worker / output policy / delegation events all surface.
+	s.registerRoute(mux, "GET /api/v1/audit/events", s.instrumented("/api/v1/audit/events", s.handleListAuditEvents))
+
 	s.registerRoute(mux, "GET /api/v1/governance/health", s.instrumented("/api/v1/governance/health", s.handleGovernanceHealth))
 
 	// 2.8 Legal hold management (admin only, entitlement-gated)

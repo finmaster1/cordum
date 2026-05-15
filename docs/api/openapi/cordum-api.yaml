@@ -5108,6 +5108,115 @@ paths:
           $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/audit/events:
+    get:
+      operationId: getAuditEvents
+      summary: List audit events from the SIEM feed
+      description: |
+        Returns a paginated list of SIEM audit events for a tenant — the full
+        chained feed (MCP, edge, worker, output policy, delegation, license, ...)
+        sourced from the per-tenant Redis Stream populated by the audit chainer.
+        Distinct from `/api/v1/policy/audit`, which only surfaces the
+        policy-bundle audit subset.
+
+        Reverse-chronological by chain sequence. Filters (event_type / severity /
+        from / to / search) apply in-process after the stream read. Defense-in-depth
+        redaction strips Extra-map keys matching the secret-key pattern
+        (token / password / api_key / private_key / secret) before serialization.
+
+        Every successful read appends an `audit.read.events` event to the same
+        chain so the read surface is itself auditable.
+
+        Permission: `audit.read` (admin/operator/viewer with RBAC; admin via
+        legacy-role fallback). 503 when the audit chainer is not configured.
+      tags:
+      - AuditExport
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: tenant
+        in: query
+        required: false
+        description: |
+          Tenant id whose audit stream should be read. Must match caller scope;
+          defaults to the authenticated/header tenant.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of events in the response page. Default 100; values
+          above 200 are clamped to 200 silently to bound Redis fetch cost.
+        schema:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 200
+        example: 50
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          Opaque cursor returned as `next_cursor` by the previous page. Pass
+          back verbatim to fetch the next page. Empty `next_cursor` means
+          end-of-stream.
+        schema:
+          type: string
+      - name: event_type
+        in: query
+        required: false
+        description: Case-insensitive exact match against the event type (e.g. `mcp.tool_invocation`).
+        schema:
+          type: string
+        example: mcp.tool_invocation
+      - name: severity
+        in: query
+        required: false
+        description: Case-insensitive exact match against severity (CRITICAL / HIGH / MEDIUM / LOW / INFO).
+        schema:
+          type: string
+        example: HIGH
+      - name: from
+        in: query
+        required: false
+        description: Inclusive lower-bound on event timestamp (RFC3339).
+        schema:
+          type: string
+          format: date-time
+        example: '2026-05-15T00:00:00Z'
+      - name: to
+        in: query
+        required: false
+        description: Inclusive upper-bound on event timestamp (RFC3339).
+        schema:
+          type: string
+          format: date-time
+        example: '2026-05-15T23:59:59Z'
+      - name: search
+        in: query
+        required: false
+        description: |
+          Case-insensitive substring search over the lowercased concatenation
+          of `action + event_type + agent_id + job_id + identity + reason`.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Audit events envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventsEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/audit/export:
     get:
       operationId: exportAuditCompliance
@@ -9964,6 +10073,109 @@ components:
       required:
       - snapshot_id
       - author
+    AuditEvent:
+      type: object
+      description: |
+        One SIEM audit event returned by `GET /api/v1/audit/events`. Mirrors
+        the gateway handler's `auditEventResponseItem` (which itself mirrors
+        `audit.SIEMEvent` in `core/audit/exporter.go`). The `extra` map's
+        secret-shaped keys (token / password / api_key / private_key / secret)
+        are stripped server-side as defense-in-depth before the response is
+        serialized; their absence does NOT imply the source event lacked them.
+      properties:
+        id:
+          type: string
+          description: |
+            Opaque per-event handle (Redis Stream message ID under the hood).
+            Stable across pagination — safe to use as a row key.
+        seq:
+          type: integer
+          format: int64
+          description: |
+            Per-tenant monotonic chain sequence. First event for a tenant has
+            seq=1. Pairs with `/api/v1/audit/verify` for forensic re-check.
+        timestamp:
+          type: string
+          format: date-time
+        event_type:
+          type: string
+        severity:
+          type: string
+          description: One of CRITICAL / HIGH / MEDIUM / LOW / INFO.
+        tenant_id:
+          type: string
+        agent_id:
+          type: string
+        agent_name:
+          type: string
+        agent_risk_tier:
+          type: string
+        job_id:
+          type: string
+        action:
+          type: string
+        decision:
+          type: string
+        matched_rule:
+          type: string
+        reason:
+          type: string
+        risk_tags:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        policy_version:
+          type: string
+        identity:
+          type: string
+          description: Identity of the actor who produced the event.
+        extra:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Free-form per-event metadata. Secret-shaped keys are stripped
+            before serialization (see schema-level description).
+        event_hash:
+          type: string
+          description: SHA-256 of the canonical event payload, hex-encoded.
+        prev_hash:
+          type: string
+          description: |
+            EventHash of the tenant's predecessor event, or empty for genesis.
+      required:
+      - id
+      - seq
+      - timestamp
+      - event_type
+      - severity
+      - tenant_id
+      - action
+    AuditEventsEnvelope:
+      type: object
+      description: |
+        Paginated envelope returned by `GET /api/v1/audit/events`. `next_cursor`
+        is opaque; pass it back as `?cursor=` on the next request. Empty
+        `next_cursor` means end-of-stream — clients should stop polling.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        next_cursor:
+          type: string
+          description: Opaque cursor for the next page; empty when no more events.
+        returned:
+          type: integer
+          description: Number of items in this page (== `items.length`).
+      required:
+      - items
+      - next_cursor
+      - returned
     PolicyAuditEntry:
       type: object
       description: |

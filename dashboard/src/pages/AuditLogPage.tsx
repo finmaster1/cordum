@@ -14,8 +14,9 @@ import { useQueryState, parseAsString } from "nuqs";
 import { parseAsSearchTerm } from "@/lib/url-state";
 import type { ColumnDef } from "@tanstack/react-table";
 import { get } from "@/api/client";
-import { useGetPolicyAudit } from "@/api/generated/policy/policy";
-import type { GetPolicyAuditParams } from "@/api/generated/model/getPolicyAuditParams";
+import { useGetAuditEvents } from "@/api/generated/audit-export/audit-export";
+import type { GetAuditEventsParams } from "@/api/generated/model/getAuditEventsParams";
+import type { AuditEvent as SiemAuditEvent } from "@/api/generated/model/auditEvent";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -50,12 +51,13 @@ import {
   type AuditVerifyResult,
 } from "@/hooks/useAuditVerify";
 import { useIsAdmin } from "@/hooks/usePermission";
-import type { PolicyAuditEntry } from "@/api/generated/model/policyAuditEntry";
 
-// `PolicyAuditEntry` is the openapi-declared shape; spec enrichment in
-// task-7efe8c34 brought it into parity with the backend struct so the
-// generated `useGetPolicyAudit` hook is now usable directly. The previous
-// `& Record<string, unknown>` intersection is no longer needed.
+// The page now sources rows from the SIEM-feed `GET /api/v1/audit/events`
+// (full chained feed: MCP, edge, worker, output policy, delegation, ...)
+// via the generated `useGetAuditEvents`. The previous path called
+// `useGetPolicyAudit` which only exposed the policy-bundle audit subset
+// — Yaron's bug report ("I DONT SEE ALL LOGS RECORD IN AUDIT LOG PAGE")
+// pinned that gap. See docs/audit/list-api.md for the contract.
 
 interface AuditEvent {
   id: string;
@@ -113,25 +115,49 @@ export function shouldFetchNextAuditPage(
   return !!entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage;
 }
 
-function mapEvent(e: PolicyAuditEntry): AuditEvent {
-  // `seq` is not part of the openapi-declared PolicyAuditEntry shape —
-  // the gateway's /policy/audit handler does not emit it. Tests stub it
-  // via MSW for the chain-integrity drilldown path (AuditLogPage.render
-  // verifies "Verified"/"Unverified"/"Pending" based on event.seq vs
-  // chain.first_seq/last_seq). Capture it via narrow extension cast so
-  // the test contract stays intact; in production the field is absent
-  // and AuditEvent.seq is undefined as before.
-  const seqRaw = (e as PolicyAuditEntry & { seq?: unknown }).seq;
+// siemResourceTypeFromEventType extracts the resource family prefix from
+// an event_type like `mcp.tool_invocation`, `edge.action_attempted`, or
+// `worker_trust_change`. Mirrors the same split logic used by
+// `mapAuditEvent` in api/transform.ts; duplicated here as a small helper
+// so the page doesn't pull the entire transform module just for this.
+function siemResourceTypeFromEventType(eventType: string): string {
+  const trimmed = eventType.trim();
+  if (!trimmed) return "";
+  const dotIdx = trimmed.indexOf(".");
+  const usIdx = trimmed.indexOf("_");
+  const candidates = [dotIdx, usIdx].filter((i) => i > 0);
+  if (candidates.length === 0) return trimmed.toLowerCase();
+  return trimmed.slice(0, Math.min(...candidates)).toLowerCase();
+}
+
+function mapEvent(e: SiemAuditEvent): AuditEvent {
+  const extra = e.extra ?? {};
+  const actor =
+    (e.identity && String(e.identity).trim()) ||
+    (e.agent_id && String(e.agent_id).trim()) ||
+    "unknown";
+  const resourceType = siemResourceTypeFromEventType(e.event_type);
+  const resourceId =
+    (extra["resource_id"] as string | undefined) ||
+    (extra["session_id"] as string | undefined) ||
+    (extra["execution_id"] as string | undefined) ||
+    (extra["job_id"] as string | undefined) ||
+    e.job_id ||
+    undefined;
+  // SIEM feed carries the chain seq directly — the previous policy-feed
+  // path had to extension-cast for it. ChainIntegrityWidget consumes this
+  // verbatim for verified/unverified/pending classification.
+  const seq = typeof e.seq === "number" ? e.seq : undefined;
   return {
     id: e.id,
-    action: e.action,
-    actor: e.actor_id || e.role || "unknown",
-    resource: e.resource_type || "",
-    resourceId: e.resource_id ?? undefined,
-    detail: e.message ?? undefined,
-    timestamp: e.created_at || e.timestamp || "",
+    action: e.action || e.event_type,
+    actor,
+    resource: resourceType,
+    resourceId,
+    detail: e.reason ?? undefined,
+    timestamp: e.timestamp || "",
     decision: e.decision ?? undefined,
-    seq: typeof seqRaw === "number" ? seqRaw : undefined,
+    seq,
   };
 }
 
@@ -199,40 +225,49 @@ export default function AuditLogPage() {
   }, []);
 
   // Build typed query params for the generated hook. Unset filters drop
-  // out (orval omits undefined values from the query string), so the
-  // produced URL matches the previous manual construction.
-  const auditParams = useMemo<GetPolicyAuditParams>(() => {
-    const p: GetPolicyAuditParams = {
-      limit: PAGE_LIMIT,
-      offset: 0,
+  // out (orval omits undefined values from the query string). The new
+  // SIEM-feed endpoint takes event_type rather than the legacy `action`
+  // filter; we forward actionFilter as event_type so existing URL state
+  // (?action=...) continues to narrow the page additively. agent_id is
+  // not yet a server-side filter on /audit/events — applied client-side
+  // below.
+  const auditParams = useMemo<GetAuditEventsParams>(() => {
+    const p: GetAuditEventsParams = {
+      // Server caps limit at 200 (MaxAuditEventsLimit). The previous
+      // PAGE_LIMIT=1000 single-shot fetch is intentionally clamped to
+      // the bounded page; cursor pagination via the response's
+      // next_cursor is the next-page mechanism.
+      limit: Math.min(PAGE_LIMIT, 200),
     };
-    if (actionFilter) p.action = actionFilter;
-    if (agentFilter) p.agent_id = agentFilter;
-    // Defensive ISO conversion: malformed `?from=banana` URL values
-    // would throw at toISOString() and break the whole query. Validate
-    // the parsed Date before forwarding; silently drop unparseable
-    // input so the rest of the filter set still applies.
+    if (actionFilter) p.event_type = actionFilter;
     if (dateFrom) {
       const d = new Date(dateFrom);
-      if (!Number.isNaN(d.getTime())) p.after = d.toISOString();
+      if (!Number.isNaN(d.getTime())) p.from = d.toISOString();
     }
     if (dateTo) {
       const d = new Date(dateTo + "T23:59:59");
-      if (!Number.isNaN(d.getTime())) p.before = d.toISOString();
+      if (!Number.isNaN(d.getTime())) p.to = d.toISOString();
     }
     if (search) p.search = search;
     return p;
-  }, [actionFilter, agentFilter, dateFrom, dateTo, search]);
+  }, [actionFilter, dateFrom, dateTo, search]);
 
-  const { data, isLoading, isError, error, refetch } = useGetPolicyAudit(
+  const { data, isLoading, isError, error, refetch } = useGetAuditEvents(
     auditParams,
   );
 
-  const events: AuditEvent[] = useMemo(
-    () => (data?.items ?? []).map(mapEvent),
-    [data],
-  );
-  const total = data?.total;
+  const events: AuditEvent[] = useMemo(() => {
+    const mapped = (data?.items ?? []).map(mapEvent);
+    if (!agentFilter) return mapped;
+    const needle = agentFilter.toLowerCase();
+    return mapped.filter((e) => e.actor.toLowerCase().includes(needle));
+  }, [data, agentFilter]);
+  // The new envelope ships `returned` (current page size) rather than
+  // a global total — the previous /policy/audit response shape no
+  // longer applies. Render the page count without a total when the
+  // server hasn't computed one (cursor pagination is unbounded by
+  // design — full counts would require an O(stream) scan).
+  const total = data?.returned;
   const expandedEvent = useMemo(
     () => events.find((e) => e.id === expandedEventId) ?? null,
     [events, expandedEventId],
@@ -434,20 +469,56 @@ export default function AuditLogPage() {
                 />
               </LabeledField>
 
-              <LabeledField label="Action">
+              <LabeledField label="Event type">
                 <Select
                   value={actionFilter}
                   onChange={(e) => void setActionFilter(e.target.value || null)}
-                  aria-label="Filter by action"
+                  aria-label="Filter by event type"
                   className="bg-surface-1"
                 >
-                  <option value="">All Actions</option>
-                  <option value="job.created">Job Created</option>
-                  <option value="job.completed">Job Completed</option>
-                  <option value="job.failed">Job Failed</option>
-                  <option value="approval.decided">Approval Decided</option>
-                  <option value="policy.updated">Policy Updated</option>
-                  <option value="worker.registered">Worker Registered</option>
+                  <option value="">All event types</option>
+                  <optgroup label="Safety / Policy">
+                    <option value="safety.decision">Safety decision</option>
+                    <option value="safety.approval">Safety approval</option>
+                    <option value="safety.policy_change">Policy change</option>
+                  </optgroup>
+                  <optgroup label="MCP">
+                    <option value="mcp.tool_invocation">MCP tool invocation</option>
+                    <option value="mcp.tool_approval">MCP tool approval</option>
+                    <option value="mcp.tool_denied">MCP tool denied</option>
+                    <option value="mcp.signature_invalid">MCP signature invalid</option>
+                  </optgroup>
+                  <optgroup label="Edge (Claude Code)">
+                    <option value="edge.session_started">Edge session started</option>
+                    <option value="edge.action_attempted">Edge action attempted</option>
+                    <option value="edge.policy_decision">Edge policy decision</option>
+                    <option value="edge.action_denied">Edge action denied</option>
+                    <option value="edge.approval_requested">Edge approval requested</option>
+                    <option value="edge.fail_closed">Edge fail closed</option>
+                  </optgroup>
+                  <optgroup label="Worker / Topic">
+                    <option value="worker_trust_change">Worker trust change</option>
+                    <option value="topic_registered">Topic registered</option>
+                    <option value="topic_unregistered">Topic unregistered</option>
+                  </optgroup>
+                  <optgroup label="Auth">
+                    <option value="system.auth">System auth</option>
+                    <option value="auth.api_key_created">API key created</option>
+                    <option value="auth.api_key_revoked">API key revoked</option>
+                    <option value="auth.role_upserted">Role upserted</option>
+                    <option value="auth.role_deleted">Role deleted</option>
+                  </optgroup>
+                  <optgroup label="Delegation">
+                    <option value="delegation.lineage">Delegation lineage</option>
+                    <option value="delegation.rejected">Delegation rejected</option>
+                  </optgroup>
+                  <optgroup label="License">
+                    <option value="license.legacy_format_rejected">License legacy rejected</option>
+                    <option value="license.breakglass_activated">License breakglass</option>
+                  </optgroup>
+                  <optgroup label="Action gates">
+                    <option value="actiongate.denied">Action gate denied</option>
+                  </optgroup>
                 </Select>
               </LabeledField>
 
