@@ -690,6 +690,14 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	if deps.EventIDFactory == nil {
 		deps.EventIDFactory = defaultEventIDFactory
 	}
+	// Pin the EventID for the entire InvokeToolWithPolicy lifecycle.
+	// dedupeLookup, EvaluateToolCall (event.EventID), and dedupeStore
+	// must observe the same string — otherwise retries with a stable
+	// caller-supplied factory still produce a fresh random per call
+	// inside the bridge and dedupe never hits. deps is passed by value
+	// here so overriding the factory does not leak to other callers.
+	stableEventID := deps.EventIDFactory()
+	deps.EventIDFactory = func() string { return stableEventID }
 	if dedupedResult, hit, err := dedupeLookup(ctx, deps, params, server); hit {
 		return dedupedResult, err
 	}

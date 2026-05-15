@@ -206,7 +206,7 @@ func TestEvaluateAllowedIssuerRoots(t *testing.T) {
 	policy := config.DefaultGovernancePolicy()
 	policy.AllowedIssuerRoots = []string{"trusted-root-1", "trusted-root-2"}
 	dec := e.Evaluate(context.Background(), in, policy)
-	if dec.Type != DecisionDeny || dec.RuleID != config.GovernanceRuleUnverifiedIssuer {
+	if dec.Type != DecisionDeny || dec.RuleID != config.GovernanceRuleIssuerRootNotAllowed {
 		t.Fatalf("got %v/%q", dec.Type, dec.RuleID)
 	}
 }

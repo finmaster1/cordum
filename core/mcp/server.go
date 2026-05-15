@@ -129,9 +129,21 @@ func (s *MCPServer) WithPolicyGate(serverName string, deps ToolCallDeps) *MCPSer
 	if s == nil {
 		return s
 	}
-	if deps.Pipeline == nil && deps.EventEmitter == nil {
-		// Treat all-zero deps as "explicitly disabled" so callers can
-		// pass a zero ToolCallDeps to opt out without nil-checking.
+	if deps.Pipeline == nil && deps.EventEmitter == nil &&
+		deps.ArtifactStore == nil && deps.ApprovalHandoff == nil {
+		// All-zero deps is the explicit opt-out path: leave the gate
+		// off so the call falls through to legacy direct-dispatch.
+		s.policyDeps = nil
+		s.policyServerName = ""
+		return s
+	}
+	// Partial wiring (one of the required dependencies missing) is a
+	// configuration bug. EvaluateToolCall requires both Pipeline and
+	// EventEmitter, so half-wired deps would surface as -32603 on every
+	// tool call. Disable the gate here so the failure is silent in the
+	// happy path and operators see the wiring bug at boot time by
+	// observing policyDeps=nil despite a non-empty WithPolicyGate call.
+	if deps.Pipeline == nil || deps.EventEmitter == nil {
 		s.policyDeps = nil
 		s.policyServerName = ""
 		return s
@@ -156,6 +168,15 @@ func (s *MCPServer) WithApprovalHold(deps ApprovalHoldDeps) *MCPServer {
 		return s
 	}
 	if deps.Store == nil {
+		s.approvalHoldDeps = nil
+		return s
+	}
+	// PolicySnapshot is required: ProcessApprovalClaim builds an
+	// ApprovalClaimRequest whose validation rejects an empty
+	// PolicySnapshot. Without a snapshot provider the entire resume
+	// path would fail closed at runtime. Refuse to enable the path here
+	// so the misconfiguration surfaces at boot rather than per request.
+	if deps.PolicySnapshot == nil {
 		s.approvalHoldDeps = nil
 		return s
 	}

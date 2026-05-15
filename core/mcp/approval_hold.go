@@ -35,9 +35,16 @@ type ApprovalClaimStore interface {
 // check consumes. Every field is optional so a server without the
 // approval store wired short-circuits to "no claim presented"
 // (the call proceeds to EDGE-102's policy evaluation as before).
+//
+// ServerName MUST mirror the logical MCP server identifier the mint
+// path used (typically MCPServer.policyServerName via WithPolicyGate).
+// CanonicalActionHash includes the server in its tuple, so consuming
+// with an empty ServerName silently fails to match approvals minted
+// against a non-empty server.
 type ApprovalHoldDeps struct {
 	Store          ApprovalClaimStore
 	PolicySnapshot func(ctx context.Context) string
+	ServerName     string
 }
 
 // ApprovalClaimOutcome reports the result of inspecting tool-call
@@ -114,13 +121,23 @@ func ProcessApprovalClaim(ctx context.Context, deps ApprovalHoldDeps, params Too
 		policySnapshot = deps.PolicySnapshot(ctx)
 	}
 
+	// Derive the target path from the stripped args so the consume
+	// ActionHash matches the mint-time hash (which also stamps
+	// extractTargetPathFromArgs in canonicalActionHashFromEvent). Empty
+	// targetPath is the right answer for tools whose args have no
+	// path-shaped slot.
+	var targetPath string
+	if parsedArgs, _ := parseArgsForDescriptor(strippedBytes); parsedArgs != nil {
+		targetPath = extractTargetPathFromArgs(parsedArgs)
+	}
+
 	claim := edge.ApprovalClaimRequest{
 		TenantID:       meta.Tenant,
 		ApprovalRef:    approvalRef,
 		SessionID:      meta.SessionID,
 		ExecutionID:    meta.ExecutionID,
 		EventID:        meta.AgentID,
-		ActionHash:     CanonicalActionHash(meta.Tenant, "", params.Name, ""),
+		ActionHash:     CanonicalActionHash(meta.Tenant, deps.ServerName, params.Name, targetPath),
 		InputHash:      hashStrippedArgs(strippedBytes),
 		PolicySnapshot: policySnapshot,
 		ConsumedAt:     time.Now().UTC(),

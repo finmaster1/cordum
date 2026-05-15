@@ -2,6 +2,7 @@ package actiongates
 
 import (
 	"context"
+	"encoding/json"
 	"path"
 	"reflect"
 	"strings"
@@ -49,13 +50,54 @@ type MCPGate struct {
 	dangerous    map[string][]DangerousParamRule
 }
 
-// NewMCPGate returns a gate bound to the resolver/probe in opts.
+// NewMCPGate returns a gate bound to the resolver/probe in opts. Rule
+// values are normalized through a JSON round-trip at construction so
+// the dangerous-param check compares two values in the same shape that
+// BuildActionDescriptorFromToolCall produces (float64 for numbers,
+// map[string]any for objects, []any for arrays). Without this, an
+// admin configuring `DangerousParamRule{Value: int(1)}` in Go would
+// silently never match a JSON `1` that arrives over the wire.
 func NewMCPGate(opts MCPGateOptions) *MCPGate {
 	return &MCPGate{
 		identities:   opts.Identities,
 		reachability: opts.Reachability,
-		dangerous:    opts.DangerousParamRules,
+		dangerous:    normalizeDangerousParamRules(opts.DangerousParamRules),
 	}
+}
+
+// normalizeDangerousParamRules JSON-round-trips every rule Value so
+// reflect.DeepEqual against action args (which are always JSON-decoded)
+// catches numeric and composite matches. A Value that fails to marshal
+// is preserved as-is so a misconfigured rule still loads — it just
+// won't fire against a JSON-shaped Args slot.
+func normalizeDangerousParamRules(in map[string][]DangerousParamRule) map[string][]DangerousParamRule {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string][]DangerousParamRule, len(in))
+	for k, set := range in {
+		ns := make([]DangerousParamRule, 0, len(set))
+		for _, r := range set {
+			ns = append(ns, DangerousParamRule{Name: r.Name, Value: jsonRoundTripValue(r.Value)})
+		}
+		out[k] = ns
+	}
+	return out
+}
+
+func jsonRoundTripValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return v
+	}
+	return out
 }
 
 func (g *MCPGate) ID() string { return GateIDMCP }

@@ -208,15 +208,19 @@ func (g *URLGate) Evaluate(ctx context.Context, in *config.PolicyInput) ActionGa
 	}
 
 	// 5) DNS rebinding via *.nip.io / sslip.io / xip.io: must resolve and
-	// reject if any resolved IP is in a private class.
+	// reject if any resolved IP is in a private class. Resolver errors
+	// fail closed — a transient lookup failure on a wildcard-IP host is
+	// the easiest way for an attacker to skip the rebind check, so we
+	// refuse the request rather than treat the error as benign.
 	if isRebindWildcardHost(host) {
 		ips, _, err := g.resolve(ctx, host)
-		if err == nil {
-			for _, ip := range ips {
-				if pip := net.ParseIP(ip); pip != nil {
-					if class, ok := privateIPClass(pip); ok {
-						return g.deny(CodeAccessDenied, "dns rebinding denied", "dns_rebind:"+class, raw, host, hasUserinfo)
-					}
+		if err != nil {
+			return g.deny(CodeServiceUnavailable, "unable to validate destination host", "dns_rebind:resolver_error", raw, host, hasUserinfo)
+		}
+		for _, ip := range ips {
+			if pip := net.ParseIP(ip); pip != nil {
+				if class, ok := privateIPClass(pip); ok {
+					return g.deny(CodeAccessDenied, "dns rebinding denied", "dns_rebind:"+class, raw, host, hasUserinfo)
 				}
 			}
 		}
@@ -282,9 +286,51 @@ func (g *URLGate) resolve(ctx context.Context, host string) ([]string, bool, err
 
 	ips, err := g.resolver.LookupHost(ctx, host)
 	g.resCacheMu.Lock()
+	g.evictIfFullLocked(host)
 	g.resCache[host] = resolverCacheEntry{ips: ips, err: err, expiry: time.Now().Add(g.resCacheTTL)}
 	g.resCacheMu.Unlock()
 	return ips, false, err
+}
+
+// evictIfFullLocked enforces the resCacheMax bound. Caller must hold
+// resCacheMu. The two-pass strategy is intentionally simple: sweep
+// expired entries first (cheap; the common case once TTLs roll over),
+// and only if still over capacity drop the entry with the soonest
+// expiry. This caps worst-case memory regardless of attacker-driven
+// host cardinality without dragging in a full LRU.
+func (g *URLGate) evictIfFullLocked(replacingHost string) {
+	if g.resCacheMax <= 0 {
+		return
+	}
+	if _, replacing := g.resCache[replacingHost]; replacing {
+		// We're overwriting an existing entry; size doesn't grow.
+		return
+	}
+	if len(g.resCache) < g.resCacheMax {
+		return
+	}
+	now := time.Now()
+	for k, ent := range g.resCache {
+		if !now.Before(ent.expiry) {
+			delete(g.resCache, k)
+		}
+	}
+	if len(g.resCache) < g.resCacheMax {
+		return
+	}
+	var oldestKey string
+	var oldestExpiry time.Time
+	first := true
+	for k, ent := range g.resCache {
+		if first || ent.expiry.Before(oldestExpiry) {
+			oldestKey = k
+			oldestExpiry = ent.expiry
+			first = false
+		}
+	}
+	if oldestKey != "" {
+		delete(g.resCache, oldestKey)
+	}
 }
 
 // unmapIPv4InIPv6 normalizes ::ffff:1.2.3.4 (IPv4-mapped IPv6) and the brackets
