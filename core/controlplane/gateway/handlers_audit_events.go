@@ -179,6 +179,15 @@ func parseAuditEventsQuery(r *http.Request) (int, string, auditEventsFilters, er
 	}
 
 	cursor := strings.TrimSpace(q.Get("cursor"))
+	if cursor != "" {
+		// Cursors are Redis Stream IDs (`<ms>-<seq>`). Reject anything
+		// that doesn't match that shape so a malformed value surfaces
+		// as a 400 here instead of a 500 from XRevRangeN downstream.
+		sep := strings.IndexByte(cursor, '-')
+		if sep <= 0 || sep == len(cursor)-1 {
+			return 0, "", auditEventsFilters{}, errors.New("invalid cursor: must be stream id '<ms>-<seq>'")
+		}
+	}
 
 	filters := auditEventsFilters{
 		eventType: strings.TrimSpace(q.Get("event_type")),
@@ -221,10 +230,18 @@ func readAuditEventsPage(
 	limit int,
 	filters auditEventsFilters,
 ) ([]auditEventResponseItem, string, error) {
-	out := make([]auditEventResponseItem, 0, limit)
 	if limit <= 0 {
-		return out, "", nil
+		return nil, "", nil
 	}
+	// Defense-in-depth: parseAuditEventsQuery already clamps to
+	// MaxAuditEventsLimit, but readAuditEventsPage is exported within
+	// the package and CodeQL flags `make(..., limit)` as user-influenced
+	// without seeing the upstream cap. Re-clamp here so static analysis
+	// and any future direct callers cannot DoS-allocate.
+	if limit > MaxAuditEventsLimit {
+		limit = MaxAuditEventsLimit
+	}
+	out := make([]auditEventResponseItem, 0, limit)
 
 	maxID := "+"
 	if cursor != "" {

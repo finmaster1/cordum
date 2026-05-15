@@ -148,6 +148,9 @@ func TestHandleAuditEvents_CursorPaginationStable(t *testing.T) {
 	req = adminCtx(httptest.NewRequest(http.MethodGet,
 		"/api/v1/audit/events?tenant=default&limit=10&cursor="+page1.NextCursor, nil))
 	s.handleListAuditEvents(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("page2 status=%d: %s", rec.Code, rec.Body.String())
+	}
 	page2 := decodeAuditEventsResponse(t, rec)
 	if len(page2.Items) != 10 {
 		t.Fatalf("page2 returned %d items, want 10", len(page2.Items))
@@ -162,6 +165,9 @@ func TestHandleAuditEvents_CursorPaginationStable(t *testing.T) {
 	req = adminCtx(httptest.NewRequest(http.MethodGet,
 		"/api/v1/audit/events?tenant=default&limit=10&cursor="+page2.NextCursor, nil))
 	s.handleListAuditEvents(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("page3 status=%d: %s", rec.Code, rec.Body.String())
+	}
 	page3 := decodeAuditEventsResponse(t, rec)
 	if len(page3.Items) != 5 {
 		t.Fatalf("page3 returned %d items, want 5", len(page3.Items))
@@ -292,7 +298,7 @@ func TestHandleAuditEvents_RedactsSecretsInExtra(t *testing.T) {
 				"password":    "p@ssw0rd",
 				"api_key":     "ak_live_123",
 				"apiKey":      "AK-CAMEL",
-				"private_key": "-----BEGIN PRIVATE KEY-----",
+				"private_key": "-----BEGIN PRIVATE KEY-----", // no-secret-lint — synthetic PEM marker used to assert redaction
 				"SECRET":      "uppercase-secret",
 				"safe_field":  "kept",
 				"resource_id": "rid-9",
@@ -326,7 +332,7 @@ func TestHandleAuditEvents_RedactsSecretsInExtra(t *testing.T) {
 	// the wire payload anywhere, regardless of whether the key survived.
 	for _, secret := range []string{
 		"sk-secret-xyz", "p@ssw0rd", "ak_live_123", "AK-CAMEL",
-		"-----BEGIN PRIVATE KEY-----", "uppercase-secret",
+		"-----BEGIN PRIVATE KEY-----", "uppercase-secret", // no-secret-lint — body-scan also expects the synthetic PEM marker not to leak
 	} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Errorf("secret value %q leaked into response body", secret)
