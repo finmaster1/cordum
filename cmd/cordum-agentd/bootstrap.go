@@ -57,7 +57,15 @@ func loadBootstrapSecrets(
 			// value — empty nonce auto-generates; empty api_key fails
 			// LoadConfig with a clear missing-required error. Strict
 			// mode keeps the BOOTSTRAP-FAIL contract.
-			if mode == keychain.ModeDev && errors.Is(err, keychain.ErrKeyringNotFound) && envFallback == "" {
+			// Linux CI runners don't run dbus / org.freedesktop.secrets,
+			// so LoadSecret returns ErrKeyringUnavailable rather than
+			// ErrKeyringNotFound. Treat both as "no secret present" in
+			// dev mode when the env fallback is also empty — the test
+			// TestDefaultRunLeavesNonceEmptyWhenCordumAgentdNonceUnset
+			// pins this contract.
+			if mode == keychain.ModeDev && envFallback == "" &&
+				(errors.Is(err, keychain.ErrKeyringNotFound) ||
+					errors.Is(err, keychain.ErrKeyringUnavailable)) {
 				continue
 			}
 			return nil, formatBootstrapError(b.keychainKey, b.envName, mode, err)

@@ -22,6 +22,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  CreateEdgeMCPUpstreamParams,
   EdgeAgentActionEvent,
   EdgeAgentActionEventBatchRequest,
   EdgeAgentActionEventBatchResponse,
@@ -59,8 +60,14 @@ import type {
   ListEdgeApprovalsParams,
   ListEdgeExecutionEventsParams,
   ListEdgeExecutionsParams,
+  ListEdgeMCPUpstreamsLegacyParams,
+  ListEdgeMCPUpstreamsParams,
   ListEdgeSessionEventsParams,
   ListEdgeSessionsParams,
+  MCPUpstreamListResponse,
+  MCPUpstreamServer,
+  MCPUpstreamServerWriteRequest,
+  MCPUpstreamValidationResponse,
   WaitEdgeApprovalBody,
 } from ".././model";
 
@@ -2147,6 +2154,997 @@ export const useEvaluateEdgeAction = <
   TContext
 > => {
   const mutationOptions = getEvaluateEdgeActionMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Lists tenant-scoped upstream MCP registry entries plus system-wide entries. Secret material is never resolved; `auth_secret_ref` is returned only as a redacted `secret://` reference.
+ * @summary List approved upstream MCP servers
+ */
+export const listEdgeMCPUpstreams = (
+  params?: ListEdgeMCPUpstreamsParams,
+  signal?: AbortSignal,
+) => {
+  return apiClient<MCPUpstreamListResponse>({
+    url: `/api/v1/edge/mcp/upstreams`,
+    method: "GET",
+    params,
+    signal,
+  });
+};
+
+export const getListEdgeMCPUpstreamsQueryKey = (
+  params?: ListEdgeMCPUpstreamsParams,
+) => {
+  return [`/api/v1/edge/mcp/upstreams`, ...(params ? [params] : [])] as const;
+};
+
+export const getListEdgeMCPUpstreamsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListEdgeMCPUpstreamsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEdgeMCPUpstreams>>
+  > = ({ signal }) => listEdgeMCPUpstreams(params, signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type ListEdgeMCPUpstreamsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEdgeMCPUpstreams>>
+>;
+export type ListEdgeMCPUpstreamsQueryError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useListEdgeMCPUpstreams<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params: undefined | ListEdgeMCPUpstreamsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+          TError,
+          Awaited<ReturnType<typeof listEdgeMCPUpstreams>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useListEdgeMCPUpstreams<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+          TError,
+          Awaited<ReturnType<typeof listEdgeMCPUpstreams>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useListEdgeMCPUpstreams<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary List approved upstream MCP servers
+ */
+
+export function useListEdgeMCPUpstreams<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreams>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getListEdgeMCPUpstreamsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Creates a tenant-scoped upstream MCP registry entry. With `validate_only=true`, validates the entry without storing it and returns a validation verdict. Raw secrets are rejected; use `secret://` auth references.
+ * @summary Create or validate an upstream MCP server entry
+ */
+export const createEdgeMCPUpstream = (
+  mCPUpstreamServerWriteRequest: MCPUpstreamServerWriteRequest,
+  params?: CreateEdgeMCPUpstreamParams,
+  signal?: AbortSignal,
+) => {
+  return apiClient<MCPUpstreamValidationResponse | MCPUpstreamServer>({
+    url: `/api/v1/edge/mcp/upstreams`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: mCPUpstreamServerWriteRequest,
+    params,
+    signal,
+  });
+};
+
+export const getCreateEdgeMCPUpstreamMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeConflictResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEdgeMCPUpstream>>,
+    TError,
+    {
+      data: MCPUpstreamServerWriteRequest;
+      params?: CreateEdgeMCPUpstreamParams;
+    },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEdgeMCPUpstream>>,
+  TError,
+  { data: MCPUpstreamServerWriteRequest; params?: CreateEdgeMCPUpstreamParams },
+  TContext
+> => {
+  const mutationKey = ["createEdgeMCPUpstream"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEdgeMCPUpstream>>,
+    {
+      data: MCPUpstreamServerWriteRequest;
+      params?: CreateEdgeMCPUpstreamParams;
+    }
+  > = (props) => {
+    const { data, params } = props ?? {};
+
+    return createEdgeMCPUpstream(data, params);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEdgeMCPUpstreamMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEdgeMCPUpstream>>
+>;
+export type CreateEdgeMCPUpstreamMutationBody = MCPUpstreamServerWriteRequest;
+export type CreateEdgeMCPUpstreamMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeConflictResponse
+  | EdgePayloadTooLargeResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Create or validate an upstream MCP server entry
+ */
+export const useCreateEdgeMCPUpstream = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeConflictResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createEdgeMCPUpstream>>,
+      TError,
+      {
+        data: MCPUpstreamServerWriteRequest;
+        params?: CreateEdgeMCPUpstreamParams;
+      },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createEdgeMCPUpstream>>,
+  TError,
+  { data: MCPUpstreamServerWriteRequest; params?: CreateEdgeMCPUpstreamParams },
+  TContext
+> => {
+  const mutationOptions = getCreateEdgeMCPUpstreamMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Compatibility alias for `GET /api/v1/edge/mcp/upstreams`.
+ * @summary List approved upstream MCP servers (compatibility path)
+ */
+export const listEdgeMCPUpstreamsLegacy = (
+  params?: ListEdgeMCPUpstreamsLegacyParams,
+  signal?: AbortSignal,
+) => {
+  return apiClient<MCPUpstreamListResponse>({
+    url: `/api/v1/edge/mcp/upstreams/list`,
+    method: "GET",
+    params,
+    signal,
+  });
+};
+
+export const getListEdgeMCPUpstreamsLegacyQueryKey = (
+  params?: ListEdgeMCPUpstreamsLegacyParams,
+) => {
+  return [
+    `/api/v1/edge/mcp/upstreams/list`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListEdgeMCPUpstreamsLegacyQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsLegacyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListEdgeMCPUpstreamsLegacyQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>
+  > = ({ signal }) => listEdgeMCPUpstreamsLegacy(params, signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type ListEdgeMCPUpstreamsLegacyQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>
+>;
+export type ListEdgeMCPUpstreamsLegacyQueryError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useListEdgeMCPUpstreamsLegacy<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params: undefined | ListEdgeMCPUpstreamsLegacyParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+          TError,
+          Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useListEdgeMCPUpstreamsLegacy<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsLegacyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+          TError,
+          Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useListEdgeMCPUpstreamsLegacy<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsLegacyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary List approved upstream MCP servers (compatibility path)
+ */
+
+export function useListEdgeMCPUpstreamsLegacy<
+  TData = Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListEdgeMCPUpstreamsLegacyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listEdgeMCPUpstreamsLegacy>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getListEdgeMCPUpstreamsLegacyQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * @summary Get an upstream MCP server entry
+ */
+export const getEdgeMCPUpstream = (name: string, signal?: AbortSignal) => {
+  return apiClient<MCPUpstreamServer>({
+    url: `/api/v1/edge/mcp/upstreams/${name}`,
+    method: "GET",
+    signal,
+  });
+};
+
+export const getGetEdgeMCPUpstreamQueryKey = (name?: string) => {
+  return [`/api/v1/edge/mcp/upstreams/${name}`] as const;
+};
+
+export const getGetEdgeMCPUpstreamQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  name: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEdgeMCPUpstreamQueryKey(name);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEdgeMCPUpstream>>
+  > = ({ signal }) => getEdgeMCPUpstream(name, signal);
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!name,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type GetEdgeMCPUpstreamQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEdgeMCPUpstream>>
+>;
+export type GetEdgeMCPUpstreamQueryError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useGetEdgeMCPUpstream<
+  TData = Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  name: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+          TError,
+          Awaited<ReturnType<typeof getEdgeMCPUpstream>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useGetEdgeMCPUpstream<
+  TData = Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  name: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+          TError,
+          Awaited<ReturnType<typeof getEdgeMCPUpstream>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useGetEdgeMCPUpstream<
+  TData = Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  name: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary Get an upstream MCP server entry
+ */
+
+export function useGetEdgeMCPUpstream<
+  TData = Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  name: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getEdgeMCPUpstream>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getGetEdgeMCPUpstreamQueryOptions(name, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Updates a tenant-scoped upstream MCP registry entry and stores a best-effort backup of the prior entry before overwrite.
+ * @summary Update an upstream MCP server entry
+ */
+export const updateEdgeMCPUpstream = (
+  name: string,
+  mCPUpstreamServerWriteRequest: MCPUpstreamServerWriteRequest,
+) => {
+  return apiClient<MCPUpstreamServer>({
+    url: `/api/v1/edge/mcp/upstreams/${name}`,
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    data: mCPUpstreamServerWriteRequest,
+  });
+};
+
+export const getUpdateEdgeMCPUpstreamMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEdgeMCPUpstream>>,
+    TError,
+    { name: string; data: MCPUpstreamServerWriteRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateEdgeMCPUpstream>>,
+  TError,
+  { name: string; data: MCPUpstreamServerWriteRequest },
+  TContext
+> => {
+  const mutationKey = ["updateEdgeMCPUpstream"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateEdgeMCPUpstream>>,
+    { name: string; data: MCPUpstreamServerWriteRequest }
+  > = (props) => {
+    const { name, data } = props ?? {};
+
+    return updateEdgeMCPUpstream(name, data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateEdgeMCPUpstreamMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateEdgeMCPUpstream>>
+>;
+export type UpdateEdgeMCPUpstreamMutationBody = MCPUpstreamServerWriteRequest;
+export type UpdateEdgeMCPUpstreamMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeConflictResponse
+  | EdgePayloadTooLargeResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Update an upstream MCP server entry
+ */
+export const useUpdateEdgeMCPUpstream = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateEdgeMCPUpstream>>,
+      TError,
+      { name: string; data: MCPUpstreamServerWriteRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateEdgeMCPUpstream>>,
+  TError,
+  { name: string; data: MCPUpstreamServerWriteRequest },
+  TContext
+> => {
+  const mutationOptions = getUpdateEdgeMCPUpstreamMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * @summary Disable an upstream MCP server entry
+ */
+export const disableEdgeMCPUpstream = (name: string, signal?: AbortSignal) => {
+  return apiClient<MCPUpstreamServer>({
+    url: `/api/v1/edge/mcp/upstreams/${name}/disable`,
+    method: "POST",
+    signal,
+  });
+};
+
+export const getDisableEdgeMCPUpstreamMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof disableEdgeMCPUpstream>>,
+    TError,
+    { name: string },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof disableEdgeMCPUpstream>>,
+  TError,
+  { name: string },
+  TContext
+> => {
+  const mutationKey = ["disableEdgeMCPUpstream"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof disableEdgeMCPUpstream>>,
+    { name: string }
+  > = (props) => {
+    const { name } = props ?? {};
+
+    return disableEdgeMCPUpstream(name);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DisableEdgeMCPUpstreamMutationResult = NonNullable<
+  Awaited<ReturnType<typeof disableEdgeMCPUpstream>>
+>;
+
+export type DisableEdgeMCPUpstreamMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Disable an upstream MCP server entry
+ */
+export const useDisableEdgeMCPUpstream = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof disableEdgeMCPUpstream>>,
+      TError,
+      { name: string },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof disableEdgeMCPUpstream>>,
+  TError,
+  { name: string },
+  TContext
+> => {
+  const mutationOptions = getDisableEdgeMCPUpstreamMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * @summary Enable an upstream MCP server entry
+ */
+export const enableEdgeMCPUpstream = (name: string, signal?: AbortSignal) => {
+  return apiClient<MCPUpstreamServer>({
+    url: `/api/v1/edge/mcp/upstreams/${name}/enable`,
+    method: "POST",
+    signal,
+  });
+};
+
+export const getEnableEdgeMCPUpstreamMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof enableEdgeMCPUpstream>>,
+    TError,
+    { name: string },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof enableEdgeMCPUpstream>>,
+  TError,
+  { name: string },
+  TContext
+> => {
+  const mutationKey = ["enableEdgeMCPUpstream"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof enableEdgeMCPUpstream>>,
+    { name: string }
+  > = (props) => {
+    const { name } = props ?? {};
+
+    return enableEdgeMCPUpstream(name);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type EnableEdgeMCPUpstreamMutationResult = NonNullable<
+  Awaited<ReturnType<typeof enableEdgeMCPUpstream>>
+>;
+
+export type EnableEdgeMCPUpstreamMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Enable an upstream MCP server entry
+ */
+export const useEnableEdgeMCPUpstream = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof enableEdgeMCPUpstream>>,
+      TError,
+      { name: string },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof enableEdgeMCPUpstream>>,
+  TError,
+  { name: string },
+  TContext
+> => {
+  const mutationOptions = getEnableEdgeMCPUpstreamMutationOptions(options);
 
   return useMutation(mutationOptions, queryClient);
 };

@@ -30,8 +30,11 @@ import type {
   GetAgentDeniedEvents200,
   GetAgentToolVisibility200,
   GetMcpApproval200,
+  GetMcpGatewayConfig200,
+  GetMcpGatewayHealth200,
   GetMcpUsage200,
   GetMcpUsageParams,
+  InternalServerErrorResponse,
   JsonRpcRequest,
   JsonRpcResponse,
   ListMcpApprovals200,
@@ -42,6 +45,7 @@ import type {
   ListMcpToolsParams,
   McpStatus,
   NotFoundResponse,
+  PostMcpGatewayClientsConnect200,
   RejectMcpApproval200,
   ServiceUnavailableResponse,
   UnauthorizedResponse,
@@ -401,6 +405,461 @@ export function useMcpStatus<
   return query;
 }
 
+/**
+ * @summary EDGE-100 MCP Gateway skeleton — health probe
+ */
+export const getMcpGatewayHealth = (signal?: AbortSignal) => {
+  return apiClient<GetMcpGatewayHealth200>({
+    url: `/api/v1/mcp/gateway/health`,
+    method: "GET",
+    signal,
+  });
+};
+
+export const getGetMcpGatewayHealthQueryKey = () => {
+  return [`/api/v1/mcp/gateway/health`] as const;
+};
+
+export const getGetMcpGatewayHealthQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+  TError = ServiceUnavailableResponse,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+      TError,
+      TData
+    >
+  >;
+}) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMcpGatewayHealthQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMcpGatewayHealth>>
+  > = ({ signal }) => getMcpGatewayHealth(signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type GetMcpGatewayHealthQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMcpGatewayHealth>>
+>;
+export type GetMcpGatewayHealthQueryError = ServiceUnavailableResponse;
+
+export function useGetMcpGatewayHealth<
+  TData = Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+  TError = ServiceUnavailableResponse,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getMcpGatewayHealth>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useGetMcpGatewayHealth<
+  TData = Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+  TError = ServiceUnavailableResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getMcpGatewayHealth>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useGetMcpGatewayHealth<
+  TData = Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+  TError = ServiceUnavailableResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary EDGE-100 MCP Gateway skeleton — health probe
+ */
+
+export function useGetMcpGatewayHealth<
+  TData = Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+  TError = ServiceUnavailableResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayHealth>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getGetMcpGatewayHealthQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * @summary EDGE-100 MCP Gateway skeleton — effective per-tenant config (redacted)
+ */
+export const getMcpGatewayConfig = (signal?: AbortSignal) => {
+  return apiClient<GetMcpGatewayConfig200>({
+    url: `/api/v1/mcp/gateway/config`,
+    method: "GET",
+    signal,
+  });
+};
+
+export const getGetMcpGatewayConfigQueryKey = () => {
+  return [`/api/v1/mcp/gateway/config`] as const;
+};
+
+export const getGetMcpGatewayConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+      TError,
+      TData
+    >
+  >;
+}) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMcpGatewayConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMcpGatewayConfig>>
+  > = ({ signal }) => getMcpGatewayConfig(signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type GetMcpGatewayConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMcpGatewayConfig>>
+>;
+export type GetMcpGatewayConfigQueryError =
+  | UnauthorizedResponse
+  | ServiceUnavailableResponse;
+
+export function useGetMcpGatewayConfig<
+  TData = Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+          TError,
+          Awaited<ReturnType<typeof getMcpGatewayConfig>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useGetMcpGatewayConfig<
+  TData = Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+          TError,
+          Awaited<ReturnType<typeof getMcpGatewayConfig>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useGetMcpGatewayConfig<
+  TData = Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary EDGE-100 MCP Gateway skeleton — effective per-tenant config (redacted)
+ */
+
+export function useGetMcpGatewayConfig<
+  TData = Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMcpGatewayConfig>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getGetMcpGatewayConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Catch-all for `/api/v1/mcp/gateway/upstream/*`. Always returns 503 in
+the P1 skeleton: `gateway_disabled` when MCPPolicy.GatewayEnabled is
+false (default), `no_upstream_configured` when true but the EDGE-101
+upstream registry is empty.
+
+ * @summary EDGE-100 MCP Gateway skeleton — upstream forwarding (disabled by default)
+ */
+export const postMcpGatewayUpstream = (signal?: AbortSignal) => {
+  return apiClient<unknown>({
+    url: `/api/v1/mcp/gateway/upstream`,
+    method: "POST",
+    signal,
+  });
+};
+
+export const getPostMcpGatewayUpstreamMutationOptions = <
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof postMcpGatewayUpstream>>,
+    TError,
+    void,
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof postMcpGatewayUpstream>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["postMcpGatewayUpstream"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof postMcpGatewayUpstream>>,
+    void
+  > = () => {
+    return postMcpGatewayUpstream();
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PostMcpGatewayUpstreamMutationResult = NonNullable<
+  Awaited<ReturnType<typeof postMcpGatewayUpstream>>
+>;
+
+export type PostMcpGatewayUpstreamMutationError =
+  | UnauthorizedResponse
+  | ServiceUnavailableResponse;
+
+/**
+ * @summary EDGE-100 MCP Gateway skeleton — upstream forwarding (disabled by default)
+ */
+export const usePostMcpGatewayUpstream = <
+  TError = UnauthorizedResponse | ServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof postMcpGatewayUpstream>>,
+      TError,
+      void,
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof postMcpGatewayUpstream>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationOptions = getPostMcpGatewayUpstreamMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Creates an EdgeSession + AgentExecution attributed to the resolved
+tenant + authenticated principal (never to request-body claims) and
+emits an `mcp.server.connected` event on success or
+`mcp.server.failed` on the failure path.
+
+ * @summary EDGE-100 MCP Gateway skeleton — register an MCP client connect
+ */
+export const postMcpGatewayClientsConnect = (signal?: AbortSignal) => {
+  return apiClient<PostMcpGatewayClientsConnect200>({
+    url: `/api/v1/mcp/gateway/clients/connect`,
+    method: "POST",
+    signal,
+  });
+};
+
+export const getPostMcpGatewayClientsConnectMutationOptions = <
+  TError = UnauthorizedResponse | InternalServerErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof postMcpGatewayClientsConnect>>,
+    TError,
+    void,
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof postMcpGatewayClientsConnect>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["postMcpGatewayClientsConnect"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof postMcpGatewayClientsConnect>>,
+    void
+  > = () => {
+    return postMcpGatewayClientsConnect();
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PostMcpGatewayClientsConnectMutationResult = NonNullable<
+  Awaited<ReturnType<typeof postMcpGatewayClientsConnect>>
+>;
+
+export type PostMcpGatewayClientsConnectMutationError =
+  | UnauthorizedResponse
+  | InternalServerErrorResponse;
+
+/**
+ * @summary EDGE-100 MCP Gateway skeleton — register an MCP client connect
+ */
+export const usePostMcpGatewayClientsConnect = <
+  TError = UnauthorizedResponse | InternalServerErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof postMcpGatewayClientsConnect>>,
+      TError,
+      void,
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof postMcpGatewayClientsConnect>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationOptions =
+    getPostMcpGatewayClientsConnectMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
 /**
  * @summary List MCP tool-call approvals
  */

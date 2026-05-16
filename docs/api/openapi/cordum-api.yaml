@@ -6774,7 +6774,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
-  /api/v1/mcp/gateway/upstream/:
+  /api/v1/mcp/gateway/upstream:
     post:
       operationId: postMcpGatewayUpstream
       summary: EDGE-100 MCP Gateway skeleton — upstream forwarding (disabled by default)
@@ -6822,7 +6822,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
-          $ref: '#/components/responses/InternalError'
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/mcp/approvals:
     get:
       operationId: listMcpApprovals
