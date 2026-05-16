@@ -254,11 +254,17 @@ func (g *gatewayApprovalGate) Check(ctx context.Context, tool mcp.Tool, params j
 	// EDGE-103: try to dual-write an EdgeApproval when the gate is
 	// wired for it AND mcp.CallMetadata has SessionID/ExecutionID.
 	// On success the returned ApprovalRef is the Edge ref consumable
-	// by the new `_approval_ref` resume path. On miss (no Edge wiring
-	// or no Edge metadata), ApprovalRef falls back to the legacy
-	// MCPApprovalStore record id; the legacy retry-with-same-args
-	// protocol still works via ClaimPreApproved above.
-	approvalRef, policySnapshot, expiresAt := g.dualWriteEdgeApproval(ctx, meta, tool, params, rec)
+	// by the new `_approval_ref` resume path. On legitimate miss (no
+	// Edge wiring or no Edge metadata), ApprovalRef falls back to the
+	// legacy MCPApprovalStore record id; the legacy retry-with-same-args
+	// protocol still works via ClaimPreApproved above. On Edge-store
+	// outage (wired + metadata present but EnqueueApproval errored),
+	// fail-closed per DoD #5 — no silent fallback to a non-resumable
+	// legacy approval_id.
+	approvalRef, policySnapshot, expiresAt, mintErr := g.dualWriteEdgeApproval(ctx, meta, tool, params, rec)
+	if mintErr != nil {
+		return nil, fmt.Errorf("approval_store_unavailable: edge approval mint failed: %w", mintErr)
+	}
 	return &mcp.ApprovalRequired{
 		ApprovalID:     rec.ID,
 		ApprovalRef:    approvalRef,
@@ -278,20 +284,22 @@ func (g *gatewayApprovalGate) Check(ctx context.Context, tool mcp.Tool, params j
 // it, the response falls back to the legacy ID (resumable via
 // retry-with-same-args, not via `_approval_ref`).
 //
-// Failure modes are non-fatal here — the legacy record already
-// committed, so a missing Edge record degrades to legacy-only resume
-// rather than failing the entire approval response.
-func (g *gatewayApprovalGate) dualWriteEdgeApproval(ctx context.Context, _ MCPCallMetadata, tool mcp.Tool, params json.RawMessage, rec *MCPApprovalRecord) (approvalRef, policySnapshot string, expiresAt time.Time) {
+// Returns a four-tuple — the last field is non-nil when Edge mint was
+// ATTEMPTED (transport metadata present) and FAILED. Caller surfaces
+// approval_store_unavailable per DoD #5 in that case. nil errors include
+// both the success path and the legitimate-fallback path where Edge mint
+// was skipped (no edgeStore wired, or no CallMetadata in ctx).
+func (g *gatewayApprovalGate) dualWriteEdgeApproval(ctx context.Context, _ MCPCallMetadata, tool mcp.Tool, params json.RawMessage, rec *MCPApprovalRecord) (approvalRef, policySnapshot string, expiresAt time.Time, mintErr error) {
 	approvalRef = rec.ID
 	if rec.ExpiresAt > 0 {
 		expiresAt = time.Unix(rec.ExpiresAt, 0).UTC()
 	}
 	if g.edgeStore == nil {
-		return approvalRef, "", expiresAt
+		return approvalRef, "", expiresAt, nil
 	}
 	edgeMeta, ok := mcp.CallMetadataFromContext(ctx)
 	if !ok || edgeMeta.SessionID == "" || edgeMeta.ExecutionID == "" {
-		return approvalRef, "", expiresAt
+		return approvalRef, "", expiresAt, nil
 	}
 	if g.policySnapshot != nil {
 		policySnapshot = g.policySnapshot(ctx)
@@ -315,14 +323,17 @@ func (g *gatewayApprovalGate) dualWriteEdgeApproval(ctx context.Context, _ MCPCa
 		ActionHash:     actionHash,
 		InputHash:      inputHash,
 	})
-	if err != nil || edgeApproval == nil {
-		return approvalRef, policySnapshot, expiresAt
+	if err != nil {
+		return "", policySnapshot, expiresAt, err
+	}
+	if edgeApproval == nil {
+		return "", policySnapshot, expiresAt, fmt.Errorf("edge store returned nil approval without error")
 	}
 	approvalRef = edgeApproval.ApprovalRef
 	if edgeApproval.ExpiresAt != nil {
 		expiresAt = edgeApproval.ExpiresAt.UTC()
 	}
-	return approvalRef, policySnapshot, expiresAt
+	return approvalRef, policySnapshot, expiresAt, nil
 }
 
 // approvalReasonFor builds the reason string stored on the approval

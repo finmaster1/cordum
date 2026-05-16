@@ -228,12 +228,20 @@ type ApprovalHandoff interface {
 // EdgeApproval. The ActionHash is the canonical hash the gate
 // already computed; reusing it (instead of recomputing) keeps the
 // gate and approval lifecycle bound to the same key.
+//
+// EDGE-103 reopen #1: Args carries the canonical (already-redacted)
+// tool-call arguments so the mint side can derive the same InputHash
+// that the consume side (ProcessApprovalClaim → BuildMCPApprovalBinding)
+// derives. Without this field the mint had no way to compute the
+// args hash and was storing ActionHash in its place — surfacing as
+// ApprovalConflictKindArgsMismatch on every legitimate retry.
 type ToolCallApprovalContext struct {
 	Tenant     string
 	AgentID    string
 	Server     string
 	Tool       string
 	ActionHash string
+	Args       json.RawMessage
 }
 
 // ToolCallDeps bundles the production wiring EvaluateToolCall and
@@ -774,6 +782,10 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 			Server:     server,
 			Tool:       params.Name,
 			ActionHash: actionHash,
+			// EDGE-103 reopen #1: plumb raw args through so the gate's
+			// mint side can compute the same InputHash that
+			// ProcessApprovalClaim's BuildMCPApprovalBinding produces.
+			Args: params.Arguments,
 		})
 		if herr != nil {
 			finalErr = fmt.Errorf("approval handoff: %w", herr)

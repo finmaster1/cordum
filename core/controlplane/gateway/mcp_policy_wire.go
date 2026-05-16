@@ -89,24 +89,35 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 	if g.preapproval != nil && g.preapproval.IsPreapproved(ctx, ctxData.Tenant, ctxData.AgentID, ctxData.Tool) {
 		return "", nil
 	}
-	// Fall through: claim-or-enqueue against the canonical action hash.
+	// EDGE-103 reopen #1: Edge approval store is the source of truth
+	// per DoD #4. Try Edge mint FIRST when wired + transport metadata
+	// present. Three-way outcome from mintEdgeApprovalForActionGate:
+	//   - (ref, nil, true):   Edge mint succeeded — return ref.
+	//   - ("",  nil, false):  Edge unwired or no CallMetadata — fall
+	//                         back to legacy MCPApprovalStore mint by
+	//                         design (supports HTTP MCP transit without
+	//                         an EdgeSession, dev/test deploys).
+	//   - ("",  err, true):   Edge wired + metadata present but
+	//                         EnqueueApproval errored — fail-closed per
+	//                         DoD #5 (no silent legacy fallback that
+	//                         would produce a non-resumable approval_id).
+	ref, mintErr, didTry := g.mintEdgeApprovalForActionGate(ctx, ctxData)
+	if mintErr != nil {
+		return "", fmt.Errorf("approval_store_unavailable: mcp gate Edge enqueue failed: %w", mintErr)
+	}
+	if didTry {
+		return ref, nil
+	}
+	// Legacy MCPApprovalStore path (non-authoritative SIEM correlation).
+	// Only reached when Edge mint was skipped because of missing wiring
+	// or absent transport metadata. The legacy retry-with-same-args
+	// protocol still works via ClaimPreApproved for pre-EDGE-103 SIEM
+	// consumers that don't speak `_approval_ref`.
 	if rec, err := g.store.ClaimPreApproved(ctx, ctxData.Tenant, ctxData.AgentID, ctxData.Tool, ctxData.ActionHash); err != nil {
 		return "", fmt.Errorf("mcp gate: pre-approval claim: %w", err)
 	} else if rec != nil {
 		return rec.ID, nil
 	}
-	// EDGE-103 reopen #1: mint a consumable EdgeApproval when the gate
-	// is wired for Edge mint AND mcp.CallMetadata carries
-	// SessionID/ExecutionID. The returned Edge ref is the handle the
-	// `_approval_ref` resume path consumes. Falls back to legacy
-	// MCPApprovalStore mint when Edge is not available so dev/test
-	// deploys without edge.RedisStore keep working.
-	if ref, ok := g.mintEdgeApprovalForActionGate(ctx, ctxData); ok {
-		return ref, nil
-	}
-	// No prior approval — enqueue pending and return the new ref. The
-	// EnqueueMCPApproval store API requires an MCPApprovalRequest; we
-	// build it from the context payload + action hash.
 	req := &MCPApprovalRequest{
 		Tenant:   ctxData.Tenant,
 		AgentID:  ctxData.AgentID,
@@ -121,30 +132,37 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 }
 
 // mintEdgeApprovalForActionGate creates an EdgeApproval consumable via
-// the EDGE-103 `_approval_ref` resume path. Returns (ref, true) on
-// success and (_, false) when the gate is not wired for Edge mint or
-// mcp.CallMetadata is missing the SessionID/ExecutionID this requires.
-// On false the caller falls back to legacy MCPApprovalStore mint so
-// HTTP MCP transit without an EdgeSession still produces an approval
-// response.
+// the EDGE-103 `_approval_ref` resume path. Returns a three-way outcome:
+//   - (ref, nil, true):  Edge mint succeeded.
+//   - ("",  nil, false): Edge unwired or required mcp.CallMetadata
+//     fields missing — caller falls back to legacy mint by design.
+//   - ("",  err, true):  Edge wired + metadata present but
+//     EnqueueApproval failed — caller surfaces -32096
+//     approval_store_unavailable (DoD #5; no silent legacy fallback).
 //
-// The ActionHash arriving in ctxData was computed by the policy
-// dispatcher via canonicalActionHashFromEvent; reuse it for both
-// ActionHash and InputHash on the EdgeApproval. The matching resume
-// path runs the SAME tuple through mcp.BuildMCPApprovalBinding, so the
-// classifyApprovalClaimMismatch tuple-equality check holds.
-func (g *gatewayApprovalGate) mintEdgeApprovalForActionGate(ctx context.Context, ctxData mcp.ToolCallApprovalContext) (string, bool) {
+// InputHash + ActionHash are derived from mcp.BuildMCPApprovalBinding so
+// the mint side stores byte-identical hashes to what the consume path
+// (ProcessApprovalClaim) computes. Without this match, edge.RedisStore
+// classifyApprovalClaimMismatch surfaces ApprovalConflictKindArgsMismatch
+// on every legitimate retry — the EDGE-103 reopen #1 core bug QA flagged.
+func (g *gatewayApprovalGate) mintEdgeApprovalForActionGate(ctx context.Context, ctxData mcp.ToolCallApprovalContext) (string, error, bool) {
 	if g == nil || g.edgeStore == nil {
-		return "", false
+		return "", nil, false
 	}
 	meta, ok := mcp.CallMetadataFromContext(ctx)
 	if !ok || meta.SessionID == "" || meta.ExecutionID == "" {
-		return "", false
+		return "", nil, false
 	}
 	policySnapshot := ""
 	if g.policySnapshot != nil {
 		policySnapshot = g.policySnapshot(ctx)
 	}
+	actionHash, inputHash := mcp.BuildMCPApprovalBinding(
+		meta.Tenant,
+		g.serverName,
+		mcp.ToolCallParams{Name: ctxData.Tool, Arguments: ctxData.Args},
+		policySnapshot,
+	)
 	approval, err := g.edgeStore.EnqueueApproval(ctx, edge.EdgeApprovalRequest{
 		TenantID:       meta.Tenant,
 		SessionID:      meta.SessionID,
@@ -153,14 +171,17 @@ func (g *gatewayApprovalGate) mintEdgeApprovalForActionGate(ctx context.Context,
 		PrincipalID:    meta.Principal,
 		Requester:      meta.Principal,
 		Reason:         "policy gate REQUIRE_HUMAN",
-		ActionHash:     ctxData.ActionHash,
-		InputHash:      ctxData.ActionHash,
+		ActionHash:     actionHash,
+		InputHash:      inputHash,
 		PolicySnapshot: policySnapshot,
 	})
-	if err != nil || approval == nil {
-		return "", false
+	if err != nil {
+		return "", err, true
 	}
-	return approval.ApprovalRef, true
+	if approval == nil {
+		return "", fmt.Errorf("edge store returned nil approval without error"), true
+	}
+	return approval.ApprovalRef, nil, true
 }
 
 // BuildMCPPolicyDeps assembles the production ToolCallDeps the MCP
