@@ -235,14 +235,16 @@ func readAuditEventsPage(
 	}
 	// Defense-in-depth: parseAuditEventsQuery already clamps to
 	// MaxAuditEventsLimit, but readAuditEventsPage is exported within
-	// the package and CodeQL flags `make(..., limit)` as user-influenced
-	// without seeing the upstream cap. Re-clamp at entry so every
-	// downstream allocation (the response slice + the batch fetch size)
-	// is constant-bounded against MaxAuditEventsLimit.
+	// the package and CodeQL's taint tracker flags `make(..., limit)`
+	// as user-influenced even when an upstream guard is in place. Use
+	// MaxAuditEventsLimit as the allocation capacity directly — it's a
+	// compile-time constant the analyzer can prove is bounded — and
+	// keep the working `limit` value re-clamped so the rest of the
+	// function logic stays correct without re-flowing the taint.
 	if limit > MaxAuditEventsLimit {
 		limit = MaxAuditEventsLimit
 	}
-	out := make([]auditEventResponseItem, 0, limit)
+	out := make([]auditEventResponseItem, 0, MaxAuditEventsLimit)
 
 	maxID := "+"
 	if cursor != "" {
