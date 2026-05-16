@@ -359,7 +359,8 @@ type DiffConstraints struct {
 	DenyPathGlobs []string `yaml:"deny_path_globs"`
 }
 
-// MCPPolicy defines allow/deny rules for MCP servers/tools/resources.
+// MCPPolicy defines allow/deny rules for MCP servers/tools/resources, plus
+// the per-tenant EDGE-100 MCP Gateway enable flag.
 type MCPPolicy struct {
 	AllowServers   []string `json:"allow_servers" yaml:"allow_servers"`
 	DenyServers    []string `json:"deny_servers" yaml:"deny_servers"`
@@ -369,6 +370,13 @@ type MCPPolicy struct {
 	DenyResources  []string `json:"deny_resources" yaml:"deny_resources"`
 	AllowActions   []string `json:"allow_actions" yaml:"allow_actions"`
 	DenyActions    []string `json:"deny_actions" yaml:"deny_actions"`
+	// GatewayEnabled gates the per-tenant EDGE-100 cross-agent MCP Gateway
+	// upstream-forwarding family of routes (/api/v1/mcp/gateway/upstream/*).
+	// Default false — gateway is disabled-by-default per EDGE-100 DoD #1;
+	// the health and config routes remain reachable regardless so operators
+	// can probe a disabled deployment. EDGE-101 populates the upstream
+	// registry consumed when this flag is true.
+	GatewayEnabled bool `json:"gateway_enabled" yaml:"gateway_enabled"`
 }
 
 // TenantPolicy captures legacy allow/deny topics per tenant.
@@ -401,12 +409,12 @@ type PolicyInput struct {
 type ActionKind string
 
 const (
-	ActionKindFile             ActionKind = "file"
-	ActionKindURL              ActionKind = "url"
-	ActionKindTenantQuery      ActionKind = "tenant_query"
-	ActionKindMutation         ActionKind = "mutation"
-	ActionKindMCPCall          ActionKind = "mcp_call"
-	ActionKindProvenanceCheck  ActionKind = "provenance_check"
+	ActionKindFile            ActionKind = "file"
+	ActionKindURL             ActionKind = "url"
+	ActionKindTenantQuery     ActionKind = "tenant_query"
+	ActionKindMutation        ActionKind = "mutation"
+	ActionKindMCPCall         ActionKind = "mcp_call"
+	ActionKindProvenanceCheck ActionKind = "provenance_check"
 )
 
 // ActionVerb names the operation an actor is requesting. Free-form by design:

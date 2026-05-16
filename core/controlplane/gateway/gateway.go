@@ -46,6 +46,7 @@ import (
 	"github.com/cordum/cordum/core/infra/store"
 	"github.com/cordum/cordum/core/infra/tlsreload"
 	"github.com/cordum/cordum/core/licensing"
+	"github.com/cordum/cordum/core/mcp"
 	"github.com/cordum/cordum/core/model"
 	"github.com/cordum/cordum/core/policy/actiongates"
 	"github.com/cordum/cordum/core/policyshadow"
@@ -1425,6 +1426,23 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	s.registerRoute(mux, "GET /api/v1/agents/{id}/tools", s.instrumented("/api/v1/agents/{id}/tools", s.handleAgentToolVisibility))
 	s.registerRoute(mux, "GET /api/v1/agents/{id}/denied-events", s.instrumented("/api/v1/agents/{id}/denied-events", s.handleAgentDeniedEvents))
 
+	// EDGE-100: register MCP Gateway skeleton routes UNCONDITIONALLY so the
+	// route table stays consistent across test environments where
+	// s.edgeStore may be nil. Construction failure falls back to a stub
+	// gateway whose handlers respond 503 "gateway_unavailable" — surfaces
+	// the misconfiguration in audit instead of silently dropping routes.
+	// Disabled-by-default upstream forwarding is enforced via the
+	// GatewayEnabled callback inside mcpGatewayHandlers; EDGE-101 will
+	// wire per-tenant MCPPolicy.GatewayEnabled lookup, until then it
+	// returns false so the upstream route family fails closed with 503
+	// "gateway disabled" on every tenant. Health + config remain probeable
+	// so operators can observe a disabled deployment.
+	mcpGatewayHealth, mcpGatewayConfig, mcpGatewayUpstream, mcpGatewayConnect := mcpGatewayHandlers(s)
+	s.registerRoute(mux, "GET /api/v1/mcp/gateway/health", s.instrumented("/api/v1/mcp/gateway/health", mcpGatewayHealth))
+	s.registerRoute(mux, "GET /api/v1/mcp/gateway/config", s.instrumented("/api/v1/mcp/gateway/config", mcpGatewayConfig))
+	s.registerRoute(mux, "POST /api/v1/mcp/gateway/upstream/", s.instrumented("/api/v1/mcp/gateway/upstream/", mcpGatewayUpstream))
+	s.registerRoute(mux, "POST /api/v1/mcp/gateway/clients/connect", s.instrumented("/api/v1/mcp/gateway/clients/connect", mcpGatewayConnect))
+
 	// 12. Policy endpoints
 	s.registerRoute(mux, "POST /api/v1/policy/evaluate", s.instrumented("/api/v1/policy/evaluate", s.handlePolicyEvaluate))
 	s.registerRoute(mux, "POST /api/v1/policy/simulate", s.instrumented("/api/v1/policy/simulate", s.handlePolicySimulate))
@@ -1512,6 +1530,51 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	}
 
 	return nil
+}
+
+// mcpGatewayHandlers constructs the EDGE-100 MCP Gateway skeleton's four
+// handlers wired to the server's edge store and tenant/auth helpers. When
+// any required dep is missing (e.g. s.edgeStore nil in unit-test gateways)
+// every handler returns 503 "gateway_unavailable" so the route table stays
+// consistent across environments and the misconfiguration is observable
+// without crashing boot.
+func mcpGatewayHandlers(s *server) (health, config, upstream, connect http.HandlerFunc) {
+	stub := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"service unavailable","code":"gateway_unavailable","message":"mcp gateway not initialized"}`))
+	}
+	if s == nil || s.edgeStore == nil {
+		return stub, stub, stub, stub
+	}
+	g, err := mcp.NewGateway(mcp.GatewayDeps{
+		Store: s.edgeStore,
+		GatewayEnabled: func(_ context.Context, _ string) (bool, error) {
+			// TODO(EDGE-101): look up per-tenant MCPPolicy.GatewayEnabled
+			// from the live config snapshot. Stubbed false here so the
+			// upstream family ships fail-closed per EDGE-100 DoD #1.
+			return false, nil
+		},
+		ResolveTenant: func(r *http.Request) (string, string, error) {
+			tenant, terr := s.resolveTenant(r, "")
+			if terr != nil {
+				return "", "", terr
+			}
+			if terr := s.requireTenantAccess(r, tenant); terr != nil {
+				return "", "", terr
+			}
+			authCtx := auth.FromRequest(r)
+			if authCtx == nil {
+				return "", "", errors.New("auth context missing")
+			}
+			return tenant, authCtx.PrincipalID, nil
+		},
+	})
+	if err != nil {
+		slog.Warn("mcp gateway: skeleton construction failed; routes wired to 503 stub", "err", err)
+		return stub, stub, stub, stub
+	}
+	return g.HandleHealth, g.HandleConfig, g.HandleUpstream, g.HandleClientConnect
 }
 
 func (s *server) registerRoute(mux *http.ServeMux, pattern string, handler http.HandlerFunc) {

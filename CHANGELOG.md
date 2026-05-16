@@ -7,6 +7,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-100 — P1 MCP Gateway service skeleton (2026-05-16, task-0ffcac35)
+
+- New `core/mcp/gateway_skeleton.go` exposes `RegisterGatewayRoutes(mux, deps)` +
+  `NewGateway(deps)` and four `*Gateway` handlers (HandleHealth, HandleConfig,
+  HandleUpstream, HandleClientConnect) for the per-tenant
+  `/api/v1/mcp/gateway/*` route family. Reuses `edge.Store` for evidence
+  persistence (no parallel store) and surfaces tenant resolution +
+  gateway-enable lookup as injectable function fields on `GatewayDeps` so the
+  API gateway can plug in its existing `resolveTenant` /
+  `requireTenantAccess` / `auth.FromRequest` helpers without inventing
+  wrapper types.
+- `core/infra/config/safety_policy.go` `MCPPolicy.GatewayEnabled bool` field
+  added. Default `false` ships fail-closed per DoD #1; EDGE-101 will populate
+  the upstream registry and wire per-tenant enable lookup from the config
+  snapshot. Existing single-server MCP endpoints preserved; gateway-mode is
+  strictly additive.
+- `core/controlplane/gateway/gateway.go` adds `mcpGatewayHandlers(s)` helper
+  that constructs the gateway against `s.edgeStore` (or substitutes a
+  503 `gateway_unavailable` stub when the store is unavailable) and
+  registers all four routes through the existing `s.registerRoute` +
+  `s.instrumented` pipeline. Route table + OpenAPI coverage tests both
+  pass.
+- Event kinds `mcp.server.connected` + `mcp.server.failed` (pre-existing
+  at `core/edge/event.go:51-52`) are now emitted from the gateway connect
+  path with the resolved tenant + principal — never from body claims
+  (task rail #3). Connect-success creates EdgeSession + AgentExecution +
+  connected event; connect-failure emits the failed event without
+  serialising the underlying error string into the event body (operators
+  correlate via timestamp + tenant).
+- New OpenAPI operations: `getMcpGatewayHealth`, `getMcpGatewayConfig`,
+  `postMcpGatewayUpstream`, `postMcpGatewayClientsConnect`.
+- New tests: `core/mcp/gateway_skeleton_test.go` (7 tests covering
+  health, config-redaction, disabled-default, no-upstream, tenant
+  attribution, missing-tenant, connect-failure-event) +
+  `core/edge/event_mcp_server_test.go` (2 wire-string constants).
+- Dashboard surfacing of gateway events deferred to EDGE-105
+  (task-a04699dc) — no dashboard files touched in this task.
+- EDGE-101 (upstream registry) + EDGE-104 (real client attach) + EDGE-105
+  (dashboard surface) build on this contract.
+
 #### EDGE-152 — cordum-agentd keychain + service bootstrap hardening (2026-05-15, task-00320a80)
 
 - New `core/edge/keychain` package wraps the host OS-native credential

@@ -754,6 +754,72 @@ See [Dashboard Guide](dashboard-guide.md#how-to-configure-mcp-server) for the fu
   (`mcp.tools.<tool_id>.enabled=false`,
   `mcp.resources.<resource_name>.enabled=false`).
 
+## MCP Gateway (multi-upstream mode) — EDGE-100 skeleton
+
+EDGE-100 introduces a per-tenant MCP Gateway skeleton at
+`/api/v1/mcp/gateway/*`. The gateway sits between MCP clients and upstream
+MCP servers while reusing the existing Edge primitives (EdgeSession,
+AgentExecution, AgentActionEvent) — no parallel store, no parallel event
+bus. This P1 ships disabled-by-default; EDGE-101 will populate the
+upstream registry consumed when enabled.
+
+### Routes
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/api/v1/mcp/gateway/health` | Always 200; body `{status, gateway_enabled, component}`. Never touches the store — safe operator probe even when disabled. |
+| `GET` | `/api/v1/mcp/gateway/config` | Returns redacted per-tenant config `{gateway_enabled, upstream_count, upstream_forwarding}`. Never echoes upstream credentials or tokens. |
+| `POST` | `/api/v1/mcp/gateway/upstream/*` | 503 always in P1: `gateway_disabled` when `MCPPolicy.GatewayEnabled` is false (default); `no_upstream_configured` when true but registry empty (EDGE-101 populates). |
+| `POST` | `/api/v1/mcp/gateway/clients/connect` | Creates EdgeSession + AgentExecution attributed to the **resolved** tenant + principal — NEVER body claims. Emits `mcp.server.connected` on success, `mcp.server.failed` on the failure path. |
+
+### Per-tenant enable flag
+
+`MCPPolicy.GatewayEnabled` (added in `core/infra/config/safety_policy.go`)
+controls the upstream-forwarding family per tenant. Default `false` ships
+fail-closed per DoD #1 — the upstream route family returns 503 on every
+tenant until EDGE-101 wires the per-tenant config lookup. Health and
+config routes remain reachable regardless so operators can probe a
+disabled deployment.
+
+### Tenant/principal attribution contract
+
+The gateway resolves tenant + principal via the API gateway's existing
+`s.resolveTenant` + `s.requireTenantAccess` + `auth.FromRequest` plumbing.
+**Body-claimed tenants are ignored.** The test
+`TestMCPGatewayTenantAttribution` posts `{"claimed_tenant":"tenant-spoofed"}`
+with `X-Tenant-ID: tenant-a` and asserts the resulting session has
+`TenantID = "tenant-a"`. This locks task rail #3 (`All MCP sessions must
+be tenant/principal attributed`) at the contract layer.
+
+### Event kinds on connect
+
+| Kind | When | Required fields |
+| --- | --- | --- |
+| `mcp.server.connected` | Successful client connect (session + execution created) | `tenant_id`, `session_id`, `execution_id`, `principal_id` |
+| `mcp.server.failed` | Connect failure at any stage (resolve, create, append) | `tenant_id`, `principal_id` |
+
+The failure event deliberately **does not** carry the underlying error
+string in its event body — the reason is logged structurally via
+`slog.Warn` instead, preventing transport-error leakage into the
+audit-evidence stream. Operators correlate by timestamp + tenant.
+
+### Migration path
+
+1. Bring up the gateway disabled (default; EDGE-100 ships this).
+2. After EDGE-101 lands, set `MCPPolicy.GatewayEnabled = true` per tenant
+   and register upstream MCP servers via the upstream registry.
+3. EDGE-104 wires real client attach over the upstream registry.
+4. EDGE-105 surfaces gateway sessions + events on the Cordum dashboard.
+
+### Construction failure → 503 stub
+
+If the API gateway boots without an `edgeStore` (e.g. unit tests, dev
+mode missing Redis), `mcpGatewayHandlers` substitutes a stub gateway
+whose four handlers each return 503 `gateway_unavailable`. Routes still
+register so the table is consistent across environments; the
+misconfiguration surfaces as a logged warning + per-request 503
+instead of a missing-route 404.
+
 ## Cross References
 
 - [API Reference](./api-reference.md)

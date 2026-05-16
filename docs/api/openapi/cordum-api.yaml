@@ -6473,6 +6473,107 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/mcp/gateway/health:
+    get:
+      operationId: getMcpGatewayHealth
+      summary: EDGE-100 MCP Gateway skeleton — health probe
+      tags:
+      - MCP
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      responses:
+        '200':
+          description: Gateway component reachable; body includes per-tenant gateway_enabled flag.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  status:
+                    type: string
+                  gateway_enabled:
+                    type: boolean
+                  component:
+                    type: string
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/mcp/gateway/config:
+    get:
+      operationId: getMcpGatewayConfig
+      summary: EDGE-100 MCP Gateway skeleton — effective per-tenant config (redacted)
+      tags:
+      - MCP
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      responses:
+        '200':
+          description: Effective gateway config; never echoes secret-shaped fields.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  gateway_enabled:
+                    type: boolean
+                  upstream_count:
+                    type: integer
+                  upstream_forwarding:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/mcp/gateway/upstream/:
+    post:
+      operationId: postMcpGatewayUpstream
+      summary: EDGE-100 MCP Gateway skeleton — upstream forwarding (disabled by default)
+      description: |
+        Catch-all for `/api/v1/mcp/gateway/upstream/*`. Always returns 503 in
+        the P1 skeleton: `gateway_disabled` when MCPPolicy.GatewayEnabled is
+        false (default), `no_upstream_configured` when true but the EDGE-101
+        upstream registry is empty.
+      tags:
+      - MCP
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/mcp/gateway/clients/connect:
+    post:
+      operationId: postMcpGatewayClientsConnect
+      summary: EDGE-100 MCP Gateway skeleton — register an MCP client connect
+      description: |
+        Creates an EdgeSession + AgentExecution attributed to the resolved
+        tenant + authenticated principal (never to request-body claims) and
+        emits an `mcp.server.connected` event on success or
+        `mcp.server.failed` on the failure path.
+      tags:
+      - MCP
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      responses:
+        '200':
+          description: Session + execution created; body returns their IDs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  execution_id:
+                    type: string
+                  tenant_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/mcp/approvals:
     get:
       operationId: listMcpApprovals
