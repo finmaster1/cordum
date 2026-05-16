@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+#### Dashboard — Jobs + Job Detail refresh: unified search, fold I/O into Overview, remove Policy Trace tab (2026-05-16, task-cafacca3)
+
+- `dashboard/src/pages/JobsPage.tsx` — main search input placeholder expanded to "Search jobs (ID, topic, pool, tenant, session, run, trace)"; the underlying `filtered` predicate now matches `pool`, `tenant`, and `getJobParentRefs(j).sessionId` alongside the prior ID/topic/trace/run fields so users don't need to open the advanced filter bar to find jobs by those fields.
+- `dashboard/src/pages/JobDetailPage.tsx` — tabs reduced from 5 to 2 (Overview + Audit Chain). Inputs + Outputs tab content (Context BlobViewer + Result BlobViewer) folded into Overview as `CollapsibleSection` rows below `AgentExecutionsPanel`. Policy Trace tab removed entirely (unused per task description); `GovernanceTimeline` import deleted from this page — the component file stays because `RunDetailPage.tsx` still consumes it. Legacy `?tab=inputs|outputs|policy-trace` deep-links gracefully migrate to Overview via the activeTab derivation so bookmarks don't 404.
+- Tests: 4 obsolete tab-click tests (Inputs/Outputs/Overview-clears-tab-param + the 5-label tab-set assertion) deleted as the assertions test removed UI. New replacement asserts exactly 2 tabs (Overview + Audit Chain) and that GovernanceTimeline does not mount. One pre-existing test (`does not double-print ctx.run_id`) refined from page-wide assertion to the GenericContext-curated-row invariant — the new Context BlobViewer in Overview legitimately echoes raw ctx in JSON.
+
 #### Dashboard — Agent Fleet consolidated from 4 tabs to 2 (2026-05-16, task-083581ca)
 
 - `dashboard/src/pages/AgentsPage.tsx` — `topTabs` reduced 4→2 (Fleet Overview + Identities). Pool Topology absorbed into Fleet Overview as a segmented view-mode toggle (Table / By Pool) with `?view=by-pool` query-state persistence. Agent Registry deleted as redundant — its worker table duplicated Fleet Overview's; the standalone `AgentRegistryTab` function and the `useWorkers` import removed (~75 LOC). Identity Directory renamed to Identities (same content + EntitlementGate wrapper).

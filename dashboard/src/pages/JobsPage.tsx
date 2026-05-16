@@ -478,11 +478,18 @@ export default function JobsPage() {
       }
       if (search) {
         const q = search.toLowerCase();
+        // task-cafacca3: extended the main search predicate to cover
+        // pool / tenant / session so users don't need to open the
+        // JobFiltersBar advanced inputs to find by those fields. ID +
+        // topic + trace + run preserved; pool/tenant/session added.
         return (
           j.id.toLowerCase().includes(q) ||
           (j.topic ?? "").toLowerCase().includes(q) ||
           (j.traceId ?? "").toLowerCase().includes(q) ||
-          (j.workflowRunId ?? "").toLowerCase().includes(q)
+          (j.workflowRunId ?? "").toLowerCase().includes(q) ||
+          (j.pool ?? "").toLowerCase().includes(q) ||
+          (j.tenant ?? "").toLowerCase().includes(q) ||
+          (getJobParentRefs(j).sessionId ?? "").toLowerCase().includes(q)
         );
       }
       return true;
@@ -708,7 +715,7 @@ export default function JobsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Input
             type="text"
-            placeholder="Search by ID, topic, or trace..."
+            placeholder="Search jobs (ID, topic, pool, tenant, session, run, trace)"
             value={search ?? ""}
             onChange={(e) => void setSearch(e.target.value)}
             icon={<Search className="h-3.5 w-3.5" />}
