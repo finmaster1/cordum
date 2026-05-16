@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -114,6 +115,11 @@ type Gateway struct {
 	deps GatewayDeps
 }
 
+type gatewayEvidenceRoot struct {
+	Session   edge.EdgeSession
+	Execution edge.AgentExecution
+}
+
 // handleHealth always reports 200; the body indicates whether upstream
 // forwarding is enabled for the requesting tenant so operators can probe
 // a disabled deployment without having to hit /upstream and parse 503s.
@@ -160,9 +166,11 @@ func (g *Gateway) HandleConfig(w http.ResponseWriter, r *http.Request) {
 //   - "no upstream configured" when GatewayEnabled is true (registry is
 //     empty in P1 until EDGE-101 populates it)
 //
-// In either case NO Store writes occur; a misconfigured deploy fails loud.
+// Disabled tenants produce no Store writes. Enabled tenants with no upstream
+// registry produce one evidence root plus a failed event so the skeleton's
+// production-shaped failure path is auditable.
 func (g *Gateway) HandleUpstream(w http.ResponseWriter, r *http.Request) {
-	tenantID, _, err := g.deps.ResolveTenant(r)
+	tenantID, principalID, err := g.deps.ResolveTenant(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "tenant_missing", "X-Tenant-ID required")
 		return
@@ -173,16 +181,33 @@ func (g *Gateway) HandleUpstream(w http.ResponseWriter, r *http.Request) {
 			"mcp gateway disabled for tenant — enable via MCPPolicy.GatewayEnabled")
 		return
 	}
-	writeError(w, http.StatusServiceUnavailable, "no_upstream_configured",
-		"mcp gateway: no upstream configured — register via EDGE-101 upstream registry")
+	now := time.Now().UTC()
+	root, err := g.createGatewayEvidenceRoot(r.Context(), tenantID, principalID, now)
+	if err != nil {
+		g.deps.Logger.Warn("mcp gateway: upstream evidence root create failed", "tenant", tenantID, "err", err)
+		writeError(w, http.StatusInternalServerError, "evidence_create_failed", "could not create gateway evidence root")
+		return
+	}
+	if _, err := g.appendGatewayEvent(r.Context(), root, edge.EventKindMCPServerFailed, edge.DecisionDeny, edge.ActionStatusFailed, now); err != nil {
+		g.deps.Logger.Warn("mcp gateway: upstream failed-event append failed", "tenant", tenantID, "session", root.Session.SessionID, "err", err)
+		writeError(w, http.StatusInternalServerError, "event_append_failed", "could not persist mcp server failed event")
+		return
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"error":        strings.ToLower(http.StatusText(http.StatusServiceUnavailable)),
+		"code":         "no_upstream_configured",
+		"message":      "mcp gateway: no upstream configured — register via EDGE-101 upstream registry",
+		"session_id":   root.Session.SessionID,
+		"execution_id": root.Execution.ExecutionID,
+	})
 }
 
 // handleClientConnect resolves tenant + principal from the request, creates
 // an EdgeSession + AgentExecution, and emits an
 // EventKindMCPServerConnected event with the resolved tenant/principal —
-// never from request-body claims (task rail #3). On any failure after
-// session creation succeeds, an EventKindMCPServerFailed event is emitted
-// so partial-state is observable in audit.
+// never from request-body claims (task rail #3). Store failures before the
+// evidence root exists are logged and surfaced as 500; they are not claimed
+// as persisted orphan events because RedisStore rejects missing executions.
 func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 	tenantID, principalID, err := g.deps.ResolveTenant(r)
 	if err != nil {
@@ -191,15 +216,33 @@ func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
+	root, err := g.createGatewayEvidenceRoot(r.Context(), tenantID, principalID, now)
+	if err != nil {
+		g.deps.Logger.Warn("mcp gateway: evidence root create failed", "tenant", tenantID, "err", err)
+		writeError(w, http.StatusInternalServerError, "evidence_create_failed", "could not create gateway evidence root")
+		return
+	}
+	if _, err := g.appendGatewayEvent(r.Context(), root, edge.EventKindMCPServerConnected, edge.DecisionRecorded, edge.ActionStatusOK, now); err != nil {
+		g.deps.Logger.Warn("mcp gateway: connect event append failed", "tenant", tenantID, "session", root.Session.SessionID, "err", err)
+		writeError(w, http.StatusInternalServerError, "event_append_failed", "could not persist mcp server connected event")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":   root.Session.SessionID,
+		"execution_id": root.Execution.ExecutionID,
+		"tenant_id":    tenantID,
+	})
+}
+
+func (g *Gateway) createGatewayEvidenceRoot(ctx context.Context, tenantID, principalID string, ts time.Time) (gatewayEvidenceRoot, error) {
 	sessionID, sErr := newGatewayID("egs")
 	if sErr != nil {
-		writeError(w, http.StatusInternalServerError, "id_failed", "session id generation failed")
-		return
+		return gatewayEvidenceRoot{}, fmt.Errorf("generate session id: %w", sErr)
 	}
 	executionID, eErr := newGatewayID("aex")
 	if eErr != nil {
-		writeError(w, http.StatusInternalServerError, "id_failed", "execution id generation failed")
-		return
+		return gatewayEvidenceRoot{}, fmt.Errorf("generate execution id: %w", eErr)
 	}
 
 	session := edge.EdgeSession{
@@ -210,84 +253,44 @@ func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 		AgentProduct:  "cordum-mcp-gateway",
 		Mode:          edge.SessionModeLocalDev,
 		PolicyMode:    edge.PolicyModeObserve,
-		StartedAt:     now,
+		StartedAt:     ts,
 		Status:        edge.SessionStatusRunning,
 		RiskSummary: edge.RiskSummary{
 			MaxRisk: edge.RiskLevelLow,
 		},
 	}
-	if err := g.deps.Store.CreateSession(r.Context(), session); err != nil {
-		g.emitFailed(r.Context(), tenantID, principalID, sessionID, executionID, "create_session: "+err.Error(), now)
-		writeError(w, http.StatusInternalServerError, "session_create_failed", "could not create edge session")
-		return
+	if err := g.deps.Store.CreateSession(ctx, session); err != nil {
+		return gatewayEvidenceRoot{}, fmt.Errorf("create session: %w", err)
 	}
-
 	execution := edge.AgentExecution{
 		ExecutionID: executionID,
 		SessionID:   sessionID,
 		TenantID:    tenantID,
 		Adapter:     edge.AdapterMCPGateway,
 		Mode:        edge.ExecutionModeLocalDev,
-		StartedAt:   now,
+		StartedAt:   ts,
 		Status:      edge.ExecutionStatusRunning,
 	}
-	if err := g.deps.Store.CreateExecution(r.Context(), execution); err != nil {
-		g.emitFailed(r.Context(), tenantID, principalID, sessionID, executionID, "create_execution: "+err.Error(), now)
-		writeError(w, http.StatusInternalServerError, "execution_create_failed", "could not create agent execution")
-		return
+	if err := g.deps.Store.CreateExecution(ctx, execution); err != nil {
+		return gatewayEvidenceRoot{}, fmt.Errorf("create execution: %w", err)
 	}
-
-	connectEvent := edge.AgentActionEvent{
-		EventID:     mustGatewayID("aev"),
-		SessionID:   sessionID,
-		ExecutionID: executionID,
-		TenantID:    tenantID,
-		PrincipalID: principalID,
-		Timestamp:   now,
-		Layer:       edge.LayerMCP,
-		Kind:        edge.EventKindMCPServerConnected,
-		Decision:    edge.DecisionRecorded,
-		Status:      edge.ActionStatusOK,
-	}
-	if _, err := g.deps.Store.AppendEvent(r.Context(), connectEvent); err != nil {
-		g.deps.Logger.Warn("mcp gateway: connect event append failed",
-			"tenant", tenantID, "session", sessionID, "err", err)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":   sessionID,
-		"execution_id": executionID,
-		"tenant_id":    tenantID,
-	})
+	return gatewayEvidenceRoot{Session: session, Execution: execution}, nil
 }
 
-// emitFailed records a connect-failure event. Best-effort: a Store write
-// failure here is logged but does not propagate, since the caller is
-// already on an error path returning to the client. sessionID and
-// executionID are minted up-front in HandleClientConnect so the failure
-// event carries valid IDs even when the corresponding CreateSession or
-// CreateExecution call rejected the record — RedisStore AppendEvent
-// validation requires both fields non-empty.
-func (g *Gateway) emitFailed(ctx context.Context, tenantID, principalID, sessionID, executionID, reason string, ts time.Time) {
-	failedEvent := edge.AgentActionEvent{
+func (g *Gateway) appendGatewayEvent(ctx context.Context, root gatewayEvidenceRoot, kind edge.EventKind, decision edge.EdgeDecision, status edge.ActionStatus, ts time.Time) (edge.AgentActionEvent, error) {
+	event := edge.AgentActionEvent{
 		EventID:     mustGatewayID("aev"),
-		SessionID:   sessionID,
-		ExecutionID: executionID,
-		TenantID:    tenantID,
-		PrincipalID: principalID,
+		SessionID:   root.Session.SessionID,
+		ExecutionID: root.Execution.ExecutionID,
+		TenantID:    root.Session.TenantID,
+		PrincipalID: root.Session.PrincipalID,
 		Timestamp:   ts,
 		Layer:       edge.LayerMCP,
-		Kind:        edge.EventKindMCPServerFailed,
-		Decision:    edge.DecisionDeny,
-		Status:      edge.ActionStatusFailed,
+		Kind:        kind,
+		Decision:    decision,
+		Status:      status,
 	}
-	// Reason is logged structurally; we deliberately do NOT serialise it into
-	// the event body to avoid leaking transport-layer error strings into the
-	// evidence stream. Operators correlate via Timestamp + tenant.
-	if _, err := g.deps.Store.AppendEvent(ctx, failedEvent); err != nil {
-		g.deps.Logger.Warn("mcp gateway: failed-event append also failed",
-			"tenant", tenantID, "reason", reason, "err", err)
-	}
+	return g.deps.Store.AppendEvent(ctx, event)
 }
 
 // writeJSON serialises v as JSON with Content-Type and the given status.

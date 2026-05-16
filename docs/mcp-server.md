@@ -769,12 +769,12 @@ upstream registry consumed when enabled.
 | --- | --- | --- |
 | `GET` | `/api/v1/mcp/gateway/health` | Always 200; body `{status, gateway_enabled, component}`. Never touches the store — safe operator probe even when disabled. |
 | `GET` | `/api/v1/mcp/gateway/config` | Returns redacted per-tenant config `{gateway_enabled, upstream_count, upstream_forwarding}`. Never echoes upstream credentials or tokens. |
-| `POST` | `/api/v1/mcp/gateway/upstream/*` | 503 always in P1: `gateway_disabled` when `MCPPolicy.GatewayEnabled` is false (default); `no_upstream_configured` when true but registry empty (EDGE-101 populates). |
-| `POST` | `/api/v1/mcp/gateway/clients/connect` | Creates EdgeSession + AgentExecution attributed to the **resolved** tenant + principal — NEVER body claims. Emits `mcp.server.connected` on success, `mcp.server.failed` on the failure path. |
+| `POST` | `/api/v1/mcp/gateway/upstream/*` | 503 always in P1: `gateway_disabled` when `MCPPolicy.GatewayEnabled` is false (default, zero Edge records); `no_upstream_configured` when true but registry empty (EDGE-101 populates), with `session_id` + `execution_id` correlation IDs and a persisted `mcp.server.failed` event. |
+| `POST` | `/api/v1/mcp/gateway/clients/connect` | Creates EdgeSession + AgentExecution attributed to the **resolved** tenant + principal — NEVER body claims. Emits `mcp.server.connected` only after the event is durably appended. Storage failures before or during evidence creation return 500 and are logged structurally. |
 
 ### Per-tenant enable flag
 
-`MCPPolicy.GatewayEnabled` (added in `core/infra/config/safety_policy.go`)
+`MCPPolicy.GatewayEnabled` (defined in `core/infra/config/mcp.go`)
 controls the upstream-forwarding family per tenant. Default `false` ships
 fail-closed per DoD #1 — the upstream route family returns 503 on every
 tenant until EDGE-101 wires the per-tenant config lookup. Health and
@@ -791,17 +791,21 @@ with `X-Tenant-ID: tenant-a` and asserts the resulting session has
 `TenantID = "tenant-a"`. This locks task rail #3 (`All MCP sessions must
 be tenant/principal attributed`) at the contract layer.
 
-### Event kinds on connect
+### Gateway event contract
 
 | Kind | When | Required fields |
 | --- | --- | --- |
 | `mcp.server.connected` | Successful client connect (session + execution created) | `tenant_id`, `session_id`, `execution_id`, `principal_id` |
-| `mcp.server.failed` | Connect failure at any stage (resolve, create, append) | `tenant_id`, `principal_id` |
+| `mcp.server.failed` | Gateway failure after tenant/principal resolution and after a valid EdgeSession + AgentExecution evidence root exists. EDGE-100's concrete P1 case is `GatewayEnabled=true` with no upstream configured; future EDGE-101 upstream handshake failures use the same root. | `tenant_id`, `session_id`, `execution_id`, `principal_id` |
 
-The failure event deliberately **does not** carry the underlying error
-string in its event body — the reason is logged structurally via
-`slog.Warn` instead, preventing transport-error leakage into the
-audit-evidence stream. Operators correlate by timestamp + tenant.
+Store/bootstrap failures before session/execution creation cannot be
+represented in the Edge event stream because `edge.RedisStore.AppendEvent`
+requires an existing AgentExecution. Those failures are logged structurally
+and returned as 500 responses; they are not recorded as orphan events.
+Failed events deliberately **do not** carry the underlying error string in
+their event body, preventing transport-error leakage into the
+audit-evidence stream. Operators correlate by timestamp, tenant,
+`session_id`, and `execution_id`.
 
 ### Migration path
 

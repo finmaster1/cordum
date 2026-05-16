@@ -41,6 +41,7 @@ type fakeGatewayStore struct {
 	executions []edge.AgentExecution
 	events     []edge.AgentActionEvent
 	createErr  error
+	appendErr  error
 }
 
 // CreateSession runs the real edge.EdgeSession.Validate() before recording —
@@ -88,8 +89,25 @@ func (f *fakeGatewayStore) AppendEvent(_ context.Context, ev edge.AgentActionEve
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.appendErr != nil {
+		return edge.AgentActionEvent{}, f.appendErr
+	}
+	if !f.hasMatchingExecution(ev) {
+		return edge.AgentActionEvent{}, edge.ErrNotFound
+	}
 	f.events = append(f.events, ev)
 	return ev, nil
+}
+
+func (f *fakeGatewayStore) hasMatchingExecution(ev edge.AgentActionEvent) bool {
+	for _, execution := range f.executions {
+		if execution.ExecutionID == ev.ExecutionID &&
+			execution.SessionID == ev.SessionID &&
+			execution.TenantID == ev.TenantID {
+			return true
+		}
+	}
+	return false
 }
 
 // Unused methods of edge.Store — panic on any unexpected call so the
@@ -275,7 +293,7 @@ func TestMCPGatewayDisabledByDefault(t *testing.T) {
 // TestMCPGatewayEnabledNoOpForwarding — when GatewayEnabled=true and the
 // upstream registry is empty (EDGE-101 will populate), the upstream route
 // returns a 503 'no upstream configured' so a misconfigured deploy fails
-// loudly rather than silently dropping connect attempts.
+// loudly and emits a store-supported failed event.
 func TestMCPGatewayEnabledNoOpForwarding(t *testing.T) {
 	store := &fakeGatewayStore{}
 	mux := newGatewayTestMux(t, testDeps(store, true))
@@ -288,6 +306,15 @@ func TestMCPGatewayEnabledNoOpForwarding(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(rr.Body.String()), "no upstream configured") {
 		t.Fatalf("enabled-no-op: body missing 'no upstream configured': %q", rr.Body.String())
+	}
+	if len(store.sessions) != 1 || len(store.executions) != 1 || len(store.events) != 1 {
+		t.Fatalf("enabled-no-op evidence = sessions:%d executions:%d events:%d, want 1/1/1", len(store.sessions), len(store.executions), len(store.events))
+	}
+	if got := store.events[0].Kind; got != edge.EventKindMCPServerFailed {
+		t.Fatalf("enabled-no-op event.Kind = %q, want %q", got, edge.EventKindMCPServerFailed)
+	}
+	if got := store.events[0].Decision; got != edge.DecisionDeny {
+		t.Fatalf("enabled-no-op event.Decision = %q, want %q", got, edge.DecisionDeny)
 	}
 }
 
@@ -339,13 +366,11 @@ func TestMCPGatewayTenantAttribution(t *testing.T) {
 	}
 }
 
-// TestMCPGatewayConnectFailureEmitsFailedEvent — when the Store rejects
-// CreateSession, the gateway responds 5xx AND emits a
-// EventKindMCPServerFailed event so partial-state is observable in audit
-// (no dangling AgentExecution because session creation never succeeded).
-// Locks the connect-failure path documented in step-4 of the plan +
-// satisfies task rail #3 "no dangling session/execution on failure".
-func TestMCPGatewayConnectFailureEmitsFailedEvent(t *testing.T) {
+// TestMCPGatewayConnectFailureDoesNotEmitOrphanFailedEvent locks the QA
+// rejection fix: if session creation fails, RedisStore cannot persist an
+// AgentActionEvent because no AgentExecution exists. The gateway must not
+// rely on fake-store orphan events to claim durable mcp.server.failed evidence.
+func TestMCPGatewayConnectFailureDoesNotEmitOrphanFailedEvent(t *testing.T) {
 	store := &fakeGatewayStore{createErr: errors.New("redis unavailable")}
 	mux := newGatewayTestMux(t, testDeps(store, true))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mcp/gateway/clients/connect", nil)
@@ -360,17 +385,27 @@ func TestMCPGatewayConnectFailureEmitsFailedEvent(t *testing.T) {
 	if len(store.executions) != 0 {
 		t.Fatalf("connect-failure left dangling execution: count=%d", len(store.executions))
 	}
-	// The fake store rejects CreateSession but AppendEvent succeeds, so we
-	// expect the failed event to land. (Real Redis would also accept the
-	// event append independent of the session create rejection.)
-	if len(store.events) != 1 {
-		t.Fatalf("connect-failure: expected 1 failed event; got %d", len(store.events))
+	if len(store.events) != 0 {
+		t.Fatalf("connect-failure created orphan event: got %d events", len(store.events))
 	}
-	if got := store.events[0].Kind; got != edge.EventKindMCPServerFailed {
-		t.Fatalf("failure event Kind: got %q want %q", got, edge.EventKindMCPServerFailed)
+}
+
+func TestMCPGatewayClientConnectAppendFailureReturns500(t *testing.T) {
+	store := &fakeGatewayStore{appendErr: errors.New("redis unavailable")}
+	mux := newGatewayTestMux(t, testDeps(store, true))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mcp/gateway/clients/connect", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("append-failure: got status %d want 500; body=%q", rr.Code, rr.Body.String())
 	}
-	if got := store.events[0].TenantID; got != "tenant-a" {
-		t.Fatalf("failure event TenantID: got %q want %q", got, "tenant-a")
+	if len(store.sessions) != 1 || len(store.executions) != 1 {
+		t.Fatalf("append-failure evidence root = sessions:%d executions:%d, want 1/1", len(store.sessions), len(store.executions))
+	}
+	if len(store.events) != 0 {
+		t.Fatalf("append-failure persisted event despite append error: %d", len(store.events))
 	}
 }
 

@@ -64,11 +64,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   API gateway can plug in its existing `resolveTenant` /
   `requireTenantAccess` / `auth.FromRequest` helpers without inventing
   wrapper types.
-- `core/infra/config/safety_policy.go` `MCPPolicy.GatewayEnabled bool` field
-  added. Default `false` ships fail-closed per DoD #1; EDGE-101 will populate
-  the upstream registry and wire per-tenant enable lookup from the config
-  snapshot. Existing single-server MCP endpoints preserved; gateway-mode is
-  strictly additive.
+- `core/infra/config/mcp.go` now owns `MCPPolicy`, including
+  `GatewayEnabled bool`, `UpstreamServers []UpstreamServerConfig`, and
+  `AllowedUpstreams []string`. Default `false` ships fail-closed per DoD #1;
+  EDGE-101 will populate the runtime upstream registry and wire per-tenant
+  enable lookup from the config snapshot. Existing single-server MCP
+  endpoints preserved; gateway-mode is strictly additive.
 - `core/controlplane/gateway/gateway.go` adds `mcpGatewayHandlers(s)` helper
   that constructs the gateway against `s.edgeStore` (or substitutes a
   503 `gateway_unavailable` stub when the store is unavailable) and
@@ -76,17 +77,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `s.instrumented` pipeline. Route table + OpenAPI coverage tests both
   pass.
 - Event kinds `mcp.server.connected` + `mcp.server.failed` (pre-existing
-  at `core/edge/event.go:51-52`) are now emitted from the gateway connect
-  path with the resolved tenant + principal — never from body claims
-  (task rail #3). Connect-success creates EdgeSession + AgentExecution +
-  connected event; connect-failure emits the failed event without
-  serialising the underlying error string into the event body (operators
-  correlate via timestamp + tenant).
+  at `core/edge/event.go:51-52`) are now emitted only through
+  store-supported EdgeSession + AgentExecution evidence roots with the
+  resolved tenant + principal — never from body claims (task rail #3).
+  Connect-success creates EdgeSession + AgentExecution + connected event.
+  The P1 failed-event case is GatewayEnabled=true with no upstream
+  configured; bootstrap/store failures before an AgentExecution exists are
+  logged structurally instead of being claimed as orphan events.
 - New OpenAPI operations: `getMcpGatewayHealth`, `getMcpGatewayConfig`,
   `postMcpGatewayUpstream`, `postMcpGatewayClientsConnect`.
-- New tests: `core/mcp/gateway_skeleton_test.go` (7 tests covering
-  health, config-redaction, disabled-default, no-upstream, tenant
-  attribution, missing-tenant, connect-failure-event) +
+- New tests: `core/mcp/gateway_skeleton_test.go` and
+  `core/mcp/gateway_skeleton_redis_test.go` cover health,
+  config-redaction, disabled-default zero records, no-upstream failed-event
+  persistence via real RedisStore, tenant attribution, missing tenant,
+  append-failure handling, and no orphan failure events; plus
   `core/edge/event_mcp_server_test.go` (2 wire-string constants).
 - Dashboard surfacing of gateway events deferred to EDGE-105
   (task-a04699dc) — no dashboard files touched in this task.
