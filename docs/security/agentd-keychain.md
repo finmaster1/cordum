@@ -264,7 +264,7 @@ sc.exe query cordum-agentd                                               # Windo
 
 # Did the bootstrap path actually use the keychain? (Check structured logs.)
 journalctl --user -u cordum-agentd.service -n 50 \
-    | grep -E 'keychain\.(load|env_fallback)' 
+    | grep -E 'keychain\.(load|env_fallback)'
 ```
 
 The values themselves never appear in any of these surfaces. If you see
