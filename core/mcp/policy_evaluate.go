@@ -731,11 +731,25 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	// here so overriding the factory does not leak to other callers.
 	stableEventID := deps.EventIDFactory()
 	deps.EventIDFactory = func() string { return stableEventID }
-	if dedupedResult, hit, err := dedupeLookup(ctx, deps, params, server); hit {
-		return dedupedResult, err
+	myEntry, won, hit := dedupeBegin(ctx, deps, params, server)
+	if hit != nil {
+		return hit.result, hit.err
+	}
+	// dedupeFinish must run on every return path below when we won the
+	// slot. Use a named return + deferred publisher so the singleflight
+	// waiters never deadlock on a panic or early-return path.
+	var (
+		finalResult *ToolCallResult
+		finalErr    error
+	)
+	if won {
+		defer func() {
+			dedupeFinish(deps, params, server, myEntry, finalResult, finalErr)
+		}()
 	}
 	evalResult, err := EvaluateToolCall(ctx, deps, params, server)
 	if err != nil {
+		finalErr = err
 		return nil, err
 	}
 	dec := evalResult.Decision
@@ -762,40 +776,49 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 			ActionHash: actionHash,
 		})
 		if herr != nil {
-			return nil, fmt.Errorf("approval handoff: %w", herr)
+			finalErr = fmt.Errorf("approval handoff: %w", herr)
+			return nil, finalErr
 		}
-		return &ToolCallResult{
+		approvalPending := &ToolCallResult{
 			Content: []ContentItem{{
 				Type: "text",
 				Text: fmt.Sprintf("approval pending: %s", ref),
 			}},
 			IsError: false,
-		}, dedupeStore(deps, params, server, nil, nil)
+		}
+		finalResult = approvalPending
+		return approvalPending, nil
 	case !dec.Allowed():
 		// EvaluateToolCall already emitted mcp.tool.failed for the deny.
-		result := &ToolCallResult{
+		denyResult := &ToolCallResult{
 			Content: []ContentItem{{Type: "text", Text: dec.Reason}},
 			IsError: true,
 		}
-		return result, dedupeStore(deps, params, server, result, nil)
+		finalResult = denyResult
+		return denyResult, nil
 	}
 	if deps.Upstream == nil {
-		return nil, errors.New("deps.Upstream is required for ALLOW decisions")
+		finalErr = errors.New("deps.Upstream is required for ALLOW decisions")
+		return nil, finalErr
 	}
 	upstreamResult, upstreamErr := deps.Upstream.Invoke(ctx, params)
 	if upstreamErr != nil {
 		failed := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolFailed, dec)
 		failed.ErrorMessage = sanitizeUpstreamError(deps.Redactor, upstreamErr)
 		if emitErr := deps.EventEmitter.Emit(ctx, failed); emitErr != nil {
-			return nil, fmt.Errorf("emit failed event: %w", emitErr)
+			finalErr = fmt.Errorf("emit failed event: %w", emitErr)
+			return nil, finalErr
 		}
+		finalErr = upstreamErr
 		return nil, upstreamErr
 	}
 	post := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolPost, dec)
 	if err := deps.EventEmitter.Emit(ctx, post); err != nil {
-		return nil, fmt.Errorf("emit post event: %w", err)
+		finalErr = fmt.Errorf("emit post event: %w", err)
+		return nil, finalErr
 	}
-	return upstreamResult, dedupeStore(deps, params, server, upstreamResult, nil)
+	finalResult = upstreamResult
+	return upstreamResult, nil
 }
 
 // newPostEvent clones the identity/session fields from the pre event
@@ -877,7 +900,14 @@ func sanitizeUpstreamError(_ ArgumentRedactor, err error) string {
 // state lives on ToolCallDeps so each caller scope (test fixture,
 // HTTP server instance) gets isolated tracking — no package-globals
 // that would bleed across -count=N runs.
+// dedupeEntry is the singleflight cell stored in deps.DedupeState. The
+// first caller to LoadOrStore wins the slot, runs the upstream once,
+// then closes done. Concurrent callers with the same stable EventID see
+// the same entry, block on done, and read the result the winner stored.
+// On error, the winner deletes the entry so the next retry can fire
+// fresh — only successful (non-error) outcomes are cached.
 type dedupeEntry struct {
+	done   chan struct{}
 	result *ToolCallResult
 	err    error
 }
@@ -890,32 +920,59 @@ func dedupeKey(deps ToolCallDeps, server, tool string) string {
 	return server + "|" + tool + "|" + id
 }
 
-// dedupeLookup returns the cached outcome for a stable EventID. The
-// boolean signals whether the lookup was a hit; on hit the caller
-// short-circuits without re-emitting events.
-func dedupeLookup(_ context.Context, deps ToolCallDeps, params ToolCallParams, server string) (*ToolCallResult, bool, error) {
+// dedupeBegin reserves the singleflight slot for a (server, tool,
+// EventID) tuple. Three returns:
+//
+//   - (entry, true, _)  caller is the winner; runs the body, then MUST
+//     call dedupeFinish so waiters unblock and the cache fills (or
+//     clears, on error).
+//   - (_, false, hit)   caller observed an already-completed entry;
+//     short-circuits with hit.result / hit.err.
+//   - (_, false, nil)   dedupe is disabled (no factory or no state).
+//
+// When LoadOrStore returns loaded=true but the existing entry is still
+// in flight (done not yet closed), the function blocks on done before
+// returning. Ctx cancellation surfaces as ctx.Err() so a SIGTERM-bound
+// caller doesn't get stuck waiting for a peer's upstream call.
+func dedupeBegin(ctx context.Context, deps ToolCallDeps, params ToolCallParams, server string) (*dedupeEntry, bool, *dedupeEntry) {
 	if deps.EventIDFactory == nil || deps.DedupeState == nil {
 		return nil, false, nil
 	}
 	key := dedupeKey(deps, server, params.Name)
-	if entry, ok := deps.DedupeState.Load(key); ok {
-		if e, ok := entry.(dedupeEntry); ok {
-			return e.result, true, e.err
-		}
+	fresh := &dedupeEntry{done: make(chan struct{})}
+	existing, loaded := deps.DedupeState.LoadOrStore(key, fresh)
+	if !loaded {
+		return fresh, true, nil
 	}
-	return nil, false, nil
+	e, ok := existing.(*dedupeEntry)
+	if !ok {
+		// Defensive: malformed entry from a stale serialization path.
+		// Treat as if we won the slot; overwrite under our key.
+		deps.DedupeState.Store(key, fresh)
+		return fresh, true, nil
+	}
+	select {
+	case <-e.done:
+		return nil, false, e
+	case <-ctx.Done():
+		// Don't synthesize a fake hit on cancel — surface ctx.Err()
+		// via a dedicated entry so the caller propagates it.
+		return nil, false, &dedupeEntry{err: ctx.Err()}
+	}
 }
 
-// dedupeStore records the outcome under the EventID key so the next
-// retry with the same EventID short-circuits via dedupeLookup. Errors
-// from the upstream are NOT cached — a transient failure on attempt
-// N should still allow attempt N+1 to fire if the caller chose to
-// rotate the EventID.
-func dedupeStore(deps ToolCallDeps, params ToolCallParams, server string, result *ToolCallResult, err error) error {
-	if deps.EventIDFactory == nil || deps.DedupeState == nil {
-		return nil
+// dedupeFinish publishes the outcome for the singleflight winner. On
+// success (err == nil) the entry stays in the map so subsequent retries
+// short-circuit. On error the entry is removed so the next attempt
+// fires upstream fresh — transient failures must not become sticky.
+func dedupeFinish(deps ToolCallDeps, params ToolCallParams, server string, entry *dedupeEntry, result *ToolCallResult, err error) {
+	if entry == nil || entry.done == nil {
+		return
 	}
-	key := dedupeKey(deps, server, params.Name)
-	deps.DedupeState.Store(key, dedupeEntry{result: result, err: err})
-	return nil
+	entry.result = result
+	entry.err = err
+	close(entry.done)
+	if err != nil && deps.DedupeState != nil && deps.EventIDFactory != nil {
+		deps.DedupeState.Delete(dedupeKey(deps, server, params.Name))
+	}
 }

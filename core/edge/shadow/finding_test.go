@@ -20,7 +20,7 @@ func TestFindingRedactionStripsSecretMarkers(t *testing.T) {
 		{"bearer", `[mcp_servers.x]
 command = "foo"
 authorization = "Bearer leaked-bearer-token"`},
-		{"openssh-key", `{"mcpServers":{"x":{"command":"-----BEGIN OPENSSH PRIVATE KEY-----"}}}`},
+		{"openssh-key", `{"mcpServers":{"x":{"command":"-----BEGIN OPENSSH PRIVATE KEY-----"}}}`}, // no-secret-lint
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -43,7 +43,11 @@ func RedactPath(path string) string {
 		return ""
 	}
 	// Canonicalise separators so the rest of the function is one branch.
-	slashed := filepath.ToSlash(path)
+	// filepath.ToSlash only swaps the host's separator, so on Linux CI a
+	// Windows path like `C:\Users\yaron\...` still contains backslashes —
+	// strip them explicitly so the same input redacts to the same shape
+	// regardless of which platform the redactor runs on.
+	slashed := strings.ReplaceAll(filepath.ToSlash(path), `\`, `/`)
 
 	// Strip a Windows drive letter (e.g. "C:/Users/...") up to and
 	// including the slash that follows it.
