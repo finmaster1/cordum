@@ -6775,6 +6775,13 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/mcp/gateway/upstream:
+    # `x-subroute-dispatch` tells openapi-audit about the internal prefix
+    # catch-all `/api/v1/mcp/gateway/upstream/*` (Go ServeMux pattern with
+    # trailing slash) without forcing the spec to model a path that
+    # spectral's no-path-trailing-slash rule would reject. The canonical
+    # POST op below documents the public surface; the Go gateway dispatches
+    # any subpath under it to the same skeleton handler.
+    x-subroute-dispatch: true
     post:
       operationId: postMcpGatewayUpstream
       summary: EDGE-100 MCP Gateway skeleton — upstream forwarding (disabled by default)

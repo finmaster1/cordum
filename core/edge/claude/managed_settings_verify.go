@@ -277,7 +277,49 @@ func agentdURLDrifts(env map[string]string) []ManagedSettingsDrift {
 			Severity: managedSettingsDriftCritical,
 		}}
 	}
+	// The hook URL must be a loopback http(s) endpoint pointed at the
+	// per-host /v1/edge/hooks/claude path. A scheme-less value (e.g.
+	// "agentd.example.com/v1/...") parses without error but reaches a
+	// non-local network; a non-loopback host can be a SSRF target or a
+	// silent man-in-the-middle for hook decisions. Enforce all three
+	// invariants here so the verify pass refuses to ratify a config that
+	// would route enforcement decisions off-box.
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return []ManagedSettingsDrift{{
+			Field:    "env.CORDUM_AGENTD_URL",
+			Got:      redactDiagnostic(raw),
+			Want:     "http(s) loopback URL",
+			Severity: managedSettingsDriftCritical,
+		}}
+	}
+	host := parsed.Hostname()
+	if !isLoopbackHookHost(host) {
+		return []ManagedSettingsDrift{{
+			Field:    "env.CORDUM_AGENTD_URL",
+			Got:      redactDiagnostic(raw),
+			Want:     "loopback host (127.0.0.1, ::1, or localhost)",
+			Severity: managedSettingsDriftCritical,
+		}}
+	}
+	if parsed.Path != "/v1/edge/hooks/claude" {
+		return []ManagedSettingsDrift{{
+			Field:    "env.CORDUM_AGENTD_URL",
+			Got:      redactDiagnostic(raw),
+			Want:     "path /v1/edge/hooks/claude",
+			Severity: managedSettingsDriftCritical,
+		}}
+	}
 	return nil
+}
+
+func isLoopbackHookHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	default:
+		return false
+	}
 }
 
 func serializedMarkerDrifts(raw []byte) []ManagedSettingsDrift {

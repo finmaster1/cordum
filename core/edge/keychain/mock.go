@@ -74,6 +74,9 @@ func (m *MockKeyring) Delete(ctx context.Context, key string) error {
 	if m.fail != nil {
 		return m.fail
 	}
+	if key == "" {
+		return ErrKeyringNotFound
+	}
 	delete(m.store, key)
 	return nil
 }

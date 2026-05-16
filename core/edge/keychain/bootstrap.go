@@ -115,20 +115,46 @@ func LoadSecret(
 		return "", ErrKeyringNotFound
 
 	default:
+		// Log a coarse error class rather than err.Error(): a custom
+		// Keyring impl could embed the secret value or other sensitive
+		// material (raw command output, JWT, base64 token) in its error
+		// string and we don't want that flowing to stderr / journald.
+		// The Go type name + classifyBootstrapErr label is enough for
+		// an operator to tell "permission" from "ipc unavailable" from
+		// "other" without exposing payload bytes.
+		category := classifyBootstrapErr(err)
 		if mode == ModeStrict {
 			logger.Error(
 				"keychain.load.unavailable",
 				slog.String("secret_name", secretName),
 				slog.String("mode", mode.String()),
-				slog.String("reason", err.Error()),
+				slog.String("err_type", fmt.Sprintf("%T", err)),
+				slog.String("err_class", category),
 			)
 			return "", err
 		}
 		if envFallback != "" {
-			warnEnvFallback(logger, secretName, mode, "keychain unavailable: "+err.Error())
+			warnEnvFallback(logger, secretName, mode, "keychain unavailable: "+category)
 			return envFallback, nil
 		}
 		return "", err
+	}
+}
+
+// classifyBootstrapErr maps an underlying keyring error to a fixed
+// vocabulary of operator-readable categories so logs never echo raw
+// backend message bytes. Each label corresponds 1:1 to the sentinel
+// errors exported by this package.
+func classifyBootstrapErr(err error) string {
+	switch {
+	case errors.Is(err, ErrKeyringUnavailable):
+		return "backend_unavailable"
+	case errors.Is(err, ErrKeyringPermissionDenied):
+		return "permission_denied"
+	case errors.Is(err, ErrKeyringNotFound):
+		return "secret_not_found"
+	default:
+		return "keyring_error"
 	}
 }
 

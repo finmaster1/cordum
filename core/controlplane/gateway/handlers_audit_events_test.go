@@ -39,9 +39,16 @@ func seedAuditEvents(t *testing.T, s *server, tenant string, events []audit.SIEM
 
 func decodeAuditEventsResponse(t *testing.T, rec *httptest.ResponseRecorder) auditEventsResponse {
 	t.Helper()
+	// Copy the bytes off the recorder before decoding: json.NewDecoder
+	// reads from rec.Body and advances its read cursor, so a subsequent
+	// rec.Body.String() in the error path (and any caller that wants to
+	// re-scan the body for secret-leak checks) sees an empty buffer. The
+	// copy is cheap (single-page responses) and preserves the recorder's
+	// state for the rest of the test.
+	body := append([]byte(nil), rec.Body.Bytes()...)
 	var out auditEventsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode response: %v (body=%s)", err, rec.Body.String())
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode response: %v (body=%s)", err, string(body))
 	}
 	return out
 }

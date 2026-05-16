@@ -1,6 +1,7 @@
 package actiongates
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"path"
@@ -274,10 +275,81 @@ func matchDangerousParams(rules map[string][]DangerousParamRule, tool string, ar
 			if !present {
 				continue
 			}
-			if reflect.DeepEqual(actual, rule.Value) {
+			if dangerousParamMatches(actual, rule.Value) {
 				return "dangerous_param:" + name, true
 			}
 		}
 	}
 	return "", false
+}
+
+// dangerousParamMatches is a Go-vs-JSON-aware equality test. act.Args
+// arrives via json.Unmarshal(..., &any), so a JSON `1` becomes float64(1)
+// while an admin-configured DangerousParamRule{Value: 1} or
+// {Value: int64(1)} or {Value: "1"} stays in its source-typed form. A
+// raw reflect.DeepEqual returns false in those cases and silently lets a
+// dangerous-value match slip past. Two normalization passes catch the
+// real-world configs:
+//
+//  1. Numeric coercion: if BOTH sides cast cleanly to float64, compare
+//     as float64. Covers admin int / int64 / json.Number / float matched
+//     against a json-decoded float64.
+//  2. JSON-roundtrip equality: marshal both sides and compare bytes.
+//     Catches map[string]any{"x":1} vs custom struct shapes that DeepEqual
+//     would reject for type identity even when the JSON-shape matches.
+//
+// Falls back to reflect.DeepEqual so existing same-type rules (string vs
+// string, bool vs bool) keep their semantics.
+func dangerousParamMatches(actual, want any) bool {
+	if reflect.DeepEqual(actual, want) {
+		return true
+	}
+	if a, aok := toFloat64(actual); aok {
+		if w, wok := toFloat64(want); wok {
+			return a == w
+		}
+	}
+	ab, aerr := json.Marshal(actual)
+	wb, werr := json.Marshal(want)
+	if aerr == nil && werr == nil && bytes.Equal(ab, wb) {
+		return true
+	}
+	return false
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case float32:
+		return float64(x), true
+	case int:
+		return float64(x), true
+	case int8:
+		return float64(x), true
+	case int16:
+		return float64(x), true
+	case int32:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case uint:
+		return float64(x), true
+	case uint8:
+		return float64(x), true
+	case uint16:
+		return float64(x), true
+	case uint32:
+		return float64(x), true
+	case uint64:
+		return float64(x), true
+	case json.Number:
+		f, err := x.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	default:
+		return 0, false
+	}
 }

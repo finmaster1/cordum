@@ -215,15 +215,17 @@ var errRefusingToOverwrite = errors.New("refusing to overwrite existing managed 
 
 // writeManagedSettingsOutput writes payload to path. Without force, it uses
 // O_EXCL so a concurrent operator export wins exactly one writer; with
-// force it truncates atomically. Mode 0600 prevents fleet workstation
-// readers other than the operator from harvesting the file.
+// force it delegates to atomicWriteManagedSettings (temp-file + rename) so
+// a crashed process never leaves a half-written file on disk that a
+// downstream reader on macOS/Windows could pick up as the active managed
+// configuration. Mode 0600 prevents fleet workstation readers other than
+// the operator from harvesting the file.
 func writeManagedSettingsOutput(path string, payload []byte, force bool) error {
 	clean := filepath.Clean(path)
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
 	if force {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		return atomicWriteManagedSettings(clean, payload)
 	}
-	f, err := os.OpenFile(clean, flags, 0o600)
+	f, err := os.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("%w: %s (re-run with --force to overwrite)", errRefusingToOverwrite, clean)

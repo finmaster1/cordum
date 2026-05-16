@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	zkeyring "github.com/zalando/go-keyring"
@@ -146,16 +147,42 @@ func normalizeBackendError(err error) error {
 
 // redactBackendError keeps the error category visible (D-Bus session, ACL,
 // missing-entry) while stripping anything that might look like a secret.
-// The function intentionally allows lowercase backend diagnostic text but
-// truncates aggressively at the first whitespace-padded base64-style run
-// so a backend that included a leaked value in its error string cannot
-// propagate that value into agentd's stderr or audit log.
+// A custom Keyring implementation that included a raw value, JWT, base64
+// or UUID-shaped token in its error string would otherwise propagate that
+// material into agentd's stderr / audit log via Errorf("%s: %w", ...).
+// The redact passes catch the common high-entropy substring shapes before
+// the truncation pass so the surviving message is operator-readable but
+// never carries a credential.
 func redactBackendError(msg string) string {
 	const maxLen = 200
 	cleaned := strings.ReplaceAll(msg, "\n", " ")
 	cleaned = strings.ReplaceAll(cleaned, "\r", " ")
+	for _, p := range backendErrorRedactPatterns {
+		cleaned = p.MustCompile.ReplaceAllString(cleaned, p.Replacement)
+	}
 	if len(cleaned) > maxLen {
 		cleaned = cleaned[:maxLen] + "...[truncated]"
 	}
 	return cleaned
+}
+
+type backendRedactRule struct {
+	MustCompile *regexp.Regexp
+	Replacement string
+}
+
+// backendErrorRedactPatterns scrubs long high-entropy substrings before
+// the truncation pass. Ordered most-specific → most-general so a JWT is
+// caught before its base64 segments individually trip the generic rule.
+var backendErrorRedactPatterns = []backendRedactRule{
+	// JWT (three base64url segments separated by dots).
+	{regexp.MustCompile(`\b[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b`), "[REDACTED:jwt]"},
+	// UUID v1..v5.
+	{regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "[REDACTED:uuid]"},
+	// Long hex run (≥32 chars) — covers SHA256/512 digests + raw key material.
+	{regexp.MustCompile(`(?i)\b[0-9a-f]{32,}\b`), "[REDACTED:hex]"},
+	// Long base64/base64url run (≥24 chars) — covers raw tokens, nonces,
+	// HMAC outputs. Constrained to alnum + url-safe + padding so we don't
+	// chew through ordinary English.
+	{regexp.MustCompile(`\b[A-Za-z0-9+/_\-]{24,}={0,2}\b`), "[REDACTED:base64]"},
 }

@@ -102,18 +102,18 @@ func runCLI(ctx context.Context, opts cliOptions) int {
 }
 
 func defaultRun(ctx context.Context, cfg runConfig) error {
-	opts, err := defaultRunOptions(cfg)
+	opts, err := defaultRunOptions(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	return agentdcore.Run(ctx, opts)
 }
 
-func defaultRunOptions(cfg runConfig) (agentdcore.RunOptions, error) {
-	return defaultRunOptionsWithRecorder(cfg, nil)
+func defaultRunOptions(ctx context.Context, cfg runConfig) (agentdcore.RunOptions, error) {
+	return defaultRunOptionsWithRecorder(ctx, cfg, nil)
 }
 
-func defaultRunOptionsWithRecorder(cfg runConfig, recorder edgecore.Recorder) (agentdcore.RunOptions, error) {
+func defaultRunOptionsWithRecorder(ctx context.Context, cfg runConfig, recorder edgecore.Recorder) (agentdcore.RunOptions, error) {
 	env := cloneEnv(cfg.Env)
 	if env == nil {
 		env = environMap(os.Environ())
@@ -135,7 +135,7 @@ func defaultRunOptionsWithRecorder(cfg runConfig, recorder edgecore.Recorder) (a
 		kr = keychain.NewOSKeyring()
 	}
 	mode := resolveBootstrapMode(env)
-	env, err := loadBootstrapSecrets(context.Background(), kr, mode, env, os.Stderr)
+	env, err := loadBootstrapSecrets(ctx, kr, mode, env, os.Stderr)
 	if err != nil {
 		return agentdcore.RunOptions{}, err
 	}

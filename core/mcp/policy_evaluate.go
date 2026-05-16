@@ -34,7 +34,7 @@ var upstreamErrorRedactPatterns = []struct {
 	{regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-+/=]+`), "[REDACTED:bearer]"},
 	// API key tokens by common prefix (Anthropic sk-, GitHub ghp_, AWS AKIA).
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_\-]{4,}\b`), "[REDACTED:api_key]"},
-	{regexp.MustCompile(`\bghp_[A-Za-z0-9]{8,}\b`), "[REDACTED:github_token]"},
+	{regexp.MustCompile(`\bgh[opusr]_[A-Za-z0-9]{8,}\b`), "[REDACTED:github_token]"},
 	{regexp.MustCompile(`\bAKIA[0-9A-Z]{12,}\b`), "[REDACTED:aws_key]"},
 }
 
@@ -422,7 +422,14 @@ func parseArgsForDescriptor(args json.RawMessage) (map[string]any, string) {
 // so the audit trail records the policy-side failure.
 func EvaluateToolCall(ctx context.Context, deps ToolCallDeps, params ToolCallParams, server string) (EvaluateToolCallResult, error) {
 	meta, ok := CallMetadataFromContext(ctx)
-	if !ok || meta.Tenant == "" {
+	// Refuse the call when ANY identity field is blank — the audit row
+	// is keyed on (Tenant, SessionID, ExecutionID, AgentID), so a single
+	// missing component produces unattributed events that are useless for
+	// incident forensics and silently break tenant-scoped audit filters.
+	// Fail-closed is preferred over best-effort emission with synthetic
+	// placeholders: an upstream bridge that forgot to call
+	// ContextWithCallMetadata is a bug, not a soft warning.
+	if !ok || meta.Tenant == "" || meta.SessionID == "" || meta.ExecutionID == "" || meta.AgentID == "" {
 		return EvaluateToolCallResult{}, errMissingMCPMetadata
 	}
 	// Reject oversized args before running the redactor so a 10 MB
@@ -734,20 +741,28 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	dec := evalResult.Decision
 	switch {
 	case dec.requiresHuman():
-		ref := ""
-		if deps.ApprovalHandoff != nil {
-			actionHash := canonicalActionHashFromEvent(evalResult.PreEvent, params, server)
-			r, herr := deps.ApprovalHandoff.ConsumeActionGateDecision(ctx, dec, ToolCallApprovalContext{
-				Tenant:     evalResult.PreEvent.TenantID,
-				AgentID:    evalResult.PreEvent.PrincipalID,
-				Server:     server,
-				Tool:       params.Name,
-				ActionHash: actionHash,
-			})
-			if herr != nil {
-				return nil, fmt.Errorf("approval handoff: %w", herr)
-			}
-			ref = r
+		// Require deps.ApprovalHandoff: without it we cannot mint an
+		// approval reference, so returning "approval pending: " with an
+		// empty ref leaves the caller no way to resume — the only safe
+		// outcome is a misconfiguration error so deployment notices.
+		// AgentID is sourced from CallMetadata, not from PreEvent.PrincipalID:
+		// PrincipalID identifies WHO called (user / service principal),
+		// while the approval-hold resume contract is keyed on the agent
+		// identity that the tool-call is being attributed to.
+		if deps.ApprovalHandoff == nil {
+			return nil, errors.New("deps.ApprovalHandoff is required for REQUIRE_HUMAN decisions")
+		}
+		callMeta, _ := CallMetadataFromContext(ctx)
+		actionHash := canonicalActionHashFromEvent(evalResult.PreEvent, params, server)
+		ref, herr := deps.ApprovalHandoff.ConsumeActionGateDecision(ctx, dec, ToolCallApprovalContext{
+			Tenant:     evalResult.PreEvent.TenantID,
+			AgentID:    callMeta.AgentID,
+			Server:     server,
+			Tool:       params.Name,
+			ActionHash: actionHash,
+		})
+		if herr != nil {
+			return nil, fmt.Errorf("approval handoff: %w", herr)
 		}
 		return &ToolCallResult{
 			Content: []ContentItem{{

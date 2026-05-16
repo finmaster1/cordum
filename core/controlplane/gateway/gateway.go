@@ -1449,7 +1449,14 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	mcpGatewayHealth, mcpGatewayConfig, mcpGatewayUpstream, mcpGatewayConnect := mcpGatewayHandlers(s)
 	s.registerRoute(mux, "GET /api/v1/mcp/gateway/health", s.instrumented("/api/v1/mcp/gateway/health", mcpGatewayHealth))
 	s.registerRoute(mux, "GET /api/v1/mcp/gateway/config", s.instrumented("/api/v1/mcp/gateway/config", mcpGatewayConfig))
-	s.registerRoute(mux, "POST /api/v1/mcp/gateway/upstream/", s.instrumented("/api/v1/mcp/gateway/upstream/", mcpGatewayUpstream))
+	// Two routes for the upstream forwarding catch-all:
+	//   POST /api/v1/mcp/gateway/upstream    — canonical OpenAPI surface
+	//   /api/v1/mcp/gateway/upstream/        — any-method subroute prefix
+	// Together they cover both the operator-visible POST and any future
+	// EDGE-1xx subpath dispatch while keeping the spec free of an invalid
+	// trailing-slash path (see x-subroute-dispatch in cordum-api.yaml).
+	s.registerRoute(mux, "POST /api/v1/mcp/gateway/upstream", s.instrumented("/api/v1/mcp/gateway/upstream", mcpGatewayUpstream))
+	s.registerRoute(mux, "/api/v1/mcp/gateway/upstream/", s.instrumented("/api/v1/mcp/gateway/upstream/", mcpGatewayUpstream))
 	s.registerRoute(mux, "POST /api/v1/mcp/gateway/clients/connect", s.instrumented("/api/v1/mcp/gateway/clients/connect", mcpGatewayConnect))
 
 	// 12. Policy endpoints
