@@ -153,6 +153,36 @@ func TestGatewayEdgeApprovalTerminalMutationsReturnConflict(t *testing.T) {
 	}
 }
 
+func TestGatewayEdgeApprovalGetAutoExpiresPendingApproval(t *testing.T) {
+	base := time.Now().UTC().Add(-10 * time.Second).Truncate(time.Microsecond)
+	s, handler := newEdgeRouteTestServer(t)
+	s.edgeStore = edgecore.NewRedisStoreFromClient(
+		s.jobStore.Client(),
+		edgecore.WithClock(func() time.Time { return base }),
+	)
+	approval := seedGatewayEdgeApprovalWithExpiresAt(
+		t,
+		s,
+		edgeRouteTenant,
+		"principal-edge-a",
+		"get-auto-expired",
+		base.Add(time.Second),
+	)
+
+	detail := edgeApprovalRouteGETAs(t, handler, edgeRouteTestAPIKey, edgeRouteTenant, "/api/v1/edge/approvals/"+approval.ApprovalRef)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200 body=%s", detail.Code, detail.Body.String())
+	}
+	var got edgecore.EdgeApproval
+	decodeEdgeRouteJSON(t, detail, &got)
+	if got.Status != edgecore.ApprovalStatusExpired ||
+		got.Decision != edgecore.ApprovalDecisionExpire ||
+		got.ResolutionReason != "approval expired" ||
+		got.ResolvedAt == nil {
+		t.Fatalf("detail approval = %#v, want expired terminal state", got)
+	}
+}
+
 func TestGatewayEdgeApprovalListDetailRejectAndTenantIsolation(t *testing.T) {
 	s, handler := newEdgeRouteTestServer(t)
 	approvalA := seedGatewayEdgeApproval(t, s, edgeRouteTenant, "principal-edge-a", "list-a")
@@ -424,6 +454,11 @@ func TestGatewayEdgeApprovalErrors(t *testing.T) {
 
 func seedGatewayEdgeApproval(t *testing.T, s *server, tenantID, requester, suffix string) edgecore.EdgeApproval {
 	t.Helper()
+	return seedGatewayEdgeApprovalWithExpiresAt(t, s, tenantID, requester, suffix, time.Now().UTC().Add(5*time.Minute))
+}
+
+func seedGatewayEdgeApprovalWithExpiresAt(t *testing.T, s *server, tenantID, requester, suffix string, expires time.Time) edgecore.EdgeApproval {
+	t.Helper()
 	ctx := context.Background()
 	started := time.Now().UTC().Add(-2 * time.Second).Truncate(time.Microsecond)
 	slug := strings.NewReplacer("/", "-", " ", "-").Replace(strings.ToLower(t.Name() + "-" + suffix))
@@ -488,7 +523,6 @@ func seedGatewayEdgeApproval(t *testing.T, s *server, tenantID, requester, suffi
 	if _, err := s.edgeStore.AppendEvent(ctx, event); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	expires := time.Now().UTC().Add(5 * time.Minute)
 	approval, err := s.edgeStore.EnqueueApproval(ctx, edgecore.EdgeApprovalRequest{
 		TenantID:       tenantID,
 		SessionID:      sessionID,

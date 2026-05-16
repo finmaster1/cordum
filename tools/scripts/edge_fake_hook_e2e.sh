@@ -51,6 +51,8 @@ readonly EXIT_TIMEOUT=124
 # edge_session_setup         step 7  (agentd ready + session/execution created)
 # edge_pretooluse_deny       step 8  (PreToolUse Read .env -> deny + DENY event)
 # edge_approval_flow         step 9  (Edit -> approval -> retry -> consume)
+# edge_approval_rejected     step 9b (Gateway-direct reject terminal state)
+# edge_approval_expired      step 9c (Gateway-direct expired terminal state)
 # edge_posttooluse_artifact  step 10 (PostToolUse + artifact pointer recorded)
 # edge_evidence_export       step 11 (export bundle has expected entries)
 #
@@ -171,6 +173,8 @@ PASS LINE SHAPES (one per gate)
   PASS edge_session_setup
   PASS edge_pretooluse_deny
   PASS edge_approval_flow
+  PASS edge_approval_rejected
+  PASS edge_approval_expired
   PASS edge_posttooluse_artifact
   PASS edge_evidence_export
 
@@ -1598,6 +1602,119 @@ JSON
 }
 
 # ---------------------------------------------------------------------------
+# Gate: edge_approval_expired (EDGE-056 expired follow-up).
+#
+# Gateway-direct/server-lifecycle coverage for the approval expiration
+# terminal state. This intentionally mirrors gate_approval_rejected's
+# bypass-mode-only structure: expiration semantics live entirely in the
+# Gateway approval store/evaluate path and do not need a separate hook-mode
+# transport duplicate.
+# ---------------------------------------------------------------------------
+gate_approval_expired() {
+  local gate=edge_approval_expired
+  local expired_path="${FIXTURE_DIR}/src/protected-expired.go"
+  local recovery_path="${FIXTURE_DIR}/src/protected-expired-recovery.go"
+
+  local req
+  req=$(cat <<JSON
+{
+  "session_id": "${EDGE_SESSION_ID}",
+  "execution_id": "${EDGE_EXECUTION_ID}",
+  "principal_id": "${EDGE_PRINCIPAL_ID}",
+  "agent_product": "cordum-edge-fake-hook-e2e",
+  "layer": "hook",
+  "kind": "hook.pre_tool_use",
+  "tool_name": "Edit",
+  "input_redacted": {
+    "file_path": "${expired_path}"
+  },
+  "cwd": "${TMP_ROOT}",
+  "approval_ttl_seconds": 2
+}
+JSON
+)
+  local code
+  code=$(curl_request POST "${API_BASE}/api/v1/edge/evaluate" "${req}")
+  log_http "${gate}" POST "/api/v1/edge/evaluate (initial ttl=2s)" "${code}"
+  assert_http_status "${gate}" "${code}" "200" "evaluate Edit (initial ttl=2s)"
+  assert_json "${gate}" '.decision == "REQUIRE_APPROVAL"' 'initial evaluate did not require approval'
+
+  local approval_ref
+  approval_ref=$(extract_json '.approval_ref // empty')
+  if [[ -z "${approval_ref}" ]]; then
+    fail "${gate}" 'evaluate response missing approval_ref'
+  fi
+  if [[ ! "${approval_ref}" =~ ^edge_appr_[A-Za-z0-9_-]+$ ]]; then
+    fail "${gate}" "approval_ref does not match required pattern: ${approval_ref}"
+  fi
+  log "approval_ref=${approval_ref}"
+
+  code=$(curl_request GET "${API_BASE}/api/v1/edge/approvals/${approval_ref}")
+  log_http "${gate}" GET "/api/v1/edge/approvals/${approval_ref} (pending)" "${code}"
+  assert_http_status "${gate}" "${code}" "200" "GET approval before expiry"
+  assert_json "${gate}" '.status == "pending"' 'pre-expiry status != pending'
+  assert_json "${gate}" '.session_id == "'"${EDGE_SESSION_ID}"'"' 'approval bound to wrong session'
+
+  sleep 3
+
+  code=$(curl_request GET "${API_BASE}/api/v1/edge/approvals/${approval_ref}")
+  log_http "${gate}" GET "/api/v1/edge/approvals/${approval_ref} (expired)" "${code}"
+  assert_http_status "${gate}" "${code}" "200" "GET approval after expiry"
+  assert_json "${gate}" '.status == "expired"' 'post-expiry status != expired'
+
+  code=$(curl_request POST "${API_BASE}/api/v1/edge/evaluate" "${req}")
+  log_http "${gate}" POST "/api/v1/edge/evaluate (retry post-expiry)" "${code}"
+  assert_http_status "${gate}" "${code}" "200" "evaluate Edit (retry post-expiry)"
+  assert_json "${gate}" '.decision == "DENY"' 'retry post-expiry did not return DENY'
+  assert_json "${gate}" '.permission_decision == "deny"' 'retry post-expiry permission_decision != deny'
+  assert_reason_contains "${gate}" "expired"
+
+  local recovery_req
+  recovery_req=$(cat <<JSON
+{
+  "session_id": "${EDGE_SESSION_ID}",
+  "execution_id": "${EDGE_EXECUTION_ID}",
+  "principal_id": "${EDGE_PRINCIPAL_ID}",
+  "agent_product": "cordum-edge-fake-hook-e2e",
+  "layer": "hook",
+  "kind": "hook.pre_tool_use",
+  "tool_name": "Edit",
+  "input_redacted": {
+    "file_path": "${recovery_path}"
+  },
+  "cwd": "${TMP_ROOT}"
+}
+JSON
+)
+  code=$(curl_request POST "${API_BASE}/api/v1/edge/evaluate" "${recovery_req}")
+  log_http "${gate}" POST "/api/v1/edge/evaluate (recovery default ttl)" "${code}"
+  assert_http_status "${gate}" "${code}" "200" "evaluate Edit (recovery default ttl)"
+  assert_json "${gate}" '.decision == "REQUIRE_APPROVAL"' 'recovery evaluate did not require approval'
+
+  local recovery_ref
+  recovery_ref=$(extract_json '.approval_ref // empty')
+  if [[ -z "${recovery_ref}" ]]; then
+    fail "${gate}" 'recovery evaluate response missing approval_ref'
+  fi
+  if [[ ! "${recovery_ref}" =~ ^edge_appr_[A-Za-z0-9_-]+$ ]]; then
+    fail "${gate}" "recovery approval_ref does not match required pattern: ${recovery_ref}"
+  fi
+  if [[ "${recovery_ref}" == "${approval_ref}" ]]; then
+    fail "${gate}" 'recovery approval_ref unexpectedly reused expired approval_ref'
+  fi
+
+  code=$(curl_request GET "${API_BASE}/api/v1/edge/approvals/${recovery_ref}")
+  log_http "${gate}" GET "/api/v1/edge/approvals/${recovery_ref} (recovery pending)" "${code}"
+  assert_http_status "${gate}" "${code}" "200" "GET recovery approval"
+  assert_json "${gate}" '.status == "pending"' 'recovery approval status != pending'
+
+  assert_body_does_not_contain "${gate}" "OPENAI_API_KEY" 'evaluate response contains a real-secret marker'
+  assert_body_does_not_contain "${gate}" "AWS_SECRET_ACCESS_KEY" 'evaluate response contains a real-secret marker'
+
+  pass "${gate}"
+}
+
+# ---------------------------------------------------------------------------
 # Gate: edge_posttooluse_artifact (step 10).
 #
 # Default (hook) mode: pipes synthetic Claude PostToolUse JSON through
@@ -1919,6 +2036,7 @@ main() {
   gate_pretooluse_deny
   gate_approval_flow
   gate_approval_rejected
+  gate_approval_expired
   gate_posttooluse_artifact
   gate_evidence_export
 }

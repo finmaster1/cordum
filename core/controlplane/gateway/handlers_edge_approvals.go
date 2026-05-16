@@ -85,6 +85,24 @@ func (s *server) handleGetEdgeApproval(w http.ResponseWriter, r *http.Request) {
 		writeEdgeApprovalNotFound(w, r)
 		return
 	}
+	if approval.Status == edgecore.ApprovalStatusPending && approval.ExpiresAt != nil {
+		now := time.Now().UTC()
+		if !approval.ExpiresAt.After(now) {
+			if _, err := store.ExpireApprovals(r.Context(), tenantID, now); err != nil {
+				writeEdgeApprovalStoreError(w, r, err, "expire edge approvals before get")
+				return
+			}
+			approval, found, err = store.GetApproval(r.Context(), tenantID, approvalRef)
+			if err != nil {
+				writeEdgeApprovalStoreError(w, r, err, "get expired edge approval")
+				return
+			}
+			if !found || approval == nil || !s.edgeApprovalVisibleToCaller(r, approval) {
+				writeEdgeApprovalNotFound(w, r)
+				return
+			}
+		}
+	}
 	writeJSON(w, approval)
 }
 
@@ -148,12 +166,12 @@ func (s *server) handleResolveEdgeApproval(w http.ResponseWriter, r *http.Reques
 		endpoint = edgeApprovalRejectEndpoint
 	}
 	normalizedReq := struct {
-		TenantID    string                     `json:"tenant_id"`
-		ApprovalRef string                     `json:"approval_ref"`
-		Decision    edgecore.ApprovalDecision  `json:"decision"`
-		ResolverID  string                     `json:"resolver_id"`
-		ResolvedBy  string                     `json:"resolved_by"`
-		Reason      string                     `json:"reason"`
+		TenantID    string                    `json:"tenant_id"`
+		ApprovalRef string                    `json:"approval_ref"`
+		Decision    edgecore.ApprovalDecision `json:"decision"`
+		ResolverID  string                    `json:"resolver_id"`
+		ResolvedBy  string                    `json:"resolved_by"`
+		Reason      string                    `json:"reason"`
 	}{
 		TenantID:    tenantID,
 		ApprovalRef: strings.TrimSpace(approvalRef),
