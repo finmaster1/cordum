@@ -68,6 +68,33 @@ jobs:
       - name: install_test.sh — tamper + unsigned synthetics must FAIL install
         run: bash tools/scripts/install_test.sh
 
+  install-tamper-windows:
+    # Windows-native validation for install.ps1 + install_test.ps1. The
+    # Windows runner ships PowerShell 7 + Gpg4Win and has no MSYS layer,
+    # so the path-conversion artefacts that hit local Git-Bash testing
+    # do not apply here. This is the canonical gate for the .ps1 path.
+    name: install_test.ps1 synthetic-tampered (windows)
+    runs-on: windows-latest
+    needs: [verifier-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Gpg4Win
+        shell: pwsh
+        run: |
+          choco install --no-progress --yes gnupg
+          $env:Path = "$env:Path;C:\Program Files (x86)\GnuPG\bin"
+          gpg --version
+      - name: Build release-local (bash)
+        shell: bash
+        run: bash tools/scripts/release-local.sh
+      - name: install_test.ps1 — tamper + unsigned synthetics must FAIL install
+        shell: pwsh
+        run: pwsh -NoProfile -File tools/scripts/install_test.ps1
+
   no-private-keys-leaked:
     name: lint — no private keys outside tools/test-keys/TEST-ONLY-*
     runs-on: ubuntu-latest

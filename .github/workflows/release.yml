@@ -228,8 +228,21 @@ jobs:
           ./.manifest-cli $paths > SHA256SUMS
           rm -f .manifest-cli
           cat SHA256SUMS
+      - name: Probe for Tier 1 secrets
+        id: tier1_secrets
+        env:
+          # Pass secrets through env so step-level `if` can compare a plain
+          # env var instead of a `secrets.*` expression (actionlint rejects
+          # step-level `if: secrets.X != ''`).
+          GPG_RELEASE_KEY_PRIVATE: ${{ secrets.GPG_RELEASE_KEY_PRIVATE }}
+        run: |
+          if [ -n "${GPG_RELEASE_KEY_PRIVATE:-}" ]; then
+            echo "has_gpg=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_gpg=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Detach-sign SHA256SUMS (Tier 1)
-        if: ${{ secrets.GPG_RELEASE_KEY_PRIVATE != '' }}
+        if: steps.tier1_secrets.outputs.has_gpg == 'true'
         env:
           GPG_RELEASE_KEY_PRIVATE: ${{ secrets.GPG_RELEASE_KEY_PRIVATE }}
           GPG_RELEASE_KEY_PASSPHRASE: ${{ secrets.GPG_RELEASE_KEY_PASSPHRASE }}
@@ -252,7 +265,7 @@ jobs:
               release/SHA256SUMS
           rm -rf "$tmp_home"
       - name: Banner — Tier 1 skipped
-        if: ${{ secrets.GPG_RELEASE_KEY_PRIVATE == '' }}
+        if: steps.tier1_secrets.outputs.has_gpg == 'false'
         run: |
           echo "::warning::GPG_RELEASE_KEY_PRIVATE not set on this fork — SHA256SUMS.asc was NOT produced. install.sh will refuse these artefacts in production mode (--dev-allow-unsigned only)."
       - uses: actions/upload-artifact@v4
@@ -276,6 +289,18 @@ jobs:
         with:
           name: release-bundle
           path: release/
+      - name: Require signed manifest on canonical release
+        if: github.repository == 'cordum-io/cordum'
+        run: |
+          set -euo pipefail
+          if [ ! -f release/SHA256SUMS.asc ]; then
+            echo "::error::canonical release tag ${GITHUB_REF#refs/tags/} requires a signed SHA256SUMS.asc; sign-manifest job did not produce one (GPG_RELEASE_KEY_PRIVATE missing or signing failed). Refusing to publish an unsigned release."
+            exit 1
+          fi
+          if [ ! -f release/SHA256SUMS ]; then
+            echo "::error::release/SHA256SUMS missing"
+            exit 1
+          fi
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

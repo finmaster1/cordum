@@ -150,8 +150,10 @@ soak-ws-full:
 # cordum-claude with a SHA256SUMS manifest detached-signed by the
 # TEST-ONLY key under tools/test-keys/. NOT for production. install.sh
 # only accepts these via --dev-allow-unsigned AND a fingerprint match
-# against the TEST-ONLY value baked in via -ldflags.
+# against the TEST-ONLY value baked in via -ldflags. Invoked via `bash`
+# so the target works regardless of the script's filesystem executable
+# bit (git ls-files -s reports 100644 on some platforms / CI checkouts).
 release-local:
-	@./tools/scripts/release-local.sh
+	@bash tools/scripts/release-local.sh
 
 .PHONY: help proto build build-all $(SERVICES:%=build-%) test test-integration coverage coverage-core openapi openapi-validate docker smoke verify-images demo-quickstart-test demo-mock-bank-test dev-up dev-down dev-logs edge-rebuild-e2e soak-ws soak-ws-quick soak-ws-full release-local

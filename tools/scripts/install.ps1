@@ -115,10 +115,26 @@ function Invoke-BinaryVerify {
 
     $tmpHome = New-Item -ItemType Directory -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), [Guid]::NewGuid().ToString('N')))
     try {
-        & $gpg.Source --homedir $tmpHome.FullName --batch --quiet --import $pubkey 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Verify-Fail "gpg --import failed for $pubkey" }
+        # Forward-slash both arguments before passing to gpg.exe — Git/MSYS
+        # gpg interprets backslashes as POSIX path separators and prepends
+        # its own working directory, producing paths like
+        # `/cwd/C:\Users\...\Temp\xxx` that fail to open. Gpg4Win accepts
+        # forward-slash form, MSYS gpg accepts it too, so this is portable.
+        $tmpHomeArg = ($tmpHome.FullName) -replace '\\', '/'
+        $pubkeyArg  = ($pubkey)             -replace '\\', '/'
 
-        $colonLines = & $gpg.Source --homedir $tmpHome.FullName --with-colons --list-keys 2>$null
+        $importOutput = & $gpg.Source --homedir $tmpHomeArg --batch --import $pubkeyArg 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            # Surface the gpg error so reviewers and CI logs can diagnose
+            # path / format issues without re-running with --verbose by hand.
+            $importDiag = ($importOutput | Out-String).Trim()
+            if ($importDiag) {
+                [Console]::Error.WriteLine("gpg --import diagnostic: $importDiag")
+            }
+            Verify-Fail "gpg --import failed for $pubkey"
+        }
+
+        $colonLines = & $gpg.Source --homedir $tmpHomeArg --with-colons --list-keys 2>$null
         $importedFpr = $null
         foreach ($cl in $colonLines) {
             if ($cl -match '^fpr:::::::::([0-9A-F]+):') {
@@ -150,7 +166,9 @@ function Invoke-BinaryVerify {
             }
         }
 
-        & $gpg.Source --homedir $tmpHome.FullName --batch --quiet --verify $sig $manifest 2>$null
+        $sigArg = ($sig) -replace '\\', '/'
+        $manifestArg = ($manifest) -replace '\\', '/'
+        & $gpg.Source --homedir $tmpHomeArg --batch --quiet --verify $sigArg $manifestArg 2>$null
         if ($LASTEXITCODE -ne 0) { Verify-Fail 'gpg signature invalid' }
 
         $lines = Get-Content -LiteralPath $manifest
