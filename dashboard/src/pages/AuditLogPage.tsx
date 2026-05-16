@@ -233,6 +233,18 @@ export default function AuditLogPage() {
     "to",
     parseAsString.withDefault("").withOptions({ clearOnDefault: true }),
   );
+  // task-266f21ad: `?event_type_prefix=edge` is the URL contract the new
+  // Edge sidebar item lands on (via /edge/audit →
+  // /audit?event_type_prefix=edge redirect). Filters events client-side
+  // by matching `event.action.startsWith(prefix)`. Today's
+  // /audit/events feed primarily carries policy/auth events; edge.*
+  // event types will populate the filtered view once task-00b82b90's
+  // SIEM-feed wiring lands. Read-only here (no setter) — the redirect
+  // sets the param.
+  const [eventTypePrefix] = useQueryState(
+    "event_type_prefix",
+    parseAsString.withDefault("").withOptions({ clearOnDefault: true }),
+  );
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
 
@@ -289,11 +301,17 @@ export default function AuditLogPage() {
 
   const events: AuditEvent[] = useMemo(() => {
     const raw = pages.flatMap((p) => p.items as SiemAuditEvent[]);
-    const mapped = raw.map(mapEvent);
-    if (!agentFilter) return mapped;
-    const needle = agentFilter.toLowerCase();
-    return mapped.filter((e) => e.actor.toLowerCase().includes(needle));
-  }, [pages, agentFilter]);
+    let mapped = raw.map(mapEvent);
+    if (agentFilter) {
+      const needle = agentFilter.toLowerCase();
+      mapped = mapped.filter((e) => e.actor.toLowerCase().includes(needle));
+    }
+    if (eventTypePrefix) {
+      const prefix = eventTypePrefix.toLowerCase();
+      mapped = mapped.filter((e) => e.action.toLowerCase().startsWith(prefix));
+    }
+    return mapped;
+  }, [pages, agentFilter, eventTypePrefix]);
   // Server emits per-page `returned` rather than a global total —
   // cursor pagination is unbounded by design (a global count would
   // require an O(stream) scan). The render below shows the running

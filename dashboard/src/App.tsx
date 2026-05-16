@@ -191,6 +191,17 @@ function ProtectedRoutes() {
           <Route path="/jobs/:id" element={<RouteBoundary name="Job details"><JobDetailPage /></RouteBoundary>} />
           <Route path="/edge/sessions" element={<RouteBoundary name="Edge sessions"><EdgeSessionsPage /></RouteBoundary>} />
           <Route path="/edge/sessions/:sessionId" element={<RouteBoundary name="Edge session details"><EdgeSessionDetailPage /></RouteBoundary>} />
+          {/* task-266f21ad: Edge sidebar items (Edge Approvals / Edge
+              Audit) link to dedicated /edge/* paths so the Edge section
+              stays highlighted in findActiveSection at click time. Each
+              path is a Navigate redirect to the global page with an
+              edge-scoped query filter (lane=edge / event_type_prefix=edge).
+              Post-redirect the sidebar reflects WHERE the user IS
+              (Run/Approvals or Audit), not where they came from — an
+              accepted UX trade-off vs introducing a query-aware
+              findActiveSection. */}
+          <Route path="/edge/approvals" element={<Navigate to="/approvals?lane=edge" replace />} />
+          <Route path="/edge/audit" element={<Navigate to="/audit?event_type_prefix=edge" replace />} />
 
           {/* ORCHESTRATE */}
           <Route path="/workflows" element={<RouteBoundary name="Workflows"><WorkflowsPage /></RouteBoundary>} />

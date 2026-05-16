@@ -107,12 +107,20 @@ describe("AppShell findActiveSection", () => {
     expect(findActiveSection("/agents/abc", APP_SHELL_NAV_SECTIONS)).toBe("Run");
   });
 
-  it("matches /edge/sessions to Run", () => {
-    expect(findActiveSection("/edge/sessions", APP_SHELL_NAV_SECTIONS)).toBe("Run");
+  it("matches /edge/sessions to Edge (top-level section)", () => {
+    expect(findActiveSection("/edge/sessions", APP_SHELL_NAV_SECTIONS)).toBe("Edge");
   });
 
-  it("matches /edge/sessions/abc detail path to Run", () => {
-    expect(findActiveSection("/edge/sessions/abc", APP_SHELL_NAV_SECTIONS)).toBe("Run");
+  it("matches /edge/sessions/abc detail path to Edge", () => {
+    expect(findActiveSection("/edge/sessions/abc", APP_SHELL_NAV_SECTIONS)).toBe("Edge");
+  });
+
+  it("matches /edge/approvals to Edge (sidebar redirect-route)", () => {
+    expect(findActiveSection("/edge/approvals", APP_SHELL_NAV_SECTIONS)).toBe("Edge");
+  });
+
+  it("matches /edge/audit to Edge (sidebar redirect-route)", () => {
+    expect(findActiveSection("/edge/audit", APP_SHELL_NAV_SECTIONS)).toBe("Edge");
   });
 
   it("matches /govern/overview to Govern", () => {
@@ -141,8 +149,12 @@ describe("AppShell findActiveSection", () => {
     expect(findActiveSection("/audit", APP_SHELL_NAV_SECTIONS)).toBe("Audit");
   });
 
-  it("matches /dlq to Audit", () => {
-    expect(findActiveSection("/dlq", APP_SHELL_NAV_SECTIONS)).toBe("Audit");
+  it("does NOT match /dlq to any section after Dead Letters sidebar removal", () => {
+    // task-266f21ad: Dead Letters sidebar entry removed (DLQ folded into
+    // JobsPage as ?status=dlq). The /dlq URL still redirects via
+    // App.tsx::DlqRouteRedirect for bookmarked links, but no sidebar
+    // section claims the pathname any more.
+    expect(findActiveSection("/dlq", APP_SHELL_NAV_SECTIONS)).toBe(null);
   });
 
   it("matches /settings/* sub-routes to Settings", () => {
@@ -157,9 +169,13 @@ describe("AppShell findActiveSection", () => {
 });
 
 describe("AppShell sidebar accordion structure", () => {
-  it("groups items into 5 customer-language sections", () => {
+  it("groups items into 6 customer-language sections with Edge between Run and Govern", () => {
+    // task-266f21ad: Edge promoted to a first-class top-level section so
+    // the Edge subsystem (Sessions / Approvals / Audit) has visible
+    // breadth in the IA instead of being buried as one item in Run.
     expect(APP_SHELL_NAV_SECTIONS.map((s) => s.label)).toEqual([
       "Run",
+      "Edge",
       "Govern",
       "Catalog",
       "Audit",
@@ -167,16 +183,32 @@ describe("AppShell sidebar accordion structure", () => {
     ]);
   });
 
-  it("Run section absorbs Workflows and Approvals", () => {
+  it("Run section no longer owns Edge Sessions (relocated to Edge)", () => {
     const run = APP_SHELL_NAV_SECTIONS.find((s) => s.label === "Run");
     expect(run?.items.map((i) => i.label)).toEqual([
       "Dashboard",
       "Agents",
       "Jobs",
-      "Edge Sessions",
       "Workflows",
       "Approvals",
     ]);
+    expect(run?.items.map((i) => i.path)).not.toContain("/edge/sessions");
+  });
+
+  it("Edge section surfaces Sessions, Approvals, and Audit as its three items", () => {
+    const edge = APP_SHELL_NAV_SECTIONS.find((s) => s.label === "Edge");
+    expect(edge).toBeDefined();
+    expect(edge?.items.map((i) => ({ path: i.path, label: i.label }))).toEqual([
+      { path: "/edge/sessions", label: "Edge Sessions" },
+      { path: "/edge/approvals", label: "Edge Approvals" },
+      { path: "/edge/audit", label: "Edge Audit" },
+    ]);
+  });
+
+  it("Audit section no longer surfaces Dead Letters (folded into Jobs?status=dlq)", () => {
+    const audit = APP_SHELL_NAV_SECTIONS.find((s) => s.label === "Audit");
+    expect(audit?.items.map((i) => i.path)).toEqual(["/audit"]);
+    expect(audit?.items.map((i) => i.path)).not.toContain("/dlq");
   });
 
   it("Settings section has the Hub item with end:true to avoid prefix-matching sub-routes", () => {

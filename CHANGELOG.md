@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+#### Dashboard — Edge promoted to top-level sidebar section; redundant Dead Letters entry removed (2026-05-16, task-266f21ad)
+
+- `dashboard/src/components/layout/AppShell.tsx` — APP_SHELL_NAV_SECTIONS now ships 6 sections (Run, **Edge**, Govern, Catalog, Audit, Settings). The new `Edge` section sits between Run and Govern and contains: `Edge Sessions` (`/edge/sessions`), `Edge Approvals` (`/edge/approvals`), `Edge Audit` (`/edge/audit`). The Edge Sessions item moved out of Run so the Edge subsystem has visible breadth in the IA instead of being buried as one item in Run.
+- `Dead Letters` sidebar entry removed from the Audit section. DLQ content has been folded into JobsPage as `?status=dlq` since task-0bcb9411; the sidebar entry was a redirect-stub that added navigation noise without a dedicated destination. `/dlq` URL still redirects via `App.tsx::DlqRouteRedirect` so bookmarked links resolve.
+- `dashboard/src/App.tsx` — added 2 Navigate redirect routes:
+  - `/edge/approvals` → `/approvals?lane=edge`
+  - `/edge/audit` → `/audit?event_type_prefix=edge`
+  Pathname-prefix routing (`findActiveSection`) keeps Edge highlighted at click time; post-redirect the section reflects WHERE the user IS (Run/Approvals or Audit), an accepted UX trade-off vs introducing a query-aware section matcher.
+- `dashboard/src/pages/ApprovalsPage.tsx` — reads `?lane` from the URL; when `lane=edge`, filters approvals to those where `decisionSummary.source.startsWith("edge")`. Today's /approvals feed primarily carries gateway approvals; edge-source approvals populate the filtered view once edge sources are routed through the global feed.
+- `dashboard/src/pages/AuditLogPage.tsx` — adds an `event_type_prefix` query state via nuqs; when set, filters events client-side by `e.action.startsWith(prefix)`. Same dependency on a future audit-feed wiring for the prefix to surface non-zero results; the URL contract is wired now.
+- Tests: `dashboard/src/components/layout/AppShell.test.tsx` (updated existing 3 assertions + added 4 new) and `dashboard/src/App.routing.test.ts` (added 3 redirect-route source-regex assertions including `/dlq` preservation). 44/44 PASS post-impl.
+
 ### Added
 
 #### EDGE-104 — cordumctl mcp attach/preview/rollback for Claude Code, Codex, and Cursor (2026-05-16, task-9351f243)
