@@ -574,6 +574,15 @@ func isSecretPath(path string) bool {
 		strings.Contains(padded, "/.pypirc") ||
 		strings.Contains(padded, "/.dockercfg") ||
 		strings.Contains(padded, "/.htpasswd") ||
+		// /etc/passwd + sibling OS-credential paths (EDGE-064-FOLLOWUP, task-98ad858f).
+		// Contains match (not HasPrefix) so nested fixtures like /tmp/etc/passwd
+		// still classify as secret; the negative guard
+		// TestIsSecretPathDoesNotFlagBenignPaths pins that hyphenated tokens like
+		// /var/log/foo-etc-passwd.log don't false-positive.
+		strings.Contains(padded, "/etc/passwd") ||
+		strings.Contains(padded, "/etc/shadow") ||
+		strings.Contains(padded, "/etc/sudoers") ||
+		strings.Contains(padded, "/etc/gshadow") ||
 		strings.Contains(padded, "/application_default_credentials") ||
 		strings.Contains(path, "id_rsa") ||
 		strings.Contains(path, "id_ed25519") ||
