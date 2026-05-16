@@ -25,7 +25,7 @@ const (
 func runEdgeManagedSettingsCmd(args []string, stdout, stderr io.Writer) int {
 	stdout, stderr = edgeManagedSettingsWriters(stdout, stderr)
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "usage: cordumctl edge managed-settings <export|verify|rollback-template>")
+		_, _ = fmt.Fprintln(stderr, "usage: cordumctl edge managed-settings <export|verify|rollback-template>")
 		return 2
 	}
 	switch args[0] {
@@ -36,8 +36,8 @@ func runEdgeManagedSettingsCmd(args []string, stdout, stderr io.Writer) int {
 	case "rollback-template":
 		return runEdgeManagedSettingsRollbackCmd(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "unknown managed-settings subcommand %q\n", args[0])
-		fmt.Fprintln(stderr, "usage: cordumctl edge managed-settings <export|verify|rollback-template>")
+		_, _ = fmt.Fprintf(stderr, "unknown managed-settings subcommand %q\n", args[0])
+		_, _ = fmt.Fprintln(stderr, "usage: cordumctl edge managed-settings <export|verify|rollback-template>")
 		return 2
 	}
 }
@@ -71,11 +71,11 @@ func runEdgeManagedSettingsExportCmd(args []string, stdout, stderr io.Writer) in
 	}
 	dir := strings.TrimSpace(*output)
 	if dir == "" {
-		fmt.Fprintln(stderr, "edge managed-settings export: --output required")
+		_, _ = fmt.Fprintln(stderr, "edge managed-settings export: --output required")
 		return 2
 	}
 	if strings.TrimSpace(*mcpURL) == "" || strings.TrimSpace(*llmProxy) == "" || strings.TrimSpace(*apiKeyHelper) == "" {
-		fmt.Fprintln(stderr, "edge managed-settings export: --mcp-gateway-url, --llm-proxy-base-url, and --api-key-helper-command are required")
+		_, _ = fmt.Fprintln(stderr, "edge managed-settings export: --mcp-gateway-url, --llm-proxy-base-url, and --api-key-helper-command are required")
 		return 2
 	}
 	bundle, err := claude.GenerateManagedSettingsTemplate(claude.ManagedSettingsOptions{
@@ -88,11 +88,11 @@ func runEdgeManagedSettingsExportCmd(args []string, stdout, stderr io.Writer) in
 		Platform:            strings.TrimSpace(*platform),
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "edge managed-settings export: %s\n", redactManagedSettingsError(err))
+		_, _ = fmt.Fprintf(stderr, "edge managed-settings export: %s\n", redactManagedSettingsError(err))
 		return 2
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		fmt.Fprintf(stderr, "edge managed-settings export: %s\n", err)
+		_, _ = fmt.Fprintf(stderr, "edge managed-settings export: %s\n", err)
 		return 1
 	}
 	settingsPath := filepath.Join(dir, "managed-settings.json")
@@ -105,13 +105,13 @@ func runEdgeManagedSettingsExportCmd(args []string, stdout, stderr io.Writer) in
 		{path: mcpPath, data: bundle.ManagedMCPJSON},
 	} {
 		if err := writeManagedSettingsOutput(item.path, item.data, *force); err != nil {
-			fmt.Fprintf(stderr, "edge managed-settings export: %s\n", err)
+			_, _ = fmt.Fprintf(stderr, "edge managed-settings export: %s\n", err)
 			if errors.Is(err, errRefusingToOverwrite) {
 				return 2
 			}
 			return 1
 		}
-		fmt.Fprintf(stdout, "wrote %s\n", item.path)
+		_, _ = fmt.Fprintf(stdout, "wrote %s\n", item.path)
 	}
 	return 0
 }
@@ -126,19 +126,19 @@ func runEdgeManagedSettingsVerifyCmd(args []string, stdout, stderr io.Writer) in
 		return 2
 	}
 	if strings.TrimSpace(*path) == "" {
-		fmt.Fprintln(stderr, "edge managed-settings verify: --path required")
+		_, _ = fmt.Fprintln(stderr, "edge managed-settings verify: --path required")
 		return 2
 	}
 	res, err := claude.VerifyManagedSettingsFromPath(*path)
 	if err != nil {
-		fmt.Fprintf(stderr, "edge managed-settings verify: %s\n", redactManagedSettingsError(err))
+		_, _ = fmt.Fprintf(stderr, "edge managed-settings verify: %s\n", redactManagedSettingsError(err))
 		return 2
 	}
 	if *emitJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(res); err != nil {
-			fmt.Fprintf(stderr, "edge managed-settings verify: %s\n", err)
+			_, _ = fmt.Fprintf(stderr, "edge managed-settings verify: %s\n", err)
 			return 2
 		}
 		if !res.OK {
@@ -147,11 +147,11 @@ func runEdgeManagedSettingsVerifyCmd(args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 	if res.OK {
-		fmt.Fprintln(stdout, "ok: managed-settings.json matches Cordum Edge invariants")
+		_, _ = fmt.Fprintln(stdout, "ok: managed-settings.json matches Cordum Edge invariants")
 		return 0
 	}
 	for _, d := range res.Drifts {
-		fmt.Fprintf(stdout, "drift: %s got=%s want=%s severity=%s\n", d.Field, d.Got, d.Want, d.Severity)
+		_, _ = fmt.Fprintf(stdout, "drift: %s got=%s want=%s severity=%s\n", d.Field, d.Got, d.Want, d.Severity)
 	}
 	return 1
 }
@@ -172,11 +172,11 @@ func runEdgeManagedSettingsRollbackCmd(args []string, stdout, stderr io.Writer) 
 		return 2
 	}
 	if strings.TrimSpace(*path) == "" {
-		fmt.Fprintln(stderr, "edge managed-settings rollback-template: --path required")
+		_, _ = fmt.Fprintln(stderr, "edge managed-settings rollback-template: --path required")
 		return 2
 	}
 	if strings.TrimSpace(*mcpURL) == "" || strings.TrimSpace(*llmProxy) == "" || strings.TrimSpace(*apiKeyHelper) == "" {
-		fmt.Fprintln(stderr, "edge managed-settings rollback-template: --mcp-gateway-url, --llm-proxy-base-url, and --api-key-helper-command are required")
+		_, _ = fmt.Fprintln(stderr, "edge managed-settings rollback-template: --mcp-gateway-url, --llm-proxy-base-url, and --api-key-helper-command are required")
 		return 2
 	}
 	bundle, err := claude.GenerateManagedSettingsTemplate(claude.ManagedSettingsOptions{
@@ -189,25 +189,25 @@ func runEdgeManagedSettingsRollbackCmd(args []string, stdout, stderr io.Writer) 
 		Platform:            strings.TrimSpace(*platform),
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "edge managed-settings rollback-template: %s\n", redactManagedSettingsError(err))
+		_, _ = fmt.Fprintf(stderr, "edge managed-settings rollback-template: %s\n", redactManagedSettingsError(err))
 		return 2
 	}
 	if err := atomicWriteManagedSettings(*path, bundle.ManagedSettingsJSON); err != nil {
-		fmt.Fprintf(stderr, "edge managed-settings rollback-template: %s\n", err)
+		_, _ = fmt.Fprintf(stderr, "edge managed-settings rollback-template: %s\n", err)
 		return 1
 	}
 	res, err := claude.VerifyManagedSettingsFromPath(*path)
 	if err != nil {
-		fmt.Fprintf(stderr, "edge managed-settings rollback-template: %s\n", redactManagedSettingsError(err))
+		_, _ = fmt.Fprintf(stderr, "edge managed-settings rollback-template: %s\n", redactManagedSettingsError(err))
 		return 1
 	}
 	if !res.OK {
 		for _, d := range res.Drifts {
-			fmt.Fprintf(stderr, "post-rollback drift: %s got=%s want=%s severity=%s\n", d.Field, d.Got, d.Want, d.Severity)
+			_, _ = fmt.Fprintf(stderr, "post-rollback drift: %s got=%s want=%s severity=%s\n", d.Field, d.Got, d.Want, d.Severity)
 		}
 		return 1
 	}
-	fmt.Fprintf(stdout, "ok: rewrote %s with the freshly generated managed-settings template\n", *path)
+	_, _ = fmt.Fprintf(stdout, "ok: rewrote %s with the freshly generated managed-settings template\n", *path)
 	return 0
 }
 
@@ -230,7 +230,7 @@ func writeManagedSettingsOutput(path string, payload []byte, force bool) error {
 		}
 		return fmt.Errorf("create %s: %w", clean, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(payload); err != nil {
 		return fmt.Errorf("write %s: %w", clean, err)
 	}

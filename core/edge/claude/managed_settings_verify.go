@@ -77,7 +77,7 @@ func VerifyManagedSettingsFromPath(path string) (ManagedSettingsVerifyResult, er
 	if err != nil {
 		return ManagedSettingsVerifyResult{}, fmt.Errorf("open managed-settings.json: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	limited := io.LimitReader(f, maxManagedSettingsFileBytes+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
