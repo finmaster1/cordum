@@ -7,6 +7,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### Decision-threshold helper for REQUIRE_HUMAN routing (2026-05-16, task-96f931fe)
+
+- New helper `core/policy/actiongates/decision_thresholds.go`
+  `ClassifyByThresholds(in DecisionThresholdInput) DecisionThresholdResult`
+  routes producer findings (action gates / safety-kernel scanners /
+  governance evaluator) through a 3-axis threshold model
+  (severity + confidence + action_binding + educational_context) to
+  one of the existing `pb.DecisionType` values: `DENY`,
+  `REQUIRE_HUMAN`, `ALLOW`, `ALLOW_WITH_CONSTRAINTS`. No new
+  decision architecture; no wire-format change for audit / dashboard.
+- Routing reduces over-refusal on prompt-only educational content
+  (security-training mentions of `/etc/passwd`, defensive-runbook
+  `rm -rf`, API-key rotation procedures, approval-token logging,
+  metadata-service education) by re-routing those scenarios from
+  `DENY` to `ALLOW` when an authenticated session declares
+  `educational_context`. Action-bound high-confidence findings still
+  emit `DENY` regardless of `educational_context` — the
+  "educational tag excuses a real action" attack is explicitly
+  defended (`SubReason: action_bound:high_severity:high_confidence`).
+- `EducationalContext` is typed as `bool` (not string) so the trust
+  source MUST be session metadata (pack manifest, tenant policy,
+  governance rule), never user-supplied prose. A regression test
+  (`TestClassifyByThresholds_EducationalContextIsBooleanNotString`)
+  fails loud against any refactor widening the field to a string.
+- `ALLOW_WITH_CONSTRAINTS` carrier (`ProducerConstraints map[string]any`)
+  mirrors `ActionGateDecision.Constraints` and
+  `core/edge/agentd EvaluateResponse.Constraints` — single canonical
+  shape across hook + MCP + governance surfaces. Empty / nil map
+  leaves decision as plain `ALLOW`; non-empty flips to AWC with
+  `SubReason: ...:with_constraints` and the map propagated by
+  reference.
+- 31 GREEN unit tests across two suites — Phase 2 (5 false-positive
+  benchmark scenarios + 7 routing invariants) and Phase 4 (16-row
+  4-output-path × 3-producer-family coverage + 2 constraint-carrier
+  guards). `-count=3` flake check clean.
+- Docs: new `docs/safety/decision-thresholds.md` covers the routing
+  table, per-producer mapping, REQUIRE_HUMAN rationale, anti-pattern
+  callout for educational-tag spoofing, and the AWC carrier contract.
+- Per-producer wiring (each gate's `Evaluate()` calling the helper) is
+  intentionally NOT included in this changeset — it is a downstream
+  refactor that will land alongside the AgentShield holdout regression
+  in a follow-up task; the helper is dead code on the request path
+  until that wiring lands. See task-96f931fe `comment-afabb3c7`.
+
 #### EDGE-102 follow-up — Wire MCPServer.WithPolicyGate at gateway boot (2026-05-16, task-e9d9a37d, bundles task-3d5c4f37)
 
 - Gateway boot path (`core/controlplane/gateway/handlers_mcp.go`
