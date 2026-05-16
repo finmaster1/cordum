@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/cordum/cordum/core/edge"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/mcp"
+	"github.com/cordum/cordum/core/policy/actiongates"
 )
 
 // fakeInvariantLookup returns a deny rule keyed by tool name. The
@@ -188,27 +190,120 @@ func TestPolicyDispatcherAdapter_NilPipelineReturnsZero(t *testing.T) {
 	}
 }
 
-// TestBuildMCPPolicyDeps_PopulatesNoopFallbacks asserts the builder
-// returns a deps struct safe to pass to MCPServer.WithPolicyGate even
-// when emitter + artifact store are nil — the no-op fallbacks satisfy
-// the interfaces so the policy gate boot never crashes on a partial
-// dev wiring.
-func TestBuildMCPPolicyDeps_PopulatesNoopFallbacks(t *testing.T) {
+// fakeMCPEventEmitter / fakeMCPArtifactStore are test stand-ins for the
+// production adapters. They satisfy the mcp interfaces so the test
+// builds a fully-wired ToolCallDeps from non-nil deps without touching
+// the production edge.RedisStore / artifacts.Store machinery.
+type fakeMCPEventEmitter struct{}
+
+func (fakeMCPEventEmitter) Emit(_ context.Context, _ *edge.AgentActionEvent) error { return nil }
+
+type fakeMCPArtifactStore struct{}
+
+func (fakeMCPArtifactStore) Put(_ context.Context, _ mcp.ArtifactPutRequest) (*edge.ArtifactPointer, error) {
+	return &edge.ArtifactPointer{}, nil
+}
+
+// TestBuildMCPPolicyDeps_FailsClosedOnNilPipeline asserts the EDGE-102
+// follow-up fail-closed contract: a nil action-gate pipeline produces a
+// zero ToolCallDeps so MCPServer.WithPolicyGate's partial-wiring guard
+// resets the gate and HasPolicyGate() reports false. Closes the loophole
+// where the noop policyDispatcherAdapter wrapping a nil pipeline used to
+// satisfy the interface check while silently downgrading every call to
+// ALLOW.
+func TestBuildMCPPolicyDeps_FailsClosedOnNilPipeline(t *testing.T) {
 	t.Parallel()
-	deps := BuildMCPPolicyDeps(nil, &gatewayApprovalGate{}, nil, nil)
+	deps := BuildMCPPolicyDeps(nil, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, fakeMCPArtifactStore{})
+	assertZeroToolCallDeps(t, deps, "nil pipeline")
+}
+
+// TestBuildMCPPolicyDeps_FailsClosedOnNilEmitter asserts a nil
+// EventEmitter produces a zero ToolCallDeps. Without this guard, every
+// mcp.tool.pre / mcp.tool.post event would be silently dropped while
+// the boot log claimed the gate was active.
+func TestBuildMCPPolicyDeps_FailsClosedOnNilEmitter(t *testing.T) {
+	t.Parallel()
+	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, &gatewayApprovalGate{}, nil, fakeMCPArtifactStore{})
+	assertZeroToolCallDeps(t, deps, "nil emitter")
+}
+
+// TestBuildMCPPolicyDeps_FailsClosedOnNilArtifactStore asserts a nil
+// ArtifactStore produces a zero ToolCallDeps. Without this guard,
+// oversized redacted payloads would fail at materializeRedactedPayload
+// time with -32603 on every tools/call instead of one boot-time signal.
+func TestBuildMCPPolicyDeps_FailsClosedOnNilArtifactStore(t *testing.T) {
+	t.Parallel()
+	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, nil)
+	assertZeroToolCallDeps(t, deps, "nil artifact store")
+}
+
+// TestBuildMCPPolicyDeps_WiresAllDepsWhenComplete asserts the positive
+// branch: with every required dep non-nil, the builder returns a fully
+// wired ToolCallDeps that MCPServer.WithPolicyGate will accept. A nil
+// gate (approval-handoff) is allowed — handlers_mcp.go legitimately
+// passes nil when Redis is unavailable.
+func TestBuildMCPPolicyDeps_WiresAllDepsWhenComplete(t *testing.T) {
+	t.Parallel()
+	pipeline := &actiongates.Pipeline{}
+	deps := BuildMCPPolicyDeps(pipeline, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, fakeMCPArtifactStore{})
 	if deps.Pipeline == nil {
-		t.Fatal("deps.Pipeline should be a non-nil adapter (even wrapping nil pipeline)")
+		t.Fatal("deps.Pipeline nil; want policyDispatcherAdapter wrapping the supplied pipeline")
+	}
+	if _, ok := deps.Pipeline.(policyDispatcherAdapter); !ok {
+		t.Fatalf("deps.Pipeline type = %T; want policyDispatcherAdapter", deps.Pipeline)
 	}
 	if deps.EventEmitter == nil {
-		t.Fatal("deps.EventEmitter should fall back to noop, not nil")
+		t.Fatal("deps.EventEmitter nil; want the supplied emitter")
 	}
 	if deps.ArtifactStore == nil {
-		t.Fatal("deps.ArtifactStore should fall back to noop, not nil")
+		t.Fatal("deps.ArtifactStore nil; want the supplied store")
 	}
 	if deps.ApprovalHandoff == nil {
-		t.Fatal("deps.ApprovalHandoff should be the supplied gate, not nil")
+		t.Fatal("deps.ApprovalHandoff nil; want the supplied gate")
 	}
 	if deps.Redactor == nil {
-		t.Fatal("deps.Redactor should default to mcp.DefaultRedactor")
+		t.Fatal("deps.Redactor nil; want mcp.DefaultRedactor")
+	}
+}
+
+// TestBuildMCPPolicyDeps_NilGateStillWires asserts the contract that a
+// nil gatewayApprovalGate (ApprovalHandoff) does NOT trip the fail-
+// closed guard — handlers_mcp.go disables the MCP approval store when
+// Redis is unavailable, and the EvaluateToolCall path skips the
+// REQUIRE_HUMAN handoff branch in that case. Pipeline + emitter + store
+// remain mandatory.
+func TestBuildMCPPolicyDeps_NilGateStillWires(t *testing.T) {
+	t.Parallel()
+	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, nil, fakeMCPEventEmitter{}, fakeMCPArtifactStore{})
+	if deps.Pipeline == nil {
+		t.Fatal("nil gate must not zero the deps; want pipeline wired")
+	}
+	if deps.EventEmitter == nil {
+		t.Fatal("nil gate must not zero the deps; want emitter wired")
+	}
+	if deps.ArtifactStore == nil {
+		t.Fatal("nil gate must not zero the deps; want artifact store wired")
+	}
+	if deps.ApprovalHandoff == nil {
+		t.Fatal("ApprovalHandoff should be the supplied (nil) gate — typed-nil interface")
+	}
+}
+
+func assertZeroToolCallDeps(t *testing.T, deps mcp.ToolCallDeps, scenario string) {
+	t.Helper()
+	if deps.Pipeline != nil {
+		t.Fatalf("%s: deps.Pipeline = %v; want nil so WithPolicyGate disables the gate", scenario, deps.Pipeline)
+	}
+	if deps.EventEmitter != nil {
+		t.Fatalf("%s: deps.EventEmitter = %v; want nil", scenario, deps.EventEmitter)
+	}
+	if deps.ArtifactStore != nil {
+		t.Fatalf("%s: deps.ArtifactStore = %v; want nil", scenario, deps.ArtifactStore)
+	}
+	if deps.ApprovalHandoff != nil {
+		t.Fatalf("%s: deps.ApprovalHandoff = %v; want nil", scenario, deps.ApprovalHandoff)
+	}
+	if deps.Redactor != nil {
+		t.Fatalf("%s: deps.Redactor = %v; want nil", scenario, deps.Redactor)
 	}
 }

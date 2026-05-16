@@ -249,20 +249,38 @@ func (s *server) startMCPRuntimeFromConfig(cfg mcpGatewayConfig) error {
 	// EDGE-102 / EDGE-103 policy + approval-hold wiring. Gated by
 	// `mcp.policy_gate_enabled` so legacy deploys keep the direct-dispatch
 	// path until operators explicitly opt in (feedback_dont_change_deployment_defaults).
-	// Partial-wiring guards inside WithPolicyGate / WithApprovalHold reset
-	// the gate to off when required deps are missing — operators see the
-	// resulting state via the boot log line emitted below.
+	// Three terminal states — operators grep one of these lines:
+	//   * `mcp.policy_gate skipped` — flag off, by design.
+	//   * `mcp.policy_gate wired`   — flag on, every required dep present,
+	//                                HasPolicyGate()==true post-attach.
+	//   * `mcp.policy_gate degraded` — flag on but attach refused to wire
+	//                                because a required dep was missing
+	//                                (reason names the dep). HasPolicyGate()
+	//                                must read false in this branch.
 	if cfg.PolicyGateEnabled {
-		mcpServer = s.attachMCPPolicyDeps(mcpServer, approvalGate)
-		slog.Info("mcp.policy_gate wired",
-			"server_name", mcpServer.PolicyServerName(),
-			"policy_gate_active", mcpServer.HasPolicyGate(),
-			"approval_hold_active", mcpServer.HasApprovalHold(),
-			"emitter", "edge.RedisStore",
-			"artifact_store", "artifacts.RedisStore",
-		)
+		var skipReason string
+		mcpServer, skipReason = s.attachMCPPolicyDeps(mcpServer, approvalGate)
+		if mcpServer.HasPolicyGate() {
+			slog.Info("mcp.policy_gate wired",
+				"server_name", mcpServer.PolicyServerName(),
+				"policy_gate_active", true,
+				"approval_hold_active", mcpServer.HasApprovalHold(),
+				"emitter", "edge.RedisStore",
+				"artifact_store", "artifacts.RedisStore",
+			)
+		} else {
+			if skipReason == "" {
+				skipReason = "WithPolicyGate partial-wiring guard reset deps"
+			}
+			slog.Warn("mcp.policy_gate degraded",
+				"policy_gate_active", false,
+				"approval_hold_active", mcpServer.HasApprovalHold(),
+				"reason", skipReason,
+			)
+		}
 	} else {
 		slog.Info("mcp.policy_gate skipped",
+			"policy_gate_active", false,
 			"reason", "policy_gate_enabled config flag is false",
 		)
 	}
@@ -912,6 +930,17 @@ func (s *server) wireMCPApprovalGate(approvalStore *MCPApprovalStore, invariantL
 	}
 	if invariantLookup != nil {
 		gate.WithInvariantLookup(invariantLookup)
+	}
+	// EDGE-103 reopen #1: wire Edge approval mint so the gate can
+	// dual-write a consumable EdgeApproval alongside the legacy
+	// MCPApprovalStore record. Falls back to legacy-only when the
+	// Edge store is nil (dev/test) or when the request lacks
+	// mcp.CallMetadata SessionID/ExecutionID (transports without an
+	// EdgeSession). The same snapshot provider used by WithApprovalHold
+	// is reused so the mint + consume paths bind to identical
+	// PolicySnapshot strings.
+	if s.edgeStore != nil {
+		gate.WithEdgeApprovalMint(s.edgeStore, s.mcpPolicySnapshotFunc(), mcpPolicyServerName)
 	}
 	return gate, gate
 }

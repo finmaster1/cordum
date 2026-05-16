@@ -99,35 +99,38 @@ func (p productionArtifactStore) Put(ctx context.Context, req mcp.ArtifactPutReq
 
 // attachMCPPolicyDeps applies the EDGE-102 + EDGE-103 wiring to a freshly
 // constructed MCPServer when the gateway's `mcp.policy_gate_enabled`
-// flag is on. Returns the same server (fluent chain) so the caller can
-// keep the original assignment site idiomatic.
+// flag is on. Returns the (possibly modified) server plus a non-empty
+// reason string when wiring was skipped because a required production
+// dep is missing. The caller logs the reason so operators have one
+// greppable signal for misconfigured boots.
 //
-// Partial-wiring is intentional: passing nil deps (no edge.RedisStore,
-// no action-gate pipeline) triggers the c530c1c0 guards inside
-// WithPolicyGate / WithApprovalHold which reset the gate to off. The
-// boot-log line in startMCPRuntimeFromConfig reports the resulting
-// HasPolicyGate state so operators have one greppable signal that
-// degraded wiring fired at startup.
+// Required deps (each guarded up-front, no noop fallback):
+//   - s.actionGatePipeline — the production gate-decision source. A nil
+//     pipeline would be wrapped in an adapter that always returns the
+//     zero decision, silently downgrading every tools/call to ALLOW.
+//   - s.edgeStore — the AppendEvent destination. A nil store would be
+//     wrapped in an adapter that returns "edge store unavailable" on
+//     every emit, surfacing as -32603 on every tools/call instead of
+//     a single boot-time failure signal.
+//   - s.artifactStore — the oversized-payload sink. Nil here would
+//     fail every oversized arg with "artifact store unavailable".
 //
-// gate may be nil when Redis is unavailable (handlers_mcp.go warns and
-// disables the MCP approval gate); in that case BuildMCPPolicyDeps
-// receives a nil ApprovalHandoff and the EvaluateToolCall path skips
-// the REQUIRE_HUMAN handoff branch.
-func (s *server) attachMCPPolicyDeps(mcpServer *mcp.MCPServer, gate *gatewayApprovalGate) *mcp.MCPServer {
+// gate (gatewayApprovalGate) may be nil when Redis is unavailable —
+// handlers_mcp.go already warns and disables the MCP approval gate; in
+// that case BuildMCPPolicyDeps receives a nil ApprovalHandoff and the
+// EvaluateToolCall path skips the REQUIRE_HUMAN handoff branch.
+func (s *server) attachMCPPolicyDeps(mcpServer *mcp.MCPServer, gate *gatewayApprovalGate) (*mcp.MCPServer, string) {
 	if s == nil || mcpServer == nil {
-		return mcpServer
+		return mcpServer, "server or mcp_server nil"
 	}
-	// Adversarial-review guard (a/(d): if s.edgeStore is nil the
-	// edgeStoreEventEmitter adapter is non-nil but every Emit call
-	// returns "edge store unavailable" — silently passing the c530c1c0
-	// EventEmitter==nil check inside WithPolicyGate while every actual
-	// tools/call would surface -32603. Refuse to wire here so the
-	// failure mode is one boot-log line rather than per-request noise.
+	if s.actionGatePipeline == nil {
+		return mcpServer, "actionGatePipeline nil"
+	}
 	if s.edgeStore == nil {
-		return mcpServer
+		return mcpServer, "edgeStore nil"
 	}
 	if s.artifactStore == nil {
-		return mcpServer
+		return mcpServer, "artifactStore nil"
 	}
 	emitter := edgeStoreEventEmitter{store: s.edgeStore}
 	artifactStore := productionArtifactStore{store: s.artifactStore}
@@ -139,7 +142,7 @@ func (s *server) attachMCPPolicyDeps(mcpServer *mcp.MCPServer, gate *gatewayAppr
 		PolicySnapshot: s.mcpPolicySnapshotFunc(),
 		ServerName:     mcpPolicyServerName,
 	})
-	return mcpServer
+	return mcpServer, ""
 }
 
 // mcpPolicySnapshotFunc returns a closure the WithApprovalHold consume

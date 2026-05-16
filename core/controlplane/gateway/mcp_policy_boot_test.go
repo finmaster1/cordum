@@ -81,15 +81,15 @@ func TestMCPProdBoot_PolicyGateWiredWhenFlagOn(t *testing.T) {
 	if emitter == nil {
 		t.Fatal("MCPServer.PolicyEventEmitter() nil after wired boot; want a real edge-store-backed emitter")
 	}
-	if _, isNoop := emitter.(noopEventEmitter); isNoop {
-		t.Fatalf("MCPServer.PolicyEventEmitter() is noopEventEmitter; production boot must wire the real edge.RedisStore adapter (acceptance criterion #1)")
+	if _, isProd := emitter.(edgeStoreEventEmitter); !isProd {
+		t.Fatalf("MCPServer.PolicyEventEmitter() type = %T; want edgeStoreEventEmitter (acceptance criterion #1: production boot must wire the real edge.RedisStore adapter)", emitter)
 	}
 	artifactStore := runtime.server.PolicyArtifactStore()
 	if artifactStore == nil {
 		t.Fatal("MCPServer.PolicyArtifactStore() nil after wired boot; want a real artifacts.Store adapter")
 	}
-	if _, isNoop := artifactStore.(noopArtifactStore); isNoop {
-		t.Fatalf("MCPServer.PolicyArtifactStore() is noopArtifactStore; production boot must wire the real artifacts.Store adapter (acceptance criterion #1)")
+	if _, isProd := artifactStore.(productionArtifactStore); !isProd {
+		t.Fatalf("MCPServer.PolicyArtifactStore() type = %T; want productionArtifactStore (acceptance criterion #1: production boot must wire the real artifacts.Store adapter)", artifactStore)
 	}
 }
 
@@ -219,6 +219,56 @@ func TestMCPProdBoot_PolicyGateWiredEmitsBootLog(t *testing.T) {
 	}
 }
 
+// TestMCPProdBoot_PolicyGateDegradedEmitsBootLog asserts the third
+// terminal state: flag on, but a required production dep is missing
+// (here: actionGatePipeline nil) so attachMCPPolicyDeps refuses to
+// wire. Operators MUST see `mcp.policy_gate degraded` with a reason
+// naming the missing dep — without that signal, a misconfigured
+// production deploy would look identical to a healthy one because
+// HasPolicyGate() and the previous hard-coded `wired` log line both
+// reported success regardless of the actual server state.
+//
+// Sequential (not t.Parallel) for the same slog-isolation reason.
+func TestMCPProdBoot_PolicyGateDegradedEmitsBootLog(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	s.auth = mcpTestAuth{apiKey: "test-key", tenant: "default"}
+	s.shutdownCh = make(chan struct{})
+	t.Cleanup(func() { close(s.shutdownCh) })
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Wire the edge store but deliberately leave actionGatePipeline nil
+	// (simulating an upstream wiring bug). The flag is on, so the boot
+	// path attempts to wire — and the new actionGatePipeline-nil guard
+	// in attachMCPPolicyDeps must trip before reaching WithPolicyGate.
+	s.edgeStore = edgecore.NewRedisStoreFromClient(s.jobStore.Client())
+	// s.actionGatePipeline intentionally left nil.
+	setMCPConfigForBoot(t, s, true, true)
+	if err := s.registerMCPRoutes(http.NewServeMux()); err != nil {
+		t.Fatalf("register mcp routes: %v", err)
+	}
+	runtime := s.getMCPRuntime()
+	if runtime == nil || runtime.server == nil {
+		t.Fatal("expected booted MCP runtime")
+	}
+	if runtime.server.HasPolicyGate() {
+		t.Fatal("HasPolicyGate() = true on degraded wiring; want false (actionGatePipeline nil must abort wiring)")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "mcp.policy_gate degraded") {
+		t.Fatalf("boot log missing 'mcp.policy_gate degraded' signal:\n%s", out)
+	}
+	if !strings.Contains(out, "actionGatePipeline nil") {
+		t.Fatalf("boot log missing reason='actionGatePipeline nil':\n%s", out)
+	}
+	if strings.Contains(out, "mcp.policy_gate wired") {
+		t.Fatalf("degraded boot must NOT log 'wired'; saw both lines:\n%s", out)
+	}
+}
+
 // TestMCPProdBoot_PolicyGateSkippedEmitsBootLog asserts the symmetric
 // "skipped" log line lands when the flag is off — without it, operators
 // can't distinguish "skipped on purpose" from "wiring crashed silently".
@@ -243,6 +293,37 @@ func TestMCPProdBoot_PolicyGateSkippedEmitsBootLog(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "mcp.policy_gate skipped") {
 		t.Fatalf("boot log missing 'mcp.policy_gate skipped' signal:\n%s", out)
+	}
+}
+
+// TestMCPProdBoot_ApprovalHoldWiredWhenFlagOn is the EDGE-103 reopen #1
+// boot-wiring regression. QA's prior rejection cited
+// `WithApprovalHold never called in handlers_mcp.go startMCPRuntimeFromConfig`
+// — the gate was constructed but the production server never had its
+// resume path wired, so any `_approval_ref` retry would hit a nil
+// approvalHoldDeps and return -32601 method-not-found instead of
+// consuming. Commit 30c07614 wired it; this test pins the wiring so a
+// future refactor cannot silently re-introduce the dead-path.
+func TestMCPProdBoot_ApprovalHoldWiredWhenFlagOn(t *testing.T) {
+	t.Parallel()
+	s, _, _ := newTestGateway(t)
+	s.auth = mcpTestAuth{apiKey: "test-key", tenant: "default"}
+	s.shutdownCh = make(chan struct{})
+	t.Cleanup(func() { close(s.shutdownCh) })
+
+	configurePolicyGateBootDeps(t, s)
+	setMCPConfigForBoot(t, s, true, true)
+
+	mux := http.NewServeMux()
+	if err := s.registerMCPRoutes(mux); err != nil {
+		t.Fatalf("register mcp routes: %v", err)
+	}
+	runtime := s.getMCPRuntime()
+	if runtime == nil || runtime.server == nil {
+		t.Fatal("expected booted MCP runtime with non-nil server, got nil")
+	}
+	if !runtime.server.HasApprovalHold() {
+		t.Fatal("MCPServer.HasApprovalHold() = false after boot with policy_gate_enabled=true; want true (resume path must reach the Edge claim store, not nil approvalHoldDeps)")
 	}
 }
 

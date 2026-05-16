@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cordum/cordum/core/edge"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/mcp"
 	"github.com/cordum/cordum/core/policy/actiongates"
@@ -111,44 +110,23 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 	return rec.ID, nil
 }
 
-// noopEventEmitter discards events. Used as a safe default when the
-// gateway boots without a wired event recorder so the policy gate
-// never panics on a nil EventEmitter; production wiring substitutes
-// a real edge.RedisStore-backed implementation.
-type noopEventEmitter struct{}
-
-func (noopEventEmitter) Emit(_ context.Context, _ *edge.AgentActionEvent) error { return nil }
-
-// noopArtifactStore discards oversized payloads. The mcp policy layer
-// fails closed when an oversized event hits a nil ArtifactStore; this
-// stub satisfies the interface so dev/test deploys without artifact
-// storage still boot. Production wiring substitutes a real adapter
-// over the gateway's ArtifactStater.
-type noopArtifactStore struct{}
-
-func (noopArtifactStore) Put(_ context.Context, req mcp.ArtifactPutRequest) (*edge.ArtifactPointer, error) {
-	return &edge.ArtifactPointer{
-		ArtifactType: req.Type,
-		URI:          "noop://" + string(req.Type),
-		// 64-hex-character zero placeholder so downstream consumers
-		// expecting a valid SHA256 shape don't reject the noop pointer.
-		SHA256: "0000000000000000000000000000000000000000000000000000000000000000",
-	}, nil
-}
-
 // BuildMCPPolicyDeps assembles the production ToolCallDeps the MCP
-// server consumes via MCPServer.WithPolicyGate. Call sites should
-// pass the gateway's already-constructed actionGatePipeline, the
-// existing gatewayApprovalGate (cast to ApprovalHandoff via its
-// new ConsumeActionGateDecision method), and Real emitter/artifact
-// adapters when those are wired; nil deps trigger no-op fallbacks
-// so the boot path never crashes.
+// server consumes via MCPServer.WithPolicyGate. Fail-closed contract:
+// any nil required dep (pipeline, emitter, store) returns the zero
+// ToolCallDeps so the MCPServer.WithPolicyGate partial-wiring guard
+// resets the gate to off and HasPolicyGate() reports false. Without
+// this guard, noop-fallback adapters would satisfy the interface
+// check inside server.go while silently dropping every event, leaving
+// HasPolicyGate() falsely true on inert wiring.
+//
+// gate (ApprovalHandoff) may legitimately be nil — handlers_mcp.go
+// disables the MCP approval store when Redis is unavailable and the
+// EvaluateToolCall path skips the REQUIRE_HUMAN handoff branch in
+// that case. Pipeline/emitter/store are mandatory because their nil
+// branches would produce a silently-degraded gate.
 func BuildMCPPolicyDeps(pipeline *actiongates.Pipeline, gate *gatewayApprovalGate, emitter mcp.EventEmitter, store mcp.ArtifactStore) mcp.ToolCallDeps {
-	if emitter == nil {
-		emitter = noopEventEmitter{}
-	}
-	if store == nil {
-		store = noopArtifactStore{}
+	if pipeline == nil || emitter == nil || store == nil {
+		return mcp.ToolCallDeps{}
 	}
 	return mcp.ToolCallDeps{
 		Pipeline:        policyDispatcherAdapter{pipeline: pipeline},
