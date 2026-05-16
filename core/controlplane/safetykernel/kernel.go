@@ -81,6 +81,12 @@ type server struct {
 	invariantOutputRules []config.OutputPolicyRule
 	outputRules          []compiledOutputRule
 	inputRules           []compiledInputRule
+	// requireHumanThreshold downgrades input-rule "deny" decisions to
+	// REQUIRE_HUMAN when the matched finding is below the configured
+	// severity/confidence floor OR the request has no ActionDescriptor.
+	// Loaded from policy.RequireHuman at policy-load time. Zero value
+	// preserves legacy DENY-everything behavior.
+	requireHumanThreshold config.RequireHumanThreshold
 	scanners             map[string]OutputScanner
 	snapshot             string
 	snapshots            []string
@@ -652,6 +658,7 @@ func (s *server) evaluate(ctx context.Context, req *pb.PolicyCheckRequest, metho
 	inputRules := s.inputRules
 	scanners := s.scanners
 	shadowEvaluator := s.shadowEvaluator
+	requireHumanThreshold := s.requireHumanThreshold
 	defaultTenant := ""
 	if policy != nil {
 		defaultTenant = strings.TrimSpace(policy.DefaultTenant)
@@ -905,11 +912,24 @@ func (s *server) evaluate(ctx context.Context, req *pb.PolicyCheckRequest, metho
 				matchedCount++
 				switch rule.decision {
 				case "deny":
-					decision = pb.DecisionType_DECISION_TYPE_DENY
-					reason = inputRuleReason(rule, findings)
-					ruleID = rule.id
-					ruleTier = rule.tier
-					inputDecision = "deny"
+					// Per task-96f931fe architect amendment comment-79a9e609:
+					// downgrade DENY → REQUIRE_HUMAN when the matched finding
+					// falls below the configured severity/confidence floor OR
+					// the request has no ActionDescriptor (prompt-only). DoD #4
+					// authorizes this routing for "truly ambiguous" cases.
+					if shouldDowngradeDenyToRequireHuman(rule, findings, input.Action, requireHumanThreshold) {
+						decision = pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN
+						reason = inputRuleReason(rule, findings)
+						ruleID = rule.id
+						ruleTier = rule.tier
+						inputDecision = "require_human"
+					} else {
+						decision = pb.DecisionType_DECISION_TYPE_DENY
+						reason = inputRuleReason(rule, findings)
+						ruleID = rule.id
+						ruleTier = rule.tier
+						inputDecision = "deny"
+					}
 				case "require_approval", "require-approval", "require_human":
 					decision = pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN
 					reason = inputRuleReason(rule, findings)
@@ -917,7 +937,7 @@ func (s *server) evaluate(ctx context.Context, req *pb.PolicyCheckRequest, metho
 					ruleTier = rule.tier
 					inputDecision = "require_human"
 				}
-				slog.Info("input rule matched", "component", "safety", "rule", rule.id, "ruleTier", rule.tier, "decision", rule.decision, "findings", len(findings))
+				slog.Info("input rule matched", "component", "safety", "rule", rule.id, "ruleTier", rule.tier, "decision", rule.decision, "findings", len(findings), "outputDecision", inputDecision)
 				break // first matching input rule wins
 			}
 			finishInput(inputDecision, matchedCount)
@@ -1473,6 +1493,11 @@ func (s *server) setPolicyWithInvariants(ctx context.Context, policy *config.Saf
 	s.invariantOutputRules = invariantOutputRules
 	s.outputRules = compileOutputRules(combined)
 	s.inputRules = compileInputRules(combined)
+	if combined != nil {
+		s.requireHumanThreshold = combined.RequireHuman
+	} else {
+		s.requireHumanThreshold = config.RequireHumanThreshold{}
+	}
 	s.snapshot = snapshot
 	s.customBundleCount = customBundleCount
 	if snapshot != "" {

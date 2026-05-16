@@ -44,7 +44,7 @@ func BuildMCPApprovalBinding(tenant, server string, params ToolCallParams, _ str
 	if parsed, _ := parseArgsForDescriptor(canonical); parsed != nil {
 		targetPath = extractTargetPathFromArgs(parsed)
 	}
-	actionHash = CanonicalActionHash(tenant, server, params.Name, targetPath)
+	actionHash = ActionTupleHash(tenant, server, params.Name, targetPath)
 	return actionHash, inputHash
 }
 

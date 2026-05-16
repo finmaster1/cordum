@@ -46,49 +46,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   and EDGE-105 dashboard surfaces consume this registry. Structured gateway logs
   emit `mcp-upstream-<op>` outcomes without secret refs or values.
 
-#### Decision-threshold helper for REQUIRE_HUMAN routing (2026-05-16, task-96f931fe)
+#### REQUIRE_HUMAN threshold routing in safety kernel (2026-05-16, task-96f931fe reopen #1)
 
-- New helper `core/policy/actiongates/decision_thresholds.go`
-  `ClassifyByThresholds(in DecisionThresholdInput) DecisionThresholdResult`
-  routes producer findings (action gates / safety-kernel scanners /
-  governance evaluator) through a 3-axis threshold model
-  (severity + confidence + action_binding + educational_context) to
-  one of the existing `pb.DecisionType` values: `DENY`,
-  `REQUIRE_HUMAN`, `ALLOW`, `ALLOW_WITH_CONSTRAINTS`. No new
-  decision architecture; no wire-format change for audit / dashboard.
-- Routing reduces over-refusal on prompt-only educational content
-  (security-training mentions of `/etc/passwd`, defensive-runbook
-  `rm -rf`, API-key rotation procedures, approval-token logging,
-  metadata-service education) by re-routing those scenarios from
-  `DENY` to `ALLOW` when an authenticated session declares
-  `educational_context`. Action-bound high-confidence findings still
-  emit `DENY` regardless of `educational_context` — the
-  "educational tag excuses a real action" attack is explicitly
-  defended (`SubReason: action_bound:high_severity:high_confidence`).
-- `EducationalContext` is typed as `bool` (not string) so the trust
-  source MUST be session metadata (pack manifest, tenant policy,
-  governance rule), never user-supplied prose. A regression test
-  (`TestClassifyByThresholds_EducationalContextIsBooleanNotString`)
-  fails loud against any refactor widening the field to a string.
-- `ALLOW_WITH_CONSTRAINTS` carrier (`ProducerConstraints map[string]any`)
-  mirrors `ActionGateDecision.Constraints` and
-  `core/edge/agentd EvaluateResponse.Constraints` — single canonical
-  shape across hook + MCP + governance surfaces. Empty / nil map
-  leaves decision as plain `ALLOW`; non-empty flips to AWC with
-  `SubReason: ...:with_constraints` and the map propagated by
-  reference.
-- 31 GREEN unit tests across two suites — Phase 2 (5 false-positive
-  benchmark scenarios + 7 routing invariants) and Phase 4 (16-row
-  4-output-path × 3-producer-family coverage + 2 constraint-carrier
-  guards). `-count=3` flake check clean.
-- Docs: new `docs/safety/decision-thresholds.md` covers the routing
-  table, per-producer mapping, REQUIRE_HUMAN rationale, anti-pattern
-  callout for educational-tag spoofing, and the AWC carrier contract.
-- Per-producer wiring (each gate's `Evaluate()` calling the helper) is
-  intentionally NOT included in this changeset — it is a downstream
-  refactor that will land alongside the AgentShield holdout regression
-  in a follow-up task; the helper is dead code on the request path
-  until that wiring lands. See task-96f931fe `comment-afabb3c7`.
+- Supersedes the rejected `cf40ce81` (deleted in `75ed120d`, 1138 LOC
+  removed). Rejected predecessor placed 1350 LOC in
+  `core/policy/actiongates/*` (forbidden by governor amendment
+  `comment-e58c8328`) and used a 3-output model with an
+  EducationalContext carrier that does not exist in the architecture
+  (carved out by architect amendment `comment-79a9e609`). This entry
+  describes the replacement implementation.
+- New `core/infra/config/safety_policy.go` `RequireHumanThreshold`
+  struct (`MinSeverityForDeny string`, `MinConfidenceForDeny float32`,
+  `DowngradeWhenPromptOnly bool`) wired as `SafetyPolicy.RequireHuman`.
+  Zero value preserves legacy DENY-on-match behavior; operators opt in
+  per-tenant via YAML.
+- Safety-kernel input-rule dispatch in
+  `core/controlplane/safetykernel/kernel.go` now consults the threshold
+  inside the matched-rule loop. A `deny`-authored rule downgrades to
+  `pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN` when any of three
+  conditions hold (logical OR): finding severity below the floor,
+  finding confidence below the floor, or
+  `DowngradeWhenPromptOnly && input.Action == nil`. Action-bound
+  high-severity high-confidence DENYs are unchanged — the
+  "unchanged from today" branch the architect amendment carved out.
+- 2-output model only. No new `pb.DecisionType` value, no
+  EducationalContext field, no `input_text`-derived trust source.
+  Audit / dashboard / approval-store paths consume the downgraded
+  decisions through the existing `REQUIRE_HUMAN` surface.
+- `core/controlplane/safetykernel/input_policy.go` carries the
+  `shouldDowngradeDenyToRequireHuman` helper + `severityRank` ordinal
+  mapping. 9 GREEN unit tests in
+  `core/controlplane/safetykernel/decision_threshold_test.go`:
+  5 FP scenarios (defensive `/etc/passwd`, `rm -rf` mention,
+  API-key rotation, approval-token logging, metadata-service
+  education) assert `DENY → REQUIRE_HUMAN`, plus action-bound
+  stays-DENY guard, zero-threshold legacy guard, rule-tier severity
+  floor precedence, and severityRank mapping. `-count=3` flake check
+  clean.
+- Structured log `input rule matched` now records the resolved
+  `outputDecision` field so operators see at a glance when a
+  `deny`-authored rule routed to `require_human` instead.
+- Docs: `docs/safety/decision-thresholds.md` rewritten end-to-end to
+  reflect the 2-output dial, the routing table, the 5 FP scenarios,
+  the anti-patterns (no session-metadata carrier, no `input_text`
+  trust), and the implementation references.
+- DoD #6 (AgentShield holdout regression) is **deferred**:
+  `agentshield-benchmark` is not our repo per
+  `[[feedback_dont_touch_agentshield_benchmark]]`; verifying real
+  numeric over-refusal reduction requires running the AgentShield
+  regression against a gateway built from this commit which is a
+  separate operational task. Functional correctness is verified by the
+  9 unit tests above + the full `safetykernel` suite passing
+  (`go test ./core/controlplane/safetykernel/... -count=1`).
 
 #### EDGE-102 follow-up — Wire MCPServer.WithPolicyGate at gateway boot (2026-05-16, task-e9d9a37d, bundles task-3d5c4f37)
 

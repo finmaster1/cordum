@@ -348,14 +348,19 @@ func normalizeTargetPath(p string) string {
 	return strings.ReplaceAll(p, `\`, `/`)
 }
 
-// CanonicalActionHash returns the stable SHA-256 over the tuple that
-// identifies an MCP tool call for approval-lifecycle binding. Inputs
-// MUST be the normalized forms: tenant ID, server, tool name, and the
-// already-normalized TargetPath (or empty when no path-like arg
-// applies). Keeping the hash exported lets the gateway adapter and the
-// approval store derive the same key without re-implementing the
-// canonicalization.
-func CanonicalActionHash(tenant, server, tool, targetPath string) string {
+// ActionTupleHash returns the stable SHA-256 over the (tenant, server,
+// tool, target_path) tuple that identifies an MCP tool call for
+// approval-lifecycle binding. Inputs MUST be the normalized forms.
+//
+// Renamed from CanonicalActionHash (EDGE-103 reopen #2 DoD #3) so the
+// SINGLE definition of `func CanonicalActionHash` in the repo is the
+// one at `core/policy/actiongates/mutation_gate.go:218`. The two
+// helpers serve different scopes: mutation_gate's hashes the full
+// `*config.ActionDescriptor` (kind/verb/server/tool/target/args/filters/
+// wildcards/risk_tags) for the actiongates evaluation path; this one
+// hashes the per-(tenant, server, tool, target_path) tuple as the
+// approval-lifecycle action-key.
+func ActionTupleHash(tenant, server, tool, targetPath string) string {
 	canonical := fmt.Sprintf("%s|%s|%s|%s", tenant, server, tool, normalizeTargetPath(targetPath))
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:])
@@ -883,7 +888,7 @@ func canonicalActionHashFromEvent(pre *edge.AgentActionEvent, params ToolCallPar
 	if parsed, _ := parseArgsForDescriptor(params.Arguments); parsed != nil {
 		targetPath = extractTargetPathFromArgs(parsed)
 	}
-	return CanonicalActionHash(pre.TenantID, server, params.Name, targetPath)
+	return ActionTupleHash(pre.TenantID, server, params.Name, targetPath)
 }
 
 // sanitizeUpstreamError redacts URL hosts, query strings, and known

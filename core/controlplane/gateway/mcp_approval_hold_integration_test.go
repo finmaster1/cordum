@@ -98,7 +98,7 @@ func TestApprovalHoldMintConsumeIntegration_Miniredis(t *testing.T) {
 		AgentID:    eventID,
 		Server:     serverName,
 		Tool:       toolName,
-		ActionHash: mcp.CanonicalActionHash(tenantID, serverName, toolName, "/etc/hostname"),
+		ActionHash: mcp.ActionTupleHash(tenantID, serverName, toolName, "/etc/hostname"),
 		Args:       args,
 	})
 	if err != nil {
@@ -169,7 +169,7 @@ func TestApprovalHoldMintConsumeIntegration_Miniredis(t *testing.T) {
 		AgentID:    eventID,
 		Server:     serverName,
 		Tool:       toolName,
-		ActionHash: mcp.CanonicalActionHash(tenantID, serverName, toolName, "/etc/hostname"),
+		ActionHash: mcp.ActionTupleHash(tenantID, serverName, toolName, "/etc/hostname"),
 		Args:       args,
 	})
 	if err != nil {

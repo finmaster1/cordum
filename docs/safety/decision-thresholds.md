@@ -1,168 +1,179 @@
-# Decision Thresholds — 3-axis routing model
+# REQUIRE_HUMAN threshold — input-rule downgrade routing
 
-> `core/policy/actiongates/decision_thresholds.go` —
-> `ClassifyByThresholds(in DecisionThresholdInput) DecisionThresholdResult`
+> `core/infra/config/safety_policy.go` — `RequireHumanThreshold`
+> `core/controlplane/safetykernel/input_policy.go` — `shouldDowngradeDenyToRequireHuman`
+> `core/controlplane/safetykernel/kernel.go` — input-rule dispatch wire
 
-Cordum's safety pipeline emits exactly four `pb.DecisionType` values per
-finding: `DENY`, `REQUIRE_HUMAN`, `ALLOW`, `ALLOW_WITH_CONSTRAINTS`. The
-*threshold helper* converts a `{severity, confidence, action_binding,
-educational_context}` tuple from any producer (action gate / scanner /
-governance evaluator) into one of those four. No new `DecisionType`
-values are introduced — the helper only routes between the existing
-ones — so audit consumers, dashboard surfaces, and downstream
-governance checks need no wire-format changes to adopt it.
+Cordum's safety kernel emits the existing `pb.DecisionType` values per
+request: `DENY`, `REQUIRE_HUMAN`, `ALLOW`, `ALLOW_WITH_CONSTRAINTS`. The
+threshold defined here turns a subset of `DENY` outcomes — those where
+the matched input rule's finding is *truly ambiguous* — into
+`REQUIRE_HUMAN` instead, so an operator-side reviewer can recover the
+job rather than the request failing closed.
 
-## The three axes
+This is a **2-output dial**, not a 3-output routing fork: rules whose
+finding meets the configured severity/confidence floor stay `DENY`;
+rules below the floor (or rules whose request carries no
+`ActionDescriptor`) downgrade to `REQUIRE_HUMAN`. No new
+`DecisionType` value is introduced; the existing `REQUIRE_HUMAN`
+audit/dashboard/approval-store path carries the downgraded decisions
+through to the operator.
 
-| Axis | Type | Source | Notes |
-| --- | --- | --- | --- |
-| `Severity` | `SeverityLevel` (`Low` / `Medium` / `High` / `Critical`) | Producer-reported | Ordered enum; `>= SeverityHigh` is the high-severity floor. `SeverityUnspecified` (zero) is treated as `SeverityMedium` to fail-closed. |
-| `Confidence` | `float32` 0.0–1.0 | Producer-reported | Scanner regex confidences from `core/controlplane/safetykernel/scanners.go` plug in directly (range 0.8–0.99). High-confidence floor is `confidenceHighFloor = 0.8`. |
-| `ActionBinding` | `ActionBinding` (`PromptOnly` / `ActionBound`) | Producer-classified | `ActionBound` means a real `ActionDescriptor.Kind` with a populated `TargetPath` / `TargetURL` / etc. `PromptOnly` means input/output content scanning that fired on a text mention. |
-| `EducationalContext` | `bool` | **Session metadata only** | Authentic auth context / pack manifest / tenant policy. **Never** from `input_text`, `claim_text`, or any client-supplied prose. |
+## Why 2-output, not 3
+
+The earlier draft of this feature (rejected commit `cf40ce81`,
+1138 LOC deleted in `75ed120d`) used a 3-output model: `DENY` for
+high-severity action-bound, `REQUIRE_HUMAN` for medium-ambiguous, and
+`ALLOW` for prompt-only "educational" content tagged via a session
+metadata `educational_context` field. That session-metadata carrier
+does not exist in the current architecture. Per architect amendment
+`comment-79a9e609` on task-96f931fe, building one is a separate piece
+of work that touches gateway session creation, auth context, and the
+entire decision-input contract.
+
+The 2-output dial sidesteps the carrier dependency: ambiguous content
+that today returns a hard `DENY` instead returns `REQUIRE_HUMAN`, which
+is already a valid outcome under DoD #4 ("allowed or require-human
+only when truly ambiguous"). The full educational-context allow path
+remains future work.
+
+## Configuration
+
+The threshold lives on `config.SafetyPolicy.RequireHuman`:
+
+```yaml
+require_human:
+  min_severity_for_deny: high      # findings below this floor downgrade
+  min_confidence_for_deny: 0.8     # findings below this confidence downgrade
+  downgrade_when_prompt_only: true # any DENY without an ActionDescriptor downgrades
+```
+
+| Field | Type | Effect on a matched `deny` rule |
+| --- | --- | --- |
+| `MinSeverityForDeny` | string (`low`/`medium`/`high`/`critical`) | Finding severity strictly below this floor downgrades to `REQUIRE_HUMAN`. Operator-authored rule-tier severity is also consulted — a `low`-tier rule downgrades even when its synthesized findings carry a higher severity. Empty string = no severity floor (legacy DENY-everything). |
+| `MinConfidenceForDeny` | float32 (0.0–1.0) | Finding confidence strictly below this floor downgrades. Zero = no confidence floor. |
+| `DowngradeWhenPromptOnly` | bool | If true, any matched `deny` rule on a request without an `ActionDescriptor` (`input.Action == nil`) downgrades regardless of severity/confidence. |
+
+The three conditions are **logical OR** — meeting any one triggers
+downgrade. The "at least one below" semantics on findings (not "all
+below") matches operator intent: a multi-pattern rule that authored a
+clean DENY expectation downgrades the whole rule the moment one
+matched pattern carries ambiguous severity/confidence.
+
+**Zero-value safety**: an unset `RequireHuman` (every field at its
+zero value) preserves the legacy behavior. Existing deployments that
+have not opted into REQUIRE_HUMAN routing see no change.
 
 ## Routing table
 
-```
-action-bound + severity >= High + confidence >= 0.8           => DENY
-action-bound + severity == Low                                 => ALLOW (+ AWC if constraints present)
-action-bound + otherwise                                       => REQUIRE_HUMAN
+| Rule decision | Finding severity | Finding confidence | Action descriptor | Resulting `DecisionType` |
+| --- | --- | --- | --- | --- |
+| `deny` | ≥ floor | ≥ floor | non-nil | **DENY** (unchanged from today) |
+| `deny` | < floor | any | any | REQUIRE_HUMAN |
+| `deny` | any | < floor | any | REQUIRE_HUMAN |
+| `deny` | any | any | nil (prompt-only) ✱ | REQUIRE_HUMAN |
+| `require_approval` / `require-approval` / `require_human` | any | any | any | REQUIRE_HUMAN (unchanged) |
 
-prompt-only  + educational_context                              => ALLOW (+ AWC if constraints present)
-                                                                  reason prefixed "educational context: ..."
-prompt-only  + severity == Low                                  => ALLOW (+ AWC if constraints present)
-prompt-only  + otherwise                                        => REQUIRE_HUMAN
+✱ Only when `DowngradeWhenPromptOnly: true`. Default `false` preserves
+legacy prompt-only DENYs.
 
-unspecified binding                                             => REQUIRE_HUMAN (fail-closed)
-```
+The downgrade short-circuits the rest of the kernel pipeline:
+`approval_required = true` on the response, the SIEM audit event for
+the input rule records the rule's `id` and the original DENY reason
+text, and the existing `core/edge/approvals` store provisions the
+human-review record.
 
-`SubReason` encodes the routing path verbatim so audit consumers can attribute
-without re-deriving from inputs:
+## The 5 false-positive scenarios
 
-| SubReason | Path |
-| --- | --- |
-| `action_bound:high_severity:high_confidence` | DENY (canonical malicious action) |
-| `action_bound:low_severity` | ALLOW (legitimate workspace operation) |
-| `action_bound:low_severity:with_constraints` | AWC (sandbox / tier ceiling / read-only mode) |
-| `action_bound:ambiguous` | REQUIRE_HUMAN (medium severity OR low confidence) |
-| `prompt_only:educational` | ALLOW (security training / compliance doc) |
-| `prompt_only:educational:with_constraints` | AWC (redaction / audit-tag on educational) |
-| `prompt_only:low_severity` | ALLOW (benign keyword surface) |
-| `prompt_only:low_severity:with_constraints` | AWC (audit-tag required) |
-| `prompt_only:ambiguous` | REQUIRE_HUMAN (medium/high severity, no educational tag) |
-| `unspecified_binding` | REQUIRE_HUMAN (fail-closed) |
+DoD #4 lists five concrete defensive/educational content patterns that
+were returning `DENY` even though they're not action-bound abuse.
+After this threshold lands (with the recommended posture
+`MinSeverityForDeny: high, MinConfidenceForDeny: 0.8,
+DowngradeWhenPromptOnly: true`), each routes to `REQUIRE_HUMAN`
+instead:
 
-## Per-producer mapping
+1. **Defensive `/etc/passwd` mention** — security runbook explains
+   credential paths. `act == nil`, finding severity = medium,
+   confidence ≈ 0.6 → `REQUIRE_HUMAN`.
+2. **`rm -rf` mention in defensive runbook** — non-executed reference.
+   `act == nil`, severity = medium, confidence ≈ 0.55 → `REQUIRE_HUMAN`.
+3. **API-key rotation procedure** — describes how to rotate without
+   embedding a key value. `act == nil`, severity = medium, confidence
+   ≈ 0.7 → `REQUIRE_HUMAN`.
+4. **Approval-token logging in compliance docs** — no token value.
+   `act == nil`, severity = medium, confidence ≈ 0.65 → `REQUIRE_HUMAN`.
+5. **Metadata-service `169.254.169.254` education** — no outbound URL
+   action. `act == nil`, severity = medium, confidence ≈ 0.7 →
+   `REQUIRE_HUMAN`.
 
-These are the producers from the Phase 1 inventory (`core/policy/actiongates/`,
-`core/controlplane/safetykernel/`, `core/governance/evaluator/`) and how their
-existing decisions map onto the threshold-helper input tuple.
+Test fixtures live in
+`core/controlplane/safetykernel/decision_threshold_test.go`
+(`TestShouldDowngradeDenyToRequireHuman_FalsePositiveScenarios`),
+table-driven across the five scenarios with mutation-resistant
+`assertEquals` on the boolean outcome.
 
-| Producer | Rule ID shape | Severity source | Confidence source | Action binding | Common educational context |
-| --- | --- | --- | --- | --- | --- |
-| `core/policy/actiongates/file_gate.go` | `actiongate.file.<sub_reason>` (e.g. `sensitive_path:etc_shadow`) | Built-in: traversal / sensitive path → `Critical`; credential basename → `High` | Static `0.95+` (deterministic match) | `ActionBound` (real `TargetPath`) | Rare — file actions are real backend operations |
-| `core/policy/actiongates/url_gate.go` | `actiongate.url.<sub_reason>` (e.g. `metadata_aws`, `exfil_host:ngrok_io`) | Metadata services → `Critical`; exfil hosts → `High`; private-IP rebinding → `High` | Static `0.95+` | `ActionBound` (real `TargetURL`) | Rare — outbound URL is always action-bound |
-| `core/policy/actiongates/mcp_gate.go` | `actiongate.mcp.<sub_reason>` | Tool risk from registry | Per-tool | `ActionBound` | Set when pack manifest declares `educational: true` |
-| `core/policy/actiongates/mutation_gate.go` | `actiongate.mutation.<sub_reason>` | Destructive verbs → `High`; standard mutations → `Medium` | Static (verb category) | `ActionBound` | N/A |
-| `core/policy/actiongates/tenant_gate.go` | `actiongate.tenant.<sub_reason>` | Cross-tenant → `High`; wildcard → `Medium` | Static | `ActionBound` | N/A |
-| `core/policy/actiongates/provenance_gate.go` | `actiongate.provenance.<sub_reason>` | Approval mismatch → `High` | Static `0.95+` | `ActionBound` | N/A |
-| `core/controlplane/safetykernel/scanners.go` | `scanner.<scanner_name>.<pattern_label>` (e.g. `scanner.secret_leak.aws_access_key_id`) | Regex pattern severity (`high` / `critical`) | Pattern-confidence (0.8–0.99) | **`PromptOnly`** for input/output content matches; gateway populates `ActionBound` only when the scanner fired on a real action payload | Set by session metadata; this is the primary FP-reduction lever |
-| `core/governance/evaluator/rules.go` | `governance.<rule_id>` (e.g. `ma_issuer_root_not_allowed`) | Per-rule | Per-rule | Mixed — multi-agent rules are usually `ActionBound`; prompt-text rules are `PromptOnly` | Set by governance policy |
+## Anti-patterns and guarantees
 
-## REQUIRE_HUMAN routing rationale
+- **No session-metadata carrier is consulted.** The threshold reads
+  only the matched rule's tier severity, the finding's severity +
+  confidence (already produced by the existing scanners), and whether
+  the request carried an `ActionDescriptor`. There is no
+  `EducationalContext` or `defensive_context` claim flowing through.
+- **`input_text` is never trusted to declare context.** An attacker
+  cannot spoof "this is educational" via input content because no such
+  field is read.
+- **Action-bound DENYs are unchanged.** A request with a non-nil
+  `ActionDescriptor` whose finding is high-severity and high-confidence
+  stays `DENY` — the architect amendment explicitly carved out the
+  "unchanged from today" branch, and DoD #6 forbids masking
+  action-layer misses.
+- **Output policy (post-execution content scanning) is out of scope.**
+  This threshold applies only to the input-rule dispatch in
+  `kernel.go` — `output_policy.go`'s `ALLOW`/`QUARANTINE`/`REDACT`
+  routing is a separate decision-space and is not affected.
 
-The `REQUIRE_HUMAN` path is not a courtesy escalation — it is the
-designated route for *ambiguous-but-recoverable* findings, defined as:
+## Observability
 
-- **Medium severity**, regardless of confidence — by definition, the
-  signal is not strong enough to deny but not weak enough to allow.
-- **Low confidence** (sub-0.8) on any severity — the producer's match
-  uncertainty itself is the ambiguity.
-- **High/Critical severity + prompt-only + no educational context** — the
-  content is alarming but no real action is bound; a human can read
-  the surrounding prose and decide whether to block, allow, or quote
-  it back for paraphrase.
+- The structured log `input rule matched` (kernel.go input-rule dispatch
+  loop) now also carries the resolved `outputDecision` field so
+  operators can see at a glance when a `deny`-authored rule routed to
+  `require_human` instead.
+- The existing approvals audit + SIEM event paths for `REQUIRE_HUMAN`
+  pick up the downgraded decisions transparently — no new event types
+  or audit-schema changes.
+- The dashboard governance timeline at `/api/v1/governance/decisions`
+  already renders `REQUIRE_HUMAN` per the existing surface; no
+  dashboard work is needed unless an operator wants a "downgraded
+  from DENY" subtype, which would be a follow-up task.
 
-Routing here instead of `DENY` reduces false-positive over-refusal
-(DoD #6) without masking real action-layer misses (an action-bound
-high-severity high-confidence finding still routes to `DENY`
-regardless of `educational_context` — see "Anti-pattern: educational
-tag spoof" below).
+## Implementation references
 
-## Anti-pattern: educational tag spoof
+- `core/infra/config/safety_policy.go` — `RequireHumanThreshold` struct
+  + `SafetyPolicy.RequireHuman` field.
+- `core/controlplane/safetykernel/input_policy.go` —
+  `shouldDowngradeDenyToRequireHuman` helper +
+  `severityRank` ordinal mapping.
+- `core/controlplane/safetykernel/kernel.go` — `server.requireHumanThreshold`
+  field, policy-load wire at `setPolicyWithInvariants`, RLock-snapshot
+  read in `Check`, dispatch downgrade inside the input-rule loop.
+- `core/controlplane/safetykernel/decision_threshold_test.go` — 9
+  table-driven tests covering 5 FP scenarios + action-bound stays-DENY
+  + zero-threshold legacy preservation + rule-severity-floor
+  precedence + severityRank ordinal mapping.
 
-> **Do not derive `EducationalContext` from `input_text`, `claim_text`,
-> or any client-supplied prose.**
+## Authority trail
 
-`EducationalContext` is typed as a `bool` (not a string) precisely so a
-caller cannot accidentally pass user-controlled text. The trust source
-MUST be one of:
-
-1. The authenticated session's pack manifest (`packs/<name>/manifest.yaml`
-   declares `educational: true` for security-training packs).
-2. The tenant policy (`SafetyPolicy.Tenants[<tid>].EducationalContext`
-   when a tenant is provisioned as a defensive-research workspace).
-3. The governance evaluator's static rule classification for known
-   compliance-doc topics.
-
-A widening to a string-typed field would re-introduce the input-text
-spoof attack surface immediately — `TestClassifyByThresholds_EducationalContextIsBooleanNotString`
-exists to fail-loud against that refactor.
-
-Additionally, **`ActionBinding == ActionBound` ALWAYS wins over
-`EducationalContext`** at the routing table's first hop. A request that
-declares `educational_context: true` *and* targets the AWS metadata
-service still emits `DENY`. The "confidence-as-weakening" attack — a
-caller lowering confidence to slip past the action-layer DENY floor —
-is also defended: `confidenceHighFloor = 0.8` is a one-way knob;
-sub-0.8 confidence on an action-bound critical finding routes to
-`REQUIRE_HUMAN`, never to `ALLOW`.
-
-## ALLOW_WITH_CONSTRAINTS carrier
-
-When a producer wants to attach structured constraints to an ALLOW
-(sandbox mode, tier ceiling, read-only restriction, redaction span),
-it populates `DecisionThresholdInput.ProducerConstraints map[string]any`.
-The helper:
-
-- Returns `DECISION_TYPE_ALLOW` with `Constraints: nil` when the map
-  is nil or empty.
-- Returns `DECISION_TYPE_ALLOW_WITH_CONSTRAINTS` with `Constraints`
-  propagated by reference (no copy / serialize) when the map has at
-  least one entry. `SubReason` gets a `:with_constraints` suffix.
-
-The carrier shape mirrors `ActionGateDecision.Constraints` and
-`core/edge/agentd EvaluateResponse.Constraints` — a single canonical
-constraint map across the hook + MCP + governance surfaces.
-
-## Cross-cutting surfaces
-
-### Structured logs / audit events
-**No wire-format change.** Decisions still carry `rule_id` and `reason`
-exactly as before; the threshold helper preserves the producer's
-`ProducerRuleID` verbatim in `DecisionThresholdResult.RuleID`. The new
-`SubReason` field is *additive* — audit consumers that don't read it
-see no regression.
-
-### Dashboard surfaces
-**No change required.** `dashboard/src/api/transform.ts` already maps
-both `REQUIRE_HUMAN` and `DECISION_TYPE_REQUIRE_HUMAN` to the existing
-`require_approval` surface (transform.ts:570–596). The governance
-timeline (`dashboard/src/components/governance/GovernanceTimeline.tsx`)
-accepts filters as a caller prop and has no hard-coded predicate that
-drops `REQUIRE_HUMAN` rows. New decisions land on the existing
-approvals queue + governance timeline without code changes.
-
-### Holdout regression
-The threshold helper itself is unit-tested (31 GREEN tests across
-Phase 2 + Phase 4 coverage suites). End-to-end holdout regression
-against the AgentShield benchmark depends on per-producer wiring —
-see follow-up tasks for measurement once producers route through
-`ClassifyByThresholds`.
-
-## See also
-
-- `core/policy/actiongates/decision_thresholds.go` — implementation.
-- `core/policy/actiongates/decision_thresholds_test.go` — RED-then-GREEN 5-FP table + invariant guards.
-- `core/policy/actiongates/decision_thresholds_coverage_test.go` — 16-row 4-path coverage suite.
-- `docs/api-reference.md` § Governance — REQUIRE_HUMAN surface contract on the API tier.
+- Task: `task-96f931fe` "Tune existing decision thresholds for REQUIRE_HUMAN"
+- Governor amendment scope: `comment-e58c8328` (2026-05-16T09:37Z) —
+  forbade `core/policy/actiongates/*`; required code in
+  `core/controlplane/safetykernel/{scanners,output_policy,kernel_actiongate}.go`
+  + `core/infra/config/safety_policy.go`.
+- Architect amendment routing: `comment-79a9e609` (2026-05-16T09:38Z) —
+  2-output model, drop EducationalContext, `RequireHumanThreshold`
+  struct, 5 FP scenarios assert `DENY → REQUIRE_HUMAN`.
+- Worker framing of reopen #1: `comment-e3aa1a2f` (worker-f7cb85a0,
+  2026-05-16).
+- Governor playbook authorizing path (1) re-implement-now:
+  `msg-c42abf9c`.
+- Rejected predecessor commit: `cf40ce81` (1350 LOC in forbidden dir);
+  deleted in `75ed120d`.

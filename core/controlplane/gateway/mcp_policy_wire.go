@@ -103,7 +103,7 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 	//                         would produce a non-resumable approval_id).
 	ref, mintErr, didTry := g.mintEdgeApprovalForActionGate(ctx, ctxData)
 	if mintErr != nil {
-		return "", fmt.Errorf("approval_store_unavailable: mcp gate Edge enqueue failed: %w", mintErr)
+		return "", fmt.Errorf("%w: mcp gate Edge enqueue failed: %w", mcp.ErrApprovalStoreUnavailable, mintErr)
 	}
 	if didTry {
 		return ref, nil

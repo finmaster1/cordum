@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -220,6 +221,57 @@ func TestJSONRPC_ApprovalRefResumeArgsMismatchSurfacesLifecycleError(t *testing.
 	if got, _ := data["approval_ref"].(string); got != "edge_appr_xyz" {
 		t.Errorf("error.data.approval_ref = %q; want edge_appr_xyz", got)
 	}
+}
+
+// TestJSONRPC_ApprovalStoreUnavailableWiresTo32096 is the EDGE-103
+// reopen #2 DoD #5 wire-mapping regression. When the gateway gate
+// returns `ErrApprovalStoreUnavailable` (Edge mint attempted +
+// failed), MCPServer.handleToolsCall MUST surface JSON-RPC -32096
+// with error.data.kind = "approval_store_unavailable", NOT the
+// generic -32603 "internal error". Operators page on -32096 specifically
+// for store outages.
+func TestJSONRPC_ApprovalStoreUnavailableWiresTo32096(t *testing.T) {
+	t.Parallel()
+	registry := NewToolRegistry()
+	tool := Tool{Name: "fs.write", RequiresApproval: true}
+	if err := registry.Register(tool, func(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		t.Fatal("tool handler must NOT execute when gate returns approval_store_unavailable")
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	registry.SetApprovalGate(approvalGateFunc(func(_ context.Context, _ Tool, _ json.RawMessage) (*ApprovalRequired, error) {
+		return nil, fmt.Errorf("%w: edge store reachable but enqueue failed", ErrApprovalStoreUnavailable)
+	}))
+	srv := NewServer(newChannelTransport(), registry, NewResourceRegistry(), ServerConfig{
+		Name: "test", Version: "0.0.0", ProtocolVersion: DefaultProtocolVersion,
+	})
+
+	params, _ := json.Marshal(map[string]any{
+		"name":      tool.Name,
+		"arguments": map[string]any{"path": "/etc/hostname"},
+	})
+	_, rpcErr := srv.handleToolsCall(context.Background(), params)
+	if rpcErr == nil {
+		t.Fatal("expected -32096 JSON-RPC error on approval_store_unavailable; got nil")
+	}
+	if rpcErr.Code != jsonRPCApprovalLifecycleErrorCode {
+		t.Errorf("rpcErr.Code = %d; want %d (approval_lifecycle_error) — this is the DoD #5 wire-mapping regression. Was -32603 before sentinel + mapHandlerError case landed.", rpcErr.Code, jsonRPCApprovalLifecycleErrorCode)
+	}
+	data, ok := rpcErr.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("rpcErr.Data type = %T; want map[string]any with kind=approval_store_unavailable", rpcErr.Data)
+	}
+	if got, _ := data["kind"].(string); got != "approval_store_unavailable" {
+		t.Errorf("error.data.kind = %q; want approval_store_unavailable", got)
+	}
+}
+
+// approvalGateFunc adapts a function literal into ApprovalGate for tests.
+type approvalGateFunc func(ctx context.Context, tool Tool, paramsJSON json.RawMessage) (*ApprovalRequired, error)
+
+func (f approvalGateFunc) Check(ctx context.Context, tool Tool, paramsJSON json.RawMessage) (*ApprovalRequired, error) {
+	return f(ctx, tool, paramsJSON)
 }
 
 // TestJSONRPC_ApprovalRefResumeWithoutMetadataFailsClosed is the

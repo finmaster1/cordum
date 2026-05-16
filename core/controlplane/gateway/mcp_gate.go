@@ -263,7 +263,7 @@ func (g *gatewayApprovalGate) Check(ctx context.Context, tool mcp.Tool, params j
 	// legacy approval_id.
 	approvalRef, policySnapshot, expiresAt, mintErr := g.dualWriteEdgeApproval(ctx, meta, tool, params, rec)
 	if mintErr != nil {
-		return nil, fmt.Errorf("approval_store_unavailable: edge approval mint failed: %w", mintErr)
+		return nil, fmt.Errorf("%w: edge approval mint failed: %w", mcp.ErrApprovalStoreUnavailable, mintErr)
 	}
 	return &mcp.ApprovalRequired{
 		ApprovalID:     rec.ID,

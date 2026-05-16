@@ -472,8 +472,8 @@ func TestBuildActionDescriptor_PathBackslashAndForwardSlashSameHash(t *testing.T
 	if descB.TargetPath != descF.TargetPath {
 		t.Fatalf("TargetPath divergence: %q vs %q", descB.TargetPath, descF.TargetPath)
 	}
-	hashB := CanonicalActionHash("tnt_a", "local-fs", "fs.write", descB.TargetPath)
-	hashF := CanonicalActionHash("tnt_a", "local-fs", "fs.write", descF.TargetPath)
+	hashB := ActionTupleHash("tnt_a", "local-fs", "fs.write", descB.TargetPath)
+	hashF := ActionTupleHash("tnt_a", "local-fs", "fs.write", descF.TargetPath)
 	if hashB != hashF {
 		t.Fatalf("canonical hash diverged for equivalent paths: %s vs %s", hashB, hashF)
 	}
