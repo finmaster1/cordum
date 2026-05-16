@@ -22,6 +22,7 @@ import (
 	"github.com/cordum/cordum/core/mcp"
 	mcpresources "github.com/cordum/cordum/core/mcp/resources"
 	mcptools "github.com/cordum/cordum/core/mcp/tools"
+	"github.com/cordum/cordum/core/model"
 )
 
 // mcpAgentIDHeader is the request header that identifies the calling
@@ -463,6 +464,13 @@ func (s *server) mcpToolCallAuditHook() mcp.ToolCallAuditHook {
 	}
 	sender := s.auditExporter
 	return func(event audit.SIEMEvent) {
+		// Defense-in-depth: core/mcp/audit_invocation.go defaults the
+		// handle's tenant at Start{Inbound,Outbound}, but a future
+		// producer site that bypasses the auditor and constructs a
+		// SIEMEvent directly would slip through to the chain sender's
+		// slog.Warn fallback. Default here so the gateway boundary is
+		// the explicit catch-all. task-3fad45d3.
+		event.TenantID = model.ResolveTenantForAudit(event.TenantID, "")
 		sender.Send(event)
 	}
 }
@@ -477,6 +485,12 @@ func (s *server) mcpApprovalAuditHook() MCPAuditHook {
 	}
 	sender := s.auditExporter
 	return func(event audit.SIEMEvent) {
+		// Same defense-in-depth as mcpToolCallAuditHook above:
+		// MCPApprovalStore populates Tenant from validated request
+		// records, but a future enqueue path that skips the validator
+		// would emit a tenantless event. Default at the gateway
+		// boundary. task-3fad45d3.
+		event.TenantID = model.ResolveTenantForAudit(event.TenantID, "")
 		sender.Send(event)
 	}
 }

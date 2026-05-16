@@ -42,19 +42,22 @@ func (s *auditChainSender) Send(event audit.SIEMEvent) {
 		return
 	}
 	if s.chainer != nil {
-		// Attribute tenantless events (anonymous reads, system bootstrap,
-		// producer bugs) to model.DefaultTenant rather than silently
-		// dropping them. The previous behaviour made the Audit Log feel
-		// incomplete because every middleware-emitted system.auth event
-		// on an unauthenticated request, plus every producer that
-		// forgot to set TenantID, vanished from the chain. Default-
-		// tenant attribution keeps the per-tenant chain semantics
-		// intact (no cross-tenant leakage — "default" is its own
-		// stream) while ensuring no chain-eligible event is dropped.
-		// slog.Debug surfaces the producer site so the missing-tenant
-		// can be fixed at source over time.
+		// Defense-in-depth: producer sites SHOULD attribute TenantID
+		// explicitly via model.ResolveTenantForAudit (see task-3fad45d3
+		// for the 5 wired sites — middleware.auditReadMiddleware,
+		// edge.SendSIEMEvent, gateway.mcpDenyAuditor, mcp.auditor's
+		// Start{Inbound,Outbound}, gateway's mcpTool{Call,Approval}
+		// AuditHook). This fallback prevents data loss if a NEW
+		// producer site is added without proper attribution. Logged at
+		// slog.Warn (downgraded from Debug 2026-05-16) so CI/dev
+		// surfaces the producer regression loudly rather than letting
+		// it accumulate silently in production audit logs.
+		//
+		// Per-tenant chain semantics stay intact ("default" is its own
+		// stream — no cross-tenant leakage). Task rail #1 keeps this
+		// fallback in place until a CI gate prevents tenantless emissions.
 		if strings.TrimSpace(event.TenantID) == "" {
-			slog.Debug("audit chain: tenantless event attributed to default tenant",
+			slog.Warn("audit chain: tenantless event — PRODUCER BUG, falling back to default tenant",
 				"event_type", event.EventType,
 				"action", event.Action,
 				"identity", event.Identity,

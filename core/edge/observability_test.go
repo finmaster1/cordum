@@ -931,6 +931,52 @@ func TestSendSIEMEventDeliversToWorkingSender(t *testing.T) {
 	}
 }
 
+// TestSendSIEMEventDefaultsEmptyTenant asserts the producer-side
+// fallback contract for the edge audit wrapper: a SIEMEvent emitted
+// with empty TenantID lands at the sink with TenantID =
+// model.DefaultTenant. Closes the gap where SIEMEventForAction (and
+// peers) propagate event.TenantID verbatim from an AgentActionEvent
+// that may have come in tenantless (anonymous hook bridge, system
+// bootstrap event). Mutation-resistant: asserts the literal "default"
+// constant value, not just non-empty.
+func TestSendSIEMEventDefaultsEmptyTenant(t *testing.T) {
+	rec := &recordingAuditSender{}
+	SendSIEMEvent(rec, audit.SIEMEvent{
+		EventType: audit.EventEdgePolicyDecision,
+		TenantID:  "", // producer left empty
+		Action:    "bash.exec",
+		Decision:  "allow",
+	})
+	got := rec.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("recorder got %d events, want 1", len(got))
+	}
+	if got[0].TenantID != "default" {
+		t.Fatalf("TenantID = %q, want %q (model.DefaultTenant — empty-producer must be defaulted before forwarding)",
+			got[0].TenantID, "default")
+	}
+}
+
+// TestSendSIEMEventPreservesExplicitTenant pins the contract that an
+// explicit tenant is NEVER overwritten by the empty-tenant defaulter
+// — per-tenant chain isolation depends on this. Without this guard a
+// future refactor could accidentally route all events to the default
+// chain.
+func TestSendSIEMEventPreservesExplicitTenant(t *testing.T) {
+	rec := &recordingAuditSender{}
+	SendSIEMEvent(rec, audit.SIEMEvent{
+		EventType: audit.EventEdgePolicyDecision,
+		TenantID:  "tenant-explicit",
+		Action:    "bash.exec",
+		Decision:  "allow",
+	})
+	got := rec.snapshot()
+	if got[0].TenantID != "tenant-explicit" {
+		t.Fatalf("TenantID = %q, want %q (explicit tenant must be preserved)",
+			got[0].TenantID, "tenant-explicit")
+	}
+}
+
 // TestRecorderInterfaceForbidsRawSecretLeak documents the contract that
 // raw secret-shaped inputs MUST collapse to bounded labels via the
 // Normalize* helpers before reaching a Prometheus recorder. The no-op

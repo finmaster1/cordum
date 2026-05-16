@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/audit"
+	"github.com/cordum/cordum/core/model"
 )
 
 // Recorder is the EDGE-014 Edge observability surface. Every Edge call
@@ -672,6 +673,16 @@ func SIEMEventForDegraded(tenantID, mode, component, reasonCode string, at time.
 func SendSIEMEvent(sender audit.AuditSender, event audit.SIEMEvent) {
 	if sender == nil {
 		return
+	}
+	// Defensive producer-side default: SIEMEvent builders in this
+	// package (SIEMEventForAction, SIEMEventForSessionStarted, ...)
+	// propagate event.TenantID verbatim from the source AgentActionEvent
+	// / EdgeSession; an event that arrived tenantless (anonymous hook
+	// bridge, system bootstrap, future producer regression) would land
+	// at the sink-level fallback at slog.Warn. Defaulting here keeps
+	// the chain populated without per-event log noise. task-3fad45d3.
+	if strings.TrimSpace(event.TenantID) == "" {
+		event.TenantID = model.DefaultTenant
 	}
 	defer func() {
 		// AuditSender.Send is documented as non-error-returning, but we

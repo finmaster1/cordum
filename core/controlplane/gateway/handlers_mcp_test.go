@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/configsvc"
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/mcp"
@@ -52,6 +53,65 @@ func (a mcpTestAuth) RequireTenantAccess(*http.Request, string) error { return n
 
 func (a mcpTestAuth) ResolvePrincipal(_ *http.Request, requested string) (string, error) {
 	return requested, nil
+}
+
+// TestMCPToolCallAuditHookDefaultsEmptyTenant asserts the producer-
+// side fallback contract for the gateway's tool-call audit forwarder
+// (handlers_mcp.go::mcpToolCallAuditHook): an event arriving with
+// empty TenantID (upstream producer bug or new producer site not yet
+// wired to ResolveTenantForAudit) is rewritten to model.DefaultTenant
+// before reaching the downstream sender. Defense-in-depth at the
+// gateway boundary so the sink-level slog.Warn (Phase 4) only fires
+// on genuinely-novel producer paths.
+func TestMCPToolCallAuditHookDefaultsEmptyTenant(t *testing.T) {
+	t.Parallel()
+	cap := &captureAuditSender{}
+	s := &server{auditExporter: cap}
+	hook := s.mcpToolCallAuditHook()
+	if hook == nil {
+		t.Fatal("mcpToolCallAuditHook returned nil; expected non-nil hook when auditExporter is wired")
+	}
+	hook(audit.SIEMEvent{
+		EventType: audit.EventMCPToolInvocation,
+		TenantID:  "", // upstream producer left it empty
+		Action:    "invoke",
+	})
+	events := cap.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(events))
+	}
+	if events[0].TenantID != "default" {
+		t.Fatalf("TenantID = %q, want %q (hook must default empty TenantID)",
+			events[0].TenantID, "default")
+	}
+}
+
+// TestMCPApprovalAuditHookDefaultsEmptyTenant mirrors the previous
+// test for the approval-lifecycle hook. MCPApprovalStore writes
+// SIEMEvents from MCPApprovalRecord.Tenant; if a future enqueue path
+// slips through with an empty Tenant, the hook catches the gap before
+// the chain sender's slog.Warn fires.
+func TestMCPApprovalAuditHookDefaultsEmptyTenant(t *testing.T) {
+	t.Parallel()
+	cap := &captureAuditSender{}
+	s := &server{auditExporter: cap}
+	hook := s.mcpApprovalAuditHook()
+	if hook == nil {
+		t.Fatal("mcpApprovalAuditHook returned nil; expected non-nil hook when auditExporter is wired")
+	}
+	hook(audit.SIEMEvent{
+		EventType: audit.EventMCPToolApproval,
+		TenantID:  "",
+		Action:    "approved",
+	})
+	events := cap.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(events))
+	}
+	if events[0].TenantID != "default" {
+		t.Fatalf("TenantID = %q, want %q (hook must default empty TenantID)",
+			events[0].TenantID, "default")
+	}
 }
 
 func TestRegisterMCPRoutesEnforcesAuthAndHandlesPing(t *testing.T) {

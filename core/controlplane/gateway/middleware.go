@@ -22,6 +22,7 @@ import (
 	"github.com/cordum/cordum/core/infra/env"
 	cordumotel "github.com/cordum/cordum/core/infra/otel"
 	"github.com/cordum/cordum/core/licensing"
+	"github.com/cordum/cordum/core/model"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
@@ -634,16 +635,21 @@ func auditReadMiddleware(sender audit.AuditSender, sampleRate float64, next http
 		if shouldAudit {
 			authCtx, _ := r.Context().Value(auth.ContextKey{}).(*auth.AuthContext)
 			identity := ""
-			tenantID := ""
+			authCtxTenant := ""
 			if authCtx != nil {
 				identity = authCtx.PrincipalID
-				tenantID = authCtx.Tenant
+				authCtxTenant = authCtx.Tenant
 			}
+			// Anonymous reads land here with authCtx == nil. Resolve the
+			// tenant via authCtx → X-Tenant-ID header → DefaultTenant so
+			// the audit chain never receives a tenantless event (the
+			// sink-level fallback would attribute but at slog.Warn —
+			// surfacing as per-request log noise). task-3fad45d3.
 			sender.Send(audit.SIEMEvent{
 				Timestamp: time.Now().UTC(),
 				EventType: audit.EventSystemAuth,
 				Severity:  audit.SeverityInfo,
-				TenantID:  tenantID,
+				TenantID:  model.ResolveTenantForAudit(authCtxTenant, r.Header.Get("X-Tenant-ID")),
 				Action:    "data.read",
 				Identity:  identity,
 				Extra: map[string]string{

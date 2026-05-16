@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +108,60 @@ func TestAuditChainSenderAttributesTenantlessEventsToDefaultTenant(t *testing.T)
 	}
 	if result.Status != audit.VerifyStatusOK || result.TotalEvents != 1 {
 		t.Fatalf("verify result = status %q total %d, want ok/1", result.Status, result.TotalEvents)
+	}
+}
+
+// TestAuditChainSenderTenantlessFallbackEmitsWarn asserts the Phase 4
+// downgrade (Debug → Warn) of the sink-level tenantless-event log.
+// After task-3fad45d3 Phase 2 wires every producer site to attribute
+// TenantID explicitly, any sink-level fallback firing in production
+// is a producer regression — surfacing it at slog.Warn (not Debug)
+// ensures CI / dev / oncall logs flag it immediately rather than
+// letting it accumulate silently.
+//
+// Sequential (not t.Parallel) because the global slog.Default() swap
+// must not race with sibling tests' logs landing in the same buffer.
+func TestAuditChainSenderTenantlessFallbackEmitsWarn(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	chainer := audit.NewChainer(client, "")
+	downstream := &testAuditSender{}
+	sender := newAuditChainSender(chainer, downstream)
+
+	sender.Send(audit.SIEMEvent{
+		Timestamp: time.Now().UTC(),
+		EventType: audit.EventSystemAuth,
+		Severity:  audit.SeverityMedium,
+		Action:    "auth.failure",
+		// TenantID intentionally empty to exercise the fallback.
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") {
+		t.Fatalf("expected WARN-level log line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "PRODUCER BUG") {
+		t.Fatalf("expected 'PRODUCER BUG' signal in log line, got:\n%s", out)
+	}
+	// The rewrite still happens — task rail #1 keeps the fallback in
+	// place until a CI gate exists. Confirms downgrade did not also
+	// remove the rewrite.
+	if downstream.Len() != 1 {
+		t.Fatalf("downstream event count = %d, want 1 (rewrite must still forward)", downstream.Len())
+	}
+	if downstream.Get(0).TenantID != model.DefaultTenant {
+		t.Fatalf("forwarded TenantID = %q, want %q (rewrite must still default)",
+			downstream.Get(0).TenantID, model.DefaultTenant)
 	}
 }
