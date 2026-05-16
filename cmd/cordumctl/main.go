@@ -75,6 +75,8 @@ func main() {
 		runGovernanceCmd(args)
 	case "edge":
 		os.Exit(runEdgeCmd(args))
+	case "shadow":
+		os.Exit(runShadowCmd(args))
 	default:
 		usage()
 		os.Exit(1)

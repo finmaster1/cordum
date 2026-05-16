@@ -7,6 +7,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-140 — Local shadow-agent scanner observe mode (2026-05-16, task-74ac5153)
+
+- New `core/edge/shadow/` package implements an opt-in P3 local scanner
+  that detects likely-unmanaged Claude Code / Codex / Cursor MCP
+  configurations, known agent process names, and known agent-credential
+  env-var names. Observe-mode only: zero enforcement actions, zero
+  filesystem mutation, zero subprocess invocation. The static-source
+  TestScannerRefusesEnforcement guard greps the package for
+  `os.Remove` / `os.WriteFile` / `os.Rename` / `os.RemoveAll` /
+  `exec.Command` / `"os/exec"` and fails the build if any appears in a
+  non-test file (task rail #2 'no enforcement').
+- Privacy boundary: the scanner reads only structural JSON / TOML
+  fields (`mcpServers` keys + transport + endpoint hostname) — never
+  command-lines, env-var values, prompt content, or any field outside
+  the recognised schema. Defence-in-depth `RedactConfigSummary`
+  regex-strips 8 secret-shape patterns (`sk-`, `sk-ant-`, `ghp_`,
+  `gho_`, `xoxb-`, `Bearer`, `BEGIN PRIVATE KEY`, `BEGIN CERTIFICATE`)
+  and bounds output to ≤2048 bytes.
+- Managed-config skip: configs carrying the EDGE-150
+  `CORDUM_EDGE_MANAGED_POLICY_MODE=enterprise-strict` invariant emit
+  `Finding{Status:"managed_skip"}` rather than a shadow flag, so
+  enterprise-managed fleets are not drowned in false-positive alerts
+  (DoD #4 'managed config not flagged').
+- New `cordumctl shadow scan` subcommand wires the scanner with three
+  CLI flags: `--enable-shadow-scan` (opt-in), `--output <path>` (mode
+  0600 JSONL output; default stdout), `--tenant` / `--principal`
+  (override attribution fields). The env-var
+  `CORDUM_EDGE_SHADOW_SCAN_ENABLED=true|1|yes` is honoured as an
+  equivalent opt-in. Default invocation (no flag, no env) prints a
+  polite no-op message and exits 0 so CI pipelines can include the
+  command unconditionally.
+- Cross-platform process enumeration via
+  `github.com/shirou/gopsutil/v3 v3.24.5` (plus 7 indirect transitives
+  including go-ole, plan9stats, perfstat, m1cpu, go-sysconf, numcpus,
+  wmi); test seam `WithProcessLister` injects a mock so unit tests are
+  OS-independent. Symlink-attack hardening via `os.Lstat` (refuses to
+  follow); large-config OOM hardening via `io.LimitReader` at 1 MiB
+  cap with `Status:"partial"` reporting.
+- Threat model + operator runbook: `docs/edge/shadow-scanner.md`
+  documents the trust boundary, opt-in gate, detection sources, finding
+  schema, managed-config skip semantics, and operational guidance.
+  Explicitly NO dashboard surface in this task (task rail #3 'Shadow
+  Agents were cut from P0'); future EDGE-141 adds the server-side
+  finding store, EDGE-142 the remediation-hint generator, EDGE-143 the
+  P3 dashboard design.
+
 #### EDGE-100 — P1 MCP Gateway service skeleton (2026-05-16, task-0ffcac35)
 
 - New `core/mcp/gateway_skeleton.go` exposes `RegisterGatewayRoutes(mux, deps)` +
