@@ -75,9 +75,9 @@ keychain by agentd.
 
 | Platform | Backend              | Provision CLI                                                                  |
 |----------|----------------------|--------------------------------------------------------------------------------|
-| macOS    | Keychain (Security)  | `security add-generic-password -a "$USER" -s cordum_agentd_nonce -w '<value>' -T /usr/local/bin/cordum-agentd -U` |
-| Linux    | Secret Service / libsecret | `printf '%s' '<value>' \| secret-tool store --label='cordum-agentd nonce' service cordum-agentd account cordum_agentd_nonce` |
-| Windows  | Credential Manager   | `cmdkey /generic:cordum_agentd_nonce /user:%USERNAME% /pass:<value>`           |
+| macOS    | Keychain (Security)  | `security add-generic-password -a cordum_agentd_nonce -s cordum-agentd -w '<value>' -T /usr/local/bin/cordum-agentd -U` |
+| Linux    | Secret Service / libsecret | `printf '%s' '<value>' \| secret-tool store --label='cordum-agentd nonce' service cordum-agentd username cordum_agentd_nonce` |
+| Windows  | Credential Manager   | `cmdkey /generic:cordum-agentd:cordum_agentd_nonce /user:cordum_agentd_nonce /pass:<value>` |
 
 Notes:
 
@@ -85,7 +85,7 @@ Notes:
   binary so Console.app does not prompt on first read. `-U` updates the
   entry if already present (idempotent rotation).
 - **Linux** the secret value is passed via stdin to `secret-tool`; the
-  schema fields are positional after `service` and `account`. libsecret
+  schema fields are positional after `service` and `username`. libsecret
   + a running D-Bus session are required; CI without these falls back to
   dev mode + the env passthrough.
 - **Windows** `cmdkey` has no stdin mode — the only API path is
@@ -95,8 +95,12 @@ Notes:
   argument exactly once; the in-process string copy is zeroed
   immediately after the call.
 
-For all three backends, the value is `(service=cordum-agentd, account=<key>)`,
-where `<key>` is one of `cordum_agentd_nonce` / `cordum_api_key`.
+For all three backends, cordum-agentd calls
+`go-keyring.Get("cordum-agentd", <key>)`, where `<key>` is one of
+`cordum_agentd_nonce` / `cordum_api_key`. That maps to macOS
+`service=cordum-agentd, account=<key>`, Linux Secret Service attributes
+`service=cordum-agentd, username=<key>`, and Windows Credential Manager
+target `cordum-agentd:<key>`.
 
 ## 4. Service-Manager Integration
 
@@ -179,9 +183,9 @@ Rotation is a three-step ritual:
 
 ```bash
 # 1. Revoke the existing entry (idempotent — succeeds if missing).
-security delete-generic-password -a "$USER" -s cordum_agentd_nonce        # macOS
-secret-tool clear service cordum-agentd account cordum_agentd_nonce       # Linux
-cmdkey /delete:cordum_agentd_nonce                                        # Windows
+security delete-generic-password -a cordum_agentd_nonce -s cordum-agentd  # macOS
+secret-tool clear service cordum-agentd username cordum_agentd_nonce      # Linux
+cmdkey /delete:cordum-agentd:cordum_agentd_nonce                          # Windows
 
 # 2. Provision the new value (sealed prompt / pipe; never on argv where avoidable).
 tools/scripts/agentd-install/install.sh --rotate                          # POSIX
@@ -249,9 +253,9 @@ tools/scripts/agentd-install/install.sh
 
 ```bash
 # Are the entries in the keychain?
-security find-generic-password -a "$USER" -s cordum_agentd_nonce         # macOS
-secret-tool search service cordum-agentd account cordum_agentd_nonce     # Linux
-cmdkey /list:cordum_agentd_nonce                                         # Windows
+security find-generic-password -a cordum_agentd_nonce -s cordum-agentd   # macOS
+secret-tool search service cordum-agentd username cordum_agentd_nonce    # Linux
+cmdkey /list:cordum-agentd:cordum_agentd_nonce                           # Windows
 
 # Is the service alive?
 launchctl print "gui/$(id -u)/com.cordum.agentd" | head -20              # macOS
