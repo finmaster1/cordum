@@ -129,6 +129,7 @@ type server struct {
 	memStore              store.Store
 	jobStore              *store.RedisJobStore // Typed for ListRecentJobs
 	edgeStore             edgecore.Store
+	mcpUpstreamRegistry   edgecore.MCPUpstreamRegistry
 	decisionLogStore      model.DecisionLogStore
 	copilotStore          copilot.Store
 	governanceHealthCache *governance.Cache
@@ -658,6 +659,7 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 		memStore:               memStore,
 		jobStore:               jobStore,
 		edgeStore:              edgeStore,
+		mcpUpstreamRegistry:    edgecore.NewRedisMCPUpstreamRegistryFromClient(jobStore.Client()),
 		decisionLogStore:       decisionLogStore,
 		copilotStore:           copilot.NotImplementedStore{},
 		governanceHealthCache:  governance.NewCache(60 * time.Second),
@@ -1336,6 +1338,13 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	s.registerRoute(mux, "POST /api/v1/edge/approvals/{approval_ref}/reject", s.instrumented("/api/v1/edge/approvals/{approval_ref}/reject", s.handleRejectEdgeApproval))
 	s.registerRoute(mux, "POST /api/v1/edge/approvals/{approval_ref}/wait", s.instrumented("/api/v1/edge/approvals/{approval_ref}/wait", s.handleWaitEdgeApproval))
 	s.registerRoute(mux, "POST /api/v1/edge/evaluate", s.instrumented("/api/v1/edge/evaluate", s.handleEdgeEvaluate))
+	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleListMCPUpstreams))
+	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams/list", s.instrumented("/api/v1/edge/mcp/upstreams/list", s.handleListMCPUpstreams))
+	s.registerRoute(mux, "POST /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleCreateMCPUpstream))
+	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams/{name}", s.instrumented("/api/v1/edge/mcp/upstreams/{name}", s.handleGetMCPUpstream))
+	s.registerRoute(mux, "PUT /api/v1/edge/mcp/upstreams/{name}", s.instrumented("/api/v1/edge/mcp/upstreams/{name}", s.handleUpdateMCPUpstream))
+	s.registerRoute(mux, "POST /api/v1/edge/mcp/upstreams/{name}/disable", s.instrumented("/api/v1/edge/mcp/upstreams/{name}/disable", s.handleDisableMCPUpstream))
+	s.registerRoute(mux, "POST /api/v1/edge/mcp/upstreams/{name}/enable", s.instrumented("/api/v1/edge/mcp/upstreams/{name}/enable", s.handleEnableMCPUpstream))
 	s.registerRoute(mux, "POST /api/v1/edge/events", s.instrumented("/api/v1/edge/events", s.handleCreateEdgeEvent))
 	s.registerRoute(mux, "POST /api/v1/edge/events/batch", s.instrumented("/api/v1/edge/events/batch", s.handleCreateEdgeEventsBatch))
 	s.registerRoute(mux, "GET /api/v1/edge/sessions/{session_id}/events", s.instrumented("/api/v1/edge/sessions/{session_id}/events", s.handleListEdgeSessionEvents))

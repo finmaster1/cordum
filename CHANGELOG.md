@@ -7,6 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-101 - MCP upstream server registry (2026-05-16, task-fb11aa72)
+
+- New `/api/v1/edge/mcp/upstreams` registry API plus `cordumctl mcp upstream`
+  subcommand for managing approved upstream MCP servers. Entries store
+  name/transport/endpoint-or-command/tenant/auth-secret-ref/labels/risk/enabled
+  metadata and keep disabled records visible to admins by default.
+- Validation rejects raw secrets (`secret://` refs only), unsafe strict-mode
+  local endpoints, shell-metacharacter `stdio` commands, tenant/name key escapes,
+  and enterprise-strict entries that are not on the MCP allowlist.
+- Updates write a 30-day backup of the previous registry record before overwrite,
+  with collision-resistant backup keys for rapid consecutive updates.
+- Builds on the EDGE-100 MCP gateway skeleton; EDGE-104 attach/preview commands
+  and EDGE-105 dashboard surfaces consume this registry. Structured gateway logs
+  emit `mcp-upstream-<op>` outcomes without secret refs or values.
+
 #### Decision-threshold helper for REQUIRE_HUMAN routing (2026-05-16, task-96f931fe)
 
 - New helper `core/policy/actiongates/decision_thresholds.go`

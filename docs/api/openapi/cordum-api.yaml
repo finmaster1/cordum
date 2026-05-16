@@ -1142,6 +1142,255 @@ paths:
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
           $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/mcp/upstreams:
+    get:
+      operationId: listEdgeMCPUpstreams
+      summary: List approved upstream MCP servers
+      description: Lists tenant-scoped upstream MCP registry entries plus system-wide entries. Secret material is never resolved; `auth_secret_ref` is returned only as a redacted `secret://` reference.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: enabled
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: Optional visibility filter. Omit to return enabled and disabled records for admin visibility.
+      responses:
+        '200':
+          description: Upstream MCP registry entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamListResponse'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+    post:
+      operationId: createEdgeMCPUpstream
+      summary: Create or validate an upstream MCP server entry
+      description: Creates a tenant-scoped upstream MCP registry entry. With `validate_only=true`, validates the entry without storing it and returns a validation verdict. Raw secrets are rejected; use `secret://` auth references.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: validate_only
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPUpstreamServerWriteRequest'
+      responses:
+        '200':
+          description: Validation-only verdict when `validate_only=true`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamValidationResponse'
+        '201':
+          description: Upstream MCP registry entry created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamServer'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '413':
+          $ref: '#/components/responses/EdgePayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/mcp/upstreams/list:
+    get:
+      operationId: listEdgeMCPUpstreamsLegacy
+      summary: List approved upstream MCP servers (compatibility path)
+      description: Compatibility alias for `GET /api/v1/edge/mcp/upstreams`.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: enabled
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: Optional visibility filter. Omit to return enabled and disabled records for admin visibility.
+      responses:
+        '200':
+          description: Upstream MCP registry entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamListResponse'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/mcp/upstreams/{name}:
+    get:
+      operationId: getEdgeMCPUpstream
+      summary: Get an upstream MCP server entry
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Upstream MCP registry entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamServer'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+    put:
+      operationId: updateEdgeMCPUpstream
+      summary: Update an upstream MCP server entry
+      description: Updates a tenant-scoped upstream MCP registry entry and stores a best-effort backup of the prior entry before overwrite.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPUpstreamServerWriteRequest'
+      responses:
+        '200':
+          description: Updated upstream MCP registry entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamServer'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '413':
+          $ref: '#/components/responses/EdgePayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/mcp/upstreams/{name}/disable:
+    post:
+      operationId: disableEdgeMCPUpstream
+      summary: Disable an upstream MCP server entry
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Disabled upstream MCP registry entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamServer'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/mcp/upstreams/{name}/enable:
+    post:
+      operationId: enableEdgeMCPUpstream
+      summary: Enable an upstream MCP server entry
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Enabled upstream MCP registry entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPUpstreamServer'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
   /api/v1/edge/events:
     post:
       operationId: createEdgeEvent
@@ -7833,6 +8082,95 @@ components:
           schema:
             $ref: '#/components/schemas/GovernanceHealth'
   schemas:
+    MCPUpstreamServer:
+      type: object
+      required: [name, transport, tenant_id, risk, enabled]
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9.-]+$'
+        transport:
+          type: string
+          enum: [stdio, http, sse]
+        endpoint:
+          type: string
+          format: uri
+          description: HTTPS endpoint for http/sse transports; unsafe local endpoints are rejected in strict policy modes.
+        command:
+          type: array
+          description: Shell-free argv vector for stdio transport. Shell metacharacters are rejected.
+          items:
+            type: string
+        tenant_id:
+          type: string
+          description: Tenant scope for the upstream; `*` is reserved for system-wide entries.
+        auth_secret_ref:
+          type: string
+          pattern: '^secret://'
+          description: Reference to auth material. Raw secrets are rejected and never resolved in registry responses.
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        risk:
+          type: string
+          enum: [low, medium, high, critical]
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MCPUpstreamServerWriteRequest:
+      type: object
+      description: Write payload for an upstream MCP entry. `tenant_id` may be omitted and is resolved from X-Tenant-ID; `created_at` and `updated_at` are server-managed.
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9.-]+$'
+        transport:
+          type: string
+          enum: [stdio, http, sse]
+        endpoint:
+          type: string
+          format: uri
+        command:
+          type: array
+          items:
+            type: string
+        tenant_id:
+          type: string
+        auth_secret_ref:
+          type: string
+          pattern: '^secret://'
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        risk:
+          type: string
+          enum: [low, medium, high, critical]
+        enabled:
+          type: boolean
+    MCPUpstreamListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MCPUpstreamServer'
+    MCPUpstreamValidationResponse:
+      type: object
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+        reason:
+          type: string
+          description: Redacted validation failure reason, never a raw secret.
     EdgeSessionCreateRequest:
       type: object
       properties:

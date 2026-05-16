@@ -45,7 +45,7 @@ func runShadowScanCmdWith(args []string, stdout, stderr io.Writer, factory shado
 	// they invoke via CLI or library.
 	envEnabled := os.Getenv("CORDUM_EDGE_SHADOW_SCAN_ENABLED")
 	if !*enable && envEnabled != "true" && envEnabled != "1" && envEnabled != "yes" {
-		fmt.Fprintln(stdout, "shadow scan disabled by default; use --enable-shadow-scan to opt in")
+		_, _ = fmt.Fprintln(stdout, "shadow scan disabled by default; use --enable-shadow-scan to opt in")
 		return 0
 	}
 
@@ -66,10 +66,10 @@ func runShadowScanCmdWith(args []string, stdout, stderr io.Writer, factory shado
 		// ErrOptInRequired here is unexpected (the env / flag gate above
 		// should have short-circuited) but kept for defence-in-depth.
 		if errors.Is(err, shadow.ErrOptInRequired) {
-			fmt.Fprintln(stdout, "shadow scan disabled by default; use --enable-shadow-scan to opt in")
+			_, _ = fmt.Fprintln(stdout, "shadow scan disabled by default; use --enable-shadow-scan to opt in")
 			return 0
 		}
-		fmt.Fprintf(stderr, "shadow scan: %s\n", err)
+		_, _ = fmt.Fprintf(stderr, "shadow scan: %s\n", err)
 		return 2
 	}
 
@@ -81,7 +81,7 @@ func runShadowScanCmdWith(args []string, stdout, stderr io.Writer, factory shado
 		// applies to keep findings off other users' eyes.
 		f, openErr := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if openErr != nil {
-			fmt.Fprintf(stderr, "shadow scan: open output: %s\n", openErr)
+			_, _ = fmt.Fprintf(stderr, "shadow scan: open output: %s\n", openErr)
 			return 2
 		}
 		defer func() { _ = f.Close() }()
@@ -91,7 +91,7 @@ func runShadowScanCmdWith(args []string, stdout, stderr io.Writer, factory shado
 	enc := json.NewEncoder(sink)
 	for _, finding := range findings {
 		if encErr := enc.Encode(finding); encErr != nil {
-			fmt.Fprintf(stderr, "shadow scan: encode finding: %s\n", encErr)
+			_, _ = fmt.Fprintf(stderr, "shadow scan: encode finding: %s\n", encErr)
 			return 2
 		}
 	}

@@ -143,6 +143,106 @@ expired / consumed / args_mismatch / policy_mismatch / self_approval /
 cross_tenant / not_found) surface as JSON-RPC `-32096` with
 `error.data.kind` carrying the typed conflict family.
 
+
+## Upstream Server Registry (EDGE-101)
+
+Cordum keeps approved upstream MCP server definitions in a tenant-scoped
+registry instead of letting enterprise deployments attach arbitrary unmanaged
+servers. The registry is the contract consumed by the EDGE-104 attach/preview
+commands and the future EDGE-105 dashboard surface; the dashboard work is
+intentionally deferred and no `cordum/dashboard/` files are touched here.
+
+### Data model
+
+Each registry entry stores:
+
+- `name` - stable upstream identifier (`A-Z`, `a-z`, `0-9`, `.`, `-`).
+- `transport` - one of `http`, `sse`, or `stdio`.
+- `endpoint` - HTTPS/HTTP URL for remote transports. Enterprise-strict mode
+  rejects unsafe local endpoints and rejects any host that resolves to loopback
+  or unspecified IPs.
+- `command` - shell-free argv vector for `stdio`; shell metacharacters such as
+  `;`, `&&`, pipes, redirects, backticks, and `$(` are rejected.
+- `tenant_id` - tenant scope; `*` is reserved for system-wide entries and
+  requires cross-tenant authority at the API layer.
+- `auth_secret_ref` - optional secret reference. Raw secrets are rejected;
+  values must be `secret://...` references when present.
+- `labels` - operator metadata (`key=value`) for ownership and routing.
+- `risk` - `low`, `medium`, `high`, or `critical`.
+- `enabled` - disabled records remain visible to admins by default; add
+  `?enabled=true` to list only active records.
+
+List/Get responses never resolve credentials and never return raw secret
+material. They return the `secret://` reference only, so secret resolution stays
+inside the runtime/keychain boundary.
+
+### HTTP API
+
+All routes are under `/api/v1/edge/mcp/upstreams`, use the existing gateway
+auth middleware, require `X-Tenant-ID`, run through the bounded-body cap, and
+emit only redacted error details.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/edge/mcp/upstreams` | List tenant + system entries. Optional `?enabled=true|false`. |
+| `GET` | `/api/v1/edge/mcp/upstreams/list` | Compatibility alias for list. |
+| `POST` | `/api/v1/edge/mcp/upstreams` | Create an entry, or validate-only with `?validate_only=true`. |
+| `GET` | `/api/v1/edge/mcp/upstreams/{name}` | Read one entry by name. |
+| `PUT` | `/api/v1/edge/mcp/upstreams/{name}` | Update an entry. The previous payload is backed up first. |
+| `POST` | `/api/v1/edge/mcp/upstreams/{name}/disable` | Disable an entry without deleting it. |
+| `POST` | `/api/v1/edge/mcp/upstreams/{name}/enable` | Re-enable a disabled entry. |
+
+Create/update validation rejects raw secret refs, unsafe strict-mode endpoints,
+invalid transports, unsafe `stdio` argv elements, name/tenant key escapes, and
+enterprise-strict entries that are not allowlisted.
+
+### `cordumctl mcp upstream`
+
+Operators can manage entries through the existing MCP CLI tree:
+
+```bash
+cordumctl mcp upstream add --name tenant-tools --transport http --endpoint https://mcp.example.com/tools --auth-secret-ref secret://vault/mcp/tenant-tools --risk medium --label team=platform --validate-only
+
+cordumctl mcp upstream add --name tenant-tools --transport http --endpoint https://mcp.example.com/tools --auth-secret-ref secret://vault/mcp/tenant-tools
+
+cordumctl mcp upstream validate --name tenant-tools --transport http --endpoint https://mcp.example.com/tools --auth-secret-ref secret://vault/mcp/tenant-tools
+cordumctl mcp upstream list --json
+cordumctl mcp upstream get tenant-tools
+cordumctl mcp upstream disable tenant-tools
+cordumctl mcp upstream enable tenant-tools
+```
+
+`--validate-only` calls the API with `?validate_only=true` and does not write a
+registry record. `--auth-secret-ref` must be a `secret://` reference; do not pass
+provider API keys or bearer tokens on the command line.
+
+### Enterprise-strict allowlist
+
+In enterprise-strict mode, registry writes are allowed only when the upstream
+`name` appears in the effective MCP allowlist (`safety.mcp.allowed_upstreams`,
+or the handler's explicit validation query parameters in tests/tools). This
+prevents unmanaged upstreams from being introduced by local attach flows.
+
+### Backup-on-update
+
+`PUT` stores the previous record under a Redis backup key before overwriting the
+active registry entry. Backup keys include a nanosecond timestamp plus collision
+avoidance so rapid consecutive updates keep distinct prior payloads. Backups
+expire after 30 days and are intended for operator rollback/forensics, not for
+secret recovery (only `secret://` references are stored).
+
+### Structured logs
+
+Handlers emit one structured log per registry outcome:
+
+```json
+{"event":"mcp-upstream-<op>","tenant_id":"tenant-a","name":"tenant-tools","decision":"allow|deny","reason":"..."}
+```
+
+The log fields intentionally omit secret values and do not include the
+`auth_secret_ref` field, even as a reference. Store/API responses may include the
+`secret://` reference; logs stay descriptor-only.
+
 ## Available Tools
 
 Current runtime behavior:
