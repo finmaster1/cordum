@@ -203,17 +203,21 @@ func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session := edge.EdgeSession{
-		SessionID:    sessionID,
-		TenantID:     tenantID,
-		PrincipalID:  principalID,
-		AgentProduct: "cordum-mcp-gateway",
-		Mode:         edge.SessionModeLocalDev,
-		PolicyMode:   edge.PolicyModeObserve,
-		StartedAt:    now,
-		Status:       edge.SessionStatusRunning,
+		SessionID:     sessionID,
+		TenantID:      tenantID,
+		PrincipalID:   principalID,
+		PrincipalType: edge.PrincipalTypeService,
+		AgentProduct:  "cordum-mcp-gateway",
+		Mode:          edge.SessionModeLocalDev,
+		PolicyMode:    edge.PolicyModeObserve,
+		StartedAt:     now,
+		Status:        edge.SessionStatusRunning,
+		RiskSummary: edge.RiskSummary{
+			MaxRisk: edge.RiskLevelLow,
+		},
 	}
 	if err := g.deps.Store.CreateSession(r.Context(), session); err != nil {
-		g.emitFailed(r.Context(), tenantID, principalID, "create_session: "+err.Error(), now)
+		g.emitFailed(r.Context(), tenantID, principalID, sessionID, executionID, "create_session: "+err.Error(), now)
 		writeError(w, http.StatusInternalServerError, "session_create_failed", "could not create edge session")
 		return
 	}
@@ -223,11 +227,12 @@ func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 		SessionID:   sessionID,
 		TenantID:    tenantID,
 		Adapter:     edge.AdapterMCPGateway,
+		Mode:        edge.ExecutionModeLocalDev,
 		StartedAt:   now,
 		Status:      edge.ExecutionStatusRunning,
 	}
 	if err := g.deps.Store.CreateExecution(r.Context(), execution); err != nil {
-		g.emitFailed(r.Context(), tenantID, principalID, "create_execution: "+err.Error(), now)
+		g.emitFailed(r.Context(), tenantID, principalID, sessionID, executionID, "create_execution: "+err.Error(), now)
 		writeError(w, http.StatusInternalServerError, "execution_create_failed", "could not create agent execution")
 		return
 	}
@@ -241,6 +246,8 @@ func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 		Timestamp:   now,
 		Layer:       edge.LayerMCP,
 		Kind:        edge.EventKindMCPServerConnected,
+		Decision:    edge.DecisionRecorded,
+		Status:      edge.ActionStatusOK,
 	}
 	if _, err := g.deps.Store.AppendEvent(r.Context(), connectEvent); err != nil {
 		g.deps.Logger.Warn("mcp gateway: connect event append failed",
@@ -256,15 +263,23 @@ func (g *Gateway) HandleClientConnect(w http.ResponseWriter, r *http.Request) {
 
 // emitFailed records a connect-failure event. Best-effort: a Store write
 // failure here is logged but does not propagate, since the caller is
-// already on an error path returning to the client.
-func (g *Gateway) emitFailed(ctx context.Context, tenantID, principalID, reason string, ts time.Time) {
+// already on an error path returning to the client. sessionID and
+// executionID are minted up-front in HandleClientConnect so the failure
+// event carries valid IDs even when the corresponding CreateSession or
+// CreateExecution call rejected the record — RedisStore AppendEvent
+// validation requires both fields non-empty.
+func (g *Gateway) emitFailed(ctx context.Context, tenantID, principalID, sessionID, executionID, reason string, ts time.Time) {
 	failedEvent := edge.AgentActionEvent{
 		EventID:     mustGatewayID("aev"),
+		SessionID:   sessionID,
+		ExecutionID: executionID,
 		TenantID:    tenantID,
 		PrincipalID: principalID,
 		Timestamp:   ts,
 		Layer:       edge.LayerMCP,
 		Kind:        edge.EventKindMCPServerFailed,
+		Decision:    edge.DecisionDeny,
+		Status:      edge.ActionStatusFailed,
 	}
 	// Reason is logged structurally; we deliberately do NOT serialise it into
 	// the event body to avoid leaking transport-layer error strings into the

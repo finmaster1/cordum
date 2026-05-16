@@ -43,7 +43,16 @@ type fakeGatewayStore struct {
 	createErr  error
 }
 
+// CreateSession runs the real edge.EdgeSession.Validate() before recording —
+// EDGE-100 QA reopen #1 (msg-91a05b16) called this out as the masking gap
+// that let the prior submit pass with empty enum values (PrincipalType,
+// RiskSummary.MaxRisk). With validation here, any future regression that
+// constructs an invalid EdgeSession surfaces in unit tests instead of only
+// in a miniredis-backed integration test.
 func (f *fakeGatewayStore) CreateSession(_ context.Context, s edge.EdgeSession) error {
+	if err := s.Validate(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.createErr != nil {
@@ -53,7 +62,13 @@ func (f *fakeGatewayStore) CreateSession(_ context.Context, s edge.EdgeSession) 
 	return nil
 }
 
+// CreateExecution validates the AgentExecution against the real
+// edge.AgentExecution.Validate() rules (e.g. non-empty Mode) before
+// recording. See CreateSession comment for QA-reopen rationale.
 func (f *fakeGatewayStore) CreateExecution(_ context.Context, e edge.AgentExecution) error {
+	if err := e.Validate(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.createErr != nil {
@@ -63,7 +78,14 @@ func (f *fakeGatewayStore) CreateExecution(_ context.Context, e edge.AgentExecut
 	return nil
 }
 
+// AppendEvent validates the AgentActionEvent against the real
+// edge.AgentActionEvent.Validate() rules (e.g. non-empty SessionID,
+// ExecutionID, Decision, Status) before recording. See CreateSession
+// comment for QA-reopen rationale.
 func (f *fakeGatewayStore) AppendEvent(_ context.Context, ev edge.AgentActionEvent) (edge.AgentActionEvent, error) {
+	if err := ev.Validate(); err != nil {
+		return edge.AgentActionEvent{}, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, ev)
