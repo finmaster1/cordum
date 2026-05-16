@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/cordum/cordum/core/edge/claude"
 )
@@ -18,7 +17,6 @@ import (
 const (
 	defaultManagedHookCommand = "/opt/cordum/bin/cordum-hook"
 	defaultManagedAgentdURL   = "http://127.0.0.1:8765/v1/edge/hooks/claude"
-	defaultManagedHookTimeout = 5 * time.Second
 )
 
 // runEdgeManagedSettingsCmd dispatches the managed-settings CLI subcommands
@@ -82,7 +80,7 @@ func runEdgeManagedSettingsExportCmd(args []string, stdout, stderr io.Writer) in
 	}
 	bundle, err := claude.GenerateManagedSettingsTemplate(claude.ManagedSettingsOptions{
 		HookCommand:         *hookCommand,
-		HookTimeout:         defaultManagedHookTimeout,
+		HookTimeout:         claude.DefaultHookTimeout,
 		AgentdURL:           *agentdURL,
 		MCPGatewayURL:       *mcpURL,
 		LLMProxyBaseURL:     *llmProxy,
@@ -183,7 +181,7 @@ func runEdgeManagedSettingsRollbackCmd(args []string, stdout, stderr io.Writer) 
 	}
 	bundle, err := claude.GenerateManagedSettingsTemplate(claude.ManagedSettingsOptions{
 		HookCommand:         *hookCommand,
-		HookTimeout:         defaultManagedHookTimeout,
+		HookTimeout:         claude.DefaultHookTimeout,
 		AgentdURL:           *agentdURL,
 		MCPGatewayURL:       *mcpURL,
 		LLMProxyBaseURL:     *llmProxy,

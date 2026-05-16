@@ -132,7 +132,7 @@ func buildEdgeDoctorEnv(fs *flagSet, opts edgeDoctorOptions) (*edgeDoctorEnv, er
 		lookPath:            exec.LookPath,
 		statFile:            os.Stat,
 		readFile:            os.ReadFile,
-		dialTCP:              defaultEdgeDoctorDialTCP,
+		dialTCP:             defaultEdgeDoctorDialTCP,
 	}, nil
 }
 

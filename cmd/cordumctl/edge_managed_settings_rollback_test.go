@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cordum/cordum/core/edge/claude"
 )
@@ -84,7 +83,7 @@ func TestManagedSettingsFullRollbackCycle(t *testing.T) {
 	// at two different timestamps) must converge on identical content.
 	reference, err := claude.GenerateManagedSettingsTemplate(claude.ManagedSettingsOptions{
 		HookCommand:         "/opt/cordum/bin/cordum-hook",
-		HookTimeout:         5 * time.Second,
+		HookTimeout:         claude.DefaultHookTimeout,
 		AgentdURL:           defaultManagedAgentdURL,
 		MCPGatewayURL:       testManagedMCPGatewayURL,
 		LLMProxyBaseURL:     testManagedLLMProxyURL,
