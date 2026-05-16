@@ -243,6 +243,109 @@ The log fields intentionally omit secret values and do not include the
 `auth_secret_ref` field, even as a reference. Store/API responses may include the
 `secret://` reference; logs stay descriptor-only.
 
+## Attach Commands (EDGE-104)
+
+`cordumctl mcp preview|attach|rollback` adds Cordum's MCP Gateway to a
+local AI-client config (Claude Code, OpenAI Codex CLI, Cursor) so the
+client routes `tools/call` through the gateway's policy gate and
+upstream registry instead of reaching the original tool directly.
+
+Attach is the **convenience/adoption path**. For enterprise enforcement
+use the managed-settings flow (`cordumctl edge managed-settings export`,
+EDGE-150) — managed settings deploy at the fleet level and cannot be
+overridden by the user.
+
+### Per-client default config paths
+
+| Client       | Path                                | Format |
+|--------------|-------------------------------------|--------|
+| `claude_code`| `~/.claude.json` (top-level `mcpServers`) | JSON   |
+| `codex`      | `~/.codex/config.toml` (`[mcp_servers.<id>]` sections) | TOML   |
+| `cursor`     | `~/.cursor/mcp.json` (top-level `mcpServers`) | JSON   |
+
+Override the default with `--config-path` (used by CI and tests; in
+production prefer the documented user-scope path so other tooling
+finds the same entry).
+
+### Subcommand surface
+
+```bash
+# Read-only diff — never writes; exits 2 on parse failure.
+cordumctl mcp preview --client claude_code
+
+# Apply the merge. Without --apply, falls through to a preview so
+# operators see exactly what would change.
+cordumctl mcp attach --client claude_code --apply
+
+# Restore the most-recent .bak.<unix_ms> snapshot via atomic rename.
+cordumctl mcp rollback --client claude_code
+```
+
+Flags common to `preview` and `attach`:
+
+- `--gateway-name` (default `cordum-gateway`) — entry name in the
+  client config.
+- `--gateway-transport` (default `http`) — `http` | `sse` | `stdio`.
+- `--gateway-endpoint` (default `https://localhost:8081/api/v1/mcp/gateway`)
+  — URL for HTTP/SSE; ignored for stdio.
+- `--gateway-secret-ref` — optional `secret://` reference written into
+  the entry's env block as `CORDUM_AUTH_SECRET_REF` (see EDGE-101 for
+  the upstream registry's secret-ref contract).
+
+### Backup-on-modify
+
+Every `attach` against an existing file writes a byte-identical
+`<path>.bak.<unix_ms>` snapshot **before** atomic-renaming the merged
+payload into place. The unix-ms suffix gives a deterministic newest-
+first sort and lets rapid consecutive applies coexist. Backups stay
+adjacent to the target file so they survive operator `rm -rf ~/.cache`
+without affecting attach state; cleanup is manual today (sibling task
+tracks an auto-rotate `cordumctl mcp cleanup-backups`).
+
+### Rollback semantics
+
+`rollback` selects the most-recent `<path>.bak.<unix_ms>` via Glob +
+lexicographic sort (equal-width unix_ms is sort-safe) and `os.Rename`s
+it back over the target. Cross-filesystem rename triggers a copy-and-
+remove fallback. Exits `2` with a `"no backup"` signal if no snapshot
+is found — operators cannot silently overwrite their current config
+with a no-op restore.
+
+### Secret redaction
+
+Preview output runs through `redactSecrets` (mcp_attach_common.go)
+which masks OpenAI-style `sk-*`, GitHub `ghp_*`/`gho_*`, and
+`Bearer <token>` patterns with `<REDACTED>` before any stdout write.
+This is a hard contract per the task DoD: a pre-existing target config
+that contains a raw token never echoes the token into chat / paste-bin
+/ CI log. Apply output does not include redacted content (only the
+target path + backup path).
+
+### Schema-version tracking
+
+Each adapter source bakes in the URL + fetch-date of the client doc it
+was validated against:
+
+| Client       | Doc URL                                                     | Validated |
+|--------------|-------------------------------------------------------------|-----------|
+| `claude_code`| https://code.claude.com/docs/en/mcp                         | 2026-05-16 |
+| `codex`      | https://developers.openai.com/codex/config-reference        | 2026-05-16 |
+| `cursor`     | https://cursor.com/docs/context/mcp                         | 2026-05-16 |
+
+Audit scripts can call `AttachSchemaProvenance(client)` (Go API) to
+read these so a periodic review surfaces stale schemas. The runtime
+does NOT fetch live docs on every invocation; operators who suspect
+drift run `cordumctl mcp upstream validate` against the EDGE-101
+registry for an authoritative gateway-side check.
+
+### Cross-link to EDGE-101 upstream registry
+
+Attach writes the per-client server entry; **what** it writes is
+derived from the canonical `cordum-gateway` `UpstreamServer` record
+that EDGE-101 owns (see `core/edge/mcp_upstream_registry.go`
+`UpstreamServer{Name, Transport, Endpoint, Command, ...}`). The same
+fields drive both surfaces — no parallel source of truth.
+
 ## Available Tools
 
 Current runtime behavior:

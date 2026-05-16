@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-104 — cordumctl mcp attach/preview/rollback for Claude Code, Codex, and Cursor (2026-05-16, task-9351f243)
+
+- `cmd/cordumctl/mcp_attach.go` + `mcp.go` — new `cordumctl mcp <preview|attach|rollback>` verbs alongside existing `pending|approve|reject|tools|keygen|upstream`. `attach` requires `--apply` to write; without it falls through to a preview run so operators see exactly what would change.
+- `cmd/cordumctl/mcp_attach_common.go` — shared `AttachAdapter` interface + lifecycle helpers (`PreviewAttach`, `ApplyAttach`, `RollbackAttach`). Backup-on-modify via `<path>.bak.<unix_ms>` with deterministic newest-first restore. Atomic writes via tempfile + `os.Rename` (cross-fs fallback to copy+remove). Mode `0600` on written files. Secret redaction in preview output masks `sk-*`, `ghp_*`/`gho_*`, `Bearer <token>` patterns before any stdout write.
+- `cmd/cordumctl/mcp_adapter_claude_code.go` — targets `~/.claude.json`, user-scope `mcpServers` map. HTTP/SSE entries render as `{type, url}`; stdio as `{command, args}`. Preserves all sibling keys (project list, history, theme) verbatim via `map[string]any` round-trip + stable-sorted re-serialize.
+- `cmd/cordumctl/mcp_adapter_codex.go` — targets `~/.codex/config.toml`. Hand-rolled byte-level splicer rather than adding a TOML library dep: locates `[mcp_servers.<id>]` blocks, replaces in place for an existing gateway entry, appends with a blank-line separator for a new one. Operator-authored comments + whitespace in non-mcp_servers sections are byte-preserved. HTTP gateways render as a stdio invocation of `cordumctl mcp proxy --endpoint <URL>` since Codex's documented MCP transport is stdio-only.
+- `cmd/cordumctl/mcp_adapter_cursor.go` — targets `~/.cursor/mcp.json`. Same JSON-merge primitive as Claude Code; only the stdio entry shape differs (Cursor docs require explicit `type: "stdio"`).
+- Schema provenance constants on every adapter (`<Client>SchemaURL` + `<Client>SchemaDate`, fetched 2026-05-16 from current docs). Exposed via `AttachSchemaProvenance(client)` for audit scripts.
+- Tests: `cmd/cordumctl/mcp_attach_test.go` — 11 test functions × 3 clients (`claude_code`, `codex`, `cursor`) covering preview missing/existing/malformed, apply creates-new/backs-up-existing, rollback restores/missing-backup-fails, secret redaction, idempotency, per-platform default path resolution (Linux + Windows home shapes), and dispatcher-level `attach` without `--apply` writes nothing.
+- Attach is the convenience/adoption path; for enterprise enforcement use the managed-settings flow (`cordumctl edge managed-settings export`, EDGE-150). The canonical cordum-gateway upstream config comes from the EDGE-101 registry (`core/edge/mcp_upstream_registry.go`).
+- Docs: `docs/mcp-server.md` § "Attach Commands (EDGE-104)" covers subcommand surface, per-client paths, backup semantics, rollback, secret redaction guarantees, and schema-version tracking.
+
 #### EDGE-103 reopen #1 — approval-required payload + Edge mint dual-write (2026-05-16, task-968d6646)
 
 - `core/mcp/registry.go` — `ApprovalRequired` struct extended with

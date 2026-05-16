@@ -16,7 +16,7 @@ import (
 // runMCPCmd dispatches `cordumctl mcp <subcommand>`.
 func runMCPCmd(args []string) {
 	if len(args) < 1 {
-		fail("usage: cordumctl mcp <pending|approve|reject|tools|keygen|upstream> [options]")
+		fail("usage: cordumctl mcp <pending|approve|reject|tools|keygen|upstream|preview|attach|rollback> [options]")
 	}
 	switch args[0] {
 	case "pending":
@@ -31,6 +31,13 @@ func runMCPCmd(args []string) {
 		runMCPKeygen(args[1:])
 	case "upstream":
 		if code := runMCPUpstreamCmd(args[1:], os.Stdout, os.Stderr, nil); code != 0 {
+			os.Exit(code)
+		}
+	case "preview", "attach", "rollback":
+		// EDGE-104: cordumctl mcp <preview|attach|rollback> --client X
+		// dispatches the attach lifecycle. The verb stays in args so
+		// runMCPAttachCmd can branch on it without re-parsing.
+		if code := runMCPAttachCmd(args, os.Stdout, os.Stderr); code != 0 {
 			os.Exit(code)
 		}
 	default:
