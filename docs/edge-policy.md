@@ -212,3 +212,39 @@ The Edge policy examples are executable fixtures, not static samples:
   fixtures through `/api/v1/edge/evaluate` with a deterministic policy-backed
   Safety Kernel fake and asserts response decisions, rule IDs, persisted Edge
   events, and absence of synthetic `job_id`.
+
+## Strict-mode e2e gate requires a 2-key gateway stack
+
+`tools/scripts/edge_fake_hook_e2e.sh` in strict mode (`CORDUM_INTEGRATION=1`)
+exercises the full approval lifecycle: each gate issues a
+`/api/v1/edge/evaluate` POST as the REQUESTER principal, then a
+`/api/v1/edge/approvals/{ref}/{approve,reject}` POST as the APPROVER
+principal. The gateway's `edgeApprovalRequesterMatchesResolver` +
+`identitiesOverlap` (`core/controlplane/gateway/helpers.go:1428-1434`) match
+on `sha256(api_key)[:4]` regardless of any `X-Principal-Id` header override,
+so a single shared API key trips `self_approval_denied` (HTTP 403) before
+the gate can complete.
+
+To run the strict-mode gate locally you need TWO distinct API keys: a
+REQUESTER (`CORDUM_API_KEY`, the existing single-key env) and an APPROVER
+(`CORDUM_APPROVER_API_KEY`, the script's new env var). The approver key
+must be admin-registered in the gateway via `CORDUM_API_KEYS` JSON. The
+docker-compose default deployment intentionally ships a single key for
+adoption-friction reduction and cannot satisfy strict mode — production
+operators do not run this gate.
+
+CI provisions the 2-key stack via:
+
+- `.github/workflows/edge-fake-hook-e2e.yml` — generates two random keys
+  per run, asserts sha256-prefix distinctness, registers the approver via
+  `CORDUM_API_KEYS=[{"key":"<hex>","role":"admin","tenant":"default", ...}]`.
+- `docker-compose.ci.yml` — workflow-only override that adds the
+  `CORDUM_API_KEYS` env passthrough to the `api-gateway` service. The
+  default `docker-compose.yml` is unchanged; the override is layered with
+  `docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d`.
+
+`CORDUM_APPROVER_API_KEY` defaults to `CORDUM_API_KEY` for backward
+compatibility — existing single-key callers still see the explicit
+`self_approval_denied` failure with a directed remediation message rather
+than a silent regression. See the script's `ENVIRONMENT` block for the full
+contract.

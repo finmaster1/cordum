@@ -66,6 +66,18 @@ readonly SCRIPT_NAME="edge_fake_hook_e2e"
 # Defaults (env-overridable)
 # ---------------------------------------------------------------------------
 : "${CORDUM_API_KEY:=}"
+# CORDUM_APPROVER_API_KEY is the auth header on approve/reject POSTs (gates
+# edge_approval_flow / edge_approval_rejected). The gateway's
+# edgeApprovalRequesterMatchesResolver + identitiesOverlap
+# (core/controlplane/gateway/helpers.go:1428-1434) match on
+# sha256(api_key)[:4] regardless of X-Principal-Id, so strict mode against a
+# single-key stack always trips self_approval_denied. Default falls back to
+# CORDUM_API_KEY for backward compat: existing single-key callers still hit
+# the self-approval 403 explicitly (the script surfaces that as a directed
+# error). 2-key stacks (CI workflow .github/workflows/edge-fake-hook-e2e.yml
+# + docker-compose.ci.yml override) set this to a second admin-role key that
+# is registered in the gateway via CORDUM_API_KEYS JSON env.
+: "${CORDUM_APPROVER_API_KEY:=${CORDUM_API_KEY}}"
 : "${CORDUM_TENANT_ID:=default}"
 : "${CORDUM_GATEWAY:=}"
 : "${CORDUM_INTEGRATION:=}"
@@ -146,7 +158,24 @@ MODES
 
 ENVIRONMENT
   CORDUM_API_KEY                 Required in strict mode. API key for the
-                                 Gateway and for cordum-agentd.
+                                 Gateway and for cordum-agentd. Identifies
+                                 the REQUESTER principal on
+                                 /api/v1/edge/evaluate POSTs.
+  CORDUM_APPROVER_API_KEY        Optional. API key for /approve and /reject
+                                 POSTs in approval gates. Defaults to
+                                 CORDUM_API_KEY. STRICT MODE REQUIREMENT:
+                                 must differ from CORDUM_API_KEY in
+                                 sha256(key)[:4] (admin-role key registered
+                                 in the gateway via CORDUM_API_KEYS JSON).
+                                 docker-compose default single-key stacks
+                                 cannot satisfy because
+                                 edgeApprovalRequesterMatchesResolver +
+                                 identitiesOverlap
+                                 (core/controlplane/gateway/helpers.go:1428-1434)
+                                 match on apikey-sha256 prefix and reject
+                                 self-approval. CI provisions a 2-key stack
+                                 via docker-compose.ci.yml +
+                                 .github/workflows/edge-fake-hook-e2e.yml.
   CORDUM_TENANT_ID               Tenant for /api/v1/edge/* requests
                                  (default `default`).
   CORDUM_GATEWAY                 Gateway base URL. If unset, derived from
@@ -1310,7 +1339,7 @@ JSON
   local approve_body='{"reason":"edge_fake_hook_e2e synthetic approval"}'
   local saved_headers=("${AUTH_HEADERS[@]}")
   AUTH_HEADERS=(
-    -H "X-API-Key: ${CORDUM_API_KEY}"
+    -H "X-API-Key: ${CORDUM_APPROVER_API_KEY}"
     -H "X-Tenant-ID: ${CORDUM_TENANT_ID}"
     -H "X-Principal-Id: edge-fake-hook-e2e-approver-$$"
   )
@@ -1318,7 +1347,7 @@ JSON
   AUTH_HEADERS=("${saved_headers[@]}")
   log_http "${gate}" POST "/api/v1/edge/approvals/${approval_ref}/approve" "${code}"
   if [[ "${code}" == "403" ]]; then
-    fail "${gate}" 'approve returned 403 (likely self_approval_denied — script approver principal collided with requester)'
+    fail "${gate}" 'approve returned 403 (likely self_approval_denied — set CORDUM_APPROVER_API_KEY to an admin-role key distinct from CORDUM_API_KEY; see header SECURITY block)'
   fi
   assert_http_status "${gate}" "${code}" "200" "POST approval approve"
   assert_json "${gate}" '.status == "approved"' 'post-approve status != approved'
@@ -1416,13 +1445,25 @@ JSON
 
   # 3. Resolve as approved. EdgeApprovalDecisionRequest body is optional;
   # supply a synthetic resolver reason so the audit record carries it.
+  # Use CORDUM_APPROVER_API_KEY + a distinct X-Principal-Id so
+  # edgeApprovalRequesterMatchesResolver + identitiesOverlap
+  # (helpers.go:1428-1434) treat the resolver as a different principal
+  # than the requester. Same pattern as gate_approval_flow / gate_approval_rejected.
   local approve_body='{"reason":"edge_fake_hook_e2e synthetic approval"}'
+  local saved_headers=("${AUTH_HEADERS[@]}")
+  AUTH_HEADERS=(
+    -H "X-API-Key: ${CORDUM_APPROVER_API_KEY}"
+    -H "X-Tenant-ID: ${CORDUM_TENANT_ID}"
+    -H "X-Principal-Id: edge-fake-hook-e2e-approver-$$"
+  )
   code=$(curl_request POST "${API_BASE}/api/v1/edge/approvals/${approval_ref}/approve" "${approve_body}")
+  AUTH_HEADERS=("${saved_headers[@]}")
   log_http "${gate}" POST "/api/v1/edge/approvals/${approval_ref}/approve" "${code}"
-  # 200 = approved; 403 self_approval_denied is possible when API key principal
-  # matches the requester. Surface a directed error if that hits.
+  # 200 = approved; 403 self_approval_denied is possible when the approver
+  # key shares a sha256[:4] prefix with the requester key. Surface a
+  # directed error if that hits.
   if [[ "${code}" == "403" ]]; then
-    fail "${gate}" 'approve returned 403 (likely self_approval_denied — set CORDUM_API_KEY to a different principal than the requester)'
+    fail "${gate}" 'approve returned 403 (likely self_approval_denied — set CORDUM_APPROVER_API_KEY to an admin-role key distinct from CORDUM_API_KEY; see header SECURITY block)'
   fi
   assert_http_status "${gate}" "${code}" "200" "POST approval approve"
   assert_json "${gate}" '.status == "approved"' 'post-approve status != approved'
@@ -1547,7 +1588,7 @@ JSON
   local reject_body='{"reason":"edge_fake_hook_e2e synthetic approval rejected"}'
   local saved_headers=("${AUTH_HEADERS[@]}")
   AUTH_HEADERS=(
-    -H "X-API-Key: ${CORDUM_API_KEY}"
+    -H "X-API-Key: ${CORDUM_APPROVER_API_KEY}"
     -H "X-Tenant-ID: ${CORDUM_TENANT_ID}"
     -H "X-Principal-Id: edge-fake-hook-e2e-approver-$$"
   )
@@ -1555,7 +1596,7 @@ JSON
   log_http "${gate}" POST "/api/v1/edge/approvals/${approval_ref}/reject" "${code}"
   if [[ "${code}" == "403" ]]; then
     AUTH_HEADERS=("${saved_headers[@]}")
-    fail "${gate}" 'reject returned 403 (likely self_approval_denied — script approver principal collided with requester)'
+    fail "${gate}" 'reject returned 403 (likely self_approval_denied — set CORDUM_APPROVER_API_KEY to an admin-role key distinct from CORDUM_API_KEY; see header SECURITY block)'
   fi
   assert_http_status "${gate}" "${code}" "200" "POST approval reject"
   assert_json "${gate}" '.status == "rejected"' 'post-reject status != rejected'
@@ -1579,7 +1620,7 @@ JSON
   # half of DoD #1.
   saved_headers=("${AUTH_HEADERS[@]}")
   AUTH_HEADERS=(
-    -H "X-API-Key: ${CORDUM_API_KEY}"
+    -H "X-API-Key: ${CORDUM_APPROVER_API_KEY}"
     -H "X-Tenant-ID: ${CORDUM_TENANT_ID}"
     -H "X-Principal-Id: edge-fake-hook-e2e-approver-$$"
   )
