@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cordum/cordum/core/audit"
+	"github.com/cordum/cordum/core/model"
 )
 
 const auditChainAppendTimeout = 5 * time.Second
@@ -40,7 +41,26 @@ func (s *auditChainSender) Send(event audit.SIEMEvent) {
 	if s == nil {
 		return
 	}
-	if s.chainer != nil && strings.TrimSpace(event.TenantID) != "" {
+	if s.chainer != nil {
+		// Attribute tenantless events (anonymous reads, system bootstrap,
+		// producer bugs) to model.DefaultTenant rather than silently
+		// dropping them. The previous behaviour made the Audit Log feel
+		// incomplete because every middleware-emitted system.auth event
+		// on an unauthenticated request, plus every producer that
+		// forgot to set TenantID, vanished from the chain. Default-
+		// tenant attribution keeps the per-tenant chain semantics
+		// intact (no cross-tenant leakage — "default" is its own
+		// stream) while ensuring no chain-eligible event is dropped.
+		// slog.Debug surfaces the producer site so the missing-tenant
+		// can be fixed at source over time.
+		if strings.TrimSpace(event.TenantID) == "" {
+			slog.Debug("audit chain: tenantless event attributed to default tenant",
+				"event_type", event.EventType,
+				"action", event.Action,
+				"identity", event.Identity,
+			)
+			event.TenantID = model.DefaultTenant
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), auditChainAppendTimeout)
 		defer cancel()
 		if err := s.chainer.Append(ctx, &event); err != nil {
