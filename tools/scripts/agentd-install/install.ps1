@@ -81,16 +81,16 @@ function Invoke-Cmdkey {
 }
 
 if ($Rotate) {
-    & cmdkey.exe /delete:cordum_agentd_nonce 2>$null | Out-Null
-    & cmdkey.exe /delete:cordum_api_key      2>$null | Out-Null
+    & cmdkey.exe /delete:cordum-agentd:cordum_agentd_nonce 2>$null | Out-Null
+    & cmdkey.exe /delete:cordum-agentd:cordum_api_key      2>$null | Out-Null
 }
 
 $nonce  = Read-Secret 'cordum_agentd_nonce (base64, >=32 bytes)'
 $apiKey = Read-Secret 'cordum_api_key'
 
 try {
-    Invoke-Cmdkey -Target 'cordum_agentd_nonce' -User $env:USERNAME -Pass $nonce
-    Invoke-Cmdkey -Target 'cordum_api_key'      -User $env:USERNAME -Pass $apiKey
+    Invoke-Cmdkey -Target 'cordum-agentd:cordum_agentd_nonce' -User 'cordum_agentd_nonce' -Pass $nonce
+    Invoke-Cmdkey -Target 'cordum-agentd:cordum_api_key'      -User 'cordum_api_key' -Pass $apiKey
     Write-Host 'Credential Manager: provisioned cordum_agentd_nonce + cordum_api_key' -ForegroundColor Cyan
 } finally {
     # Best-effort wipe of the local string copies.

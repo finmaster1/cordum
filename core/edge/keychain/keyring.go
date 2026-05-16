@@ -26,9 +26,9 @@ import (
 // keyringServiceName is the per-host namespace under which cordum-agentd
 // stores its secrets. Operators provision values with platform-native CLIs:
 //
-//	macOS  : security add-generic-password -a "$USER" -s cordum_agentd_nonce -w "<base64-nonce>"
-//	Linux  : secret-tool store --label="cordum-agentd nonce" service cordum-agentd account cordum_agentd_nonce
-//	Windows: cmdkey /generic:cordum_agentd_nonce /user:"$USER" /pass:"<base64-nonce>"
+//	macOS  : security add-generic-password -a cordum_agentd_nonce -s cordum-agentd -w "<base64-nonce>"
+//	Linux  : secret-tool store --label="cordum-agentd nonce" service cordum-agentd username cordum_agentd_nonce
+//	Windows: cmdkey /generic:cordum-agentd:cordum_agentd_nonce /user:cordum_agentd_nonce /pass:"<base64-nonce>"
 //
 // The constant is intentionally not exported — callers receive a Keyring
 // already bound to this namespace and have no reason to override it.

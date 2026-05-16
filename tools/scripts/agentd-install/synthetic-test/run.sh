@@ -32,11 +32,11 @@ cleanup() {
     fi
     # Best-effort teardown of synthetic secrets.
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        security delete-generic-password -a "$USER" -s cordum_agentd_nonce >/dev/null 2>&1 || true
-        security delete-generic-password -a "$USER" -s cordum_api_key      >/dev/null 2>&1 || true
+        security delete-generic-password -a cordum_agentd_nonce -s cordum-agentd >/dev/null 2>&1 || true
+        security delete-generic-password -a cordum_api_key -s cordum-agentd      >/dev/null 2>&1 || true
     elif [[ "$(uname -s)" == "Linux" ]]; then
-        secret-tool clear service cordum-agentd account cordum_agentd_nonce >/dev/null 2>&1 || true
-        secret-tool clear service cordum-agentd account cordum_api_key      >/dev/null 2>&1 || true
+        secret-tool clear service cordum-agentd username cordum_agentd_nonce >/dev/null 2>&1 || true
+        secret-tool clear service cordum-agentd username cordum_api_key      >/dev/null 2>&1 || true
     fi
     rm -rf "$LOG_DIR"
 }
@@ -69,6 +69,11 @@ sleep 2
 
 # Even if agentd exits early (gateway unreachable etc), the bootstrap
 # path has run — that is what we are asserting against, not steady-state.
+if grep -F -q 'BOOTSTRAP-FAIL:' "${LOG_DIR}/stderr.log"; then
+    echo "synthetic-test: bootstrap failed after installer provisioning; stderr:" >&2
+    cat "${LOG_DIR}/stderr.log" >&2
+    exit 1
+fi
 
 assert_no_leak() {
     local label="$1" file="$2" needle="$3"

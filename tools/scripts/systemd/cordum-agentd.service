@@ -7,13 +7,13 @@
 # directives with secret values. Use `secret-tool` from libsecret-tools:
 #
 #   secret-tool store --label='cordum-agentd nonce' \
-#       service cordum-agentd account cordum_agentd_nonce
+#       service cordum-agentd username cordum_agentd_nonce
 #   # secret-tool reads the value from stdin and stores under the schema
-#   # (service=cordum-agentd, account=cordum_agentd_nonce) — same key the
+#   # (service=cordum-agentd, username=cordum_agentd_nonce) — same tuple the
 #   # keychain bootstrap path expects.
 #
 #   secret-tool store --label='cordum-agentd API key' \
-#       service cordum-agentd account cordum_api_key
+#       service cordum-agentd username cordum_api_key
 #
 # Enable + start (per-user, no root):
 #   systemctl --user daemon-reload

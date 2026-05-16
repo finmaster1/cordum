@@ -11,8 +11,8 @@
   these credentials at startup; the service config carries NO env entries
   with secret values:
 
-      cmdkey /generic:cordum_agentd_nonce /user:%USERNAME% /pass:<base64-nonce>
-      cmdkey /generic:cordum_api_key      /user:%USERNAME% /pass:<api-key>
+      cmdkey /generic:cordum-agentd:cordum_agentd_nonce /user:cordum_agentd_nonce /pass:<base64-nonce>
+      cmdkey /generic:cordum-agentd:cordum_api_key      /user:cordum_api_key /pass:<api-key>
 
   Credentials added with cmdkey land in the per-user Credential Manager
   vault. Install + run the service under the SAME user (LocalSystem will
@@ -22,7 +22,7 @@
       sc.exe config cordum-agentd obj= ".\<USERNAME>" password= "<password>"
       C:\Program Files\Cordum\cordum-agentd\cordum-agentd-service.exe start
 
-  Rotate by re-running cmdkey with the same /generic name. cordum-agentd
+  Rotate by re-running cmdkey with the same /generic target. cordum-agentd
   reads on next service restart.
 -->
 <service>

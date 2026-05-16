@@ -10,9 +10,9 @@
   EnvironmentVariables block. Use the `security` CLI with the per-secret
   account names cordum-agentd reads via the keychain bootstrap path:
 
-    security add-generic-password -a "$USER" -s cordum_agentd_nonce \
+    security add-generic-password -a cordum_agentd_nonce -s cordum-agentd \
         -w "<base64-nonce>" -T /usr/local/bin/cordum-agentd
-    security add-generic-password -a "$USER" -s cordum_api_key \
+    security add-generic-password -a cordum_api_key -s cordum-agentd \
         -w "<api-key>" -T /usr/local/bin/cordum-agentd
 
   The `-T` flag scopes the Keychain ACL to the cordum-agentd binary so

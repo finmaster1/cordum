@@ -11,8 +11,8 @@
 #     from tools/scripts/{launchd,systemd}/ into the user's service path.
 #   - Provisions cordum_agentd_nonce + cordum_api_key in the OS-native
 #     credential store. Values are read from a sealed prompt (read -s) and
-#     piped to the OS CLI; they never appear on the script command line,
-#     in shell history, or in process listings.
+#     passed only to the OS credential CLI; they never appear in shell
+#     history or in service-manager configuration.
 #   - Enables + starts the service.
 #
 # What this script does NOT do:
@@ -71,16 +71,16 @@ read_secret() {
 provision_macos() {
     local nonce api_key
     if [[ $ROTATE -eq 1 ]]; then
-        security delete-generic-password -a "$USER" -s cordum_agentd_nonce >/dev/null 2>&1 || true
-        security delete-generic-password -a "$USER" -s cordum_api_key >/dev/null 2>&1 || true
+        security delete-generic-password -a cordum_agentd_nonce -s cordum-agentd >/dev/null 2>&1 || true
+        security delete-generic-password -a cordum_api_key -s cordum-agentd >/dev/null 2>&1 || true
     fi
     nonce="$(read_secret 'cordum_agentd_nonce (base64, >=32 bytes)')"
     api_key="$(read_secret 'cordum_api_key')"
     # -T scopes ACL to the cordum-agentd binary so Console.app does not
     # prompt on first read. -U updates if already present.
-    security add-generic-password -a "$USER" -s cordum_agentd_nonce \
+    security add-generic-password -a cordum_agentd_nonce -s cordum-agentd \
         -w "$nonce" -T /usr/local/bin/cordum-agentd -U >/dev/null
-    security add-generic-password -a "$USER" -s cordum_api_key \
+    security add-generic-password -a cordum_api_key -s cordum-agentd \
         -w "$api_key" -T /usr/local/bin/cordum-agentd -U >/dev/null
     # Defensive: shred locals before they leave scope.
     nonce="$(printf '%*s' "${#nonce}" '' | tr ' ' '*')"
@@ -102,16 +102,16 @@ provision_linux() {
     command -v secret-tool >/dev/null 2>&1 || die "secret-tool missing — install libsecret-tools (apt) or libsecret (rpm) first"
     local nonce api_key
     if [[ $ROTATE -eq 1 ]]; then
-        secret-tool clear service cordum-agentd account cordum_agentd_nonce >/dev/null 2>&1 || true
-        secret-tool clear service cordum-agentd account cordum_api_key >/dev/null 2>&1 || true
+        secret-tool clear service cordum-agentd username cordum_agentd_nonce >/dev/null 2>&1 || true
+        secret-tool clear service cordum-agentd username cordum_api_key >/dev/null 2>&1 || true
     fi
     nonce="$(read_secret 'cordum_agentd_nonce (base64, >=32 bytes)')"
     api_key="$(read_secret 'cordum_api_key')"
     # secret-tool reads the secret value from stdin, never argv — pipe it.
     printf '%s' "$nonce" | secret-tool store --label='cordum-agentd nonce' \
-        service cordum-agentd account cordum_agentd_nonce
+        service cordum-agentd username cordum_agentd_nonce
     printf '%s' "$api_key" | secret-tool store --label='cordum-agentd API key' \
-        service cordum-agentd account cordum_api_key
+        service cordum-agentd username cordum_api_key
     nonce="$(printf '%*s' "${#nonce}" '' | tr ' ' '*')"
     api_key="$(printf '%*s' "${#api_key}" '' | tr ' ' '*')"
     unset nonce api_key
