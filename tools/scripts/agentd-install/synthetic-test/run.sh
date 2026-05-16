@@ -47,8 +47,16 @@ SYNTH_NONCE="$(openssl rand -base64 48 | tr -d '\n')"
 SYNTH_API_KEY="SYNTH-API-KEY-$(openssl rand -hex 16)"
 
 echo "synthetic-test: provisioning into local keychain (test-only values)" >&2
+# Defense-in-depth: invoke install.sh via `bash "$INSTALL_SH"` rather than
+# direct-exec `"$INSTALL_SH"`. Matches binaries-pr-validation.yml lines
+# 71/93 + tools/scripts/install_test.sh:52 post-EDGE-151-reopen-#3 pattern
+# (commit a3616c9f). A `git update-index --chmod=+x` flipped install.sh to
+# 100755 in the same commit as this change, but the bash-wrapper survives
+# any future Windows commit that re-strips the executable bit — the bug
+# trips silently otherwise the moment this script gets wired into a Linux
+# CI workflow.
 printf '%s\n%s\n' "$SYNTH_NONCE" "$SYNTH_API_KEY" \
-    | "$INSTALL_SH" --secrets-from-stdin --rotate \
+    | bash "$INSTALL_SH" --secrets-from-stdin --rotate \
     > "${LOG_DIR}/install.log" 2>&1 || {
         echo "synthetic-test: install.sh failed; log:" >&2
         cat "${LOG_DIR}/install.log" >&2
