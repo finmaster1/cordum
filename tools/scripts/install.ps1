@@ -23,6 +23,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProdFingerprintPin = $env:CORDUM_RELEASE_FINGERPRINT
 
+. (Join-Path $PSScriptRoot 'windows\gpg-path.ps1')
+
 # Audit-log context — see docs/security/binary-signing.md §8 for the
 # stable schema. Empty values are emitted as "".
 $script:AuditSigScheme = ''
@@ -84,11 +86,12 @@ function Invoke-BinaryVerify {
     if (-not (Test-Path -LiteralPath $manifest)) { Verify-Fail 'manifest not found' }
     if (-not (Test-Path -LiteralPath $sig)) { Verify-Fail 'unsigned manifest' }
 
-    $gpg = Get-Command $GpgExe -ErrorAction SilentlyContinue
-    if (-not $gpg) {
-        $gpg = Get-Command 'gpg' -ErrorAction SilentlyContinue
+    try {
+        $gpg = Resolve-CordumGpgCommand -GpgExe $GpgExe
+    } catch {
+        Verify-Fail 'gpg required for signature verification'
     }
-    if (-not $gpg) { Verify-Fail 'gpg required for signature verification' }
+    $gpgMode = Get-CordumGpgPathMode -GpgCommand $gpg
 
     # $PSScriptRoot is the canonical "directory of the running script" in
     # PowerShell 5.1+; $MyInvocation.MyCommand.Path is unset when the
@@ -115,13 +118,14 @@ function Invoke-BinaryVerify {
 
     $tmpHome = New-Item -ItemType Directory -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), [Guid]::NewGuid().ToString('N')))
     try {
-        # Forward-slash both arguments before passing to gpg.exe — Git/MSYS
-        # gpg interprets backslashes as POSIX path separators and prepends
-        # its own working directory, producing paths like
-        # `/cwd/C:\Users\...\Temp\xxx` that fail to open. Gpg4Win accepts
-        # forward-slash form, MSYS gpg accepts it too, so this is portable.
-        $tmpHomeArg = ($tmpHome.FullName) -replace '\\', '/'
-        $pubkeyArg  = ($pubkey)             -replace '\\', '/'
+        # Route every filesystem argument to gpg through the path adapter.
+        # Git/MSYS gpg requires POSIX form (`/c/Users/...`) because the
+        # drive letter is a valid POSIX path component and gets treated
+        # as repo-relative otherwise. Gpg4Win/native gpg gets absolute
+        # Windows paths. PowerShell cmdlets keep using `-LiteralPath`
+        # with the native paths.
+        $tmpHomeArg = ConvertTo-CordumGpgArgPath -Path $tmpHome.FullName -Mode $gpgMode
+        $pubkeyArg  = ConvertTo-CordumGpgArgPath -Path $pubkey           -Mode $gpgMode
 
         $importOutput = & $gpg.Source --homedir $tmpHomeArg --batch --import $pubkeyArg 2>&1
         if ($LASTEXITCODE -ne 0) {
@@ -166,8 +170,8 @@ function Invoke-BinaryVerify {
             }
         }
 
-        $sigArg = ($sig) -replace '\\', '/'
-        $manifestArg = ($manifest) -replace '\\', '/'
+        $sigArg = ConvertTo-CordumGpgArgPath -Path $sig      -Mode $gpgMode
+        $manifestArg = ConvertTo-CordumGpgArgPath -Path $manifest -Mode $gpgMode
         & $gpg.Source --homedir $tmpHomeArg --batch --quiet --verify $sigArg $manifestArg 2>$null
         if ($LASTEXITCODE -ne 0) { Verify-Fail 'gpg signature invalid' }
 

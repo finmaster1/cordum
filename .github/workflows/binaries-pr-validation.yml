@@ -13,6 +13,7 @@ on:
     paths:
       - 'tools/sign/**'
       - 'tools/scripts/install*'
+      - 'tools/scripts/windows/**'
       - 'tools/test-keys/**'
       - '.github/workflows/release.yml'
       - '.github/workflows/binaries-pr-validation.yml'
@@ -70,9 +71,13 @@ jobs:
 
   install-tamper-windows:
     # Windows-native validation for install.ps1 + install_test.ps1. The
-    # Windows runner ships PowerShell 7 + Gpg4Win and has no MSYS layer,
-    # so the path-conversion artefacts that hit local Git-Bash testing
-    # do not apply here. This is the canonical gate for the .ps1 path.
+    # windows-latest runner ships both Git for Windows (MSYS gpg under
+    # C:\Program Files\Git\usr\bin\gpg.exe) and, after the choco step
+    # below, Gpg4Win/native gpg. EDGE-151 reopen #2 wires both flavors
+    # because MSYS gpg interprets `C:\...` paths as repo-relative and
+    # needs cygpath POSIX conversion; the gpg-path adapter under
+    # tools/scripts/windows/ handles the detection so install.ps1 works
+    # on either flavor.
     name: install_test.ps1 synthetic-tampered (windows)
     runs-on: windows-latest
     needs: [verifier-tests]
@@ -82,18 +87,31 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Build release-local (bash)
+        shell: bash
+        run: bash tools/scripts/release-local.sh
+      - name: install_test.ps1 — Git/MSYS gpg (Tier 1)
+        shell: pwsh
+        run: |
+          $msysGpg = 'C:\Program Files\Git\usr\bin\gpg.exe'
+          if (-not (Test-Path -LiteralPath $msysGpg)) {
+            Write-Host "Git/MSYS gpg not present on runner; skipping MSYS flavor"
+            exit 0
+          }
+          Write-Host "Running install_test.ps1 against Git/MSYS gpg: $msysGpg"
+          pwsh -NoProfile -File tools/scripts/install_test.ps1 -GpgExe $msysGpg
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Gpg4Win
         shell: pwsh
         run: |
           choco install --no-progress --yes gnupg
           $env:Path = "$env:Path;C:\Program Files (x86)\GnuPG\bin"
           gpg --version
-      - name: Build release-local (bash)
-        shell: bash
-        run: bash tools/scripts/release-local.sh
-      - name: install_test.ps1 — tamper + unsigned synthetics must FAIL install
+      - name: install_test.ps1 — Gpg4Win/native gpg
         shell: pwsh
-        run: pwsh -NoProfile -File tools/scripts/install_test.ps1
+        run: |
+          $env:Path = "C:\Program Files (x86)\GnuPG\bin;$env:Path"
+          pwsh -NoProfile -File tools/scripts/install_test.ps1
 
   no-private-keys-leaked:
     name: lint — no private keys outside tools/test-keys/TEST-ONLY-*
