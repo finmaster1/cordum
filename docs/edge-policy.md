@@ -248,3 +248,18 @@ compatibility — existing single-key callers still see the explicit
 `self_approval_denied` failure with a directed remediation message rather
 than a silent regression. See the script's `ENVIRONMENT` block for the full
 contract.
+
+> **Strict-PASS assertion deferred.** The CI workflow
+> (`.github/workflows/edge-fake-hook-e2e.yml`) currently ships with the
+> "all 7 PASS lines" assertion commented out. The script's
+> `gate_pretooluse_deny` requires the `cordum-edge-pack` policy overlay
+> (`examples/cordum-edge-pack/overlays/policy.fragment.yaml`) to be loaded
+> on the gateway — a fresh `docker compose up` deployment has no overlay
+> loaded by default. Pack-install bootstrap is tracked in sibling
+> `task-c94f1770` (HIGH/BACKLOG, governor-filed 2026-05-16 per
+> `comment-20eef1d1` on `task-e6721225`); the assertion step is preserved
+> in the workflow file as a `#`-prefixed block ready to comment-in once
+> that sibling lands. Until then the workflow exercises the scaffolding
+> (2-key stack, strict + bypass mode invocation, script-mod consumer,
+> override file) end-to-end and uploads the script log as
+> `edge-fake-hook-e2e-artifacts` for inspection.

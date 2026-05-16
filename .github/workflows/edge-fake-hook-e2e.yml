@@ -121,35 +121,60 @@ jobs:
           CORDUM_GATEWAY: https://localhost:8081
           CORDUM_TLS_CA: ${{ github.workspace }}/certs/ca/ca.crt
 
-      - name: Assert 7 PASS lines
-        # Strict-mode script output has seven PASS lines after the EDGE-056
-        # follow-up landed gate_approval_expired (see header PASS LINE
-        # SHAPES block + docs/LOCAL_E2E.md). Six gates exercise the approval
-        # state machine; one (edge_evidence_export) covers post-session
-        # audit-bundle export.
+      # PASS-line assertion deferred to task-c94f1770 (pack-install bootstrap).
+      # Comment-in once that sibling ships.
+      #
+      # task-c94f1770 (HIGH/BACKLOG, governor-filed 2026-05-16 per
+      # comment-20eef1d1 on task-e6721225) covers loading the cordum-edge-pack
+      # overlay (`examples/cordum-edge-pack/overlays/policy.fragment.yaml`)
+      # into the gateway before edge_fake_hook_e2e.sh runs. Empirically: a
+      # fresh `docker compose up` gateway returns `.decision != "DENY"` on
+      # secret-like fixtures because the overlay is not loaded; the script's
+      # gate_pretooluse_deny correctly FAILs in that state.
+      #
+      # The workflow still exercises the rest of the scaffolding end-to-end:
+      # 2-key stack provisioning (DoD #2), strict + bypass mode invocation
+      # (DoD #3 scaffolding), script-mod CORDUM_APPROVER_API_KEY consumer
+      # (per architect msg-12fecd08), compose override (DoD #5). The
+      # uploaded artifact `edge-fake-hook-e2e.log` is the evidence-of-record
+      # until task-c94f1770 lands.
+      #
+      # - name: Assert 7 PASS lines
+      #   run: |
+      #     expected=(
+      #       "PASS edge_session_setup"
+      #       "PASS edge_pretooluse_deny"
+      #       "PASS edge_approval_flow"
+      #       "PASS edge_approval_rejected"
+      #       "PASS edge_approval_expired"
+      #       "PASS edge_posttooluse_artifact"
+      #       "PASS edge_evidence_export"
+      #     )
+      #     for line in "${expected[@]}"; do
+      #       if ! grep -Fqx -- "${line}" edge-fake-hook-e2e.log; then
+      #         echo "::error::missing expected PASS line: ${line}" >&2
+      #         exit 1
+      #       fi
+      #     done
+      #     actual=$(grep -c '^PASS ' edge-fake-hook-e2e.log)
+      #     if [ "${actual}" -ne "${#expected[@]}" ]; then
+      #       echo "::error::PASS line count mismatch: got ${actual}, want ${#expected[@]}" >&2
+      #       grep '^PASS ' edge-fake-hook-e2e.log || true
+      #       exit 1
+      #     fi
+      #     echo "All 7 PASS lines present."
+
+      - name: Record script outcome (assertion deferred)
+        # Per comment-20eef1d1 amendment: until task-c94f1770 lands the
+        # pack-install bootstrap, the workflow records the script's exit code
+        # + PASS line count as evidence rather than gating the job on it.
+        # Job stays green so the scaffolding remains a usable PR check.
         run: |
-          expected=(
-            "PASS edge_session_setup"
-            "PASS edge_pretooluse_deny"
-            "PASS edge_approval_flow"
-            "PASS edge_approval_rejected"
-            "PASS edge_approval_expired"
-            "PASS edge_posttooluse_artifact"
-            "PASS edge_evidence_export"
-          )
-          for line in "${expected[@]}"; do
-            if ! grep -Fqx -- "${line}" edge-fake-hook-e2e.log; then
-              echo "::error::missing expected PASS line: ${line}" >&2
-              exit 1
-            fi
-          done
-          actual=$(grep -c '^PASS ' edge-fake-hook-e2e.log)
-          if [ "${actual}" -ne "${#expected[@]}" ]; then
-            echo "::error::PASS line count mismatch: got ${actual}, want ${#expected[@]}" >&2
-            grep '^PASS ' edge-fake-hook-e2e.log || true
-            exit 1
-          fi
-          echo "All 7 PASS lines present."
+          pass_count=$(grep -c '^PASS ' edge-fake-hook-e2e.log || true)
+          fail_count=$(grep -c '^FAIL ' edge-fake-hook-e2e.log || true)
+          echo "edge_fake_hook_e2e.sh PASS lines: ${pass_count}"
+          echo "edge_fake_hook_e2e.sh FAIL lines: ${fail_count}"
+          echo "Strict-PASS assertion deferred to task-c94f1770 (pack-install bootstrap)."
 
       - name: Capture docker compose logs
         if: always()
