@@ -129,6 +129,15 @@ func TestProcessApprovalClaim_TypedConflictKind(t *testing.T) {
 		{"args_mismatch", edge.ApprovalConflictKindArgsMismatch},
 		{"policy_mismatch", edge.ApprovalConflictKindPolicyMismatch},
 		{"expired", edge.ApprovalConflictKindExpired},
+		// EDGE-103 DoD #4: duplicate consume + concurrent attempts MUST
+		// fail closed. The store CAS surfaces "consumed" on the second
+		// attempt; the wire adapter must pass it through verbatim so
+		// the JSON-RPC -32096 error.data.kind matches the snake_case
+		// enum the client branches on.
+		{"consumed", edge.ApprovalConflictKindConsumed},
+		{"tuple_mismatch", edge.ApprovalConflictKindTupleMismatch},
+		{"cross_tenant", edge.ApprovalConflictKindCrossTenant},
+		{"rejected", edge.ApprovalConflictKindRejected},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,6 +202,81 @@ func TestProcessApprovalClaim_MissingMetadataFailsClosed(t *testing.T) {
 	}
 	if store.calls != 0 {
 		t.Fatalf("store.calls = %d; want 0 (no claim without metadata)", store.calls)
+	}
+}
+
+// TestBuildApprovalClaimRequest_MintAndConsumeProduceMatchingHashes is the
+// EDGE-103 reopen #1 regression: the mint side (gateway handoff) and the
+// consume side (ProcessApprovalClaim) MUST derive the SAME ActionHash and
+// InputHash from the same tenant/server/tool/args/policy snapshot tuple,
+// or the edge.RedisStore.ClaimApproval check returns args_mismatch even
+// on legitimate retries. Centralising the binding in one helper is the
+// safest defense against drift.
+func TestBuildApprovalClaimRequest_MintAndConsumeProduceMatchingHashes(t *testing.T) {
+	t.Parallel()
+	meta := CallMetadata{
+		Tenant:      "tnt_a",
+		Principal:   "alice@corp",
+		AgentID:     "agent_alpha",
+		SessionID:   "sess_99",
+		ExecutionID: "exec_88",
+	}
+	params := ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/var/data/x.db","contents":"hi"}`),
+	}
+	const server = "cordum.builtin"
+	const policySnapshot = "policy-v7"
+
+	mintAction, mintInput := BuildMCPApprovalBinding(meta.Tenant, server, params, policySnapshot)
+	consumeAction, consumeInput := BuildMCPApprovalBinding(meta.Tenant, server, params, policySnapshot)
+
+	if mintAction == "" || mintInput == "" {
+		t.Fatalf("mint binding produced empty hashes: action=%q input=%q", mintAction, mintInput)
+	}
+	if mintAction != consumeAction {
+		t.Errorf("ActionHash drift: mint=%q consume=%q", mintAction, consumeAction)
+	}
+	if mintInput != consumeInput {
+		t.Errorf("InputHash drift: mint=%q consume=%q", mintInput, consumeInput)
+	}
+
+	// Changing args MUST flip InputHash but keep ActionHash stable
+	// (ActionHash binds tenant/server/tool/path; InputHash binds args).
+	mutated := ToolCallParams{
+		Name:      params.Name,
+		Arguments: json.RawMessage(`{"path":"/var/data/x.db","contents":"different"}`),
+	}
+	mutatedAction, mutatedInput := BuildMCPApprovalBinding(meta.Tenant, server, mutated, policySnapshot)
+	if mutatedAction != mintAction {
+		t.Errorf("ActionHash flipped on args-only change; mint=%q mutated=%q", mintAction, mutatedAction)
+	}
+	if mutatedInput == mintInput {
+		t.Errorf("InputHash did NOT change on args mutation; both = %q (args-mismatch defense broken)", mintInput)
+	}
+}
+
+// TestBuildMCPApprovalBinding_StripsApprovalRef ensures the binding
+// helper ignores the server-reserved `_approval_ref` field when hashing
+// args. Without this, the resume retry's args (which still carry
+// `_approval_ref`) would hash differently from the original gated args,
+// and ClaimApproval would surface args_mismatch on every legitimate
+// retry.
+func TestBuildMCPApprovalBinding_StripsApprovalRef(t *testing.T) {
+	t.Parallel()
+	original := ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/x","contents":"hi"}`),
+	}
+	withRef := ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/x","contents":"hi","_approval_ref":"edge_appr_xyz"}`),
+	}
+	_, origIn := BuildMCPApprovalBinding("tnt_a", "cordum.builtin", original, "p")
+	_, refIn := BuildMCPApprovalBinding("tnt_a", "cordum.builtin", withRef, "p")
+	if origIn != refIn {
+		t.Errorf("InputHash differs once `_approval_ref` is present; orig=%q with-ref=%q (would force args_mismatch on every legitimate retry)",
+			origIn, refIn)
 	}
 }
 

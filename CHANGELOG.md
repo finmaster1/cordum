@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-103 reopen #1 — approval-required payload + Edge mint dual-write (2026-05-16, task-968d6646)
+
+- `core/mcp/registry.go` — `ApprovalRequired` struct extended with
+  `ApprovalRef`, `ArgsHash`, `ExpiresAt`, `PolicySnapshot`, `RetryHint`
+  (all `omitempty`). Resume authority is now `ApprovalRef`; `ApprovalID`
+  stays for backward-compat SIEM correlation only. Doc comment makes the
+  contract explicit so client SDKs branch on the right handle.
+- `core/mcp/approval_hold.go` — new exported `BuildMCPApprovalBinding(tenant, server, params, policySnapshot) (actionHash, inputHash)` centralises the hash tuple that mint + consume MUST agree on. Both sides call this helper so a refactor cannot accidentally drift one path's hashing and surface `args_mismatch` on every legitimate retry. `ProcessApprovalClaim` rewired to use the helper.
+- `core/controlplane/gateway/mcp_gate.go` — `gatewayApprovalGate` gains `edgeStore` / `policySnapshot` / `serverName` fields wired via new `WithEdgeApprovalMint`. `gate.Check` now populates the full `ApprovalRequired` contract and dual-writes an `EdgeApproval` alongside the legacy `MCPApprovalStore` record when `mcp.CallMetadata` carries `SessionID`/`ExecutionID` — the Edge ref becomes the resume handle. Falls back to legacy-only (approval_ref == approval_id, resumable via retry-with-same-args) when Edge metadata is absent so HTTP MCP transit without an `EdgeSession` keeps working.
+- `core/controlplane/gateway/handlers_mcp.go` — `wireMCPApprovalGate` calls `gate.WithEdgeApprovalMint(s.edgeStore, s.mcpPolicySnapshotFunc(), mcpPolicyServerName)` when `s.edgeStore` is non-nil so production boot exercises the dual-write path automatically.
+- Tests: `core/controlplane/gateway/mcp_gate_test.go:TestGate_ApprovalRequiredCarriesResumeMetadata` (new field assertions), `core/mcp/approval_hold_test.go:TestBuildApprovalClaimRequest_MintAndConsumeProduceMatchingHashes` + `TestBuildMCPApprovalBinding_StripsApprovalRef` (helper determinism + `_approval_ref` strip), `core/mcp/approval_hold_test.go:TestProcessApprovalClaim_TypedConflictKind` extended with `consumed`/`tuple_mismatch`/`cross_tenant`/`rejected` subtests (all 7 production `ApprovalConflictKind` values), `core/controlplane/gateway/mcp_policy_boot_test.go:TestMCPProdBoot_ApprovalHoldWiredWhenFlagOn` (HasApprovalHold==true regression guard for QA's prior dead-path issue), and `core/mcp/server_approval_hold_e2e_test.go` (4 new JSON-RPC E2E tests: -32099 envelope contract, -32096 args_mismatch lifecycle, consume-once + args-strip dispatch, gateway-misconfigured on missing CallMetadata).
+
 #### EDGE-101 - MCP upstream server registry (2026-05-16, task-fb11aa72)
 
 - New `/api/v1/edge/mcp/upstreams` registry API plus `cordumctl mcp upstream`

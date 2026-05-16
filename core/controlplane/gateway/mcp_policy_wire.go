@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cordum/cordum/core/edge"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/mcp"
 	"github.com/cordum/cordum/core/policy/actiongates"
@@ -94,6 +95,15 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 	} else if rec != nil {
 		return rec.ID, nil
 	}
+	// EDGE-103 reopen #1: mint a consumable EdgeApproval when the gate
+	// is wired for Edge mint AND mcp.CallMetadata carries
+	// SessionID/ExecutionID. The returned Edge ref is the handle the
+	// `_approval_ref` resume path consumes. Falls back to legacy
+	// MCPApprovalStore mint when Edge is not available so dev/test
+	// deploys without edge.RedisStore keep working.
+	if ref, ok := g.mintEdgeApprovalForActionGate(ctx, ctxData); ok {
+		return ref, nil
+	}
 	// No prior approval — enqueue pending and return the new ref. The
 	// EnqueueMCPApproval store API requires an MCPApprovalRequest; we
 	// build it from the context payload + action hash.
@@ -108,6 +118,49 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 		return "", fmt.Errorf("mcp gate: enqueue approval: %w", err)
 	}
 	return rec.ID, nil
+}
+
+// mintEdgeApprovalForActionGate creates an EdgeApproval consumable via
+// the EDGE-103 `_approval_ref` resume path. Returns (ref, true) on
+// success and (_, false) when the gate is not wired for Edge mint or
+// mcp.CallMetadata is missing the SessionID/ExecutionID this requires.
+// On false the caller falls back to legacy MCPApprovalStore mint so
+// HTTP MCP transit without an EdgeSession still produces an approval
+// response.
+//
+// The ActionHash arriving in ctxData was computed by the policy
+// dispatcher via canonicalActionHashFromEvent; reuse it for both
+// ActionHash and InputHash on the EdgeApproval. The matching resume
+// path runs the SAME tuple through mcp.BuildMCPApprovalBinding, so the
+// classifyApprovalClaimMismatch tuple-equality check holds.
+func (g *gatewayApprovalGate) mintEdgeApprovalForActionGate(ctx context.Context, ctxData mcp.ToolCallApprovalContext) (string, bool) {
+	if g == nil || g.edgeStore == nil {
+		return "", false
+	}
+	meta, ok := mcp.CallMetadataFromContext(ctx)
+	if !ok || meta.SessionID == "" || meta.ExecutionID == "" {
+		return "", false
+	}
+	policySnapshot := ""
+	if g.policySnapshot != nil {
+		policySnapshot = g.policySnapshot(ctx)
+	}
+	approval, err := g.edgeStore.EnqueueApproval(ctx, edge.EdgeApprovalRequest{
+		TenantID:       meta.Tenant,
+		SessionID:      meta.SessionID,
+		ExecutionID:    meta.ExecutionID,
+		EventID:        meta.AgentID,
+		PrincipalID:    meta.Principal,
+		Requester:      meta.Principal,
+		Reason:         "policy gate REQUIRE_HUMAN",
+		ActionHash:     ctxData.ActionHash,
+		InputHash:      ctxData.ActionHash,
+		PolicySnapshot: policySnapshot,
+	})
+	if err != nil || approval == nil {
+		return "", false
+	}
+	return approval.ApprovalRef, true
 }
 
 // BuildMCPPolicyDeps assembles the production ToolCallDeps the MCP

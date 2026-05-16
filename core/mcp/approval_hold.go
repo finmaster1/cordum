@@ -18,6 +18,61 @@ import (
 // upstream tool handler. Strip happens after the claim succeeds.
 const approvalRefArgKey = "_approval_ref"
 
+// BuildMCPApprovalBinding centralises the hash tuple that binds an MCP
+// approval lifecycle. Both the gateway handoff (mint side) and
+// ProcessApprovalClaim (consume side) MUST derive the action+input
+// hashes through this helper so the edge.RedisStore.ClaimApproval
+// match never surfaces args_mismatch on a legitimate retry.
+//
+// The binding includes:
+//   - tenant (separation boundary)
+//   - server (MCP upstream identity)
+//   - tool name (the action)
+//   - normalized target path extracted from path-like args (action key)
+//   - canonical SHA-256 of args AFTER stripping `_approval_ref` (input key)
+//
+// Server/tenant/tool/path drive ActionHash; canonical-stripped args drive
+// InputHash. Empty/malformed args produce a stable empty-object canonical
+// form so the binding is deterministic across nil and `{}` inputs.
+// `_approval_ref` is stripped before canonicalisation so a resume retry
+// (which echoes the ref in args) lands on the same InputHash as the
+// original gated call.
+func BuildMCPApprovalBinding(tenant, server string, params ToolCallParams, _ string) (actionHash, inputHash string) {
+	stripped := stripApprovalRefArg(params.Arguments)
+	canonical, inputHash, _ := CanonicaliseArgs(stripped)
+	var targetPath string
+	if parsed, _ := parseArgsForDescriptor(canonical); parsed != nil {
+		targetPath = extractTargetPathFromArgs(parsed)
+	}
+	actionHash = CanonicalActionHash(tenant, server, params.Name, targetPath)
+	return actionHash, inputHash
+}
+
+// stripApprovalRefArg returns args with the server-reserved
+// `_approval_ref` field removed. nil/empty payloads return nil so the
+// canonicaliser produces the stable empty-object form rather than
+// hashing the original byte order.
+//
+// Always re-marshals when the args parse as a JSON object so two
+// payloads with the same logical content but different key order /
+// whitespace produce identical bytes. This is what makes
+// BuildMCPApprovalBinding's InputHash stable.
+func stripApprovalRefArg(args json.RawMessage) json.RawMessage {
+	if len(args) == 0 {
+		return nil
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return args
+	}
+	delete(parsed, approvalRefArgKey)
+	out, err := json.Marshal(parsed)
+	if err != nil {
+		return args
+	}
+	return out
+}
+
 // ApprovalClaimStore is the narrow contract this layer needs from the
 // Edge approval store. Production wires this to edge.RedisStore.ClaimApproval;
 // tests inject an in-memory fake.
@@ -121,24 +176,30 @@ func ProcessApprovalClaim(ctx context.Context, deps ApprovalHoldDeps, params Too
 		policySnapshot = deps.PolicySnapshot(ctx)
 	}
 
-	// Derive the target path from the stripped args so the consume
-	// ActionHash matches the mint-time hash (which also stamps
-	// extractTargetPathFromArgs in canonicalActionHashFromEvent). Empty
-	// targetPath is the right answer for tools whose args have no
-	// path-shaped slot.
-	var targetPath string
-	if parsedArgs, _ := parseArgsForDescriptor(strippedBytes); parsedArgs != nil {
-		targetPath = extractTargetPathFromArgs(parsedArgs)
-	}
+	// EDGE-103 reopen #1: derive the action+input hashes through the
+	// same BuildMCPApprovalBinding helper the mint side calls. Without
+	// this centralisation the consume path could re-implement the
+	// tuple subtly differently (extractTargetPathFromArgs path key,
+	// canonical-args-without-_approval_ref hashing, server inclusion)
+	// and ClaimApproval would surface kind=args_mismatch on every
+	// legitimate retry.
+	resumeParams := ToolCallParams{Name: params.Name, Arguments: strippedBytes}
+	actionHash, inputHash := BuildMCPApprovalBinding(meta.Tenant, deps.ServerName, resumeParams, policySnapshot)
 
 	claim := edge.ApprovalClaimRequest{
-		TenantID:       meta.Tenant,
-		ApprovalRef:    approvalRef,
-		SessionID:      meta.SessionID,
-		ExecutionID:    meta.ExecutionID,
+		TenantID:    meta.Tenant,
+		ApprovalRef: approvalRef,
+		SessionID:   meta.SessionID,
+		ExecutionID: meta.ExecutionID,
+		// EventID binds the claim to the AgentActionEvent the mint
+		// side recorded. For the policy-gate handoff path the mint
+		// side stamps PreEvent.EventID; for transports without a
+		// pre-event (legacy registry-gate path), AgentID is the
+		// closest available stable identity. The same source MUST be
+		// used on both sides — see ConsumeActionGateDecision.
 		EventID:        meta.AgentID,
-		ActionHash:     CanonicalActionHash(meta.Tenant, deps.ServerName, params.Name, targetPath),
-		InputHash:      hashStrippedArgs(strippedBytes),
+		ActionHash:     actionHash,
+		InputHash:      inputHash,
 		PolicySnapshot: policySnapshot,
 		ConsumedAt:     time.Now().UTC(),
 		CallerAgentID:  meta.Principal,
@@ -179,18 +240,6 @@ func ProcessApprovalClaim(ctx context.Context, deps ApprovalHoldDeps, params Too
 		Approval:     approval,
 		StrippedArgs: strippedBytes,
 	}, nil
-}
-
-// hashStrippedArgs returns a stable hash for the args payload after the
-// reserved `_approval_ref` key has been removed. The hash binds the
-// approval lifecycle to the EXACT args shape — any caller-side mutation
-// of the args between hold and resume produces a different hash and
-// the store-level args_mismatch check fires.
-func hashStrippedArgs(stripped []byte) string {
-	if len(stripped) == 0 {
-		return ""
-	}
-	return CanonicalActionHash("", "", "", string(stripped))
 }
 
 // ApprovalConflictKindFromError extracts the typed
