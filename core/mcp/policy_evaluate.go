@@ -151,13 +151,20 @@ func CallMetadataFromContext(ctx context.Context) (CallMetadata, bool) {
 // import cycle (core/policy/actiongates already imports core/mcp).
 // The gateway adapter converts between the two types so this layer
 // stays free of an actiongates dependency.
+//
+// Constraints carries the `_constraints` map that gates populate when
+// returning ALLOW_WITH_CONSTRAINTS. The shape mirrors the agentd wire
+// format (core/edge/agentd/evaluate_client.go EvaluateResponse.Constraints)
+// so audit-event consumers and downstream tools see a single canonical
+// constraint payload regardless of which surface produced it.
 type PolicyDecision struct {
-	Decision  pb.DecisionType
-	GateID    string
-	Code      string
-	Reason    string
-	SubReason string
-	Extra     map[string]string
+	Decision    pb.DecisionType
+	GateID      string
+	Code        string
+	Reason      string
+	SubReason   string
+	Extra       map[string]string
+	Constraints map[string]any
 }
 
 // PolicyDispatcher dispatches an MCP tool-call against the production
@@ -477,6 +484,13 @@ func EvaluateToolCall(ctx context.Context, deps ToolCallDeps, params ToolCallPar
 		})
 	}
 	event.Decision = mapPolicyDecisionToEdge(decision)
+	// Constraints carry through from the gate's AWC verdict so audit
+	// consumers and downstream tools see the constraint map that
+	// authorized the call. Empty/nil for ALLOW / DENY / REQUIRE_HUMAN /
+	// THROTTLE — only AWC populates this surface today.
+	if len(decision.Constraints) > 0 {
+		event.Constraints = decision.Constraints
+	}
 	// DENY / THROTTLE flip the kind to failed because the call will not
 	// reach upstream. REQUIRE_HUMAN keeps kind=pre because the call is
 	// awaiting an approval decision; the matching post or failed will
@@ -485,9 +499,13 @@ func EvaluateToolCall(ctx context.Context, deps ToolCallDeps, params ToolCallPar
 	// the matching post in the InvokeToolWithPolicy wrapper.
 	if !decision.Allowed() && !decision.requiresHuman() && decision.Decision != pb.DecisionType_DECISION_TYPE_UNSPECIFIED {
 		event.Kind = edge.EventKindMCPToolFailed
+		event.Status = edge.ActionStatusBlocked
 		event.DecisionReason = decision.Reason
-	} else if decision.Reason != "" {
-		event.DecisionReason = decision.Reason
+	} else {
+		event.Status = edge.ActionStatusOK
+		if decision.Reason != "" {
+			event.DecisionReason = decision.Reason
+		}
 	}
 
 	if deps.EventEmitter == nil {
@@ -535,6 +553,14 @@ func logToolCallDecision(ctx context.Context, event *edge.AgentActionEvent, desc
 		slog.String("decision", string(event.Decision)),
 		slog.String("gate_id", dec.GateID),
 		slog.String("code", dec.Code),
+		// constraint_count surfaces AWC volume to operator-facing log
+		// streams (greppable for AWC bursts / dashboards) without
+		// leaking the structured constraint VALUES, which may carry
+		// sensitive policy detail (allowed hosts, redaction levels)
+		// per CLAUDE.md security rails and feedback_no_ai_slop. The
+		// full constraint map lives on the audit-bound event +
+		// artifact pointer, not the live log stream.
+		slog.Int("constraint_count", len(dec.Constraints)),
 	)
 }
 
@@ -743,14 +769,14 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	}
 	upstreamResult, upstreamErr := deps.Upstream.Invoke(ctx, params)
 	if upstreamErr != nil {
-		failed := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolFailed, edge.DecisionAllow)
+		failed := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolFailed, dec)
 		failed.ErrorMessage = sanitizeUpstreamError(deps.Redactor, upstreamErr)
 		if emitErr := deps.EventEmitter.Emit(ctx, failed); emitErr != nil {
 			return nil, fmt.Errorf("emit failed event: %w", emitErr)
 		}
 		return nil, upstreamErr
 	}
-	post := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolPost, edge.DecisionAllow)
+	post := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolPost, dec)
 	if err := deps.EventEmitter.Emit(ctx, post); err != nil {
 		return nil, fmt.Errorf("emit post event: %w", err)
 	}
@@ -759,9 +785,23 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 
 // newPostEvent clones the identity/session fields from the pre event
 // onto the post/failed event. EventID is reused so retry dedupe via
-// EventID-keyed state stays consistent across the pre/post pair.
-func newPostEvent(pre *edge.AgentActionEvent, clock func() time.Time, kind edge.EventKind, dec edge.EdgeDecision) *edge.AgentActionEvent {
-	return &edge.AgentActionEvent{
+// EventID-keyed state stays consistent across the pre/post pair. The
+// PolicyDecision sources both the EdgeDecision shape (via
+// mapPolicyDecisionToEdge so an AWC verdict records `constrain` not
+// `allow`) and the Constraints map (bundled scope from task-3d5c4f37
+// so AWC constraint metadata survives into the post-event audit row).
+// Empty/nil Constraints map leaves event.Constraints nil so the
+// JSON wire payload stays identical to legacy ALLOW events.
+//
+// Status defaults to `failed` for mcp.tool.failed kind, `ok` for any
+// other kind. The edge.Store validation rejects empty Status, so any
+// post/failed event MUST carry a known-good value before AppendEvent.
+func newPostEvent(pre *edge.AgentActionEvent, clock func() time.Time, kind edge.EventKind, dec PolicyDecision) *edge.AgentActionEvent {
+	status := edge.ActionStatusOK
+	if kind == edge.EventKindMCPToolFailed {
+		status = edge.ActionStatusFailed
+	}
+	evt := &edge.AgentActionEvent{
 		EventID:     pre.EventID,
 		SessionID:   pre.SessionID,
 		ExecutionID: pre.ExecutionID,
@@ -772,8 +812,13 @@ func newPostEvent(pre *edge.AgentActionEvent, clock func() time.Time, kind edge.
 		Kind:        kind,
 		ToolName:    pre.ToolName,
 		ActionName:  pre.ActionName,
-		Decision:    dec,
+		Decision:    mapPolicyDecisionToEdge(dec),
+		Status:      status,
 	}
+	if len(dec.Constraints) > 0 {
+		evt.Constraints = dec.Constraints
+	}
+	return evt
 }
 
 // canonicalActionHashFromEvent computes a stable hash over the tool

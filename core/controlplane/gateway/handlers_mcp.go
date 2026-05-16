@@ -33,7 +33,13 @@ type mcpGatewayConfig struct {
 	Enabled   bool
 	Transport string
 	Port      int
-	Raw       map[string]any
+	// PolicyGateEnabled gates the WithPolicyGate / WithApprovalHold
+	// wiring at boot. Defaults to false so legacy deploys keep the
+	// direct-dispatch path until operators explicitly opt in via
+	// `mcp.policy_gate_enabled: true` in config. The "must explicitly
+	// opt in" posture is mandated by feedback_dont_change_deployment_defaults.
+	PolicyGateEnabled bool
+	Raw               map[string]any
 }
 
 type mcpRuntimeState struct {
@@ -115,6 +121,11 @@ func (s *server) startMCPRuntimeFromConfig(cfg mcpGatewayConfig) error {
 	// elsewhere, so reaching this path in prod means degraded mode.
 	var approvalStore *MCPApprovalStore
 	var approvalHandler *mcpApprovalHandler
+	// approvalGate is hoisted to function scope so the EDGE-102 boot
+	// wiring below can hand it to attachMCPPolicyDeps. nil when Redis
+	// is unavailable; the gate's nil-check inside BuildMCPPolicyDeps
+	// fails closed without crashing the boot path.
+	var approvalGate *gatewayApprovalGate
 	if client := s.redisClient(); client != nil {
 		approvalStore = NewMCPApprovalStore(client).WithAuditHook(s.mcpApprovalAuditHook())
 		approvalHandler = newMCPApprovalHandler(approvalStore)
@@ -143,6 +154,7 @@ func (s *server) startMCPRuntimeFromConfig(cfg mcpGatewayConfig) error {
 		})
 		rawGate, gate := s.wireMCPApprovalGate(approvalStore, invariantLookup)
 		toolRegistry.SetApprovalGate(rawGate)
+		approvalGate = gate
 		if gate != nil {
 			slog.Info("mcp approval gate enabled",
 				"preapproval", gate.preapproval != nil,
@@ -234,6 +246,26 @@ func (s *server) startMCPRuntimeFromConfig(cfg mcpGatewayConfig) error {
 		ProtocolVersion: mcp.DefaultProtocolVersion,
 		RequestTimeout:  30 * time.Second,
 	}).WithAuditor(invocationAuditor).WithPrompts(promptRegistry)
+	// EDGE-102 / EDGE-103 policy + approval-hold wiring. Gated by
+	// `mcp.policy_gate_enabled` so legacy deploys keep the direct-dispatch
+	// path until operators explicitly opt in (feedback_dont_change_deployment_defaults).
+	// Partial-wiring guards inside WithPolicyGate / WithApprovalHold reset
+	// the gate to off when required deps are missing — operators see the
+	// resulting state via the boot log line emitted below.
+	if cfg.PolicyGateEnabled {
+		mcpServer = s.attachMCPPolicyDeps(mcpServer, approvalGate)
+		slog.Info("mcp.policy_gate wired",
+			"server_name", mcpServer.PolicyServerName(),
+			"policy_gate_active", mcpServer.HasPolicyGate(),
+			"approval_hold_active", mcpServer.HasApprovalHold(),
+			"emitter", "edge.RedisStore",
+			"artifact_store", "artifacts.RedisStore",
+		)
+	} else {
+		slog.Info("mcp.policy_gate skipped",
+			"reason", "policy_gate_enabled config flag is false",
+		)
+	}
 	sweeperStop := make(chan struct{})
 	if approvalStore != nil {
 		go runMCPApprovalSweeper(approvalStore, sweeperStop)
@@ -459,6 +491,9 @@ func (s *server) loadMCPConfig(ctx context.Context) mcpGatewayConfig {
 	}
 	if port := lookupIntPath(effective, "mcp", "port"); port > 0 {
 		cfg.Port = port
+	}
+	if enabled, ok := lookupBoolPath(effective, "mcp", "policy_gate_enabled"); ok {
+		cfg.PolicyGateEnabled = enabled
 	}
 	return cfg
 }

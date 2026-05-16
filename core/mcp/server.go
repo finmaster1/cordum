@@ -101,6 +101,71 @@ type MCPServer struct {
 	approvalHoldDeps *ApprovalHoldDeps
 }
 
+// HasPolicyGate reports whether WithPolicyGate has been wired with the
+// minimum dependencies required to route tools/call through the policy
+// gate. Returns false when the gate was wired with all-zero or partial
+// deps (the server.go partial-wiring guard reset policyDeps to nil).
+// Used by boot-log assertions, dashboard health probes, and tests.
+func (s *MCPServer) HasPolicyGate() bool {
+	return s != nil && s.policyDeps != nil
+}
+
+// PolicyServerName returns the MCP server identifier the gate stamps
+// on every ActionDescriptor.Server (e.g. "cordum.builtin"). Empty when
+// WithPolicyGate has not been wired or was reset by the partial-wiring
+// guard. Operators see this in the boot log so a misconfigured deploy
+// is greppable from cold start.
+func (s *MCPServer) PolicyServerName() string {
+	if s == nil || s.policyDeps == nil {
+		return ""
+	}
+	return s.policyServerName
+}
+
+// PolicyEventEmitter returns the EventEmitter wired through
+// WithPolicyGate so boot-time assertions can confirm the gate is backed
+// by a production emitter (e.g. an edge.RedisStore adapter) rather than
+// a noop fallback. Returns nil when WithPolicyGate has not been wired.
+func (s *MCPServer) PolicyEventEmitter() EventEmitter {
+	if s == nil || s.policyDeps == nil {
+		return nil
+	}
+	return s.policyDeps.EventEmitter
+}
+
+// PolicyArtifactStore returns the ArtifactStore wired through
+// WithPolicyGate so boot-time assertions can confirm the gate is backed
+// by a production artifact store (e.g. an artifacts.Store adapter)
+// rather than a noop fallback. Returns nil when WithPolicyGate has not
+// been wired.
+func (s *MCPServer) PolicyArtifactStore() ArtifactStore {
+	if s == nil || s.policyDeps == nil {
+		return nil
+	}
+	return s.policyDeps.ArtifactStore
+}
+
+// PolicyDispatcher returns the gate-pipeline dispatcher wired through
+// WithPolicyGate so integration tests can drive EvaluateToolCall with
+// the production adapter chain (or substitute a fake dispatcher while
+// keeping the rest of the deps real). Returns nil when WithPolicyGate
+// has not been wired.
+func (s *MCPServer) PolicyDispatcher() PolicyDispatcher {
+	if s == nil || s.policyDeps == nil {
+		return nil
+	}
+	return s.policyDeps.Pipeline
+}
+
+// HasApprovalHold reports whether WithApprovalHold has been wired with
+// the minimum dependencies (non-nil Store + non-nil PolicySnapshot)
+// required to route `_approval_ref` claims through the Edge approval
+// store. Returns false when the partial-wiring guard reset
+// approvalHoldDeps to nil.
+func (s *MCPServer) HasApprovalHold() bool {
+	return s != nil && s.approvalHoldDeps != nil
+}
+
 // WithAuditor attaches a ToolInvocationAuditor so the server emits
 // mcp.tool_invocation events for every terminal tools/call. Returns
 // the server for fluent chaining. Passing nil leaves the server as-is.

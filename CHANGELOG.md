@@ -7,6 +7,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+#### EDGE-102 follow-up — Wire MCPServer.WithPolicyGate at gateway boot (2026-05-16, task-e9d9a37d, bundles task-3d5c4f37)
+
+- Gateway boot path (`core/controlplane/gateway/handlers_mcp.go`
+  `startMCPRuntimeFromConfig`) now calls `MCPServer.WithPolicyGate` +
+  `WithApprovalHold` against real backing stores when the new
+  `mcp.policy_gate_enabled` config flag is true. Default false per
+  `feedback_dont_change_deployment_defaults` — operators opt in
+  explicitly per deploy; missing config key leaves the gate off.
+- New `core/controlplane/gateway/mcp_policy_boot.go` introduces two
+  small production adapters that the EDGE-102 surface previously
+  routed through noop fallbacks:
+  - `edgeStoreEventEmitter` adapts the existing `*edgecore.RedisStore`
+    (the same instance `s.edgeStore` Edge events already land on) to
+    `mcp.EventEmitter` — `mcp.tool.pre` / `mcp.tool.post` /
+    `mcp.tool.failed` events now persist alongside hook + LLM events
+    on one canonical stream.
+  - `productionArtifactStore` adapts the existing `artifacts.Store`
+    (the Redis-backed pointer store the export bundler reads) to
+    `mcp.ArtifactStore` — oversized redacted MCP-request/response
+    payloads land in artifact storage with content-addressed SHA-256
+    pointers carrying tenant/session/execution/event labels for the
+    dashboard's evidence-export pivot.
+- Approval-hold consume path (`_approval_ref` arg, EDGE-103) now
+  resolves claims through `edge.RedisStore.ClaimApproval` with a
+  `PolicySnapshot` closure sourced from `loadPolicyBundles` so the
+  consume-side snapshot matches mint-side (closes the c530c1c0
+  ServerName + snapshot guard from PR #276).
+- Bundled scope from task-3d5c4f37: ALLOW_WITH_CONSTRAINTS gate
+  decisions now propagate the `_constraints` map through to the
+  emitted pre + post + failed events. `AgentActionEvent.Constraints`
+  field added (omitempty so legacy ALLOW events keep their wire
+  shape); `newPostEvent` derives `Decision` via
+  `mapPolicyDecisionToEdge` so an AWC verdict records
+  `Decision=constrain` rather than degrading to `allow` on the post
+  event. Shape mirrors `core/edge/agentd EvaluateResponse.Constraints`
+  per the "No parallel subsystems" epic rail.
+- Operator-facing boot log:
+  `slog.Info("mcp.policy_gate wired", server_name=cordum.builtin, policy_gate_active, approval_hold_active, emitter, artifact_store)`
+  when the flag is on; `slog.Info("mcp.policy_gate skipped", reason)`
+  when off. One greppable line per acceptance criterion #4.
+- `logToolCallDecision` now records `slog.Int("constraint_count", ...)`
+  so AWC bursts are greppable from the live log stream; constraint
+  VALUES are never logged (CLAUDE.md security rail).
+- New `MCPServer` accessors `HasPolicyGate() / PolicyServerName() /
+  PolicyEventEmitter() / PolicyArtifactStore() / HasApprovalHold()`
+  double as boot-log inputs and stable surfaces for boot-wiring
+  tests / future dashboard health probes.
+
 #### EDGE-140 — Local shadow-agent scanner observe mode (2026-05-16, task-74ac5153)
 
 - New `core/edge/shadow/` package implements an opt-in P3 local scanner

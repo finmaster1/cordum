@@ -40,13 +40,22 @@ const (
 // only and may carry the internal "why" (e.g. "approval_consumed",
 // "self_approval", "cross_tenant"). Extra holds non-PII gate-specific
 // breadcrumbs (gate, sub_reason, sanitized target_type) for SIEM.
+//
+// Constraints carries the structured `_constraints` map a gate populates
+// when it returns ALLOW_WITH_CONSTRAINTS. The shape mirrors the agentd
+// evaluate response (core/edge/agentd EvaluateResponse.Constraints) so
+// audit consumers see a single canonical constraint payload across the
+// hook + MCP surfaces. Gates today populate this lazily; the field is
+// ready so future tier-ceiling / sandbox-mode gates can emit constraints
+// without a wire-format change.
 type ActionGateDecision struct {
-	Decision  pb.DecisionType
-	GateID    string
-	Code      string
-	Reason    string
-	SubReason string
-	Extra     map[string]string
+	Decision    pb.DecisionType
+	GateID      string
+	Code        string
+	Reason      string
+	SubReason   string
+	Extra       map[string]string
+	Constraints map[string]any
 }
 
 // Fired reports whether the gate produced a real outcome. Gates that don't

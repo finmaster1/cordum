@@ -25,18 +25,26 @@ type policyDispatcherAdapter struct {
 // shape. A nil pipeline returns the zero decision (treated as allow)
 // so a gateway boot without the action gate wired falls through to
 // the legacy approval flow without crashing.
+//
+// Constraints propagate when the gate fires ALLOW_WITH_CONSTRAINTS so
+// the mcp audit event records the same `_constraints` payload that
+// agentd consumers see — keeps the gate's verdict bound to the same
+// constraint metadata across the hook + MCP surfaces (no parallel
+// subsystem). No-op for non-AWC decisions: the source map is nil and
+// the copy preserves nil rather than substituting an empty map.
 func (a policyDispatcherAdapter) Dispatch(ctx context.Context, in *config.PolicyInput) (mcp.PolicyDecision, bool) {
 	if a.pipeline == nil {
 		return mcp.PolicyDecision{}, false
 	}
 	dec, fired := a.pipeline.Run(ctx, in)
 	return mcp.PolicyDecision{
-		Decision:  dec.Decision,
-		GateID:    dec.GateID,
-		Code:      dec.Code,
-		Reason:    dec.Reason,
-		SubReason: dec.SubReason,
-		Extra:     dec.Extra,
+		Decision:    dec.Decision,
+		GateID:      dec.GateID,
+		Code:        dec.Code,
+		Reason:      dec.Reason,
+		SubReason:   dec.SubReason,
+		Extra:       dec.Extra,
+		Constraints: dec.Constraints,
 	}, fired
 }
 

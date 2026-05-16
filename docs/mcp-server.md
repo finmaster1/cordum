@@ -65,6 +65,84 @@ Routes:
 `/mcp/sse` returns `X-MCP-Session-ID`. Clients can send `X-MCP-Session-ID` on
 `/mcp/message` to correlate session responses.
 
+### Policy Gate + Approval Hold (EDGE-102 / EDGE-103)
+
+`tools/call` requests can run through the production action-gate pipeline
+before reaching the underlying tool handler. The gate emits structured
+`mcp.tool.pre` / `mcp.tool.post` / `mcp.tool.failed` events to the Edge
+event stream so audit consumers and the dashboard's governance timeline
+see every MCP call alongside hook + LLM events. Oversized redacted args
+land in artifact storage with content-addressed SHA-256 pointers.
+
+#### Feature flag
+
+The wiring is gated on `mcp.policy_gate_enabled` (default **false** so
+legacy deploys keep the direct-dispatch path until operators explicitly
+opt in). Set it via the config service:
+
+```yaml
+mcp:
+  enabled: true
+  transport: http
+  policy_gate_enabled: true   # EDGE-102/103 wiring
+```
+
+#### Boot log line
+
+When the gate is wired the gateway emits one greppable boot log:
+
+```
+INFO mcp.policy_gate wired server_name=cordum.builtin
+     policy_gate_active=true approval_hold_active=true
+     emitter=edge.RedisStore artifact_store=artifacts.RedisStore
+```
+
+When the flag is off:
+
+```
+INFO mcp.policy_gate skipped reason="policy_gate_enabled config flag is false"
+```
+
+Operators grep these lines after a rolling restart to confirm the gate
+came up. The `partial-wiring guard` in `core/mcp/server.go` resets the
+gate to off if required deps (action-gate pipeline, event emitter,
+policy snapshot) are missing — the boot log then reports
+`policy_gate_active=false` so misconfigured deploys are visible.
+
+#### ALLOW_WITH_CONSTRAINTS contract
+
+When a gate returns `ALLOW_WITH_CONSTRAINTS` with a structured
+`_constraints` map, the constraint payload propagates to both pre and
+post events:
+
+- `event.Decision = constrain` (NOT `allow`)
+- `event.Constraints = {...}` (same shape as
+  `agentd EvaluateResponse.Constraints` — single canonical wire shape
+  across hook + MCP surfaces)
+- `event.ErrorMessage` empty (AWC is an allow, just bounded)
+
+If upstream fails after an AWC verdict, the resulting
+`mcp.tool.failed` event still records `Decision=constrain` +
+the constraint map so the audit trail preserves the gate's intent.
+
+The operator-facing log line carries `constraint_count=<N>` so AWC
+volume spikes are greppable, but never the constraint values
+themselves (CLAUDE.md security rail — constraint values may carry
+sensitive policy detail; the full map lives on the audit-bound event
+plus the artifact pointer for forensics).
+
+#### Approval-hold consume path
+
+When `mcp.policy_gate_enabled=true`, `tools/call` arguments may carry
+an `_approval_ref` field referencing a previously-minted Edge
+approval. The server-reserved field is stripped before the upstream
+handler sees the args, and the approval is consumed atomically through
+`edge.RedisStore.ClaimApproval` with the bundle-updated-at timestamp
+as the consume-time `PolicySnapshot`. Lifecycle conflicts (rejected /
+expired / consumed / args_mismatch / policy_mismatch / self_approval /
+cross_tenant / not_found) surface as JSON-RPC `-32096` with
+`error.data.kind` carrying the typed conflict family.
+
 ## Available Tools
 
 Current runtime behavior:
