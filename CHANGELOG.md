@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+#### Dashboard — Agent Fleet consolidated from 4 tabs to 2 (2026-05-16, task-083581ca)
+
+- `dashboard/src/pages/AgentsPage.tsx` — `topTabs` reduced 4→2 (Fleet Overview + Identities). Pool Topology absorbed into Fleet Overview as a segmented view-mode toggle (Table / By Pool) with `?view=by-pool` query-state persistence. Agent Registry deleted as redundant — its worker table duplicated Fleet Overview's; the standalone `AgentRegistryTab` function and the `useWorkers` import removed (~75 LOC). Identity Directory renamed to Identities (same content + EntitlementGate wrapper).
+- Backward-compatibility migration: mount-time `useEffect` rewrites legacy `?tab=pools|registry|identity` query params via `setSearchParams(..., { replace: true })` so existing bookmarks resolve to the new tab+view combination (pools → fleet+view=by-pool; registry → fleet; identity → identities).
+- `dashboard/src/pages/AgentsPage.test.tsx` — 2 new assertions: exactly `{Fleet Overview, Identities}` top-level tabs render; `{Pool Topology, Agent Registry, Identity Directory}` labels are absent. 3/3 PASS post-impl.
+
 #### Dashboard — Edge promoted to top-level sidebar section; redundant Dead Letters entry removed (2026-05-16, task-266f21ad)
 
 - `dashboard/src/components/layout/AppShell.tsx` — APP_SHELL_NAV_SECTIONS now ships 6 sections (Run, **Edge**, Govern, Catalog, Audit, Settings). The new `Edge` section sits between Run and Govern and contains: `Edge Sessions` (`/edge/sessions`), `Edge Approvals` (`/edge/approvals`), `Edge Audit` (`/edge/audit`). The Edge Sessions item moved out of Run so the Edge subsystem has visible breadth in the IA instead of being buried as one item in Run.
