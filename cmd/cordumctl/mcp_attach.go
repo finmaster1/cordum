@@ -41,7 +41,7 @@ func runMCPAttachCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	adapter, err := buildAttachAdapter(*client, *configPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err.Error())
+		_, _ = fmt.Fprintln(stderr, err.Error())
 		return 2
 	}
 	gateway := UpstreamServerRef{
@@ -58,7 +58,7 @@ func runMCPAttachCmd(args []string, stdout, stderr io.Writer) int {
 			// Task rail #1: do not overwrite user configs without explicit
 			// --apply. Fall through to a preview rather than erroring so
 			// operators see what would happen, then re-run with --apply.
-			fmt.Fprintln(stdout, "attach: --apply not set; running preview only (re-run with --apply to write)")
+			_, _ = fmt.Fprintln(stdout, "attach: --apply not set; running preview only (re-run with --apply to write)")
 			return PreviewAttach(adapter, gateway, stdout)
 		}
 		return ApplyAttach(adapter, gateway, stdout)

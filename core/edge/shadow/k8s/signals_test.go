@@ -306,9 +306,7 @@ func TestK8sDetector_DataMinimization_NeverCapturesSecrets(t *testing.T) {
 		for k, v := range fnd.Metadata {
 			fields = append(fields, k, v)
 		}
-		for _, sig := range fnd.SignalSet {
-			fields = append(fields, sig)
-		}
+		fields = append(fields, fnd.SignalSet...)
 		for _, field := range fields {
 			if leaked := containsAny(field, canaries); leaked != "" {
 				t.Errorf("finding %q field leaked canary %q: %q",

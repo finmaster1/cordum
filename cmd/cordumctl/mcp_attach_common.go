@@ -67,22 +67,22 @@ func DefaultConfigPath(client, homeDir string) string {
 // distinguish parse error from missing config (exit 0).
 func PreviewAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Writer) int {
 	if adapter == nil {
-		fmt.Fprintln(stdout, "preview: adapter is nil")
+		_, _ = fmt.Fprintln(stdout, "preview: adapter is nil")
 		return 2
 	}
 	path := adapter.ConfigPath()
 	existing, missing, err := readMaybeMissing(path)
 	if err != nil {
-		fmt.Fprintf(stdout, "preview: read %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(stdout, "preview: read %s: %v\n", path, err)
 		return 2
 	}
 	if missing {
-		fmt.Fprintf(stdout, "preview: no existing config at %s; apply will create one with cordum-gateway\n", path)
+		_, _ = fmt.Fprintf(stdout, "preview: no existing config at %s; apply will create one with cordum-gateway\n", path)
 		return 0
 	}
 	_, preview, err := adapter.ReadAndMerge(existing, gateway)
 	if err != nil {
-		fmt.Fprintf(stdout, "preview: parse %s failed: %v (apply would abort to preserve the broken file)\n",
+		_, _ = fmt.Fprintf(stdout, "preview: parse %s failed: %v (apply would abort to preserve the broken file)\n",
 			path, err)
 		return 2
 	}
