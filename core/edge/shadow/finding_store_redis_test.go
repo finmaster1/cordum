@@ -353,6 +353,33 @@ func TestListFindings_LimitCapAcrossPaths(t *testing.T) {
 	})
 }
 
+// TestListFindings_MultiSignalCapEnforcedAtListLayer asserts the
+// list-layer defence-in-depth cap fires when a caller submits more than
+// maxShadowSignalSetEntries signals to the multi-signal path. The
+// handler-layer cap in parseShadowFindingListQuery is the primary gate;
+// this test pins the redundant store-layer check so a future internal
+// caller that bypasses the handler cannot trigger unbounded fan-out.
+func TestListFindings_MultiSignalCapEnforcedAtListLayer(t *testing.T) {
+	s, _ := newTestStore(t)
+	q := ListFindingsQuery{TenantID: "tenant-cap", Signals: make([]string, maxShadowSignalSetEntries+1)}
+	for i := range q.Signals {
+		q.Signals[i] = fmt.Sprintf("signal_%02d", i)
+	}
+	page, err := s.ListFindings(context.Background(), q)
+	if err == nil {
+		t.Fatalf("ListFindings with %d signals returned no error; want ErrValidation cap", len(q.Signals))
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrValidation)", err)
+	}
+	if !strings.Contains(err.Error(), "signals exceeds max") {
+		t.Fatalf("err = %v, want message containing %q", err, "signals exceeds max")
+	}
+	if len(page.Findings) != 0 {
+		t.Fatalf("findings len = %d, want 0 on capped error", len(page.Findings))
+	}
+}
+
 func TestResolveFinding_TerminalAndIdempotent(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()

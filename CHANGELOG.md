@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+#### PR #276 code-cleanup bundle — multi-signal dedup cap + sanitizeUpstreamError signature (2026-05-17, task-513e3c1b)
+
+- `core/edge/shadow/finding_store_redis.go` — defence-in-depth cap added at the entry of `listFindingsByMultiSignal` (line 511) so a future internal caller that bypasses the handler-layer `parseShadowFindingListQuery` gate cannot trigger unbounded fan-out across signal indexes. Reuses existing `maxShadowSignalSetEntries=16` const and `ErrValidation` sentinel; mirrors the `CreateFindingExtension` signal-cap pattern at finding_store.go:634. (Cap addition was captured by sibling commit 19e7dab1.)
+- `core/edge/shadow/finding_store_redis_test.go` — `TestListFindings_MultiSignalCapEnforcedAtListLayer` pins the redundant store-layer check: submitting 17 signals returns `ErrValidation` with message `"signals exceeds max 16 entries"` and zero accumulated findings. PASS at `-count=3`.
+- `core/mcp/policy_evaluate.go` — dropped the unused `ArgumentRedactor` parameter from `sanitizeUpstreamError` (option a from the PR review): function body uses the package-level `upstreamErrorRedactPatterns` regex set, so the param was misleading on the signature. Updated the sole call site at line 835 and refreshed the InvokeToolWithPolicy default-deps comment that referenced the helper. No behavior change.
+
 #### CI — PR #276 Sub-C: CI / release infra cluster (#6, #23, #28) (2026-05-17, task-ba430336)
 
 - `Makefile` — extended the explicit-`bash` invocation pattern (established by the `release-local:` target in commit 1f409017) to the three `soak-ws*` targets at :139 / :143 / :147. They previously bare-invoked `./tools/scripts/ws_soak_test.sh <mode>`, which relies on the script's 0755 mode bit and `#!/bin/bash` shebang resolving — both of which can fail on Windows checkouts (git reports the file 100644) and minimal CI containers (no `/bin/bash`). Now reads `bash tools/scripts/ws_soak_test.sh <mode>`, mirroring `release-local:` at :157. Resolves the sibling-target scope of CodeRabbit PR #276 #28.

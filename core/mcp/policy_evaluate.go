@@ -728,8 +728,9 @@ func defaultEventIDFactory() string {
 // (or pre+failed) pair in the emitter.
 func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCallParams, server string) (*ToolCallResult, error) {
 	// Apply zero-value defaults consistently across InvokeToolWithPolicy
-	// and EvaluateToolCall so downstream helpers (newPostEvent,
-	// sanitizeUpstreamError) never see a nil Clock or Redactor.
+	// and EvaluateToolCall so downstream helpers (newPostEvent and the
+	// redactor pass inside EvaluateToolCall) never see a nil Clock or
+	// Redactor.
 	if deps.Clock == nil {
 		deps.Clock = func() time.Time { return time.Now().UTC() }
 	}
@@ -831,7 +832,7 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	upstreamResult, upstreamErr := deps.Upstream.Invoke(ctx, params)
 	if upstreamErr != nil {
 		failed := newPostEvent(evalResult.PreEvent, deps.Clock, edge.EventKindMCPToolFailed, dec)
-		failed.ErrorMessage = sanitizeUpstreamError(deps.Redactor, upstreamErr)
+		failed.ErrorMessage = sanitizeUpstreamError(upstreamErr)
 		if emitErr := deps.EventEmitter.Emit(ctx, failed); emitErr != nil {
 			finalErr = fmt.Errorf("emit failed event: %w", emitErr)
 			return nil, finalErr
@@ -907,7 +908,7 @@ func canonicalActionHashFromEvent(pre *edge.AgentActionEvent, params ToolCallPar
 // include leak vectors (full URLs with `?token=...` query strings,
 // `Bearer` headers, `sk-*`/`ghp_*`/AWS keys); the contract is that
 // no such substring lands in a Redis event.
-func sanitizeUpstreamError(_ ArgumentRedactor, err error) string {
+func sanitizeUpstreamError(err error) string {
 	if err == nil {
 		return ""
 	}
