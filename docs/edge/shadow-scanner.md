@@ -150,11 +150,68 @@ that the managed-config skip is designed to prevent.
 
 ## 9. Roadmap
 
-| Sibling | Status | Adds |
-|---------|--------|------|
-| EDGE-141 | WORKING | Server-side finding store + `/api/v1/edge/shadow/findings` ingest |
-| EDGE-142 | WORKING | Remediation-hint generator (still observe-mode) |
-| EDGE-143 | DESIGN  | [K8s + CI shadow detector design doc](kubernetes-ci-shadow-detector-design.md) (design only, awaiting human signoff) |
+| Sibling    | Status  | Adds |
+|------------|---------|------|
+| EDGE-141   | DONE    | Server-side finding store + `/api/v1/edge/shadow-agents` lifecycle APIs (`detected → resolved/suppressed`). |
+| EDGE-142   | WORKING | Remediation-hint generator (still observe-mode). |
+| EDGE-143   | DESIGN  | [K8s + CI shadow detector design doc](kubernetes-ci-shadow-detector-design.md) (design only, awaiting human signoff). |
+| EDGE-143.5 | DONE    | Store extensions — §10.1 fields, §10.2 filters, §10.5 Redis indexes + per-finding retention. See §9.1 below. |
+
+### 9.1 EDGE-143.5 — store extensions (shipped)
+
+Adds the additive store surface from the EDGE-143 design doc §10. All
+changes are backward-compatible — EDGE-141 records without these
+fields continue to round-trip and surface in lists.
+
+**23 new fields on `ShadowAgentFinding`** (§10.1) — `source_type`
+(enum `local|kubernetes|ci|network`, defaults to `local` on read),
+`source_id`, `cluster_id`, `namespace`, `workload_kind`,
+`workload_name`, `pod_uid`, `ci_provider` (enum
+`github_actions|gitlab_ci|jenkins|buildkite|circleci|other`), `repo`
+(composite-indexed with `ci_provider`), `ref`, `workflow_id`,
+`job_id`, `run_id`, `runner_id`, `tenant_source`, `principal_source`,
+`signal_set` (≤16 entries, `[a-z0-9_]{1,32}`), `confidence` ([0,1]),
+`first_seen`, `last_seen`, `false_positive_reason`, `exception_id`,
+`retention_class` (enum `shadow_short|shadow_default|shadow_long`).
+
+**11 new query filters on `GET /api/v1/edge/shadow-agents`** (§10.2)
+— `source_type`, `cluster_id`, `namespace`, `ci_provider`, `repo`
+(requires `ci_provider`), `signal` (repeatable any-of, capped at 16),
+`confidence_min`, `first_seen_after`, `last_seen_before`,
+`exception_id`, `include_managed_skip` (default `false`; when `false`,
+findings carrying `false_positive_reason` are excluded). Combined
+filters apply AND semantics across dimensions; `signal` applies IN
+semantics within the dimension.
+
+**4 new Redis indexes** (§10.5) — `edge:shadow:index:source:<source>`,
+`edge:shadow:index:cluster:<cluster_id>`,
+`edge:shadow:index:repo:<provider>:<org/repo>`,
+`edge:shadow:index:signal:<signal>`. These are **NOT tenant-scoped**
+(per the Q7 binding governor ruling — store-level federation, not
+detector-level): multiple tenants share the same ZSET on these keys,
+and tenant isolation is enforced at read time. Cross-tenant index
+entries are **skipped** during a tenant's query, never deleted —
+deletion would be cross-tenant data loss.
+
+**Per-finding retention** (§10.5) — `retention_class` drives terminal
+TTL when the finding transitions to `resolved` or `suppressed`. Empty
+class falls back to the store's `terminalRetention` (default 90d) so
+EDGE-141 records keep their existing lifecycle.
+
+| Retention class  | Default TTL | Env var override                       |
+|------------------|-------------|----------------------------------------|
+| `shadow_short`   | 7 days      | `CORDUM_EDGE_SHADOW_RETENTION_SHORT`   |
+| `shadow_default` | 90 days     | `CORDUM_EDGE_SHADOW_RETENTION_DEFAULT` |
+| `shadow_long`    | 365 days    | `CORDUM_EDGE_SHADOW_RETENTION_LONG`    |
+
+Env vars use Go `time.ParseDuration` syntax (`7d` is **not** supported;
+use `168h`). Zero or negative values cause the gateway to fail at
+startup, matching the EDGE-141 "positive durations only" convention.
+
+**Backward-compatibility (§10.4):** legacy EDGE-141 findings (no
+`source_type` set) read back with `source_type="local"` defaulted
+on read; the `GET ?source_type=local` query falls back to the broad
+tenant index + post-filter so legacy rows still surface.
 
 This task explicitly does **not** add a dashboard surface for shadow
 findings (task rail #3 'Shadow Agents were cut from P0; do not add P0

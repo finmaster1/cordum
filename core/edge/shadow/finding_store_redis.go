@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +34,16 @@ const (
 	redisIndexSegRisk   = ":risk:"
 	redisIndexSegAgent  = ":agent:"
 	redisIndexSegOwner  = ":owner:"
+	// EDGE-143.5 — §10.5 NON-tenant-scoped indexes. Multiple tenants
+	// share the same ZSET on these keys (Q7 binding governor ruling,
+	// comment-a17f4f1c on task-de50a293). Tenant isolation is enforced
+	// at read time via the gate in ListFindings; cross-tenant members
+	// are SKIPPED (never deleted) by the indexIsTenantScoped=false
+	// branch — see the data-loss guard there.
+	redisIndexKeySource  = "edge:shadow:index:source:"
+	redisIndexKeyCluster = "edge:shadow:index:cluster:"
+	redisIndexKeyRepo    = "edge:shadow:index:repo:"
+	redisIndexKeySignal  = "edge:shadow:index:signal:"
 	// overScanFactor controls how many index entries we pull per page when
 	// secondary filters require post-fetch JSON validation. 3x balances
 	// read amplification vs. round-trips on dense filter combinations.
@@ -47,6 +58,12 @@ type RedisStore struct {
 	now               func() time.Time
 	idGen             func() string
 	terminalRetention time.Duration
+	// shadowRetention maps each §10.5 ShadowFindingRetentionClass to a
+	// terminal TTL. Empty class falls back to terminalRetention. Defaults
+	// from defaultShadowRetention(); overridable via
+	// WithShadowRetentionClasses or the CORDUM_EDGE_SHADOW_RETENTION_*
+	// env vars (read once in NewRedisStore).
+	shadowRetention map[ShadowFindingRetentionClass]time.Duration
 }
 
 // StoreOption customizes RedisStore behavior. Primarily for tests that
@@ -73,18 +90,54 @@ func WithTerminalRetention(d time.Duration) StoreOption {
 	return func(s *RedisStore) { s.terminalRetention = d }
 }
 
-// NewRedisStore wraps the shared redis client. Returns nil when client
-// is nil so callers can pass through a missing-store sentinel without
-// allocating a non-functional store.
-func NewRedisStore(client redis.UniversalClient, opts ...StoreOption) *RedisStore {
+// WithShadowRetentionClasses overrides the per-§10.5 retention-class
+// TTL map. Nil resets to defaults. Empty values mean "fall back to
+// terminalRetention" — useful for compliance configurations where
+// shadow records are retained indefinitely.
+func WithShadowRetentionClasses(m map[ShadowFindingRetentionClass]time.Duration) StoreOption {
+	return func(s *RedisStore) {
+		if m == nil {
+			s.shadowRetention = defaultShadowRetention()
+			return
+		}
+		copied := make(map[ShadowFindingRetentionClass]time.Duration, len(m))
+		for k, v := range m {
+			copied[k] = v
+		}
+		s.shadowRetention = copied
+	}
+}
+
+// defaultShadowRetention returns the §10.5 baseline TTL map:
+// shadow_short=7d, shadow_default=90d, shadow_long=365d.
+func defaultShadowRetention() map[ShadowFindingRetentionClass]time.Duration {
+	return map[ShadowFindingRetentionClass]time.Duration{
+		ShadowRetentionShort:   7 * 24 * time.Hour,
+		ShadowRetentionDefault: 90 * 24 * time.Hour,
+		ShadowRetentionLong:    365 * 24 * time.Hour,
+	}
+}
+
+// NewRedisStore wraps the shared redis client. Returns (nil, nil) when
+// client is nil so callers can pass through a missing-store sentinel
+// without allocating a non-functional store. Returns an error when one
+// of the CORDUM_EDGE_SHADOW_RETENTION_* env vars fails to parse or is
+// non-positive, per §10.5 "positive durations; 0/negative fail at
+// startup".
+func NewRedisStore(client redis.UniversalClient, opts ...StoreOption) (*RedisStore, error) {
 	if client == nil {
-		return nil
+		return nil, nil
+	}
+	envRetention, err := shadowRetentionFromEnv(defaultShadowRetention())
+	if err != nil {
+		return nil, err
 	}
 	s := &RedisStore{
 		client:            client,
 		now:               func() time.Time { return time.Now().UTC() },
 		idGen:             defaultIDGen,
 		terminalRetention: DefaultTerminalRetention,
+		shadowRetention:   envRetention,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -97,7 +150,43 @@ func NewRedisStore(client redis.UniversalClient, opts ...StoreOption) *RedisStor
 	if s.idGen == nil {
 		s.idGen = defaultIDGen
 	}
-	return s
+	if s.shadowRetention == nil {
+		s.shadowRetention = defaultShadowRetention()
+	}
+	return s, nil
+}
+
+// shadowRetentionFromEnv overlays env-var values onto the defaults.
+// Env vars: CORDUM_EDGE_SHADOW_RETENTION_SHORT, _DEFAULT, _LONG. Empty
+// → use default; malformed or non-positive → error.
+func shadowRetentionFromEnv(base map[ShadowFindingRetentionClass]time.Duration) (map[ShadowFindingRetentionClass]time.Duration, error) {
+	out := make(map[ShadowFindingRetentionClass]time.Duration, len(base))
+	for k, v := range base {
+		out[k] = v
+	}
+	envs := []struct {
+		envKey string
+		rc     ShadowFindingRetentionClass
+	}{
+		{"CORDUM_EDGE_SHADOW_RETENTION_SHORT", ShadowRetentionShort},
+		{"CORDUM_EDGE_SHADOW_RETENTION_DEFAULT", ShadowRetentionDefault},
+		{"CORDUM_EDGE_SHADOW_RETENTION_LONG", ShadowRetentionLong},
+	}
+	for _, e := range envs {
+		raw := strings.TrimSpace(os.Getenv(e.envKey))
+		if raw == "" {
+			continue
+		}
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return nil, fmt.Errorf("shadow finding: env %s=%q: %w", e.envKey, raw, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("shadow finding: env %s=%q must be a positive duration", e.envKey, raw)
+		}
+		out[e.rc] = d
+	}
+	return out, nil
 }
 
 func defaultIDGen() string {
@@ -126,6 +215,25 @@ func tenantIndexKey(tenant string) string {
 // redisIndexSeg* constants.
 func secondaryIndexKey(tenant, seg, value string) string {
 	return redisKeyIndexTenant + tenant + seg + value
+}
+
+// sourceIndexKey / clusterIndexKey / repoIndexKey / signalIndexKey
+// return the §10.5 shared (cross-tenant) index keys. See the constant
+// block above for the cross-tenant safety contract.
+func sourceIndexKey(sourceType string) string {
+	return redisIndexKeySource + sourceType
+}
+
+func clusterIndexKey(clusterID string) string {
+	return redisIndexKeyCluster + clusterID
+}
+
+func repoIndexKey(provider, repo string) string {
+	return redisIndexKeyRepo + provider + ":" + repo
+}
+
+func signalIndexKey(signal string) string {
+	return redisIndexKeySignal + signal
 }
 
 // CreateFinding persists a new finding. Atomicity: the JSON write +
@@ -173,6 +281,27 @@ func (s *RedisStore) CreateFinding(ctx context.Context, req CreateFindingRequest
 		redis.Z{Score: score, Member: finding.FindingID})
 	pipe.ZAdd(ctx, secondaryIndexKey(finding.TenantID, redisIndexSegOwner, finding.OwnerPrincipalID),
 		redis.Z{Score: score, Member: finding.FindingID})
+	// EDGE-143.5 — §10.5 shared (non-tenant-scoped) indexes. source is
+	// always populated (defaults to "local"). cluster/repo/signal are
+	// conditional on the corresponding field(s) being non-empty so
+	// local-source findings don't pollute the K8s/CI indexes.
+	pipe.ZAdd(ctx, sourceIndexKey(finding.SourceType),
+		redis.Z{Score: score, Member: finding.FindingID})
+	if finding.ClusterID != "" {
+		pipe.ZAdd(ctx, clusterIndexKey(finding.ClusterID),
+			redis.Z{Score: score, Member: finding.FindingID})
+	}
+	if finding.CIProvider != "" && finding.Repo != "" {
+		pipe.ZAdd(ctx, repoIndexKey(finding.CIProvider, finding.Repo),
+			redis.Z{Score: score, Member: finding.FindingID})
+	}
+	for _, sig := range finding.SignalSet {
+		if sig == "" {
+			continue
+		}
+		pipe.ZAdd(ctx, signalIndexKey(sig),
+			redis.Z{Score: score, Member: finding.FindingID})
+	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		// Best-effort rollback on the JSON key. The index entries are
 		// keyed by finding_id only, so future list calls will skip them
@@ -206,6 +335,7 @@ func (s *RedisStore) GetFinding(ctx context.Context, tenantID, findingID string)
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("shadow finding: unmarshal: %w", err)
 	}
+	applyReadDefaults(&f)
 	if f.TenantID != tenantID {
 		return nil, ErrNotFound
 	}
@@ -237,7 +367,19 @@ func (s *RedisStore) ListFindings(ctx context.Context, q ListFindingsQuery) (Fin
 		limit = MaxListPageSize
 	}
 
-	indexKey, postFilters := chooseIndex(tenant, q)
+	// EDGE-143.5 — multi-signal any-of bypasses chooseIndex: scan each
+	// signal's shared index, dedupe by finding_id, then apply
+	// post-filters. Single-signal is handled by chooseIndex. Bounded by
+	// len(signals)*limit*overScanFactor; worst case 16*200*3 = 9600
+	// ZSET reads + GETs per page (acceptable for observe-mode reads).
+	// Optimize to SUNIONSTORE only if profiling shows hotspot; do not
+	// pre-optimize.
+	normSignals := normalizeSignals(q.Signals)
+	if len(normSignals) > 1 {
+		return s.listFindingsByMultiSignal(ctx, tenant, q, normSignals, limit)
+	}
+
+	indexKey, postFilters, indexIsTenantScoped := chooseIndex(tenant, q)
 
 	startScore, startID, err := decodeCursor(q.Cursor)
 	if err != nil {
@@ -270,10 +412,17 @@ func (s *RedisStore) ListFindings(ctx context.Context, q ListFindingsQuery) (Fin
 			staleIDs = append(staleIDs, m.member)
 			continue
 		}
+		applyReadDefaults(&f)
 		if f.TenantID != tenant {
-			// Defence-in-depth: index entries should be tenant-scoped by
-			// key construction, but a corrupted index member is treated
-			// as stale rather than leaking cross-tenant data.
+			// EDGE-143.5 — when the index we used is NOT tenant-scoped
+			// (the new §10.5 source/cluster/repo/signal indexes), cross-
+			// tenant index members are EXPECTED and must be skipped
+			// without staleIDs cleanup (which would DELETE the other
+			// tenant's record — data loss). For tenant-scoped indexes,
+			// keep the original defence-in-depth: treat as stale.
+			if !indexIsTenantScoped {
+				continue
+			}
 			staleIDs = append(staleIDs, m.member)
 			continue
 		}
@@ -300,6 +449,102 @@ func (s *RedisStore) ListFindings(ctx context.Context, q ListFindingsQuery) (Fin
 	}
 
 	return FindingPage{Findings: findings, NextCursor: nextCursor}, nil
+}
+
+// listFindingsByMultiSignal handles the §10.2 multi-value Signals
+// any-of filter. Iterates each signal's shared index, dedupes
+// finding_ids, then post-filters. Pagination via cursor is not
+// supported in the multi-signal path (single-page only); callers
+// requesting >limit findings receive a truncated page without a cursor.
+// This matches the plan's "start simple" guidance.
+func (s *RedisStore) listFindingsByMultiSignal(
+	ctx context.Context,
+	tenant string,
+	q ListFindingsQuery,
+	normSignals []string,
+	limit int,
+) (FindingPage, error) {
+	// Build post-filter set EXCLUDING the signals dimension (the
+	// per-signal scan already restricts to findings carrying at least
+	// one of the requested signals).
+	_, postFilters, _ := chooseIndex(tenant, ListFindingsQuery{
+		TenantID:           q.TenantID,
+		Status:             q.Status,
+		Risk:               q.Risk,
+		AgentProduct:       q.AgentProduct,
+		OwnerPrincipalID:   q.OwnerPrincipalID,
+		SourceType:         q.SourceType,
+		ClusterID:          q.ClusterID,
+		Namespace:          q.Namespace,
+		CIProvider:         q.CIProvider,
+		Repo:               q.Repo,
+		ConfidenceMin:      q.ConfidenceMin,
+		FirstSeenAfter:     q.FirstSeenAfter,
+		LastSeenBefore:     q.LastSeenBefore,
+		ExceptionID:        q.ExceptionID,
+		IncludeManagedSkip: q.IncludeManagedSkip,
+	})
+	// Force the post-filter to NOT re-check signals (the union scan
+	// already did).
+	postFilters.signals = nil
+
+	seen := make(map[string]struct{}, limit)
+	findings := make([]ShadowAgentFinding, 0, limit)
+	var staleIDs []string
+	perScanLimit := limit * overScanFactor
+	for _, sig := range normSignals {
+		if int64(len(findings)) >= int64(limit) {
+			break
+		}
+		members, err := s.zScanDescending(ctx, signalIndexKey(sig), 0, "", perScanLimit)
+		if err != nil {
+			return FindingPage{}, fmt.Errorf("shadow finding: list-signal %q: %w", sig, err)
+		}
+		for _, m := range members {
+			if int64(len(findings)) >= int64(limit) {
+				break
+			}
+			if _, dup := seen[m.member]; dup {
+				continue
+			}
+			seen[m.member] = struct{}{}
+			raw, err := s.client.Get(ctx, findingKey(m.member)).Bytes()
+			if err != nil {
+				if errors.Is(err, redis.Nil) {
+					// Signal indexes are shared across tenants; we don't
+					// know which tenant owned the deleted finding, so we
+					// skip cleanup here. The owner's next list call
+					// against a tenant-scoped index will clean it up.
+					continue
+				}
+				return FindingPage{}, fmt.Errorf("shadow finding: list-get: %w", err)
+			}
+			var f ShadowAgentFinding
+			if err := json.Unmarshal(raw, &f); err != nil {
+				continue
+			}
+			applyReadDefaults(&f)
+			if f.TenantID != tenant {
+				// Cross-tenant: skip silently (shared index).
+				continue
+			}
+			if s.isExpiredTerminal(&f) {
+				staleIDs = append(staleIDs, m.member)
+				continue
+			}
+			if !matchesPostFilters(&f, postFilters) {
+				continue
+			}
+			findings = append(findings, f)
+		}
+	}
+	if len(staleIDs) > 0 {
+		go s.opportunisticCleanup(context.Background(), tenant, staleIDs)
+	}
+	// Multi-signal path doesn't support cursor pagination (yet). Return
+	// the page without NextCursor; callers needing pagination must
+	// query per single signal.
+	return FindingPage{Findings: findings}, nil
 }
 
 // ResolveFinding applies the resolve lifecycle transition atomically:
@@ -345,6 +590,7 @@ func (s *RedisStore) transitionFinding(
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("shadow finding: unmarshal: %w", err)
 	}
+	applyReadDefaults(&f)
 	if f.TenantID != tenantID {
 		return nil, ErrNotFound
 	}
@@ -366,11 +612,15 @@ func (s *RedisStore) transitionFinding(
 			redis.Z{Score: score, Member: findingID})
 	}
 	// Terminal retention: schedule TTL on the JSON key + every index entry.
-	if isTerminal(f.Status) && s.terminalRetention > 0 {
-		pipe.Expire(ctx, key, s.terminalRetention)
-		// Index entries already exist; setting the TTL on the ZSET would
-		// expire ALL members. Instead, the list path cleans expired
-		// terminals opportunistically (see purgeExpired).
+	// EDGE-143.5: TTL is per-finding via retentionFor(f.RetentionClass);
+	// legacy findings fall back to terminalRetention through retentionFor.
+	if isTerminal(f.Status) {
+		if ttl := s.retentionFor(f.RetentionClass); ttl > 0 {
+			pipe.Expire(ctx, key, ttl)
+			// Index entries already exist; setting the TTL on the ZSET would
+			// expire ALL members. Instead, the list path cleans expired
+			// terminals opportunistically (see purgeExpired).
+		}
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		return nil, fmt.Errorf("shadow finding: transition: %w", err)
@@ -382,11 +632,29 @@ func isTerminal(s FindingStatus) bool {
 	return s == FindingStatusResolved || s == FindingStatusSuppressed
 }
 
+// retentionFor returns the terminal TTL applied to a finding given its
+// §10.5 RetentionClass. Empty RetentionClass (legacy EDGE-141 records,
+// or callers that didn't set it) falls back to s.terminalRetention so
+// pre-EDGE-143.5 behavior is preserved.
+func (s *RedisStore) retentionFor(rc ShadowFindingRetentionClass) time.Duration {
+	if rc == "" {
+		return s.terminalRetention
+	}
+	if d, ok := s.shadowRetention[rc]; ok && d > 0 {
+		return d
+	}
+	return s.terminalRetention
+}
+
 func (s *RedisStore) isExpiredTerminal(f *ShadowAgentFinding) bool {
-	if !isTerminal(f.Status) || s.terminalRetention <= 0 || f.ResolvedAt == nil {
+	if !isTerminal(f.Status) || f.ResolvedAt == nil {
 		return false
 	}
-	return s.now().Sub(*f.ResolvedAt) > s.terminalRetention
+	ttl := s.retentionFor(f.RetentionClass)
+	if ttl <= 0 {
+		return false
+	}
+	return s.now().Sub(*f.ResolvedAt) > ttl
 }
 
 // purgeExpired removes a single expired terminal record + its index
@@ -419,6 +687,15 @@ func (s *RedisStore) opportunisticCleanup(ctx context.Context, tenant string, id
 				pipe.ZRem(ctx, secondaryIndexKey(tenant, seg, v), id)
 			}
 		}
+		// EDGE-143.5 — §10.5 source index is closed-enum, so we blast
+		// all 4 values. cluster/repo/signal indexes are open-set and
+		// intentionally leak stale members (matches the agent/owner
+		// pattern). The leak does not affect correctness because list
+		// reads GET the finding JSON and the deleted key returns redis.Nil,
+		// which the read path treats as stale and skips.
+		for _, src := range []string{SourceTypeLocal, SourceTypeKubernetes, SourceTypeCI, SourceTypeNetwork} {
+			pipe.ZRem(ctx, sourceIndexKey(src), id)
+		}
 	}
 	_, _ = pipe.Exec(ctx)
 }
@@ -438,36 +715,98 @@ func knownEnumValuesForSeg(seg string) []string {
 	}
 }
 
-// chooseIndex picks the narrowest tenant-scoped index for the query and
-// returns the leftover filters that have to be applied post-fetch.
-func chooseIndex(tenant string, q ListFindingsQuery) (string, postFilterSet) {
+// chooseIndex picks the narrowest index for the query and returns the
+// leftover filters that have to be applied post-fetch. The third return
+// indicates whether the chosen index is tenant-scoped (true for the
+// EDGE-141 indexes) or shared across tenants (false for the EDGE-143.5
+// §10.5 cluster/source/repo/signal indexes — see Q7 binding governor
+// ruling, comment-a17f4f1c on task-de50a293). Cross-tenant index
+// members on shared indexes are filtered out at read time (see
+// ListFindings) but MUST NOT be deleted as "stale" — that would be
+// cross-tenant data loss.
+//
+// Priority (most→least selective): repo > cluster > source > signal-single
+// > status > risk > agent > owner > tenant. Multi-signal any-of bypasses
+// chooseIndex entirely (see ListFindings → multi-signal path). Signal
+// is placed AFTER the source/cluster/repo composites because those are
+// usually narrower in practice (one repo has many findings, but a single
+// signal can fire across thousands of findings) — diverges from the
+// plan's "signal > exception_id > repo > cluster > source" only on the
+// signal-vs-{repo,cluster,source} order, which is a perf choice with
+// no correctness impact (post-filters handle the remaining dimensions).
+func chooseIndex(tenant string, q ListFindingsQuery) (string, postFilterSet, bool) {
 	post := postFilterSet{
-		status:       q.Status,
-		risk:         q.Risk,
-		agentProduct: strings.ToLower(strings.TrimSpace(q.AgentProduct)),
-		owner:        strings.TrimSpace(q.OwnerPrincipalID),
+		status:             q.Status,
+		risk:               q.Risk,
+		agentProduct:       strings.ToLower(strings.TrimSpace(q.AgentProduct)),
+		owner:              strings.TrimSpace(q.OwnerPrincipalID),
+		sourceType:         strings.ToLower(strings.TrimSpace(q.SourceType)),
+		clusterID:          strings.TrimSpace(q.ClusterID),
+		namespace:          strings.TrimSpace(q.Namespace),
+		ciProvider:         strings.ToLower(strings.TrimSpace(q.CIProvider)),
+		repo:               strings.TrimSpace(q.Repo),
+		signals:            normalizeSignals(q.Signals),
+		confidenceMin:      q.ConfidenceMin,
+		firstSeenAfter:     q.FirstSeenAfter,
+		lastSeenBefore:     q.LastSeenBefore,
+		exceptionID:        strings.TrimSpace(q.ExceptionID),
+		includeManagedSkip: q.IncludeManagedSkip,
 	}
-	// Pick the narrowest available index in deterministic order so two
-	// equally-narrow filter combinations choose the same path.
+
+	// Composite repo index is the narrowest §10.5 index when both
+	// ci_provider+repo are provided.
+	if post.ciProvider != "" && post.repo != "" {
+		idx := repoIndexKey(post.ciProvider, post.repo)
+		post.ciProvider = ""
+		post.repo = ""
+		return idx, post, false
+	}
+	// Cluster index (Q7-critical).
+	if post.clusterID != "" {
+		idx := clusterIndexKey(post.clusterID)
+		post.clusterID = ""
+		return idx, post, false
+	}
+	// Source-type index — EXCEPT "local". Legacy EDGE-141 findings have
+	// no source-index ZADD; using the source index would miss them.
+	// §10.4 backward-compat path: fall through to broad-tenant + post-
+	// filter (applyReadDefaults maps SourceType="" → "local" on read so
+	// the post-filter "local" comparison surfaces legacy rows).
+	if post.sourceType != "" && post.sourceType != SourceTypeLocal {
+		idx := sourceIndexKey(post.sourceType)
+		post.sourceType = ""
+		return idx, post, false
+	}
+	// Single-signal: use the signal index. Multi-signal any-of is
+	// handled by ListFindings; we leave signals[] populated as a marker
+	// so the caller knows to route via the multi-signal path.
+	if len(post.signals) == 1 {
+		idx := signalIndexKey(post.signals[0])
+		post.signals = nil
+		return idx, post, false
+	}
+
+	// Existing tenant-scoped selections (unchanged for the EDGE-141
+	// dimensions).
 	switch {
 	case post.status != "":
 		idx := secondaryIndexKey(tenant, redisIndexSegStatus, string(post.status))
 		post.status = ""
-		return idx, post
+		return idx, post, true
 	case post.risk != "":
 		idx := secondaryIndexKey(tenant, redisIndexSegRisk, string(post.risk))
 		post.risk = ""
-		return idx, post
+		return idx, post, true
 	case post.agentProduct != "":
 		idx := secondaryIndexKey(tenant, redisIndexSegAgent, post.agentProduct)
 		post.agentProduct = ""
-		return idx, post
+		return idx, post, true
 	case post.owner != "":
 		idx := secondaryIndexKey(tenant, redisIndexSegOwner, post.owner)
 		post.owner = ""
-		return idx, post
+		return idx, post, true
 	default:
-		return tenantIndexKey(tenant), post
+		return tenantIndexKey(tenant), post, true
 	}
 }
 
@@ -476,6 +815,20 @@ type postFilterSet struct {
 	risk         FindingRisk
 	agentProduct string
 	owner        string
+
+	// EDGE-143.5 — §10.2 dimensions left over after chooseIndex selects
+	// the primary index. nil/zero means "no filter on this dimension".
+	sourceType         string
+	clusterID          string
+	namespace          string
+	ciProvider         string
+	repo               string
+	signals            []string
+	confidenceMin      float64
+	firstSeenAfter     *time.Time
+	lastSeenBefore     *time.Time
+	exceptionID        string
+	includeManagedSkip bool
 }
 
 func matchesPostFilters(f *ShadowAgentFinding, p postFilterSet) bool {
@@ -491,7 +844,86 @@ func matchesPostFilters(f *ShadowAgentFinding, p postFilterSet) bool {
 	if p.owner != "" && f.OwnerPrincipalID != p.owner {
 		return false
 	}
+	if p.sourceType != "" && f.SourceType != p.sourceType {
+		return false
+	}
+	if p.clusterID != "" && f.ClusterID != p.clusterID {
+		return false
+	}
+	if p.namespace != "" && f.Namespace != p.namespace {
+		return false
+	}
+	if p.ciProvider != "" && f.CIProvider != p.ciProvider {
+		return false
+	}
+	if p.repo != "" && f.Repo != p.repo {
+		return false
+	}
+	if p.exceptionID != "" && f.ExceptionID != p.exceptionID {
+		return false
+	}
+	if p.confidenceMin > 0 && f.Confidence < p.confidenceMin {
+		return false
+	}
+	if p.firstSeenAfter != nil {
+		if f.FirstSeen == nil || !f.FirstSeen.After(*p.firstSeenAfter) {
+			return false
+		}
+	}
+	if p.lastSeenBefore != nil {
+		if f.LastSeen == nil || !f.LastSeen.Before(*p.lastSeenBefore) {
+			return false
+		}
+	}
+	if len(p.signals) > 0 {
+		if !anySignalMatches(f.SignalSet, p.signals) {
+			return false
+		}
+	}
+	// §10.3 managed_skip findings (FalsePositiveReason populated) are
+	// excluded by default; opt-in with IncludeManagedSkip=true. §10.3
+	// auto-promotion to managed_skip via exception_id is EDGE-143.6
+	// scope; this task wires the filter only.
+	if !p.includeManagedSkip && f.FalsePositiveReason != "" {
+		return false
+	}
 	return true
+}
+
+// anySignalMatches reports whether any element of needles is present in
+// haystack (set-intersection-non-empty). Both lists are bounded ≤16 by
+// validation; O(N*M) is fine for that scale.
+func anySignalMatches(haystack, needles []string) bool {
+	for _, n := range needles {
+		for _, h := range haystack {
+			if h == n {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// normalizeSignals lowercases + trims input signals, deduping in
+// stable order. Returns nil for empty input.
+func normalizeSignals(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 type zMember struct {

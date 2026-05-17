@@ -661,7 +661,13 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 	// does NOT own connection lifecycle. nil-safe: NewRedisStore returns
 	// nil when the client is nil so unit-test gateways without Redis
 	// continue to surface a clean 503 envelope via shadowFindingStoreOrUnavailable.
-	shadowFindingStore := shadow.NewRedisStore(jobStore.Client())
+	// EDGE-143.5: signature is (*RedisStore, error); the error surfaces
+	// CORDUM_EDGE_SHADOW_RETENTION_* parse failures fail-fast at startup
+	// per §10.5 "positive durations; 0/negative fail at startup".
+	shadowFindingStore, err := shadow.NewRedisStore(jobStore.Client())
+	if err != nil {
+		return fmt.Errorf("shadow finding store: %w", err)
+	}
 	s := &server{
 		memStore:               memStore,
 		jobStore:               jobStore,

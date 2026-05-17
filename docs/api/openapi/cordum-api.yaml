@@ -1842,6 +1842,78 @@ paths:
         in: query
         schema:
           type: string
+      - name: source_type
+        in: query
+        description: EDGE-143.5 — restrict to findings emitted by one detector family. `local` falls back to a broad tenant index + post-filter so legacy EDGE-141 findings without `source_type` surface (defaults-on-read map to `local`).
+        schema:
+          type: string
+          enum: [local, kubernetes, ci, network]
+      - name: cluster_id
+        in: query
+        description: EDGE-143.5 — Kubernetes cluster id (Q7 cross-cluster slicing). Shared (cross-tenant) index; tenant isolation enforced at read time.
+        schema:
+          type: string
+          maxLength: 64
+      - name: namespace
+        in: query
+        description: EDGE-143.5 — Kubernetes namespace.
+        schema:
+          type: string
+          maxLength: 63
+      - name: ci_provider
+        in: query
+        description: EDGE-143.5 — CI provider enum; required when `repo` is set.
+        schema:
+          type: string
+          enum: [github_actions, gitlab_ci, jenkins, buildkite, circleci, other]
+      - name: repo
+        in: query
+        description: EDGE-143.5 — `org/repo` for CI findings; `ci_provider` MUST also be set or the request is rejected with 400.
+        schema:
+          type: string
+          maxLength: 256
+      - name: signal
+        in: query
+        description: EDGE-143.5 — any-of filter on `signal_set`. Repeatable up to 16 times; each entry must match `[a-z0-9_]{1,32}`. Multi-signal queries do not support cursor pagination.
+        explode: true
+        schema:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            pattern: '^[a-z0-9_]{1,32}$'
+      - name: confidence_min
+        in: query
+        description: EDGE-143.5 — minimum detector self-confidence in [0, 1].
+        schema:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+      - name: first_seen_after
+        in: query
+        description: EDGE-143.5 — return findings whose `first_seen` is strictly after this RFC3339 timestamp.
+        schema:
+          type: string
+          format: date-time
+      - name: last_seen_before
+        in: query
+        description: EDGE-143.5 — return findings whose `last_seen` is strictly before this RFC3339 timestamp.
+        schema:
+          type: string
+          format: date-time
+      - name: exception_id
+        in: query
+        description: EDGE-143.5 — filter to findings joined to a specific operator exception declaration.
+        schema:
+          type: string
+          maxLength: 64
+      - name: include_managed_skip
+        in: query
+        description: EDGE-143.5 — include findings carrying `false_positive_reason` (§10.3 managed_skip). Defaults to false; default behavior excludes them from operator dashboards.
+        schema:
+          type: boolean
+          default: false
       responses:
         '200':
           description: Shadow finding page
@@ -9589,6 +9661,99 @@ components:
           additionalProperties:
             type: string
           description: Small free-form map (≤16 entries, ≤64-byte keys, ≤256-byte values).
+        source_type:
+          type: string
+          enum: [local, kubernetes, ci, network]
+          description: EDGE-143.5 §10.1 — detector-family identifier. Defaults to `local` on read for legacy EDGE-141 records.
+        source_id:
+          type: string
+          maxLength: 128
+          description: Detector instance identifier.
+        cluster_id:
+          type: string
+          maxLength: 64
+          description: Operator-configured K8s cluster name; empty for non-K8s sources.
+        namespace:
+          type: string
+          maxLength: 63
+          description: K8s namespace; empty for non-K8s sources.
+        workload_kind:
+          type: string
+          maxLength: 32
+          description: K8s kind (Deployment, StatefulSet, DaemonSet, ...) or empty.
+        workload_name:
+          type: string
+          maxLength: 253
+        pod_uid:
+          type: string
+          maxLength: 36
+          description: Optional pod UUID when the finding pins a specific pod.
+        ci_provider:
+          type: string
+          enum: [github_actions, gitlab_ci, jenkins, buildkite, circleci, other]
+          description: EDGE-143.5 §10.1 — CI provider; empty for non-CI sources.
+        repo:
+          type: string
+          maxLength: 256
+          description: '`org/repo` for CI sources; composite-indexed with ci_provider.'
+        ref:
+          type: string
+          maxLength: 256
+        workflow_id:
+          type: string
+          maxLength: 128
+        job_id:
+          type: string
+          maxLength: 128
+        run_id:
+          type: string
+          maxLength: 128
+        runner_id:
+          type: string
+          maxLength: 128
+        tenant_source:
+          type: string
+          maxLength: 64
+          description: Audit trail for tenant-attribution decisions (see §6.1 / §6.3).
+        principal_source:
+          type: string
+          maxLength: 64
+          description: Audit trail for principal-attribution decisions (see §6.2 / §6.4).
+        signal_set:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            pattern: '^[a-z0-9_]{1,32}$'
+          description: Bounded enum-shape signal identifiers from §7.1 / §8.x. Supports any-of filtering via the `signal` query param.
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Detector self-rated confidence in [0, 1].
+        first_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Distinct from `observed_at`; populated by detectors with longitudinal tracking.
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Updated on every re-observation.
+        false_positive_reason:
+          type: string
+          maxLength: 64
+          description: Populated when `status` would be `managed_skip` per §10.3.
+        exception_id:
+          type: string
+          maxLength: 64
+          description: Joins to operator-defined exception declarations (§10.3).
+        retention_class:
+          type: string
+          enum: [shadow_short, shadow_default, shadow_long]
+          description: EDGE-143.5 §10.5 — per-finding terminal-TTL class. Empty falls back to the store's `terminalRetention`.
     ShadowEvidencePointer:
       type: object
       description: Reference to redacted evidence stored outside the finding record. Distinct from `ArtifactPointer` because shadow findings have no session/execution context.
@@ -9663,6 +9828,81 @@ components:
           type: object
           additionalProperties:
             type: string
+        source_type:
+          type: string
+          enum: [local, kubernetes, ci, network]
+          description: EDGE-143.5 §10.1; defaults to `local` when omitted.
+        source_id:
+          type: string
+          maxLength: 128
+        cluster_id:
+          type: string
+          maxLength: 64
+        namespace:
+          type: string
+          maxLength: 63
+        workload_kind:
+          type: string
+          maxLength: 32
+        workload_name:
+          type: string
+          maxLength: 253
+        pod_uid:
+          type: string
+          maxLength: 36
+        ci_provider:
+          type: string
+          enum: [github_actions, gitlab_ci, jenkins, buildkite, circleci, other]
+        repo:
+          type: string
+          maxLength: 256
+        ref:
+          type: string
+          maxLength: 256
+        workflow_id:
+          type: string
+          maxLength: 128
+        job_id:
+          type: string
+          maxLength: 128
+        run_id:
+          type: string
+          maxLength: 128
+        runner_id:
+          type: string
+          maxLength: 128
+        tenant_source:
+          type: string
+          maxLength: 64
+        principal_source:
+          type: string
+          maxLength: 64
+        signal_set:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            pattern: '^[a-z0-9_]{1,32}$'
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        first_seen:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        false_positive_reason:
+          type: string
+          maxLength: 64
+        exception_id:
+          type: string
+          maxLength: 64
+        retention_class:
+          type: string
+          enum: [shadow_short, shadow_default, shadow_long]
     ResolveShadowAgentFindingRequest:
       type: object
       properties:

@@ -58,6 +58,37 @@ const (
 	FindingRiskCritical FindingRisk = "critical"
 )
 
+// ShadowFindingRetentionClass drives per-finding terminal-retention TTL
+// (§10.5). Distinct from edgecore.RetentionClass because shadow lifecycle
+// TTLs (7d/90d/365d) are semantically different from edgecore's artifact
+// retention classes (short/standard/audit).
+type ShadowFindingRetentionClass string
+
+const (
+	ShadowRetentionShort   ShadowFindingRetentionClass = "shadow_short"
+	ShadowRetentionDefault ShadowFindingRetentionClass = "shadow_default"
+	ShadowRetentionLong    ShadowFindingRetentionClass = "shadow_long"
+)
+
+// SourceType identifies the detector family that emitted a finding
+// (§10.1). Empty on legacy EDGE-141 records; defaults to "local" on read.
+const (
+	SourceTypeLocal      = "local"
+	SourceTypeKubernetes = "kubernetes"
+	SourceTypeCI         = "ci"
+	SourceTypeNetwork    = "network"
+)
+
+// CI provider enum per §10.1.
+const (
+	CIProviderGitHubActions = "github_actions"
+	CIProviderGitLabCI      = "gitlab_ci"
+	CIProviderJenkins       = "jenkins"
+	CIProviderBuildkite     = "buildkite"
+	CIProviderCircleCI      = "circleci"
+	CIProviderOther         = "other"
+)
+
 // findingIDPrefix is the stable opaque prefix for synthetic finding ids
 // minted when the caller omits one. Stable so downstream SIEM and audit
 // consumers can recognise shadow records without parsing the full id.
@@ -141,6 +172,33 @@ type ShadowAgentFinding struct {
 	ResolutionReason string            `json:"resolution_reason,omitempty"`
 	SuppressedUntil  *time.Time        `json:"suppressed_until,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
+
+	// EDGE-143.5 — §10.1 fields. All omitempty so EDGE-141 legacy
+	// records continue to round-trip unchanged; default-on-read for
+	// SourceType is applied in applyReadDefaults.
+	SourceType          string                      `json:"source_type,omitempty"`
+	SourceID            string                      `json:"source_id,omitempty"`
+	ClusterID           string                      `json:"cluster_id,omitempty"`
+	Namespace           string                      `json:"namespace,omitempty"`
+	WorkloadKind        string                      `json:"workload_kind,omitempty"`
+	WorkloadName        string                      `json:"workload_name,omitempty"`
+	PodUID              string                      `json:"pod_uid,omitempty"`
+	CIProvider          string                      `json:"ci_provider,omitempty"`
+	Repo                string                      `json:"repo,omitempty"`
+	Ref                 string                      `json:"ref,omitempty"`
+	WorkflowID          string                      `json:"workflow_id,omitempty"`
+	JobID               string                      `json:"job_id,omitempty"`
+	RunID               string                      `json:"run_id,omitempty"`
+	RunnerID            string                      `json:"runner_id,omitempty"`
+	TenantSource        string                      `json:"tenant_source,omitempty"`
+	PrincipalSource     string                      `json:"principal_source,omitempty"`
+	SignalSet           []string                    `json:"signal_set,omitempty"`
+	Confidence          float64                     `json:"confidence,omitempty"`
+	FirstSeen           *time.Time                  `json:"first_seen,omitempty"`
+	LastSeen            *time.Time                  `json:"last_seen,omitempty"`
+	FalsePositiveReason string                      `json:"false_positive_reason,omitempty"`
+	ExceptionID         string                      `json:"exception_id,omitempty"`
+	RetentionClass      ShadowFindingRetentionClass `json:"retention_class,omitempty"`
 }
 
 // CreateFindingRequest is the validated input used to mint a new
@@ -163,6 +221,31 @@ type CreateFindingRequest struct {
 	RedactedPath     string
 	DetectedAt       time.Time
 	Metadata         map[string]string
+
+	// EDGE-143.5 — §10.1 fields. See ShadowAgentFinding for semantics.
+	SourceType          string
+	SourceID            string
+	ClusterID           string
+	Namespace           string
+	WorkloadKind        string
+	WorkloadName        string
+	PodUID              string
+	CIProvider          string
+	Repo                string
+	Ref                 string
+	WorkflowID          string
+	JobID               string
+	RunID               string
+	RunnerID            string
+	TenantSource        string
+	PrincipalSource     string
+	SignalSet           []string
+	Confidence          float64
+	FirstSeen           *time.Time
+	LastSeen            *time.Time
+	FalsePositiveReason string
+	ExceptionID         string
+	RetentionClass      ShadowFindingRetentionClass
 }
 
 // ListFindingsQuery is the bounded filter set accepted by ListFindings.
@@ -176,6 +259,21 @@ type ListFindingsQuery struct {
 	OwnerPrincipalID string
 	Limit            int
 	Cursor           string
+
+	// EDGE-143.5 — §10.2 query filters. Empty = no filter on that
+	// dimension. Filters combine with AND semantics across dimensions
+	// and IN semantics within a slice dimension (Signals).
+	SourceType         string
+	ClusterID          string
+	Namespace          string
+	CIProvider         string
+	Repo               string
+	Signals            []string
+	ConfidenceMin      float64
+	FirstSeenAfter     *time.Time
+	LastSeenBefore     *time.Time
+	ExceptionID        string
+	IncludeManagedSkip bool
 }
 
 // FindingPage is the cursor-paginated list response. NextCursor is
@@ -267,6 +365,52 @@ var (
 	// non-empty and within byte cap passes; unknown values surface in
 	// audit/dashboard as-is.
 	validEvidenceType = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+	// validShadowSourceType — §10.1 enum gate; empty defaults to "local".
+	validShadowSourceType = map[string]struct{}{
+		SourceTypeLocal:      {},
+		SourceTypeKubernetes: {},
+		SourceTypeCI:         {},
+		SourceTypeNetwork:    {},
+	}
+	// validShadowCIProvider — §10.1 enum gate.
+	validShadowCIProvider = map[string]struct{}{
+		CIProviderGitHubActions: {},
+		CIProviderGitLabCI:      {},
+		CIProviderJenkins:       {},
+		CIProviderBuildkite:     {},
+		CIProviderCircleCI:      {},
+		CIProviderOther:         {},
+	}
+	// validShadowRetentionClass — §10.5 enum gate; empty allowed (legacy).
+	validShadowRetentionClass = map[ShadowFindingRetentionClass]struct{}{
+		ShadowRetentionShort:   {},
+		ShadowRetentionDefault: {},
+		ShadowRetentionLong:    {},
+	}
+	// validShadowSignal mirrors validEvidenceType — bounded enum-shape
+	// identifier per §10.1 signal_set.
+	validShadowSignal = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+)
+
+// §10.1 byte caps for the new string fields.
+const (
+	maxShadowSourceIDBytes      = 128
+	maxShadowClusterIDBytes     = 64
+	maxShadowNamespaceBytes     = 63
+	maxShadowWorkloadKindBytes  = 32
+	maxShadowWorkloadNameBytes  = 253
+	maxShadowPodUIDBytes        = 36
+	maxShadowRepoBytes          = 256
+	maxShadowRefBytes           = 256
+	maxShadowWorkflowIDBytes    = 128
+	maxShadowJobIDBytes         = 128
+	maxShadowRunIDBytes         = 128
+	maxShadowRunnerIDBytes      = 128
+	maxShadowTenantSourceBytes  = 64
+	maxShadowPrincipalSrcBytes  = 64
+	maxShadowFPReasonBytes      = 64
+	maxShadowExceptionIDBytes   = 64
+	maxShadowSignalSetEntries   = 16
 )
 
 // normalizeAndValidateCreate normalizes a CreateFindingRequest into a
@@ -328,6 +472,11 @@ func normalizeAndValidateCreate(req CreateFindingRequest, now time.Time, idGen f
 		return nil, err
 	}
 
+	ext, err := validateShadowExtensions(req)
+	if err != nil {
+		return nil, err
+	}
+
 	id := strings.TrimSpace(req.FindingID)
 	if id == "" {
 		id = idGen()
@@ -354,8 +503,173 @@ func normalizeAndValidateCreate(req CreateFindingRequest, now time.Time, idGen f
 		CreatedAt:        now,
 		UpdatedAt:        now,
 		Metadata:         copyMetadata(req.Metadata),
+
+		SourceType:          ext.sourceType,
+		SourceID:            ext.sourceID,
+		ClusterID:           ext.clusterID,
+		Namespace:           ext.namespace,
+		WorkloadKind:        ext.workloadKind,
+		WorkloadName:        ext.workloadName,
+		PodUID:              ext.podUID,
+		CIProvider:          ext.ciProvider,
+		Repo:                ext.repo,
+		Ref:                 ext.ref,
+		WorkflowID:          ext.workflowID,
+		JobID:               ext.jobID,
+		RunID:               ext.runID,
+		RunnerID:            ext.runnerID,
+		TenantSource:        ext.tenantSource,
+		PrincipalSource:     ext.principalSource,
+		SignalSet:           ext.signalSet,
+		Confidence:          ext.confidence,
+		FirstSeen:           ext.firstSeen,
+		LastSeen:            ext.lastSeen,
+		FalsePositiveReason: ext.falsePositiveReason,
+		ExceptionID:         ext.exceptionID,
+		RetentionClass:      ext.retentionClass,
 	}
 	return finding, nil
+}
+
+// shadowExtensionFields is the normalized + validated form of the
+// §10.1 extension fields. Kept separate from CreateFindingRequest so
+// the calling normalizeAndValidateCreate stays linear and the
+// validation logic is independently testable.
+type shadowExtensionFields struct {
+	sourceType          string
+	sourceID            string
+	clusterID           string
+	namespace           string
+	workloadKind        string
+	workloadName        string
+	podUID              string
+	ciProvider          string
+	repo                string
+	ref                 string
+	workflowID          string
+	jobID               string
+	runID               string
+	runnerID            string
+	tenantSource        string
+	principalSource     string
+	signalSet           []string
+	confidence          float64
+	firstSeen           *time.Time
+	lastSeen            *time.Time
+	falsePositiveReason string
+	exceptionID         string
+	retentionClass      ShadowFindingRetentionClass
+}
+
+func validateShadowExtensions(req CreateFindingRequest) (shadowExtensionFields, error) {
+	var ext shadowExtensionFields
+
+	ext.sourceType = strings.ToLower(strings.TrimSpace(req.SourceType))
+	if ext.sourceType == "" {
+		ext.sourceType = SourceTypeLocal
+	}
+	if _, ok := validShadowSourceType[ext.sourceType]; !ok {
+		return ext, fmt.Errorf("%w: source_type must be one of local|kubernetes|ci|network, got %q", ErrValidation, req.SourceType)
+	}
+
+	caps := []struct {
+		name  string
+		value string
+		max   int
+		dst   *string
+	}{
+		{"source_id", req.SourceID, maxShadowSourceIDBytes, &ext.sourceID},
+		{"cluster_id", req.ClusterID, maxShadowClusterIDBytes, &ext.clusterID},
+		{"namespace", req.Namespace, maxShadowNamespaceBytes, &ext.namespace},
+		{"workload_kind", req.WorkloadKind, maxShadowWorkloadKindBytes, &ext.workloadKind},
+		{"workload_name", req.WorkloadName, maxShadowWorkloadNameBytes, &ext.workloadName},
+		{"pod_uid", req.PodUID, maxShadowPodUIDBytes, &ext.podUID},
+		{"repo", req.Repo, maxShadowRepoBytes, &ext.repo},
+		{"ref", req.Ref, maxShadowRefBytes, &ext.ref},
+		{"workflow_id", req.WorkflowID, maxShadowWorkflowIDBytes, &ext.workflowID},
+		{"job_id", req.JobID, maxShadowJobIDBytes, &ext.jobID},
+		{"run_id", req.RunID, maxShadowRunIDBytes, &ext.runID},
+		{"runner_id", req.RunnerID, maxShadowRunnerIDBytes, &ext.runnerID},
+		{"tenant_source", req.TenantSource, maxShadowTenantSourceBytes, &ext.tenantSource},
+		{"principal_source", req.PrincipalSource, maxShadowPrincipalSrcBytes, &ext.principalSource},
+		{"false_positive_reason", req.FalsePositiveReason, maxShadowFPReasonBytes, &ext.falsePositiveReason},
+		{"exception_id", req.ExceptionID, maxShadowExceptionIDBytes, &ext.exceptionID},
+	}
+	for _, c := range caps {
+		v := strings.TrimSpace(c.value)
+		if len(v) > c.max {
+			return ext, fmt.Errorf("%w: %s exceeds %d bytes", ErrValidation, c.name, c.max)
+		}
+		*c.dst = v
+	}
+
+	if ext.ciProvider = strings.ToLower(strings.TrimSpace(req.CIProvider)); ext.ciProvider != "" {
+		if _, ok := validShadowCIProvider[ext.ciProvider]; !ok {
+			return ext, fmt.Errorf("%w: ci_provider must be one of github_actions|gitlab_ci|jenkins|buildkite|circleci|other, got %q", ErrValidation, req.CIProvider)
+		}
+	}
+	// ci_provider and repo are mutual: both empty or both populated.
+	if (ext.ciProvider == "") != (ext.repo == "") {
+		return ext, fmt.Errorf("%w: ci_provider and repo must be set together (both empty or both populated)", ErrValidation)
+	}
+
+	if len(req.SignalSet) > maxShadowSignalSetEntries {
+		return ext, fmt.Errorf("%w: signal_set exceeds %d entries", ErrValidation, maxShadowSignalSetEntries)
+	}
+	if len(req.SignalSet) > 0 {
+		seen := make(map[string]struct{}, len(req.SignalSet))
+		signals := make([]string, 0, len(req.SignalSet))
+		for _, raw := range req.SignalSet {
+			sig := strings.ToLower(strings.TrimSpace(raw))
+			if !validShadowSignal.MatchString(sig) {
+				return ext, fmt.Errorf("%w: signal_set entry %q must match [a-z0-9_]{1,32}", ErrValidation, raw)
+			}
+			if _, dup := seen[sig]; dup {
+				continue
+			}
+			seen[sig] = struct{}{}
+			signals = append(signals, sig)
+		}
+		ext.signalSet = signals
+	}
+
+	if req.Confidence < 0 || req.Confidence > 1 {
+		return ext, fmt.Errorf("%w: confidence must be in [0, 1], got %v", ErrValidation, req.Confidence)
+	}
+	ext.confidence = req.Confidence
+
+	if req.FirstSeen != nil && !req.FirstSeen.IsZero() {
+		t := req.FirstSeen.UTC()
+		ext.firstSeen = &t
+	}
+	if req.LastSeen != nil && !req.LastSeen.IsZero() {
+		t := req.LastSeen.UTC()
+		ext.lastSeen = &t
+	}
+	if ext.firstSeen != nil && ext.lastSeen != nil && ext.firstSeen.After(*ext.lastSeen) {
+		return ext, fmt.Errorf("%w: first_seen must be <= last_seen", ErrValidation)
+	}
+
+	if rc := ShadowFindingRetentionClass(strings.ToLower(strings.TrimSpace(string(req.RetentionClass)))); rc != "" {
+		if _, ok := validShadowRetentionClass[rc]; !ok {
+			return ext, fmt.Errorf("%w: retention_class must be one of shadow_short|shadow_default|shadow_long, got %q", ErrValidation, req.RetentionClass)
+		}
+		ext.retentionClass = rc
+	}
+
+	return ext, nil
+}
+
+// applyReadDefaults sets the §10.4 "defaults on read" — currently only
+// source_type defaults to "local" for legacy EDGE-141 records. Called
+// from every read path (GetFinding, ListFindings, transitionFinding).
+func applyReadDefaults(f *ShadowAgentFinding) {
+	if f == nil {
+		return
+	}
+	if f.SourceType == "" {
+		f.SourceType = SourceTypeLocal
+	}
 }
 
 func validateEvidencePointer(ptr EvidencePointer, parentTenant string, now time.Time) error {

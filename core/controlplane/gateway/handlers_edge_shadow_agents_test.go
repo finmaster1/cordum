@@ -34,7 +34,11 @@ func newShadowGateway(t *testing.T) *server {
 	t.Helper()
 	s, _, _ := newTestGateway(t)
 	enableTestAuth(s)
-	s.shadowFindingStore = shadow.NewRedisStore(s.jobStore.Client())
+	store, err := shadow.NewRedisStore(s.jobStore.Client())
+	if err != nil {
+		t.Fatalf("shadow.NewRedisStore: %v", err)
+	}
+	s.shadowFindingStore = store
 	// Install an in-memory audit exporter so the lifecycle audit calls
 	// can be asserted.
 	exp := &shadowFindingAuditExporter{}

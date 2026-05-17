@@ -23,13 +23,51 @@ package gateway
 
 import (
 	"errors"
+	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cordum/cordum/core/audit"
 	"github.com/cordum/cordum/core/controlplane/gateway/auth"
 	"github.com/cordum/cordum/core/edge/shadow"
+)
+
+// shadowQuerySignalRe gates per-entry shape of the repeated ?signal=
+// query param: bounded to the same alphabet as the store's signal
+// validation, so 400s land in the handler rather than 500s in the
+// store.
+var shadowQuerySignalRe = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
+// §10.2 byte caps mirror the §10.1 store-side caps; reject earlier.
+const (
+	shadowQueryClusterIDMaxBytes   = 64
+	shadowQueryNamespaceMaxBytes   = 63
+	shadowQueryRepoMaxBytes        = 256
+	shadowQueryExceptionIDMaxBytes = 64
+	shadowQuerySignalMaxEntries    = 16
+)
+
+// validShadowQuerySourceType / CIProvider mirror the store-side enum
+// gates; centralised here so the handler returns 400 with a clean
+// envelope instead of letting the store error bubble up.
+var (
+	validShadowQuerySourceType = map[string]struct{}{
+		shadow.SourceTypeLocal:      {},
+		shadow.SourceTypeKubernetes: {},
+		shadow.SourceTypeCI:         {},
+		shadow.SourceTypeNetwork:    {},
+	}
+	validShadowQueryCIProvider = map[string]struct{}{
+		shadow.CIProviderGitHubActions: {},
+		shadow.CIProviderGitLabCI:      {},
+		shadow.CIProviderJenkins:       {},
+		shadow.CIProviderBuildkite:     {},
+		shadow.CIProviderCircleCI:      {},
+		shadow.CIProviderOther:         {},
+	}
 )
 
 type shadowAgentCreateRequest struct {
@@ -47,6 +85,32 @@ type shadowAgentCreateRequest struct {
 	RedactedPath     string                  `json:"redacted_path,omitempty"`
 	DetectedAt       time.Time               `json:"detected_at"`
 	Metadata         map[string]string       `json:"metadata,omitempty"`
+
+	// EDGE-143.5 — §10.1 wire fields. All omitempty so EDGE-141
+	// clients without these fields continue to ingest cleanly.
+	SourceType          string                             `json:"source_type,omitempty"`
+	SourceID            string                             `json:"source_id,omitempty"`
+	ClusterID           string                             `json:"cluster_id,omitempty"`
+	Namespace           string                             `json:"namespace,omitempty"`
+	WorkloadKind        string                             `json:"workload_kind,omitempty"`
+	WorkloadName        string                             `json:"workload_name,omitempty"`
+	PodUID              string                             `json:"pod_uid,omitempty"`
+	CIProvider          string                             `json:"ci_provider,omitempty"`
+	Repo                string                             `json:"repo,omitempty"`
+	Ref                 string                             `json:"ref,omitempty"`
+	WorkflowID          string                             `json:"workflow_id,omitempty"`
+	JobID               string                             `json:"job_id,omitempty"`
+	RunID               string                             `json:"run_id,omitempty"`
+	RunnerID            string                             `json:"runner_id,omitempty"`
+	TenantSource        string                             `json:"tenant_source,omitempty"`
+	PrincipalSource     string                             `json:"principal_source,omitempty"`
+	SignalSet           []string                           `json:"signal_set,omitempty"`
+	Confidence          float64                            `json:"confidence,omitempty"`
+	FirstSeen           *time.Time                         `json:"first_seen,omitempty"`
+	LastSeen            *time.Time                         `json:"last_seen,omitempty"`
+	FalsePositiveReason string                             `json:"false_positive_reason,omitempty"`
+	ExceptionID         string                             `json:"exception_id,omitempty"`
+	RetentionClass      shadow.ShadowFindingRetentionClass `json:"retention_class,omitempty"`
 }
 
 type shadowAgentResolveRequest struct {
@@ -105,6 +169,31 @@ func (s *server) handleCreateShadowAgentFinding(w http.ResponseWriter, r *http.R
 		RedactedPath:     body.RedactedPath,
 		DetectedAt:       body.DetectedAt,
 		Metadata:         body.Metadata,
+
+		// EDGE-143.5 — §10.1 fields forwarded from wire body to store.
+		SourceType:          body.SourceType,
+		SourceID:            body.SourceID,
+		ClusterID:           body.ClusterID,
+		Namespace:           body.Namespace,
+		WorkloadKind:        body.WorkloadKind,
+		WorkloadName:        body.WorkloadName,
+		PodUID:              body.PodUID,
+		CIProvider:          body.CIProvider,
+		Repo:                body.Repo,
+		Ref:                 body.Ref,
+		WorkflowID:          body.WorkflowID,
+		JobID:               body.JobID,
+		RunID:               body.RunID,
+		RunnerID:            body.RunnerID,
+		TenantSource:        body.TenantSource,
+		PrincipalSource:     body.PrincipalSource,
+		SignalSet:           body.SignalSet,
+		Confidence:          body.Confidence,
+		FirstSeen:           body.FirstSeen,
+		LastSeen:            body.LastSeen,
+		FalsePositiveReason: body.FalsePositiveReason,
+		ExceptionID:         body.ExceptionID,
+		RetentionClass:      body.RetentionClass,
 	})
 	if err != nil {
 		writeShadowFindingStoreError(w, r, err, "create shadow finding")
@@ -292,6 +381,105 @@ func parseShadowFindingListQuery(w http.ResponseWriter, r *http.Request, tenantI
 	if out.Risk != "" && out.Risk != shadow.FindingRiskLow && out.Risk != shadow.FindingRiskMedium && out.Risk != shadow.FindingRiskHigh && out.Risk != shadow.FindingRiskCritical {
 		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "risk must be one of low|medium|high|critical", nil)
 		return shadow.ListFindingsQuery{}, false
+	}
+
+	// EDGE-143.5 — §10.2 query params.
+	if v := strings.ToLower(strings.TrimSpace(q.Get("source_type"))); v != "" {
+		if _, ok := validShadowQuerySourceType[v]; !ok {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "source_type must be one of local|kubernetes|ci|network", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.SourceType = v
+	}
+	if v := strings.ToLower(strings.TrimSpace(q.Get("ci_provider"))); v != "" {
+		if _, ok := validShadowQueryCIProvider[v]; !ok {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "ci_provider must be one of github_actions|gitlab_ci|jenkins|buildkite|circleci|other", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.CIProvider = v
+	}
+	if v := strings.TrimSpace(q.Get("cluster_id")); v != "" {
+		if len(v) > shadowQueryClusterIDMaxBytes {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "cluster_id exceeds 64 bytes", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.ClusterID = v
+	}
+	if v := strings.TrimSpace(q.Get("namespace")); v != "" {
+		if len(v) > shadowQueryNamespaceMaxBytes {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "namespace exceeds 63 bytes", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.Namespace = v
+	}
+	if v := strings.TrimSpace(q.Get("repo")); v != "" {
+		if len(v) > shadowQueryRepoMaxBytes {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "repo exceeds 256 bytes", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.Repo = v
+	}
+	// repo without ci_provider is a 400 (composite constraint).
+	if out.Repo != "" && out.CIProvider == "" {
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "repo requires ci_provider", nil)
+		return shadow.ListFindingsQuery{}, false
+	}
+	if v := strings.TrimSpace(q.Get("exception_id")); v != "" {
+		if len(v) > shadowQueryExceptionIDMaxBytes {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "exception_id exceeds 64 bytes", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.ExceptionID = v
+	}
+	if raw := q["signal"]; len(raw) > 0 {
+		if len(raw) > shadowQuerySignalMaxEntries {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "signal accepts at most 16 entries", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		signals := make([]string, 0, len(raw))
+		for _, sig := range raw {
+			s := strings.ToLower(strings.TrimSpace(sig))
+			if !shadowQuerySignalRe.MatchString(s) {
+				writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "signal entry must match [a-z0-9_]{1,32}", nil)
+				return shadow.ListFindingsQuery{}, false
+			}
+			signals = append(signals, s)
+		}
+		out.Signals = signals
+	}
+	if raw := strings.TrimSpace(q.Get("confidence_min")); raw != "" {
+		f, err := strconv.ParseFloat(raw, 64)
+		// NaN/Inf both satisfy !(f<0||f>1) so guard explicitly; otherwise
+		// NaN bypasses validation and matches no findings silently.
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f > 1 {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "confidence_min must be a float in [0, 1]", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.ConfidenceMin = f
+	}
+	if raw := strings.TrimSpace(q.Get("first_seen_after")); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "first_seen_after must be RFC3339", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.FirstSeenAfter = &t
+	}
+	if raw := strings.TrimSpace(q.Get("last_seen_before")); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "last_seen_before must be RFC3339", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.LastSeenBefore = &t
+	}
+	if raw := strings.TrimSpace(q.Get("include_managed_skip")); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "include_managed_skip must be true|false", nil)
+			return shadow.ListFindingsQuery{}, false
+		}
+		out.IncludeManagedSkip = b
 	}
 	return out, true
 }

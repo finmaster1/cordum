@@ -33,7 +33,10 @@ func newTestStore(t *testing.T, opts ...StoreOption) (*RedisStore, *miniredis.Mi
 			return strings.Repeat("0", 28) + fmt.Sprintf("%04x", idCounter)
 		}),
 	}
-	s := NewRedisStore(client, append(defaults, opts...)...)
+	s, err := NewRedisStore(client, append(defaults, opts...)...)
+	if err != nil {
+		t.Fatalf("NewRedisStore: %v", err)
+	}
 	return s, mr
 }
 
@@ -366,7 +369,11 @@ func TestTerminalRetention_HidesExpiredAndCleansIndex(t *testing.T) {
 }
 
 func TestRedisStore_NilClientReturnsStoreUnavailable(t *testing.T) {
-	if got := NewRedisStore(nil); got != nil {
+	got, err := NewRedisStore(nil)
+	if err != nil {
+		t.Fatalf("NewRedisStore(nil) err = %v, want nil", err)
+	}
+	if got != nil {
 		t.Fatalf("NewRedisStore(nil) = %v, want nil", got)
 	}
 	var s *RedisStore
