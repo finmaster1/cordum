@@ -157,6 +157,7 @@ that the managed-config skip is designed to prevent.
 | EDGE-143   | DESIGN  | [K8s + CI shadow detector design doc](kubernetes-ci-shadow-detector-design.md) (design only, awaiting human signoff). |
 | EDGE-143.5 | DONE    | Store extensions — §10.1 fields, §10.2 filters, §10.5 Redis indexes + per-finding retention. See §9.1 below. |
 | EDGE-143.1 | DONE    | Kubernetes shadow detector library — 9 signal extractors per design doc §7.1, observe-only. See §9.2 below. |
+| EDGE-143.2 | DONE    | GitHub Actions CI shadow detector library — 6 signal extractors per design doc §8.1, observe-only. See §9.3 below. |
 
 ### 9.1 EDGE-143.5 — store extensions (shipped)
 
@@ -336,7 +337,83 @@ future):
 parallel ingest pipeline. The Source ID emitted is
 `"k8s-detector-" + ClusterID` so SIEM aggregators can correlate.
 
-### 9.3 EDGE-143.4 — Network-signal aggregator (shipped)
+### 9.3 EDGE-143.2 — GitHub Actions CI shadow detector library (shipped)
+
+Library package at `core/edge/shadow/github/`. It uses the canonical
+`github.com/google/go-github/v74/github` read-only client and the
+existing `shadow.Store.CreateFinding` path from EDGE-141; there is no
+parallel GitHub client, no parallel finding store, and no mutating CI
+API path. The package is observe-mode only: no repository mutation, no
+PR comment, no workflow dispatch, no check-run write.
+
+Design references: [kubernetes-ci-shadow-detector-design.md §8.1](kubernetes-ci-shadow-detector-design.md)
+for GitHub Actions signals, §6.3/§6.4 for tenant/principal mapping,
+§14 for false-positive controls, and binding governor ruling
+`comment-a17f4f1c` on task-de50a293 for Q6 OIDC trust roots.
+
+**6 signal extractors** (design doc §8.1):
+
+| Signal | Trigger |
+| --- | --- |
+| `agent_action_used` | Workflow YAML references a known agent action (`anthropic-ai/claude-code-action`, Cursor, Codex). |
+| `missing_cordum_attach` | Agent action is present but the workflow does not reference `cordum/cordum-edge-attach`. |
+| `self_hosted_runner_unlabeled` | Job runner labels include `self-hosted` without a Cordum managed-runner label. |
+| `env_var_name_indicator` | Workflow/job/step env-var **names** are present; values are never read. |
+| `agent_config_present` | Known agent/MCP config-file path exists; only redacted path + structural summary are recorded. |
+| `direct_provider_endpoint` | Operator-supplied CI-log metadata reports a known provider hostname; query strings and tokens are stripped. |
+
+**Configuration**:
+
+| Field / env var | Default | Purpose |
+| --- | --- | --- |
+| `CORDUM_EDGE_SHADOW_OIDC_TRUST_github` | `https://token.actions.githubusercontent.com` | Q6 Cordum-default GitHub Actions OIDC issuer. Set to a custom issuer URL to override, or `disabled` to refuse OIDC and fall back to org/repo mapping. |
+| `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_github` | `cordum-edge` | Expected OIDC audience for verified claims. |
+| `Config.OrgRepoMap` | operator-supplied | Tier-2 `org/repo → tenant_id` map. |
+| `Config.QuarantineTenantID` | required by constructor | Terminal fallback tenant for unmapped/untrusted runs. |
+| `Config.KnownAgentActionRefs` / `AgentConfigPaths` / `ProviderEndpointHosts` | operator-supplied with fixture defaults in tests | Closed sets for action refs, config paths, and provider hostnames. |
+
+**Tenant + principal mapping**:
+
+1. Verified OIDC claims first (`iss` + `aud` match the configured trust
+   root; `sub=repo:<org>/<repo>:ref:<ref>` resolves through
+   `OrgRepoMap`; `actor` becomes `principal_id`).
+2. Configured `org/repo` map from workflow/repository metadata.
+3. Quarantine tenant + `principal_id="unknown"`.
+
+When OIDC is disabled (`CORDUM_EDGE_SHADOW_OIDC_TRUST_github=disabled`
+or `Config.OIDCDisabled=true`), tier 1 is skipped and the detector does
+not call the OIDC claims provider. Fork PRs are forced to quarantine
+even if the base repo maps to a tenant.
+
+**False-positive controls** (§14):
+
+| Control | Behavior |
+| --- | --- |
+| Ephemeral runners | `ephemeral` label hard-suppresses the self-hosted-runner signal. |
+| Fork PRs | Tagged `false_positive_reason=fork_pr_ephemeral` and routed to quarantine. |
+| Scheduled jobs | Tagged `false_positive_reason=scheduled`. |
+| Dependabot / Renovate | Actor allowlist tags `false_positive_reason=automation_bot`. |
+| Test fixtures | Operator-curated repo set tags `false_positive_reason=test_fixture`. |
+| Dev sandboxes | Operator-curated repo set tags `false_positive_reason=dev_sandbox`. |
+
+**Data minimization** (§5):
+
+- Env-var **names** only; values and `${{ secrets.* }}` expansions are
+  never persisted.
+- Config-file contents are not stored. If content is decoded, it is
+  summarized through `shadow.RedactConfigSummary`; persisted evidence
+  records only `github://org/repo/path` and a bounded structural summary.
+- Direct-provider observations persist hostnames only; full URLs,
+  query strings, Authorization headers, and raw log bodies are not
+  collected by the detector.
+- Metrics use bounded labels only:
+  `cordum_edge_shadow_finding_emit_total{source_type,signal,risk}`,
+  `cordum_edge_shadow_oidc_verify_total{provider,result}`, and
+  `cordum_edge_shadow_gh_rate_limit_remaining{provider}`. Repo, run,
+  workflow, job, and tenant identifiers remain on findings/audit events,
+  never metric labels.
+
+### 9.4 EDGE-143.4 — Network-signal aggregator (shipped)
 
 Library package at `core/edge/shadow/network/`. Reads
 operator-supplied egress / proxy logs and emits ShadowAgentFinding
@@ -449,7 +526,7 @@ in §9.2.
 operator-facing template that documents data categories, lawful
 basis, retention, controller / processor split, and DSAR contact.
 
-### 9.4 EDGE-143.6 — Operator-defined exception API (shipped)
+### 9.5 EDGE-143.6 — Operator-defined exception API (shipped)
 
 Adds the operator-signed exception API from
 [kubernetes-ci-shadow-detector-design.md §10.3](kubernetes-ci-shadow-detector-design.md).
