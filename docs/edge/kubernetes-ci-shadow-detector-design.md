@@ -810,8 +810,64 @@ follow-up to EDGE-143.
 
 ## 16. Open questions requiring human signoff
 
-These questions block follow-up implementation tasks. Resolution must
-be recorded in an ADR or in the task description before any code lands.
+> **Resolution callout (binding ADR-style ruling).** Q1–Q8 below were
+> resolved by `governor-8964b81b` via `comment-a17f4f1c` on
+> `task-de50a293` (2026-05-17, per Yaron directive "investigated deeply
+> and decided"). The original open-questions text is preserved below
+> for historical context; the inline resolutions are the current
+> binding decisions for `§17` follow-up task scoping. Architects may
+> override any single resolution via a formal counter-comment.
+>
+> - **Q1 (K8s tenant-mapping source of truth):** **RATIFY** the `§6.1`
+>   5-tier label-first precedence (pod label → namespace label →
+>   cluster config → SA config → quarantine-terminal).
+> - **Q2 (lawful network metadata for the default configuration):**
+>   **APPROVE** the `§9.1` catalog as the global default, and add a
+>   future `CORDUM_EDGE_SHADOW_PII_MODE=pseudonymize|hash|drop` flag
+>   (default `pseudonymize`) so `principal_id` from `github.actor` is
+>   GDPR/UK-DPA-safe; `managed-settings-deploy.md` adds a new GDPR /
+>   UK-DPA processing-record template.
+> - **Q3 (default retention class):** **RATIFY** `shadow_default=90d`
+>   (matches Cordum's existing 90-day audit default), with
+>   `shadow_short=7d` for ephemeral CI and `shadow_long=365d` for
+>   high-risk findings.
+> - **Q4 (warn / enforce-mode ship gates):** **STAGED.** Observe ships
+>   in `EDGE-143` wave 1 (already designed); warn ships in wave 2 only
+>   after three preconditions (≥1 customer on observe ≥30d with
+>   reviewable findings, signed `acknowledge_warn_mode` opt-in, and
+>   `§14` false-positive controls tuned to FP rate <5% on
+>   `risk=high`); enforce remains parked indefinitely under the
+>   per-action ADR discipline in `§11.3`.
+> - **Q5 (enforce-mode ADR scope):** **RATIFY** `§11.3` as-is. The
+>   4-item gate (ADR + allowlist + preview + rollback) is correct
+>   discipline for irreversible cluster mutation; the hypothetical
+>   admission-webhook / runner-deregister / token-rotation capabilities
+>   stay scope-out, and no `EDGE-143` follow-up ships any enforce
+>   action.
+> - **Q6 (OIDC trust roots for CI tenant mapping):** **Cordum ships
+>   defaults** for GitHub Actions (`https://token.actions.githubusercontent.com`)
+>   and GitLab.com SaaS (`https://gitlab.com`); self-hosted GitLab,
+>   Jenkins, Buildkite, and CircleCI are operator-supplied via
+>   `CORDUM_EDGE_SHADOW_OIDC_TRUST_<provider>` and
+>   `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_<provider>` env-vars (set to
+>   `disabled` to refuse OIDC for that provider and fall back to the
+>   `§6.3` tier-2 path).
+> - **Q7 (cross-cluster federation):** **STORE-LEVEL** federation, not
+>   detector-level. One Cordum tenant = one logical finding collection;
+>   per-cluster detectors emit to the same tenant-scoped Redis index,
+>   and the `§10.5` `edge:shadow:index:cluster:<cluster_id>` secondary
+>   index handles cross-cluster slicing. No new federation protocol or
+>   detector-to-detector auth — Redis is the single source of truth.
+> - **Q8 (exception-API step-up auth):** **RATIFY** step-up
+>   (re-MFA / signed admin token) for `risk=high` exception creation;
+>   regular auth for `risk=medium|low`. Audit event
+>   `shadow_agent.exception_applied` records both actor and step-up
+>   factor used.
+
+The original open questions are preserved below for historical
+context. These questions blocked follow-up implementation tasks before
+the `comment-a17f4f1c` ruling above; consult the resolution callout
+for the binding answers.
 
 1. **Source of truth for tenant mapping in K8s** — operator-maintained
    config map vs. cluster-resident CR vs. label-only. The design favors

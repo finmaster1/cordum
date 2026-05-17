@@ -126,7 +126,10 @@ drift-detection check, and synthetic-rollback test surface, see
 - **CLI reference:** [cli.md](cli.md) and the existing
   [cordumctl edge claude contract](cordumctl-edge-claude.md). Use
   [cordumctl edge doctor](cordumctl-edge-doctor.md) for local diagnostics.
-- **Configuration:** [configuration.md](configuration.md).
+- **Configuration:** [configuration.md](configuration.md). Operator-facing
+  env-var reference for shadow detection, retention, runtime ingest, and
+  managed-policy mode lives in
+  [environment-variables.md](environment-variables.md).
 - **Retention:** [retention.md](retention.md).
 - **API reference:** [api.md](api.md) plus the canonical
   [OpenAPI spec](../api/openapi/cordum-api.yaml).

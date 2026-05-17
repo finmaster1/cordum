@@ -99,6 +99,25 @@ store outage on an oversized event, a redaction completeness leak, or a
 nil `EventEmitter` all reject with no event emitted (we never write an
 unattributed audit row).
 
+> **Constraints persistence (post-EDGE-102).** When the policy decision
+> is `ALLOW_WITH_CONSTRAINTS`, the constraint identifiers and parameters
+> are carried on the typed `AgentActionEvent.Constraints` field
+> (`map[string]any` with `json:"constraints,omitempty"`, defined at
+> `core/edge/event.go`). The field is populated on `mcp.tool.pre`,
+> `mcp.tool.post` (`Decision=CONSTRAIN`), and `mcp.tool.failed` events,
+> per `task-3d5c4f37` follow-up commits
+> [`30c07614`](https://github.com/cordum/cordum/commit/30c07614)
+> (EDGE-102 `MCPServer.WithPolicyGate` wire-up at gateway boot) and
+> [`453ed0f4`](https://github.com/cordum/cordum/commit/453ed0f4)
+> (mcp-tool-policy AWC decision-row alignment). Structured logs emit
+> `constraint_count` only via `logToolCallDecision` — constraint
+> **values** are never logged. Dashboard and audit consumers read the
+> typed `Constraints` payload off the persisted event via the standard
+> `SessionExportAssembler` path (`core/edge/export.go`); the redaction
+> contract still applies, so any constraint value-shaped fields stay
+> bounded to identifiers and structured parameters, never freeform
+> tool input.
+
 ## Approval flow integration
 
 `REQUIRE_HUMAN` decisions route through the gateway-side
