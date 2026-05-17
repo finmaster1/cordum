@@ -156,6 +156,7 @@ that the managed-config skip is designed to prevent.
 | EDGE-142   | WORKING | Remediation-hint generator (still observe-mode). |
 | EDGE-143   | DESIGN  | [K8s + CI shadow detector design doc](kubernetes-ci-shadow-detector-design.md) (design only, awaiting human signoff). |
 | EDGE-143.5 | DONE    | Store extensions — §10.1 fields, §10.2 filters, §10.5 Redis indexes + per-finding retention. See §9.1 below. |
+| EDGE-143.1 | DONE    | Kubernetes shadow detector library — 9 signal extractors per design doc §7.1, observe-only. See §9.2 below. |
 
 ### 9.1 EDGE-143.5 — store extensions (shipped)
 
@@ -218,3 +219,119 @@ findings (task rail #3 'Shadow Agents were cut from P0; do not add P0
 nav/page here'). The future P3 dashboard surface is intentionally
 deferred; see EDGE-143's design doc §17 for the proposed follow-up task
 that designs it.
+
+### 9.2 EDGE-143.1 — Kubernetes shadow detector library (shipped)
+
+Library package at `core/edge/shadow/k8s/`. Vendors `k8s.io/client-go@v0.34.8`
+as the **first Kubernetes dependency in cordum** (transitive
+`k8s.io/api`, `k8s.io/apimachinery`). Observe-only by design and by
+the type system: the detector holds a narrow internal `kubeReader`
+interface that declares only `listPods` / `listNamespaces` /
+`listServices` / `getServiceAccount` / `listNetworkPolicies`. No
+mutating verb (Create/Update/Patch/Delete) is reachable from any code
+path in this package, so any future regression that tries to mutate
+cluster state is a Go compile error. Design doc reference: design doc
+§7 + binding governor ruling
+[comment-a17f4f1c on task-de50a293](kubernetes-ci-shadow-detector-design.md).
+
+**9 signal extractors** (design doc §7.1):
+
+| Signal                         | Risk   | Trigger |
+|--------------------------------|--------|---------|
+| `k8s_heartbeat_missing`        | medium | Pod whose image matches a known agent image but the Cordum heartbeat label is missing. §14 N-consecutive-poll gate (default 3) suppresses single-poll false positives. |
+| `k8s_unmanaged_process`        | medium | Pod container `command`/`args` leading-token matches a known agent executable AND no heartbeat label. Only the leading token is captured — never subsequent args. |
+| `k8s_unmanaged_mcp_service`    | medium | Service with `port.name ∈ {mcp, mcp-stdio, mcp-sse, mcp-http}` missing the Cordum gateway-adoption label. |
+| `k8s_unmanaged_workload`       | medium | Pod owned by a Deployment/DaemonSet/StatefulSet/Job/CronJob/ReplicaSet not on the operator allowlist; emits at owner level so a 100-replica rogue deployment produces ONE finding. |
+| `k8s_untrusted_agent_image`    | low    | Pod image registry-prefix not in `ImageRegistryAllowlist` and image name matches an agent token. |
+| `k8s_namespace_untenanted`     | low    | Namespace missing tenant label AND containing ≥1 agent-image pod (§14 aggregation guard). |
+| `k8s_admission_observed`       | medium | Reserved for operator-supplied admission-log tail; observe-only, never installs a webhook. |
+| `k8s_egress_bypass`            | high   | NetworkPolicy with broad egress (`0.0.0.0/0`) not scoped to the operator's LLM proxy allowlist. |
+| `k8s_ephemeral_indicator`      | low    | Pod present last scan, gone this scan — **never auto-promoted** to a finding without corroboration per §14. |
+
+**Tenant mapping precedence** (design doc §6.1, recorded in
+`tenant_source` field):
+
+1. `pod_label` — pod `cordum.io/tenant-id`.
+2. `namespace_label` — namespace `cordum.io/tenant-id`.
+3. `cluster_config` — operator-maintained `Config.ClusterTenantMap[ClusterID]`.
+4. `sa_config` — pod's service-account annotation `cordum.io/tenant-id`.
+5. `quarantine` — terminal default (`cordum.shadow.quarantine`); finding remains actionable because workload identity is still captured.
+
+**Principal mapping precedence** (§6.2, recorded in `principal_source`):
+
+1. `pod_label` → 2. `pod_annotation` → 3. `sa_name` (`sa:<ns>:<name>`) → 4. `unknown`.
+
+**Data minimization** (§5 — enforced at extraction time, not as a
+post-filter):
+
+| MAY collect | MUST NOT collect |
+|-------------|------------------|
+| Pod/Service/Namespace `.name`, `.labels`, `.annotations` (tenancy-purposeful). | Container `Env[].Value` (only `Env[].Name`). |
+| Container image registry+name; tag scrubbed via `imageTagSafe` if secret-shape. | Mounted Secret/ConfigMap data bodies. |
+| Container `Command[0]` / `Args[0]` leading token via `leadingToken`. | Command-arg values beyond the leading token. |
+| OwnerReferences kind+name+UID. | Full URLs with query string. |
+| | Raw network payloads. |
+
+Defense-in-depth: every string entering `CreateFindingRequest` runs
+through `redactField` (8-pattern regex strip mirroring
+`core/edge/shadow/redaction.go:23-36`, plus a 2048-byte cap). The
+shadow store applies the same patterns again at write time via
+`stripSecretMarkers` on `EvidenceSummary` — two independent strip
+passes so a regression on one side does not silently leak.
+
+**Configuration** (`k8s.Config`):
+
+| Field                       | Default | Purpose |
+|-----------------------------|---------|---------|
+| `ClusterID`                 | (required for prod) | Used as `cluster_id` on every emitted finding + tier-3 tenant lookup key. |
+| `ScanInterval`              | 60s     | Cadence for `Run()`-driven polling. |
+| `TenantLabelKey`            | `cordum.io/tenant-id` | Label/annotation key consulted by the tenant resolver. |
+| `PrincipalLabelKey`         | `cordum.io/principal-id` | Same for principal. |
+| `HeartbeatLabelKey`         | `cordum.io/edge-session-id` | Label whose presence marks a pod as Cordum-governed. |
+| `GatewayAdoptionLabel`      | `cordum.io/mcp-gateway` | Label whose presence marks a Service as MCP-gateway-attached. |
+| `HeartbeatMissedThreshold`  | 3       | §14 N-consecutive-poll gate before `heartbeat_missing` promotes. |
+| `KnownAgentImages`          | —       | Allowlisted agent image prefixes (e.g. `anthropic/claude-code`). Set explicitly per operator deployment. |
+| `KnownAgentExecutables`     | `claude, codex, cursor, mcp-server, mcp-gateway` | Leading-token allowlist for `unmanaged_process`. |
+| `ImageRegistryAllowlist`    | —       | Registry prefixes trusted not to be shadow agents. Set explicitly. |
+| `MCPPortNames`              | `mcp, mcp-stdio, mcp-sse, mcp-http` | Service port names that flag an MCP service. |
+| `WorkloadAllowlist`         | —       | Workload names exempt from `unmanaged_workload`. |
+| `NamespaceAllowlist`        | —       | Namespaces exempt from `namespace_untenanted`. |
+| `ClusterTenantMap`          | —       | Tier-3 `cluster_id → tenant_id` map for the default resolver. |
+| `LLMProxyEndpoints`         | —       | Endpoints considered safe for egress; broader egress triggers `egress_bypass`. |
+| `QuarantineTenantID`        | `cordum.shadow.quarantine` | Terminal tenant when all other tiers fail. |
+
+**Observability** (Observer interface; design doc §13):
+
+```go
+type Observer interface {
+    RecordFindingEmit(signal, risk string)
+    EmitAudit(event audit.SIEMEvent)
+}
+```
+
+Production wiring backs `Observer` with a Prometheus `CounterVec`
+(`cordum_edge_shadow_finding_emit{source_type, signal, risk}`) and the
+shared `audit.AuditSender`. Bounded labels only — tenant_id, cluster_id,
+namespace, workload_name, pod_uid, repo, run_id are NEVER passed as
+metric labels (high cardinality); they live on the persisted finding
+and on `audit.SIEMEvent.Extra`. The audit event uses
+`Action="shadow_agent.observed"`, `Decision="observed"`,
+`EventType="edge.shadow_finding_created"` with severity derived from
+risk per §13.2.
+
+**Observe-mode enforcement contract** (design doc §11, ADR-gated
+future):
+
+- This task ships ZERO enforce-mode code paths. No
+  `ValidatingAdmissionWebhook`, no `kubectl patch`, no `kubectl
+  delete`, no auto-label-mutation.
+- `CORDUM_EDGE_SHADOW_K8S_ENFORCE` env var name is **reserved** for the
+  future enforce-mode hook but is not consulted anywhere today.
+- The narrow `kubeReader` interface (`detector.go:79`) is the primary
+  enforcement mechanism — adding a mutating verb to the library would
+  require widening this interface, which would be reviewable.
+
+**EDGE-141 reuse**: findings are persisted via the existing
+`shadow.Store.CreateFinding` API. No parallel finding store, no
+parallel ingest pipeline. The Source ID emitted is
+`"k8s-detector-" + ClusterID` so SIEM aggregators can correlate.
