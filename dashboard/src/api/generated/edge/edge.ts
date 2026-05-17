@@ -22,7 +22,9 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  BinaryVerifyEventsEnvelope,
   CreateEdgeMCPUpstreamParams,
+  CreateShadowAgentFindingRequest,
   EdgeAgentActionEvent,
   EdgeAgentActionEventBatchRequest,
   EdgeAgentActionEventBatchResponse,
@@ -49,6 +51,8 @@ import type {
   EdgeMaxExecutionsExceededResponse,
   EdgeNotFoundResponse,
   EdgePayloadTooLargeResponse,
+  EdgeRuntimeIngestRequest,
+  EdgeRuntimeIngestResponse,
   EdgeServiceUnavailableResponse,
   EdgeSession,
   EdgeSessionCreateRequest,
@@ -57,6 +61,9 @@ import type {
   EdgeUnauthorizedResponse,
   ExportEdgeSession200,
   ExportEdgeSessionBody,
+  IngestBinaryVerifyRequest,
+  IngestBinaryVerifyResponse,
+  ListBinaryVerifyParams,
   ListEdgeApprovalsParams,
   ListEdgeExecutionEventsParams,
   ListEdgeExecutionsParams,
@@ -64,10 +71,17 @@ import type {
   ListEdgeMCPUpstreamsParams,
   ListEdgeSessionEventsParams,
   ListEdgeSessionsParams,
+  ListShadowAgentFindingsParams,
   MCPUpstreamListResponse,
   MCPUpstreamServer,
   MCPUpstreamServerWriteRequest,
   MCPUpstreamValidationResponse,
+  ResolveShadowAgentFindingRequest,
+  ShadowAgentFinding,
+  ShadowAgentFindingPage,
+  ShadowAgentRemediationRequest,
+  ShadowAgentRemediationResponse,
+  SuppressShadowAgentFindingRequest,
   WaitEdgeApprovalBody,
 } from ".././model";
 
@@ -3370,6 +3384,116 @@ export const useCreateEdgeEventsBatch = <
   return useMutation(mutationOptions, queryClient);
 };
 /**
+ * Disabled by default. When `CORDUM_EDGE_RUNTIME_INGEST_ENABLED` is unset (or set to a non-truthy value), the route returns 503 `service_unavailable` and persists nothing. When enabled, the endpoint accepts a bounded, redacted runtime event batch (process exec, file read/write, network connect, DNS query) from a trusted source identity and persists mapped `AgentActionEvent` records with `layer=runtime` and `decision=RECORDED` through the existing Edge store. Raw argv, file contents, packet payloads, DNS response bodies, request bodies, headers, secrets, and tokens are rejected at the strict-schema decode boundary. All-or-nothing batch acceptance — a single invalid envelope aborts the whole batch. See `docs/edge/runtime-ingestion.md` for the full contract.
+ * @summary Ingest bounded runtime telemetry from a trusted sidecar
+ */
+export const ingestEdgeRuntimeEvents = (
+  edgeRuntimeIngestRequest: EdgeRuntimeIngestRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<EdgeRuntimeIngestResponse>({
+    url: `/api/v1/edge/runtime/events`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: edgeRuntimeIngestRequest,
+    signal,
+  });
+};
+
+export const getIngestEdgeRuntimeEventsMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeError
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof ingestEdgeRuntimeEvents>>,
+    TError,
+    { data: EdgeRuntimeIngestRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof ingestEdgeRuntimeEvents>>,
+  TError,
+  { data: EdgeRuntimeIngestRequest },
+  TContext
+> => {
+  const mutationKey = ["ingestEdgeRuntimeEvents"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof ingestEdgeRuntimeEvents>>,
+    { data: EdgeRuntimeIngestRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return ingestEdgeRuntimeEvents(data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type IngestEdgeRuntimeEventsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof ingestEdgeRuntimeEvents>>
+>;
+export type IngestEdgeRuntimeEventsMutationBody = EdgeRuntimeIngestRequest;
+export type IngestEdgeRuntimeEventsMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgePayloadTooLargeResponse
+  | EdgeError
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Ingest bounded runtime telemetry from a trusted sidecar
+ */
+export const useIngestEdgeRuntimeEvents = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeError
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof ingestEdgeRuntimeEvents>>,
+      TError,
+      { data: EdgeRuntimeIngestRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof ingestEdgeRuntimeEvents>>,
+  TError,
+  { data: EdgeRuntimeIngestRequest },
+  TContext
+> => {
+  const mutationOptions = getIngestEdgeRuntimeEventsMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
  * Returns tenant-scoped events across executions in the session with cursor pagination and optional kind, decision, and RFC3339 time-window filters.
  * @summary List Edge events for a session
  */
@@ -3896,6 +4020,1246 @@ export function useListEdgeExecutionEvents<
     params,
     options,
   );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Persists a single ShadowAgentFinding lifecycle record. Evidence must be either a bounded redacted summary or an artifact pointer; raw payloads are rejected. Observe/warn only — no enforcement, no remediation execution, no Cordum Job creation. Audit event `shadow_agent.detected` is emitted on success.
+ * @summary Ingest one redacted shadow-agent finding
+ */
+export const createShadowAgentFinding = (
+  createShadowAgentFindingRequest: CreateShadowAgentFindingRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentFinding>({
+    url: `/api/v1/edge/shadow-agents`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: createShadowAgentFindingRequest,
+    signal,
+  });
+};
+
+export const getCreateShadowAgentFindingMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeConflictResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createShadowAgentFinding>>,
+    TError,
+    { data: CreateShadowAgentFindingRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createShadowAgentFinding>>,
+  TError,
+  { data: CreateShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationKey = ["createShadowAgentFinding"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createShadowAgentFinding>>,
+    { data: CreateShadowAgentFindingRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createShadowAgentFinding(data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateShadowAgentFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createShadowAgentFinding>>
+>;
+export type CreateShadowAgentFindingMutationBody =
+  CreateShadowAgentFindingRequest;
+export type CreateShadowAgentFindingMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeConflictResponse
+  | EdgePayloadTooLargeResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Ingest one redacted shadow-agent finding
+ */
+export const useCreateShadowAgentFinding = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeConflictResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createShadowAgentFinding>>,
+      TError,
+      { data: CreateShadowAgentFindingRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createShadowAgentFinding>>,
+  TError,
+  { data: CreateShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationOptions = getCreateShadowAgentFindingMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Returns a tenant-scoped cursor-paginated page of ShadowAgentFinding records. Filters narrow the result set; the narrowest filter is selected as the primary index path. Resolved/suppressed records past terminal retention are hidden.
+ * @summary List shadow-agent findings
+ */
+export const listShadowAgentFindings = (
+  params?: ListShadowAgentFindingsParams,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentFindingPage>({
+    url: `/api/v1/edge/shadow-agents`,
+    method: "GET",
+    params,
+    signal,
+  });
+};
+
+export const getListShadowAgentFindingsQueryKey = (
+  params?: ListShadowAgentFindingsParams,
+) => {
+  return [`/api/v1/edge/shadow-agents`, ...(params ? [params] : [])] as const;
+};
+
+export const getListShadowAgentFindingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listShadowAgentFindings>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowAgentFindingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowAgentFindings>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListShadowAgentFindingsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listShadowAgentFindings>>
+  > = ({ signal }) => listShadowAgentFindings(params, signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listShadowAgentFindings>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type ListShadowAgentFindingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listShadowAgentFindings>>
+>;
+export type ListShadowAgentFindingsQueryError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useListShadowAgentFindings<
+  TData = Awaited<ReturnType<typeof listShadowAgentFindings>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params: undefined | ListShadowAgentFindingsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowAgentFindings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listShadowAgentFindings>>,
+          TError,
+          Awaited<ReturnType<typeof listShadowAgentFindings>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useListShadowAgentFindings<
+  TData = Awaited<ReturnType<typeof listShadowAgentFindings>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowAgentFindingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowAgentFindings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listShadowAgentFindings>>,
+          TError,
+          Awaited<ReturnType<typeof listShadowAgentFindings>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useListShadowAgentFindings<
+  TData = Awaited<ReturnType<typeof listShadowAgentFindings>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowAgentFindingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowAgentFindings>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary List shadow-agent findings
+ */
+
+export function useListShadowAgentFindings<
+  TData = Awaited<ReturnType<typeof listShadowAgentFindings>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowAgentFindingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowAgentFindings>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getListShadowAgentFindingsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Returns one ShadowAgentFinding scoped to the caller's tenant. Cross-tenant lookups return 404 (not 403) to prevent tuple-existence probing.
+ * @summary Get a shadow-agent finding by id
+ */
+export const getShadowAgentFinding = (
+  findingId: string,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentFinding>({
+    url: `/api/v1/edge/shadow-agents/${findingId}`,
+    method: "GET",
+    signal,
+  });
+};
+
+export const getGetShadowAgentFindingQueryKey = (findingId?: string) => {
+  return [`/api/v1/edge/shadow-agents/${findingId}`] as const;
+};
+
+export const getGetShadowAgentFindingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getShadowAgentFinding>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  findingId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowAgentFinding>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetShadowAgentFindingQueryKey(findingId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getShadowAgentFinding>>
+  > = ({ signal }) => getShadowAgentFinding(findingId, signal);
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!findingId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getShadowAgentFinding>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type GetShadowAgentFindingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getShadowAgentFinding>>
+>;
+export type GetShadowAgentFindingQueryError =
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useGetShadowAgentFinding<
+  TData = Awaited<ReturnType<typeof getShadowAgentFinding>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  findingId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowAgentFinding>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getShadowAgentFinding>>,
+          TError,
+          Awaited<ReturnType<typeof getShadowAgentFinding>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useGetShadowAgentFinding<
+  TData = Awaited<ReturnType<typeof getShadowAgentFinding>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  findingId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowAgentFinding>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getShadowAgentFinding>>,
+          TError,
+          Awaited<ReturnType<typeof getShadowAgentFinding>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useGetShadowAgentFinding<
+  TData = Awaited<ReturnType<typeof getShadowAgentFinding>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  findingId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowAgentFinding>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary Get a shadow-agent finding by id
+ */
+
+export function useGetShadowAgentFinding<
+  TData = Awaited<ReturnType<typeof getShadowAgentFinding>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  findingId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowAgentFinding>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getGetShadowAgentFindingQueryOptions(findingId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Flips a detected finding to resolved. Idempotent on a resolved finding; returns 409 when called on a suppressed terminal record. Emits `shadow_agent.resolved` audit event on success.
+ * @summary Resolve a shadow-agent finding
+ */
+export const resolveShadowAgentFinding = (
+  findingId: string,
+  resolveShadowAgentFindingRequest?: ResolveShadowAgentFindingRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentFinding>({
+    url: `/api/v1/edge/shadow-agents/${findingId}/resolve`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: resolveShadowAgentFindingRequest,
+    signal,
+  });
+};
+
+export const getResolveShadowAgentFindingMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveShadowAgentFinding>>,
+    TError,
+    { findingId: string; data: ResolveShadowAgentFindingRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resolveShadowAgentFinding>>,
+  TError,
+  { findingId: string; data: ResolveShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationKey = ["resolveShadowAgentFinding"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resolveShadowAgentFinding>>,
+    { findingId: string; data: ResolveShadowAgentFindingRequest }
+  > = (props) => {
+    const { findingId, data } = props ?? {};
+
+    return resolveShadowAgentFinding(findingId, data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResolveShadowAgentFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resolveShadowAgentFinding>>
+>;
+export type ResolveShadowAgentFindingMutationBody =
+  ResolveShadowAgentFindingRequest;
+export type ResolveShadowAgentFindingMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeConflictResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Resolve a shadow-agent finding
+ */
+export const useResolveShadowAgentFinding = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof resolveShadowAgentFinding>>,
+      TError,
+      { findingId: string; data: ResolveShadowAgentFindingRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof resolveShadowAgentFinding>>,
+  TError,
+  { findingId: string; data: ResolveShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationOptions = getResolveShadowAgentFindingMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Flips a detected finding to suppressed. Idempotent on a suppressed finding; returns 409 when called on a resolved terminal record. Optional `suppressed_until` records a time-bound exception for downstream re-evaluation. Emits `shadow_agent.suppressed` audit event on success.
+ * @summary Suppress a shadow-agent finding
+ */
+export const suppressShadowAgentFinding = (
+  findingId: string,
+  suppressShadowAgentFindingRequest?: SuppressShadowAgentFindingRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentFinding>({
+    url: `/api/v1/edge/shadow-agents/${findingId}/suppress`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: suppressShadowAgentFindingRequest,
+    signal,
+  });
+};
+
+export const getSuppressShadowAgentFindingMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof suppressShadowAgentFinding>>,
+    TError,
+    { findingId: string; data: SuppressShadowAgentFindingRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof suppressShadowAgentFinding>>,
+  TError,
+  { findingId: string; data: SuppressShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationKey = ["suppressShadowAgentFinding"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof suppressShadowAgentFinding>>,
+    { findingId: string; data: SuppressShadowAgentFindingRequest }
+  > = (props) => {
+    const { findingId, data } = props ?? {};
+
+    return suppressShadowAgentFinding(findingId, data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SuppressShadowAgentFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof suppressShadowAgentFinding>>
+>;
+export type SuppressShadowAgentFindingMutationBody =
+  SuppressShadowAgentFindingRequest;
+export type SuppressShadowAgentFindingMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeConflictResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Suppress a shadow-agent finding
+ */
+export const useSuppressShadowAgentFinding = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof suppressShadowAgentFinding>>,
+      TError,
+      { findingId: string; data: SuppressShadowAgentFindingRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof suppressShadowAgentFinding>>,
+  TError,
+  { findingId: string; data: SuppressShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationOptions = getSuppressShadowAgentFindingMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Compatibility alias for POST /api/v1/edge/shadow-agents/{finding_id}/suppress. Shares the same handler and emits the same audit event; new clients should use /suppress.
+ * @summary Suppress a shadow-agent finding (compat alias for /suppress)
+ */
+export const ignoreShadowAgentFinding = (
+  findingId: string,
+  suppressShadowAgentFindingRequest?: SuppressShadowAgentFindingRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentFinding>({
+    url: `/api/v1/edge/shadow-agents/${findingId}/ignore`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: suppressShadowAgentFindingRequest,
+    signal,
+  });
+};
+
+export const getIgnoreShadowAgentFindingMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof ignoreShadowAgentFinding>>,
+    TError,
+    { findingId: string; data: SuppressShadowAgentFindingRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof ignoreShadowAgentFinding>>,
+  TError,
+  { findingId: string; data: SuppressShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationKey = ["ignoreShadowAgentFinding"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof ignoreShadowAgentFinding>>,
+    { findingId: string; data: SuppressShadowAgentFindingRequest }
+  > = (props) => {
+    const { findingId, data } = props ?? {};
+
+    return ignoreShadowAgentFinding(findingId, data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type IgnoreShadowAgentFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof ignoreShadowAgentFinding>>
+>;
+export type IgnoreShadowAgentFindingMutationBody =
+  SuppressShadowAgentFindingRequest;
+export type IgnoreShadowAgentFindingMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeConflictResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Suppress a shadow-agent finding (compat alias for /suppress)
+ */
+export const useIgnoreShadowAgentFinding = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof ignoreShadowAgentFinding>>,
+      TError,
+      { findingId: string; data: SuppressShadowAgentFindingRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof ignoreShadowAgentFinding>>,
+  TError,
+  { findingId: string; data: SuppressShadowAgentFindingRequest },
+  TContext
+> => {
+  const mutationOptions = getIgnoreShadowAgentFindingMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Returns a deterministic, redacted RemediationPlan for the referenced finding.
+Read-only: the handler does not mutate finding state, does not enqueue Cordum
+Jobs, does not emit audit events, and does not call the Safety Kernel. All
+commands inside the plan use literal placeholders (`<gateway-url>`,
+`<tenant-id>`, etc.) and never carry live secrets or developer paths.
+
+ * @summary Generate an advisory remediation plan for a shadow-agent finding (EDGE-142)
+ */
+export const generateShadowAgentRemediation = (
+  findingId: string,
+  shadowAgentRemediationRequest?: ShadowAgentRemediationRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowAgentRemediationResponse>({
+    url: `/api/v1/edge/shadow-agents/${findingId}/remediation`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: shadowAgentRemediationRequest,
+    signal,
+  });
+};
+
+export const getGenerateShadowAgentRemediationMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateShadowAgentRemediation>>,
+    TError,
+    { findingId: string; data: ShadowAgentRemediationRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateShadowAgentRemediation>>,
+  TError,
+  { findingId: string; data: ShadowAgentRemediationRequest },
+  TContext
+> => {
+  const mutationKey = ["generateShadowAgentRemediation"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateShadowAgentRemediation>>,
+    { findingId: string; data: ShadowAgentRemediationRequest }
+  > = (props) => {
+    const { findingId, data } = props ?? {};
+
+    return generateShadowAgentRemediation(findingId, data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateShadowAgentRemediationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateShadowAgentRemediation>>
+>;
+export type GenerateShadowAgentRemediationMutationBody =
+  ShadowAgentRemediationRequest;
+export type GenerateShadowAgentRemediationMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Generate an advisory remediation plan for a shadow-agent finding (EDGE-142)
+ */
+export const useGenerateShadowAgentRemediation = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof generateShadowAgentRemediation>>,
+      TError,
+      { findingId: string; data: ShadowAgentRemediationRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof generateShadowAgentRemediation>>,
+  TError,
+  { findingId: string; data: ShadowAgentRemediationRequest },
+  TContext
+> => {
+  const mutationOptions =
+    getGenerateShadowAgentRemediationMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Persists structured binary-verify outcomes emitted by
+`tools/scripts/install.{sh,ps1}` (the pre-activation integrity
+gate documented in `docs/security/binary-signing.md` §8).
+Operators capture install-script stderr (one JSON line per
+binary verified), batch it into the `events` array, and POST
+here. Each event is validated against `model.BinaryVerifyEvent`
+and persisted through the existing audit chain as a SIEMEvent
+with `EventType = binary-verify-ok | binary-verify-fail`.
+
+Partial-success semantics: per-event validation failures are
+reported in the response `errors[]` and counted in `rejected`;
+accepted events are persisted. A request with zero accepted
+events returns 400.
+
+Auth: requires `audit.export` permission or `admin` role,
+plus tenant access enforced via `X-Tenant-ID`.
+
+ * @summary Ingest install-time binary-verify outcomes
+ */
+export const ingestBinaryVerify = (
+  ingestBinaryVerifyRequest: IngestBinaryVerifyRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<IngestBinaryVerifyResponse>({
+    url: `/api/v1/edge/binary-integrity/events`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: ingestBinaryVerifyRequest,
+    signal,
+  });
+};
+
+export const getIngestBinaryVerifyMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof ingestBinaryVerify>>,
+    TError,
+    { data: IngestBinaryVerifyRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof ingestBinaryVerify>>,
+  TError,
+  { data: IngestBinaryVerifyRequest },
+  TContext
+> => {
+  const mutationKey = ["ingestBinaryVerify"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof ingestBinaryVerify>>,
+    { data: IngestBinaryVerifyRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return ingestBinaryVerify(data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type IngestBinaryVerifyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof ingestBinaryVerify>>
+>;
+export type IngestBinaryVerifyMutationBody = IngestBinaryVerifyRequest;
+export type IngestBinaryVerifyMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgePayloadTooLargeResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Ingest install-time binary-verify outcomes
+ */
+export const useIngestBinaryVerify = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgePayloadTooLargeResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof ingestBinaryVerify>>,
+      TError,
+      { data: IngestBinaryVerifyRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof ingestBinaryVerify>>,
+  TError,
+  { data: IngestBinaryVerifyRequest },
+  TContext
+> => {
+  const mutationOptions = getIngestBinaryVerifyMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Returns a tenant-scoped reverse-chronological page of
+binary-verify outcomes recovered from the tenant audit
+stream. Filters narrow the page; values that fall outside
+the accepted enums return 400. The response envelope mirrors
+`/api/v1/audit/events` (items / next_cursor / returned) but
+each item carries the original BinaryVerifyEvent shape plus a
+server-side timestamp and endpoint label.
+
+Auth: requires `audit.read` permission or `admin` role,
+plus tenant access enforced via `X-Tenant-ID`.
+
+ * @summary List binary-verify outcomes for a tenant
+ */
+export const listBinaryVerify = (
+  params?: ListBinaryVerifyParams,
+  signal?: AbortSignal,
+) => {
+  return apiClient<BinaryVerifyEventsEnvelope>({
+    url: `/api/v1/edge/binary-integrity/events`,
+    method: "GET",
+    params,
+    signal,
+  });
+};
+
+export const getListBinaryVerifyQueryKey = (
+  params?: ListBinaryVerifyParams,
+) => {
+  return [
+    `/api/v1/edge/binary-integrity/events`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListBinaryVerifyQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBinaryVerify>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListBinaryVerifyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listBinaryVerify>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListBinaryVerifyQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listBinaryVerify>>
+  > = ({ signal }) => listBinaryVerify(params, signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBinaryVerify>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type ListBinaryVerifyQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBinaryVerify>>
+>;
+export type ListBinaryVerifyQueryError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useListBinaryVerify<
+  TData = Awaited<ReturnType<typeof listBinaryVerify>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params: undefined | ListBinaryVerifyParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listBinaryVerify>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listBinaryVerify>>,
+          TError,
+          Awaited<ReturnType<typeof listBinaryVerify>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useListBinaryVerify<
+  TData = Awaited<ReturnType<typeof listBinaryVerify>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListBinaryVerifyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listBinaryVerify>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listBinaryVerify>>,
+          TError,
+          Awaited<ReturnType<typeof listBinaryVerify>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useListBinaryVerify<
+  TData = Awaited<ReturnType<typeof listBinaryVerify>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListBinaryVerifyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listBinaryVerify>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary List binary-verify outcomes for a tenant
+ */
+
+export function useListBinaryVerify<
+  TData = Awaited<ReturnType<typeof listBinaryVerify>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListBinaryVerifyParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listBinaryVerify>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getListBinaryVerifyQueryOptions(params, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,
