@@ -152,11 +152,12 @@ that the managed-config skip is designed to prevent.
 
 | Sibling | Status | Adds |
 |---------|--------|------|
-| EDGE-141 | PLANNING | Server-side finding store + `/api/v1/edge/shadow/findings` ingest |
-| EDGE-142 | PLANNING | Remediation-hint generator (still observe-mode) |
-| EDGE-143 | PLANNING | K8s + CI shadow detector design doc |
+| EDGE-141 | WORKING | Server-side finding store + `/api/v1/edge/shadow/findings` ingest |
+| EDGE-142 | WORKING | Remediation-hint generator (still observe-mode) |
+| EDGE-143 | DESIGN  | [K8s + CI shadow detector design doc](kubernetes-ci-shadow-detector-design.md) (design only, awaiting human signoff) |
 
 This task explicitly does **not** add a dashboard surface for shadow
 findings (task rail #3 'Shadow Agents were cut from P0; do not add P0
-nav/page here'). The future P3 dashboard surface will be designed by
-EDGE-143 with the full server-side store from EDGE-141 in place.
+nav/page here'). The future P3 dashboard surface is intentionally
+deferred; see EDGE-143's design doc §17 for the proposed follow-up task
+that designs it.
