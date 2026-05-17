@@ -59,6 +59,25 @@ import {
 } from "@/lib/url-state";
 import { JobFiltersBar, type JobFilterValues } from "@/components/jobs/JobFiltersBar";
 
+// matchesJobSearch returns true when `query` matches any of the canonical
+// search fields for a job row (id, topic, traceId, workflowRunId, pool,
+// tenant, sessionId). The match is case-insensitive substring. Exported so
+// the predicate is covered by focused unit tests rather than only via the
+// full-page render path.
+export function matchesJobSearch(job: Job, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === "") return true;
+  return (
+    job.id.toLowerCase().includes(q) ||
+    (job.topic ?? "").toLowerCase().includes(q) ||
+    (job.traceId ?? "").toLowerCase().includes(q) ||
+    (job.workflowRunId ?? "").toLowerCase().includes(q) ||
+    (job.pool ?? "").toLowerCase().includes(q) ||
+    (job.tenant ?? "").toLowerCase().includes(q) ||
+    (getJobParentRefs(job).sessionId ?? "").toLowerCase().includes(q)
+  );
+}
+
 export function OriginPill({ job }: { job: Job }) {
   const navigate = useNavigate();
   const { runId, sessionId, workflowId } = getJobParentRefs(job);
@@ -477,20 +496,7 @@ export default function JobsPage() {
           return false;
       }
       if (search) {
-        const q = search.toLowerCase();
-        // task-cafacca3: extended the main search predicate to cover
-        // pool / tenant / session so users don't need to open the
-        // JobFiltersBar advanced inputs to find by those fields. ID +
-        // topic + trace + run preserved; pool/tenant/session added.
-        return (
-          j.id.toLowerCase().includes(q) ||
-          (j.topic ?? "").toLowerCase().includes(q) ||
-          (j.traceId ?? "").toLowerCase().includes(q) ||
-          (j.workflowRunId ?? "").toLowerCase().includes(q) ||
-          (j.pool ?? "").toLowerCase().includes(q) ||
-          (j.tenant ?? "").toLowerCase().includes(q) ||
-          (getJobParentRefs(j).sessionId ?? "").toLowerCase().includes(q)
-        );
+        return matchesJobSearch(j, search);
       }
       return true;
     });

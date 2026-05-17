@@ -388,6 +388,43 @@ describe("JobDetailPage policy trace tab integration", () => {
   // Inputs/Outputs tab-click tests deleted (task-cafacca3) — tabs no
   // longer exist; payloads are CollapsibleSections inside Overview.
 
+  it("Test_policyTraceUrl_redirectsToOverview: legacy ?tab=policy-trace deep-link resolves to Overview", () => {
+    // task-cafacca3 reopen #1 — bookmark-backward-compat: when the URL
+    // arrives with ?tab=policy-trace (a tab that no longer exists), the
+    // page must derive the active tab as 'overview' rather than render a
+    // dead state. The Tabs primitive marks the active tab with
+    // aria-selected="true"; that's the canonical signal we assert on.
+    searchState.current = "tab=policy-trace";
+    const { container, cleanup } = renderPage();
+    try {
+      const selected = container.querySelector('[role="tab"][aria-selected="true"]');
+      expect(selected).not.toBeNull();
+      expect((selected?.textContent ?? "").trim()).toBe("Overview");
+
+      // Policy Trace must not be in the tab strip at all.
+      const tabLabels = Array.from(container.querySelectorAll('[role="tab"]'))
+        .map((b) => (b.textContent ?? "").trim());
+      expect(tabLabels).not.toContain("Policy Trace");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("Test_policyTraceUrl_redirectsToOverview: legacy ?tab=inputs and ?tab=outputs also resolve to Overview", () => {
+    // Same backward-compat invariant for the other deleted tabs. Three
+    // legacy values, one cure: derive activeTab → 'overview'.
+    for (const legacy of ["inputs", "outputs"]) {
+      searchState.current = `tab=${legacy}`;
+      const { container, cleanup } = renderPage();
+      try {
+        const selected = container.querySelector('[role="tab"][aria-selected="true"]');
+        expect((selected?.textContent ?? "").trim()).toBe("Overview");
+      } finally {
+        cleanup();
+      }
+    }
+  });
+
   it("renders the parent runId via CodeBlock inline chip with copy-on-click (task-90bb5ef3 reopen #2)", () => {
     queryState.current.data = makeJob({
       workflowRunId: "wfr-banner-001",
