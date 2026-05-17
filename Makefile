@@ -136,15 +136,15 @@ help:
 
 soak-ws:
 	@echo "Running 10-minute WebSocket soak test..."
-	./tools/scripts/ws_soak_test.sh default
+	bash tools/scripts/ws_soak_test.sh default
 
 soak-ws-quick:
 	@echo "Running 2-minute quick WebSocket soak test..."
-	./tools/scripts/ws_soak_test.sh quick
+	bash tools/scripts/ws_soak_test.sh quick
 
 soak-ws-full:
 	@echo "Running 2-hour full WebSocket soak test..."
-	./tools/scripts/ws_soak_test.sh full
+	bash tools/scripts/ws_soak_test.sh full
 
 # EDGE-151 — host-local dev release: cordum-hook + cordum-agentd +
 # cordum-claude with a SHA256SUMS manifest detached-signed by the
