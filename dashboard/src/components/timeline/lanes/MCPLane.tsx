@@ -177,7 +177,6 @@ function useMcpLaneUrlSync() {
   useEffect(() => {
     const fromUrl = parseMcpLaneFromUrl(searchParams.get("mcp_lane"));
     setChips(fromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggle = (key: McpLaneChip) => {

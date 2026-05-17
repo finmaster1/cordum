@@ -106,7 +106,6 @@ export default function AgentsPage() {
     next.set("tab", m.tab);
     if (m.view) next.set("view", m.view);
     setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const { data: workers, isLoading, isError, error, refetch } = useQuery({
