@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -478,5 +479,91 @@ func TestRedisStore_StoreClosedSurfacesError(t *testing.T) {
 	_, err := s.CreateFinding(ctx, minimalCreateReq("t", "o", "p", "claude-code", FindingRiskHigh, "config_file", "summary"))
 	if err == nil {
 		t.Fatalf("expected error after miniredis close, got nil")
+	}
+}
+
+// TestFinding_ConcurrentCreatesCollisionFree drives N concurrent
+// CreateFinding calls against a single tenant via N goroutines using
+// a shared miniredis client + the PRODUCTION defaultIDGen (NOT the
+// deterministic test counter, which races on counter increment AND
+// would manufacture collisions that the real crypto/rand-based gen
+// cannot produce). Pins that the ID generator is concurrency-safe:
+// zero ErrAlreadyExists collisions on auto-generated FindingIDs,
+// every goroutine returns a unique id, and all N records persist.
+// Run at -count=10 to catch crypto/rand misuse, lock leaks, or
+// pipeline-ordering bugs that only surface under contention.
+func TestFinding_ConcurrentCreatesCollisionFree(t *testing.T) {
+	mr := miniredis.RunT(t)
+	// Larger pool than newTestStore's PoolSize=1 so the contention
+	// surfaces at the ID-gen level instead of being serialised by a
+	// single Redis connection.
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), PoolSize: 16})
+	t.Cleanup(func() { _ = client.Close(); mr.Close() })
+
+	// Construct the store with NO options so it falls back to the
+	// production defaultIDGen (crypto/rand-backed) and a wall-clock
+	// time.Now seam. Both are the surfaces this test exercises.
+	store, err := NewRedisStore(client)
+	if err != nil {
+		t.Fatalf("NewRedisStore: %v", err)
+	}
+
+	const tenant = "tenant-concurrent"
+	baseReq := minimalCreateReq(tenant, "owner-1", "principal-1", "claude-code", FindingRiskHigh, "config_file", "concurrent-create-evidence")
+
+	const N = 50
+	var wg sync.WaitGroup
+	errCh := make(chan error, N)
+	idCh := make(chan string, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Value-copy the request so each goroutine owns its own
+			// CreateFindingRequest; the request struct contains no
+			// shared pointers in this test path.
+			req := baseReq
+			got, err := store.CreateFinding(context.Background(), req)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			idCh <- got.FindingID
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	close(idCh)
+
+	var failed int
+	for err := range errCh {
+		failed++
+		if errors.Is(err, ErrAlreadyExists) {
+			t.Errorf("ErrAlreadyExists collision on auto-generated FindingID: %v — defaultIDGen produced a duplicate under contention", err)
+		} else {
+			t.Errorf("unexpected CreateFinding error: %v", err)
+		}
+	}
+	if failed > 0 {
+		t.Fatalf("%d/%d concurrent CreateFinding calls failed; see errors above", failed, N)
+	}
+
+	seen := make(map[string]struct{}, N)
+	for id := range idCh {
+		if _, dup := seen[id]; dup {
+			t.Errorf("defaultIDGen returned duplicate id %q across concurrent calls", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != N {
+		t.Fatalf("got %d unique FindingIDs from %d goroutines, want exactly %d", len(seen), N, N)
+	}
+
+	page, err := store.ListFindings(context.Background(), ListFindingsQuery{TenantID: tenant, Limit: 200})
+	if err != nil {
+		t.Fatalf("ListFindings: %v", err)
+	}
+	if len(page.Findings) != N {
+		t.Fatalf("persisted findings count = %d, want %d (some pipeline operations did not commit, or index drift hid records)", len(page.Findings), N)
 	}
 }

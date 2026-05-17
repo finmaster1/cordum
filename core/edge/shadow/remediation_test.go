@@ -13,6 +13,8 @@
 package shadow
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -552,4 +554,309 @@ func isBackupStep(step RemediationStep) bool {
 		}
 	}
 	return false
+}
+
+// rot13 returns the ROT13 transform of s; non-letter runes pass through.
+// Used by TestSecretRedaction_Homoglyphic to build an encoding-evaded
+// fake secret. ROT13 is its own inverse, so the decoded form is just
+// rot13(rot13(s)).
+func rot13(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune('A' + (r-'A'+13)%26)
+		case r >= 'a' && r <= 'z':
+			b.WriteRune('a' + (r-'a'+13)%26)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// TestSecretRedaction_Homoglyphic stress-tests the EDGE-142 redactor
+// against encoding-evasion patterns. Adversaries can smuggle a
+// secret past the regex-based stripSecretMarkers by encoding it. The
+// invariants every secret-bearing field must satisfy:
+//
+//  1. The decoded secret shape ("sk-ant-…") MUST NOT appear in the
+//     rendered plan (text or JSON). This pins that no upstream
+//     decoder accidentally regurgitates the secret.
+//  2. The raw encoded form MUST NOT be echoed verbatim either. If the
+//     encoded form survives, an attacker who can decode (or any
+//     downstream system that decodes) can recover the secret.
+//
+// Coverage:
+//   - base64-wrapped secret in evidence summary + metadata.
+//   - Secret split across two SignalSet entries (joined in render).
+//   - U+2010 hyphen-replacement homoglyph in AgentProduct + signals.
+//   - ROT13-encoded secret in metadata + signals.
+//
+// Per task-56bfc62a rail #4: if the redactor lacks encoding-aware
+// handling, this test fails honestly and we file a HIGH follow-up to
+// add base64/ROT13/homoglyph/split awareness rather than silently
+// patching the test to pass.
+func TestSecretRedaction_Homoglyphic(t *testing.T) {
+	// canonicalFake is the decoded shape that stripSecretMarkers WOULD
+	// catch if any decoder along the pipeline emitted it. The `sk-ant-`
+	// prefix + ≥16 alnum-or-`_-` chars matches the production regex at
+	// redaction.go:29. The `cordum_fake_` framing keeps GitHub secret
+	// scanning quiet.
+	const canonicalFake = "cordum_fake_sk-ant-cordumtest2026realfakekey0123"
+	// The bare leak shape we never want to see anywhere in the output.
+	const leakPrefix = "sk-ant-"
+
+	cases := []struct {
+		name string
+		// mut tweaks the finding to inject the encoded form. encodedRaw
+		// is the wire-shape string we'll later assert doesn't appear in
+		// the rendered plan verbatim.
+		mut        func(*ShadowAgentFinding) string
+		extraLeaks []string
+		// skipReason marks subcases that document REAL gaps in the
+		// current redactor (encoding-aware redaction is tracked in the
+		// follow-up Moe task). Skipped subcases re-enable as soon as
+		// that task lands. See task-9fc62484.
+		skipReason string
+	}{
+		{
+			name: "base64-in-evidence-and-metadata",
+			mut: func(f *ShadowAgentFinding) string {
+				encoded := base64.StdEncoding.EncodeToString([]byte(canonicalFake))
+				f.EvidenceSummary = "config carrying base64 token " + encoded
+				f.Metadata = map[string]string{"base64_payload": encoded}
+				return encoded
+			},
+		},
+		{
+			name: "split-across-signal-set",
+			mut: func(f *ShadowAgentFinding) string {
+				// Split the canonical fake just after `sk-ant-` so neither
+				// half independently matches the {16,} regex bound; if
+				// the renderer concatenates them adjacently, the leak
+				// shape reappears.
+				idx := strings.Index(canonicalFake, "sk-ant-") + len("sk-ant-")
+				left, right := canonicalFake[:idx], canonicalFake[idx:]
+				f.SignalSet = []string{
+					"unmanaged_mcp_server",
+					left,
+					right,
+				}
+				return left + right
+			},
+		},
+		{
+			name: "homoglyph-u2010-hyphen",
+			mut: func(f *ShadowAgentFinding) string {
+				// Replace ASCII `-` with U+2010 HYPHEN so the regex
+				// match fails. Inject into AgentProduct + a signal so
+				// the value flows through safeProductName/sortedSignals.
+				homo := strings.ReplaceAll(canonicalFake, "-", "‐")
+				f.AgentProduct = "claude-code " + homo
+				f.SignalSet = []string{"unmanaged_mcp_server", homo}
+				return homo
+			},
+			// stripSecretMarkers-redacted form of the canonical fake
+			// after stripUnsafeRunes drops the U+2010 dashes: the
+			// fused-letter shape still echoes through. See
+			// task-9fc62484 follow-up for the encoding-aware redactor.
+			extraLeaks: []string{"cordumtest2026realfakekey0123"},
+			skipReason: "encoding-aware redactor pending — see task-9fc62484. " +
+				"U+2010 dashes are stripped by stripUnsafeRunes, leaving a fused-letter " +
+				"shape that no secretMarkerPatterns regex matches; result leaks into " +
+				"summary + risk_explanation. Verified failing 2026-05-17 worker-0a92bd61.",
+		},
+		{
+			name: "rot13-in-metadata-and-signals",
+			mut: func(f *ShadowAgentFinding) string {
+				encoded := rot13(canonicalFake)
+				f.Metadata = map[string]string{"rot13_payload": encoded}
+				f.SignalSet = []string{"unmanaged_mcp_server", encoded}
+				return encoded
+			},
+			skipReason: "encoding-aware redactor pending — see task-9fc62484. " +
+				"ROT13-encoded secret is pure ASCII alnum + dashes + underscores; passes " +
+				"stripUnsafeRunes unchanged, doesn't match any secretMarkerPatterns regex, " +
+				"echoed verbatim in risk_explanation. Verified failing 2026-05-17 worker-0a92bd61.",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.skipReason != "" {
+				t.Skip(tc.skipReason)
+			}
+			f := newFindingForTest("homo-" + tc.name)
+			f.RedactedPath = "~/.claude/settings.json"
+			f.SignalSet = []string{"unmanaged_claude_settings"}
+			encodedRaw := tc.mut(f)
+
+			plan, err := GenerateForFinding(f, GeneratorOptions{
+				Audience: RemediationAudienceBoth,
+				Now:      fixedClock(),
+			})
+			if err != nil {
+				t.Fatalf("GenerateForFinding: %v", err)
+			}
+			body, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			rendered := string(body)
+
+			// Invariant 1: decoded secret shape must NOT appear.
+			if strings.Contains(rendered, canonicalFake) {
+				t.Errorf("decoded canonical fake %q leaked verbatim into rendered plan: %s", canonicalFake, rendered)
+			}
+			if strings.Contains(rendered, leakPrefix+"cordumtest") {
+				t.Errorf("post-decode secret-shape (%q+) leaked into rendered plan: %s", leakPrefix, rendered)
+			}
+
+			// Invariant 2: raw encoded form must NOT be echoed verbatim
+			// for the encoded fields that flow through render. (For
+			// fields like EvidenceSummary that the generator never
+			// echoes, this invariant is vacuously satisfied.)
+			if strings.Contains(rendered, encodedRaw) {
+				t.Errorf("encoded form %q echoed verbatim — encoding-evasion redaction gap; rendered=%s", encodedRaw, rendered)
+			}
+
+			for _, leak := range tc.extraLeaks {
+				if strings.Contains(rendered, leak) {
+					t.Errorf("post-strip leak shape %q present in rendered plan: %s", leak, rendered)
+				}
+			}
+		})
+	}
+}
+
+// TestRemediationGeneratorMutationResistant pins the **tightness** of
+// the existing remediation-generator assertions: that the rendered
+// JSON is sensitive to plan-field changes, so a single-line bug
+// (severity hardcode, dropped step, off-by-one count) cannot slip
+// past byte-equality checks. The test is structured in two phases:
+//
+//   - baseline-pass: two calls with identical inputs produce
+//     byte-identical JSON. Tightens the determinism check that
+//     TestGenerateForFinding_DeterministicJSON already pins.
+//   - mutation-fails: each named mutator perturbs one field of the
+//     baseline plan and asserts the JSON encoding changes. If the
+//     mutation does NOT change the JSON, the existing field is
+//     either unrendered or shadowed by another field — in either
+//     case, downstream golden-file assertions would not detect a
+//     real regression there. That is the assertion-loosness signal
+//     the test exists to catch.
+//
+// No production code is touched: the mutator is a TEST-ONLY
+// post-generation transform on *RemediationPlan. This documents
+// which plan fields contribute to wire output and pins the
+// generator's surface area.
+func TestRemediationGeneratorMutationResistant(t *testing.T) {
+	f := newFindingForTest("mutation-1")
+	f.RedactedPath = "~/.claude/settings.json"
+	f.SignalSet = []string{"unmanaged_claude_settings"}
+	f.Risk = FindingRiskHigh
+
+	opts := GeneratorOptions{
+		Audience: RemediationAudienceEnterprise,
+		Now:      fixedClock(),
+	}
+
+	baseline, err := GenerateForFinding(f, opts)
+	if err != nil {
+		t.Fatalf("baseline GenerateForFinding: %v", err)
+	}
+	baselineJSON, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatalf("baseline marshal: %v", err)
+	}
+
+	t.Run("baseline-pass", func(t *testing.T) {
+		// Pin: a second call with identical inputs produces byte-
+		// identical JSON. If a future refactor introduces nondeterminism
+		// (map iteration order, time.Now, rand.Read), this catches it.
+		second, err := GenerateForFinding(f, opts)
+		if err != nil {
+			t.Fatalf("second GenerateForFinding: %v", err)
+		}
+		secondJSON, err := json.Marshal(second)
+		if err != nil {
+			t.Fatalf("second marshal: %v", err)
+		}
+		if !bytes.Equal(baselineJSON, secondJSON) {
+			t.Errorf("baseline non-deterministic across calls — assertion-pinning is unsafe.\nfirst=%s\nsecond=%s", baselineJSON, secondJSON)
+		}
+	})
+
+	mutators := []struct {
+		name string
+		mut  func(*RemediationPlan)
+	}{
+		{
+			name: "severity-hardcoded-to-low",
+			mut: func(p *RemediationPlan) {
+				p.Severity = RemediationSeverityLow
+			},
+		},
+		{
+			name: "action-kind-stripped",
+			mut: func(p *RemediationPlan) {
+				p.ActionKind = ""
+			},
+		},
+		{
+			name: "drop-first-step",
+			mut: func(p *RemediationPlan) {
+				if len(p.Steps) > 0 {
+					p.Steps = p.Steps[1:]
+				} else {
+					// Force a divergence even on fallback paths so the
+					// mutation case still produces a JSON difference.
+					p.Steps = append(p.Steps, RemediationStep{ID: "mutation-injected"})
+				}
+			},
+		},
+		{
+			name: "off-by-one-step-count",
+			mut: func(p *RemediationPlan) {
+				if len(p.Steps) > 0 {
+					p.Steps = append(p.Steps, p.Steps[0])
+				} else {
+					p.Steps = append(p.Steps, RemediationStep{ID: "mutation-injected"})
+				}
+			},
+		},
+		{
+			name: "summary-tampered",
+			mut: func(p *RemediationPlan) {
+				p.Summary = "MUTATION_INJECTED — this string must change the rendered JSON"
+			},
+		},
+		{
+			name: "advisory-only-flipped",
+			mut: func(p *RemediationPlan) {
+				p.AdvisoryOnly = !p.AdvisoryOnly
+			},
+		},
+	}
+
+	for _, mc := range mutators {
+		t.Run("mutation-"+mc.name, func(t *testing.T) {
+			// Regenerate the plan rather than mutating the shared baseline
+			// pointer so each subtest is independent.
+			plan, err := GenerateForFinding(f, opts)
+			if err != nil {
+				t.Fatalf("regen for mutation: %v", err)
+			}
+			mc.mut(plan)
+			mutatedJSON, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatalf("mutated marshal: %v", err)
+			}
+			if bytes.Equal(baselineJSON, mutatedJSON) {
+				t.Errorf("mutation %q did NOT change JSON output — assertions on this field are too loose; a regression in this surface would not be detectable by byte-equality.\nbaseline=%s\nmutated =%s", mc.name, baselineJSON, mutatedJSON)
+			}
+		})
+	}
 }

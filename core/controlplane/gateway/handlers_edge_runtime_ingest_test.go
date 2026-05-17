@@ -356,6 +356,151 @@ func TestRuntimeIngestEnabledStoresRedactedRuntimeEvent(t *testing.T) {
 	}
 }
 
+// TestRuntimeIngestAllEventKinds_EndToEnd drives every supported
+// runtime event kind — process.exec, file.read, file.write,
+// network.connect, dns.query — through `s.registerRoutes`' mux to
+// `/api/v1/edge/runtime/events` with a miniredis-backed store, then
+// reads each event back to assert it carries the correct Kind, the
+// correct tenant/session/execution, Decision=Recorded, Layer=runtime,
+// and that an AWS-key-shaped canary placed in a redactable field of
+// each summary struct does NOT survive into the stored event JSON.
+//
+// Existing coverage only exercised process.exec + (via
+// TestRuntimeIngestEnabledStoresRedactedRuntimeEvent) file.read; this
+// test closes the gap so all 5 known kinds — including the network /
+// DNS pair the K8s detector emits — round-trip end-to-end.
+func TestRuntimeIngestAllEventKinds_EndToEnd(t *testing.T) {
+	enableRuntimeIngest(t)
+	const canary = "AKIAIOSFODNN7EXAMPLE"
+
+	cases := []struct {
+		// kind is the wire `kind` string + the persisted EventKind.
+		kind edgecore.EventKind
+		// summaryJSON is the per-kind summary-block fragment. The
+		// canary is embedded in a redactable field so we can assert
+		// it does not survive into the stored event JSON.
+		summaryJSON string
+		// labelKey/labelValue is appended to the envelope's labels so
+		// each subtest carries a unique marker the store filter can
+		// pin against (so a partial-rejection regression cannot silently
+		// pass by re-persisting an earlier kind).
+		labelKey   string
+		labelValue string
+	}{
+		{
+			kind: edgecore.EventKindRuntimeProcessExec,
+			// Canary placed with explicit word boundaries on both sides
+			// (hyphen + period) so awsKeyPattern \bAKIA[0-9A-Z]{16}\b
+			// can match; lowercase trailers would suppress the trailing
+			// \b boundary and mask the regex.
+			summaryJSON: `"process":{"executable_basename":"curl-` + canary + `.bin","argument_count":2}`,
+			labelKey:    "kind_marker",
+			labelValue:  "process-exec",
+		},
+		{
+			kind:        edgecore.EventKindRuntimeFileRead,
+			summaryJSON: `"file":{"operation":"read","path_redacted":"/var/log/` + canary + `/audit.log"}`,
+			labelKey:    "kind_marker",
+			labelValue:  "file-read",
+		},
+		{
+			kind:        edgecore.EventKindRuntimeFileWrite,
+			summaryJSON: `"file":{"operation":"write","path_redacted":"/srv/data/` + canary + `/staging.bin"}`,
+			labelKey:    "kind_marker",
+			labelValue:  "file-write",
+		},
+		{
+			kind:        edgecore.EventKindRuntimeNetworkConnect,
+			summaryJSON: `"network":{"host_redacted":"` + canary + `.s3.amazonaws.com","port":443,"protocol":"tcp"}`,
+			labelKey:    "kind_marker",
+			labelValue:  "network-connect",
+		},
+		{
+			kind:        edgecore.EventKindRuntimeDNSQuery,
+			summaryJSON: `"dns":{"qname_redacted":"` + canary + `.example.internal","qtype":"A"}`,
+			labelKey:    "kind_marker",
+			labelValue:  "dns-query",
+		},
+	}
+
+	// Share the server + session + execution across subtests so the
+	// table emits 5 events into the same execution, then each
+	// subtest filters by its own kind+marker. This catches partial-
+	// rejection / wrong-kind-persistence regressions.
+	s, handler := newEdgeRouteTestServer(t)
+	session := createEdgeRouteSession(t, handler)
+	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+
+	for i, tc := range cases {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			sourceEventID := "rt-all-kinds-" + string(tc.kind)
+			body := `{
+				"source":{"source_id":"tetragon-all-kinds"},
+				"batch_id":"batch-all-kinds-` + tc.labelValue + `",
+				"events":[{
+					"tenant_id":"` + edgeRouteTenant + `",
+					"session_id":"` + session.SessionID + `",
+					"execution_id":"` + execution.ExecutionID + `",
+					"source_event_id":"` + sourceEventID + `",
+					"observed_at":"2026-05-17T12:00:0` + string(rune('0'+i)) + `Z",
+					"kind":"` + string(tc.kind) + `",
+					` + tc.summaryJSON + `,
+					"labels":{"` + tc.labelKey + `":"` + tc.labelValue + `"}
+				}]
+			}`
+			rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("kind=%q POST status = %d, want 201 body=%s", tc.kind, rr.Code, rr.Body.String())
+			}
+			var resp runtimeIngestResponseShape
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("kind=%q decode response: %v body=%s", tc.kind, err, rr.Body.String())
+			}
+			if resp.AcceptedCount != 1 || resp.DroppedCount != 0 {
+				t.Fatalf("kind=%q counts accepted=%d dropped=%d, want 1/0 body=%s",
+					tc.kind, resp.AcceptedCount, resp.DroppedCount, rr.Body.String())
+			}
+
+			page := readEdgeEventsFromStore(t, s, execution.ExecutionID)
+			var matched *edgecore.AgentActionEvent
+			for j := range page.Items {
+				ev := &page.Items[j]
+				if ev.Layer == edgecore.LayerRuntime && ev.Kind == tc.kind && ev.Labels[tc.labelKey] == tc.labelValue {
+					matched = ev
+					break
+				}
+			}
+			if matched == nil {
+				t.Fatalf("kind=%q: no stored runtime event matched marker %q=%q; events=%#v",
+					tc.kind, tc.labelKey, tc.labelValue, page.Items)
+			}
+			if matched.Decision != edgecore.DecisionRecorded {
+				t.Fatalf("kind=%q Decision = %q, want %q", tc.kind, matched.Decision, edgecore.DecisionRecorded)
+			}
+			if matched.TenantID != edgeRouteTenant {
+				t.Fatalf("kind=%q TenantID = %q, want %q", tc.kind, matched.TenantID, edgeRouteTenant)
+			}
+			if matched.SessionID != session.SessionID {
+				t.Fatalf("kind=%q SessionID = %q, want %q", tc.kind, matched.SessionID, session.SessionID)
+			}
+			if matched.ExecutionID != execution.ExecutionID {
+				t.Fatalf("kind=%q ExecutionID = %q, want %q", tc.kind, matched.ExecutionID, execution.ExecutionID)
+			}
+			if matched.Labels["runtime.source_id"] != "tetragon-all-kinds" {
+				t.Fatalf("kind=%q Labels.runtime.source_id = %q, want %q",
+					tc.kind, matched.Labels["runtime.source_id"], "tetragon-all-kinds")
+			}
+			storedJSON, err := json.Marshal(matched)
+			if err != nil {
+				t.Fatalf("kind=%q marshal: %v", tc.kind, err)
+			}
+			if strings.Contains(string(storedJSON), canary) {
+				t.Fatalf("kind=%q stored event leaked AKIA canary %q: %s", tc.kind, canary, storedJSON)
+			}
+		})
+	}
+}
+
 // TestRuntimeIngestEnabledAllOrNothingOnOneBadEnvelope locks in the
 // all-or-nothing partial-rejection contract: a batch with one valid
 // envelope and one invalid envelope must reject the whole batch and
