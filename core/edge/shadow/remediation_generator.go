@@ -108,6 +108,28 @@ func generateFromFeatures(features findingFeatures, opts GeneratorOptions) *Reme
 // hints, then product/path heuristics, then manual-review fallback.
 func classify(f findingFeatures) RemediationActionKind {
 	signals := signalSet(f.signalSet)
+	// EDGE-143.7 §12.1 Kubernetes-scope signals — highest specificity
+	// for K8s-source findings; checked before EDGE-142's generic
+	// signals so a k8s finding never decays to the local-wrapper path.
+	switch {
+	case signals[signalK8sNamespaceUntenanted]:
+		return RemediationApplyTenantLabel
+	case signals[signalK8sUnmanagedWorkload]:
+		return RemediationAdoptUnmanagedWorkload
+	case signals[signalK8sUntrustedAgentImage]:
+		return RemediationRebaseAgentImage
+	case signals[signalK8sEgressBypass]:
+		return RemediationExtendEgressPolicy
+	}
+	// EDGE-143.7 §12.1 CI-scope signals.
+	switch {
+	case signals[signalCIMissingCordumAttach]:
+		return RemediationAddCordumEdgeAttach
+	case signals[signalCIUnmanagedOIDC]:
+		return RemediationConfigureOIDCTrust
+	case signals[signalCIDirectProviderSDK] && f.sourceType == SourceTypeCI:
+		return RemediationRouteCISDKThroughProxy
+	}
 	switch {
 	case signals[signalDirectProviderURL]:
 		return RemediationRouteThroughLLMProxy
@@ -211,6 +233,20 @@ func remediationSummary(kind RemediationActionKind, f findingFeatures) string {
 		return fmt.Sprintf("Disable unmanaged %s configuration so managed settings take precedence.", product)
 	case RemediationInvestigateProcess:
 		return fmt.Sprintf("Investigate the observed %s process.", product)
+	case RemediationApplyTenantLabel:
+		return "Label the Kubernetes namespace with the Cordum tenant id so the detector can resolve a tenant."
+	case RemediationAdoptUnmanagedWorkload:
+		return fmt.Sprintf("Adopt the unmanaged %s workload: allowlist it or attach the cordum-agentd sidecar.", product)
+	case RemediationRebaseAgentImage:
+		return fmt.Sprintf("Rebase the %s workload onto an allowlisted container image registry.", product)
+	case RemediationExtendEgressPolicy:
+		return "Extend the NetworkPolicy egress allowlist to include the operator's LLM proxy."
+	case RemediationAddCordumEdgeAttach:
+		return "Add the cordum-edge-attach step to the CI workflow so the job runs under Cordum Edge governance."
+	case RemediationConfigureOIDCTrust:
+		return "Configure the CI provider's OIDC trust root and audience in Cordum Edge."
+	case RemediationRouteCISDKThroughProxy:
+		return "Route CI provider-SDK calls through the Cordum LLM proxy or file an operator-acked exception."
 	case RemediationManualReview:
 		fallthrough
 	default:
@@ -253,6 +289,33 @@ func riskExplanation(kind RemediationActionKind, f findingFeatures) string {
 	case RemediationInvestigateProcess:
 		return "An agent process was observed that does not match any managed Cordum binary. " +
 			"Investigate before deciding whether to disable or accept. Signals: " + signalsLabel + "."
+	case RemediationApplyTenantLabel:
+		return "A Kubernetes namespace that contains agent-image pods is missing the Cordum tenant label. " +
+			"Without the label, findings from this namespace cannot be tenant-scoped and default to quarantine. " +
+			"Signals: " + signalsLabel + "."
+	case RemediationAdoptUnmanagedWorkload:
+		return "A Kubernetes workload runs an agent image but is not on the operator's WorkloadAllowlist AND " +
+			"has no cordum-agentd sidecar. Until adopted, agent sessions launched from this workload run without " +
+			"Cordum policy / hook routing. Signals: " + signalsLabel + "."
+	case RemediationRebaseAgentImage:
+		return "A workload's container image is pulled from a registry that is not on the operator's " +
+			"ImageRegistryAllowlist. Untrusted registries can ship modified agent binaries or runtime payloads. " +
+			"Signals: " + signalsLabel + "."
+	case RemediationExtendEgressPolicy:
+		return "A Kubernetes NetworkPolicy permits broader egress than the operator's LLM-proxy scope. " +
+			"Pods covered by this policy can reach provider APIs directly, bypassing the Cordum LLM proxy and " +
+			"its policy/redaction layer. Signals: " + signalsLabel + "."
+	case RemediationAddCordumEdgeAttach:
+		return "A CI workflow invokes an agent action without first attaching cordum-edge. " +
+			"The job runs without Cordum policy, audit, or redaction. Signals: " + signalsLabel + "."
+	case RemediationConfigureOIDCTrust:
+		return "The CI provider's OIDC trust root or audience is not configured in Cordum Edge. " +
+			"Without trust + audience, cordum-edge cannot verify CI job identity at attach time. " +
+			"Signals: " + signalsLabel + "."
+	case RemediationRouteCISDKThroughProxy:
+		return "A CI job invoked a provider SDK directly, bypassing the Cordum LLM proxy. " +
+			"Direct provider calls evade Safety Kernel output policy and Cordum audit. " +
+			"Signals: " + signalsLabel + "."
 	case RemediationManualReview:
 		fallthrough
 	default:
@@ -294,6 +357,20 @@ func recommendedAction(kind RemediationActionKind, audience RemediationAudience)
 		return "Back up the unmanaged config, preview removal, then remove only after the managed deployment is in place."
 	case RemediationInvestigateProcess:
 		return "Identify the parent process, command line, and owner; do not terminate without operator confirmation."
+	case RemediationApplyTenantLabel:
+		return "Run `kubectl label namespace <ns> cordum.io/tenant-id=<id>` under operator credentials; verify by re-running the detector."
+	case RemediationAdoptUnmanagedWorkload:
+		return "Choose ONE: (A) add the workload to WorkloadAllowlist in the Cordum operator config, OR (B) patch the workload to inject the cordum-agentd sidecar."
+	case RemediationRebaseAgentImage:
+		return "Repoint the workload's container image to your Cordum-allowlisted registry mirror; verify the digest before rolling out."
+	case RemediationExtendEgressPolicy:
+		return "Apply a NetworkPolicy patch adding the operator's LLM-proxy CIDR / namespace selector to the offending policy's egress allowlist."
+	case RemediationAddCordumEdgeAttach:
+		return "Open a PR adding the `cordum-edge-attach@v1` step (or provider equivalent) ahead of any agent step in the workflow."
+	case RemediationConfigureOIDCTrust:
+		return "Set the CORDUM_EDGE_SHADOW_OIDC_TRUST_<provider> + CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_<provider> env vars on the Cordum Edge service, then redeploy."
+	case RemediationRouteCISDKThroughProxy:
+		return "Update the CI job env to route SDK calls through the Cordum LLM proxy, OR file an operator-acked exception via POST /api/v1/edge/shadow/exception (EDGE-143.6)."
 	case RemediationManualReview:
 		fallthrough
 	default:
@@ -317,6 +394,18 @@ func safetyNotes(kind RemediationActionKind) []string {
 		)
 	case RemediationRunEdgeDoctor:
 		return append(common, "If the heartbeat outage is fleet-wide, page the platform on-call before restarting agentd.")
+	case RemediationApplyTenantLabel, RemediationAdoptUnmanagedWorkload,
+		RemediationRebaseAgentImage, RemediationExtendEgressPolicy:
+		return append(common,
+			"Cordum NEVER mutates Kubernetes cluster state; every kubectl command must be applied by the operator.",
+			"Only target namespaces you own; cross-tenant patches are explicitly out of scope (Q5 enforce-scope-out).",
+		)
+	case RemediationAddCordumEdgeAttach, RemediationConfigureOIDCTrust,
+		RemediationRouteCISDKThroughProxy:
+		return append(common,
+			"Cordum NEVER mutates CI provider repos, workflows, or trust roots; operator opens the PR / sets the env var.",
+			"For exception flows, route through POST /api/v1/edge/shadow/exception (EDGE-143.6) so the operator-acked decision is audited.",
+		)
 	default:
 		return common
 	}
@@ -341,6 +430,20 @@ func buildSteps(kind RemediationActionKind, opts GeneratorOptions, f findingFeat
 		return buildDisableConfigSteps(kind)
 	case RemediationInvestigateProcess:
 		return buildInvestigateProcessSteps(kind)
+	case RemediationApplyTenantLabel:
+		return buildTenantLabelMissingSteps(kind, f)
+	case RemediationAdoptUnmanagedWorkload:
+		return buildUnmanagedWorkloadSteps(kind, f)
+	case RemediationRebaseAgentImage:
+		return buildRebaseAgentImageSteps(kind, f)
+	case RemediationExtendEgressPolicy:
+		return buildExtendEgressPolicySteps(kind, f)
+	case RemediationAddCordumEdgeAttach:
+		return buildAddCordumEdgeAttachSteps(kind, f)
+	case RemediationConfigureOIDCTrust:
+		return buildConfigureOIDCTrustSteps(kind, f)
+	case RemediationRouteCISDKThroughProxy:
+		return buildRouteCISDKThroughProxySteps(kind, f, opts.Audience)
 	case RemediationManualReview:
 		fallthrough
 	default:

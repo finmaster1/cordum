@@ -80,6 +80,62 @@ const (
 	// review evidence manually; the generator emits a stable step ID
 	// so dashboards can group "needs human" findings consistently.
 	RemediationManualReview RemediationActionKind = "manual_review"
+
+	// EDGE-143.7 — §12.1 Kubernetes scope templates. Operator-executed
+	// remediations: Cordum produces the diff / config snippet / kubectl
+	// command, operator applies. NO Cordum-side cluster mutation per Q5
+	// enforce-scope-out (binding governor ruling comment-a17f4f1c on
+	// parent task-de50a293).
+
+	// RemediationApplyTenantLabel — namespace or pod is missing the
+	// Cordum tenant label so the K8s detector cannot resolve a tenant
+	// id. Emits a `kubectl label namespace … cordum.io/tenant-id=…`
+	// patch the operator runs. Maps to design doc §12.1 row
+	// "tenant-label-missing".
+	RemediationApplyTenantLabel RemediationActionKind = "apply_tenant_label"
+	// RemediationAdoptUnmanagedWorkload — workload runs an agent image
+	// but does not appear on the operator's workload allowlist AND has
+	// no cordum-agentd sidecar. Emits two operator-applicable options:
+	// add the workload name to the allowlist OR inject the agentd
+	// sidecar via a Deployment patch. Maps to §12.1 row
+	// "unmanaged-workload".
+	RemediationAdoptUnmanagedWorkload RemediationActionKind = "adopt_unmanaged_workload"
+	// RemediationRebaseAgentImage — agent image's registry prefix is
+	// not on the operator's ImageRegistryAllowlist. Emits a rebase
+	// recommendation: switch the workload manifest to an allowlisted
+	// registry mirror. Maps to §12.1 row "untrusted-image".
+	RemediationRebaseAgentImage RemediationActionKind = "rebase_agent_image"
+	// RemediationExtendEgressPolicy — NetworkPolicy egress rule
+	// permits traffic outside the operator-mandated LLM-proxy scope.
+	// Emits a NetworkPolicy YAML patch extending `egress.to[]` to
+	// include the LLM proxy CIDR / FQDN. Maps to §12.1 row
+	// "egress-bypass".
+	RemediationExtendEgressPolicy RemediationActionKind = "extend_egress_policy"
+
+	// EDGE-143.7 — §12.1 CI scope templates. Operator-executed
+	// workflow / config patches; Cordum NEVER mutates the CI repo or
+	// the CI provider's settings per Q5 enforce-scope-out.
+
+	// RemediationAddCordumEdgeAttach — CI workflow invokes an agent
+	// action without first attaching cordum-edge. Emits a per-provider
+	// workflow snippet (github_actions, gitlab_ci, jenkins, buildkite,
+	// circleci) adding the `cordum-edge-attach@v1` step. Maps to
+	// §12.1 row "missing-Cordum-attach".
+	RemediationAddCordumEdgeAttach RemediationActionKind = "add_cordum_edge_attach"
+	// RemediationConfigureOIDCTrust — CI provider OIDC trust root or
+	// audience is not set in the operator's Cordum Edge configuration.
+	// Emits the per-provider env-var configuration block
+	// (CORDUM_EDGE_SHADOW_OIDC_TRUST_<provider> +
+	// CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_<provider>) per Q6. Maps to
+	// §12.1 row "unmanaged-OIDC".
+	RemediationConfigureOIDCTrust RemediationActionKind = "configure_oidc_trust"
+	// RemediationRouteCISDKThroughProxy — CI job invokes a provider
+	// SDK directly (not through the Cordum LLM proxy). Emits the
+	// proxy-routing guidance plus the alternative "operator-acked
+	// exception" snippet referencing EDGE-143.6's
+	// `POST /api/v1/edge/shadow/exception`. Maps to §12.1 row
+	// "direct-provider-SDK".
+	RemediationRouteCISDKThroughProxy RemediationActionKind = "route_ci_sdk_through_proxy"
 )
 
 // RemediationAudience selects the wording + step shape. `dev` favours
@@ -238,6 +294,16 @@ type findingFeatures struct {
 	ciProvider      string
 	signalSet       []string
 	metadata        map[string]string
+
+	// EDGE-143.7 — §10.1 fields surfaced for K8s + CI scope templates.
+	// Omit-empty on the source struct; defaults to empty string here.
+	clusterID    string
+	namespace    string
+	workloadKind string
+	workloadName string
+	podUID       string
+	repo         string
+	workflowID   string
 }
 
 // normalizeShadowAgentFinding projects an EDGE-141 lifecycle record
@@ -262,6 +328,13 @@ func normalizeShadowAgentFinding(f *ShadowAgentFinding) findingFeatures {
 		ciProvider:      strings.ToLower(strings.TrimSpace(f.CIProvider)),
 		signalSet:       signals,
 		metadata:        copyShallowMetadata(f.Metadata),
+		clusterID:       strings.TrimSpace(f.ClusterID),
+		namespace:       strings.TrimSpace(f.Namespace),
+		workloadKind:    strings.TrimSpace(f.WorkloadKind),
+		workloadName:    strings.TrimSpace(f.WorkloadName),
+		podUID:          strings.TrimSpace(f.PodUID),
+		repo:            strings.TrimSpace(f.Repo),
+		workflowID:      strings.TrimSpace(f.WorkflowID),
 	}
 }
 
