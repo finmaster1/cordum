@@ -5,7 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Added
+### Fixed
+
+#### CI — EDGE-PR276-CI: Resolved 3 high-severity CodeQL `go/allocation-size-overflow` alerts on PR #276 (2026-05-17, task-8002b1ee)
+
+- `core/edge/shadow/finding_store_redis.go` — extracted `clampListPageSize(int) int` helper that bounds a caller-supplied page size to `[1, MaxListPageSize=200]` (substituting `DefaultListPageSize=50` for non-positive input). Replaced the inline clamp in `ListFindings` with a helper call, and added a defence-in-depth `limit = clampListPageSize(limit)` at the top of `listFindingsByMultiSignal` so the bound is visible inside the function's scope at every `make([]ShadowAgentFinding, 0, limit)` / `make(map[string]struct{}, limit)` site. The functional bound is unchanged (already enforced by the caller); the change surfaces the sanitizer to CodeQL's interprocedural dataflow so the rule's `go/allocation-size-overflow` analysis recognises the cap. Resolves alerts on `finding_store_redis.go:394` (EDGE-141 commit 4b905793, `ListFindings`), `:491` and `:492` (EDGE-143.5 commit f8a96949, `listFindingsByMultiSignal`).
+- `core/edge/shadow/finding_store_redis_test.go` — `TestClampListPageSize` (10-row table) pins the bound contract; `TestListFindings_LimitCapAcrossPaths` (3 sub-tests) exercises end-to-end caps on the single-signal path, the multi-signal path, and the zero-limit default fallback with `total = MaxListPageSize + 25` records. All shadow-package tests PASS under `-count=3` (0 regressions vs baseline).
 
 #### Edge — EDGE-142 Shadow remediation generator (2026-05-17, task-4cd8299f)
 

@@ -264,6 +264,94 @@ func TestListFindings_InvalidCursor(t *testing.T) {
 	}
 }
 
+// TestClampListPageSize pins the bound used at every make() site that
+// allocates per-request scratch buffers from a caller-supplied page
+// limit. Resolves CodeQL go/allocation-size-overflow alerts on
+// finding_store_redis.go:394 + 491 + 492 (PR #276) by making the
+// bound a single named helper that static analysis can recognize
+// as a sanitizer. See task-8002b1ee.
+func TestClampListPageSize(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero falls back to default", 0, DefaultListPageSize},
+		{"negative falls back to default", -1, DefaultListPageSize},
+		{"large negative falls back to default", -1 << 30, DefaultListPageSize},
+		{"one is preserved", 1, 1},
+		{"default value passes through", DefaultListPageSize, DefaultListPageSize},
+		{"mid-range value passes through", 100, 100},
+		{"max boundary passes through", MaxListPageSize, MaxListPageSize},
+		{"one above max is capped", MaxListPageSize + 1, MaxListPageSize},
+		{"large value is capped", 10_000, MaxListPageSize},
+		{"adversarial maxint is capped", 1 << 30, MaxListPageSize},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clampListPageSize(tc.in)
+			if got != tc.want {
+				t.Fatalf("clampListPageSize(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+			if got < 1 || got > MaxListPageSize {
+				t.Fatalf("clampListPageSize(%d) = %d is outside [1, %d]; the bound is what CodeQL relies on", tc.in, got, MaxListPageSize)
+			}
+		})
+	}
+}
+
+// TestListFindings_LimitCapAcrossPaths verifies the page-size bound
+// holds end-to-end on BOTH the single-signal path (ListFindings) and
+// the multi-signal path (listFindingsByMultiSignal). Adversarial
+// limits beyond MaxListPageSize must not over-allocate; both paths
+// must cap at MaxListPageSize. Pairs with TestClampListPageSize to
+// guard the EDGE-141 + EDGE-143.5 surfaces flagged by CodeQL.
+func TestListFindings_LimitCapAcrossPaths(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	const total = MaxListPageSize + 25
+	for i := 0; i < total; i++ {
+		req := minimalCreateReq("tenant-cap", "owner-1", "principal-1", "claude-code", FindingRiskHigh, "config_file", "summary")
+		req.SignalSet = []string{"namespace_untenanted", "unmanaged_workload"}
+		if _, err := s.CreateFinding(ctx, req); err != nil {
+			t.Fatalf("CreateFinding[%d]: %v", i, err)
+		}
+	}
+	t.Run("single-signal path caps at MaxListPageSize", func(t *testing.T) {
+		page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: "tenant-cap", Limit: 1 << 30})
+		if err != nil {
+			t.Fatalf("ListFindings: %v", err)
+		}
+		if len(page.Findings) > MaxListPageSize {
+			t.Fatalf("single-signal page len = %d, want <= %d", len(page.Findings), MaxListPageSize)
+		}
+		if len(page.Findings) != MaxListPageSize {
+			t.Fatalf("single-signal page len = %d, want exactly %d (enough data exists)", len(page.Findings), MaxListPageSize)
+		}
+	})
+	t.Run("multi-signal path caps at MaxListPageSize", func(t *testing.T) {
+		page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: "tenant-cap", Limit: 1 << 30, Signals: []string{"namespace_untenanted", "unmanaged_workload"}})
+		if err != nil {
+			t.Fatalf("ListFindings(multi-signal): %v", err)
+		}
+		if len(page.Findings) > MaxListPageSize {
+			t.Fatalf("multi-signal page len = %d, want <= %d", len(page.Findings), MaxListPageSize)
+		}
+		if len(page.Findings) != MaxListPageSize {
+			t.Fatalf("multi-signal page len = %d, want exactly %d (enough data exists)", len(page.Findings), MaxListPageSize)
+		}
+	})
+	t.Run("zero limit falls back to default", func(t *testing.T) {
+		page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: "tenant-cap"})
+		if err != nil {
+			t.Fatalf("ListFindings(zero-limit): %v", err)
+		}
+		if len(page.Findings) != DefaultListPageSize {
+			t.Fatalf("zero-limit page len = %d, want %d", len(page.Findings), DefaultListPageSize)
+		}
+	})
+}
+
 func TestResolveFinding_TerminalAndIdempotent(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()

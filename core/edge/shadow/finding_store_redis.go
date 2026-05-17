@@ -347,6 +347,23 @@ func (s *RedisStore) GetFinding(ctx context.Context, tenantID, findingID string)
 	return &f, nil
 }
 
+// clampListPageSize returns a page size bounded to [1, MaxListPageSize],
+// substituting DefaultListPageSize when n is non-positive. Use at every
+// make() / loop site that depends on a caller-supplied page limit so
+// the bound is visible inside the allocating function's scope. This is
+// the named sanitizer CodeQL's go/allocation-size-overflow rule
+// recognises; callers MUST go through it before passing the value to
+// any allocation primitive (see ListFindings + listFindingsByMultiSignal).
+func clampListPageSize(n int) int {
+	if n <= 0 {
+		return DefaultListPageSize
+	}
+	if n > MaxListPageSize {
+		return MaxListPageSize
+	}
+	return n
+}
+
 // ListFindings selects the narrowest applicable index, then post-filters
 // records that don't match the remaining query dimensions. Pagination
 // uses an opaque cursor (encoded "<score>:<finding_id>") so callers
@@ -359,13 +376,7 @@ func (s *RedisStore) ListFindings(ctx context.Context, q ListFindingsQuery) (Fin
 	if tenant == "" {
 		return FindingPage{}, fmt.Errorf("%w: tenant_id is required", ErrValidation)
 	}
-	limit := q.Limit
-	if limit <= 0 {
-		limit = DefaultListPageSize
-	}
-	if limit > MaxListPageSize {
-		limit = MaxListPageSize
-	}
+	limit := clampListPageSize(q.Limit)
 
 	// EDGE-143.5 — multi-signal any-of bypasses chooseIndex: scan each
 	// signal's shared index, dedupe by finding_id, then apply
@@ -464,6 +475,12 @@ func (s *RedisStore) listFindingsByMultiSignal(
 	normSignals []string,
 	limit int,
 ) (FindingPage, error) {
+	// Defence-in-depth: ListFindings already clamps via
+	// clampListPageSize, but re-clamping in-scope surfaces the bound
+	// at the make() sites below for static-analysis dataflow
+	// (CodeQL go/allocation-size-overflow) and prevents future
+	// callers from skipping the bound.
+	limit = clampListPageSize(limit)
 	// Build post-filter set EXCLUDING the signals dimension (the
 	// per-signal scan already restricts to findings carrying at least
 	// one of the requested signals).
