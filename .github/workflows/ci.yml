@@ -124,6 +124,9 @@ jobs:
     - name: Lint shell scripts for secret leaks
       run: bash tools/scripts/lint_no_secret_log.sh
 
+    - name: Self-test the secret/shell-exec lint guard
+      run: bash tools/scripts/lint_no_secret_log.test.sh
+
   dashboard-test:
     name: Dashboard Tests
     runs-on: ubuntu-latest

@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+#### Dashboard — EDGE-105 MCP lane on Edge Session detail (2026-05-17, task-a04699dc)
+
+- `dashboard/src/components/timeline/lanes/MCPLane.tsx` (new) — the MCP timeline lane mounted below the existing P0 hook timeline on `EdgeSessionDetailPage`. Classifies each `AgentActionEvent` into Servers / Tools / Approvals / Failures categories and renders one row per MCP-relevant event with a distinct icon + decision badge + relative timestamp. Click expands an inline inspector body. Honors the global `<MotionConfig reducedMotion="user">` wrapper.
+- `dashboard/src/components/timeline/inspector/MCPInspector.tsx` (new) — six-field row-expand body: upstream server (`event.labels.mcp_server` with `agentProduct` fallback), tool name, decision (StatusBadge), approval link (router `Link` to `/approvals/<approvalRef>` when set), redacted args (`inputRedacted`), redacted result (`labels.result_redacted`). Renders an artifact-pointer chip with sha256-short when `event.artifactPtrs[0]` is present; external link uses `rel="noopener noreferrer"`.
+- `dashboard/src/state/mcpLaneFilters.ts` (new) — Zustand slice + URL parse/serialize helpers for the chip-toggle filter state. The URL query `?mcp_lane=servers,tools,approvals,failures` shares the filter across operators; invalid tokens are silently dropped, and an empty parse falls back to the default all-active state.
+- `dashboard/src/lib/redaction.ts` (new) — client-side defense-in-depth sanitizer. `sanitizeMCPField` trusts the `<name>_redacted` suffix verbatim (server-side redaction is authoritative); if only a bare sensitive field (`prompt`, `tool_input`, `result`, `args`, etc.) is present it returns the stable placeholder `"[redacted by client sanitizer]"`. `sanitizeMCPPayload` serializes the redacted blob when any `_redacted` key is present, else walks the raw payload and replaces sensitive field values.
+- `dashboard/src/pages/EdgeSessionDetailPage.tsx` — three-line ADD only: import `MCPLane` and mount `<MCPLane events={events} />` between the existing P0 timeline section and `EdgeArtifactsPanel`. Zero modifications to the P0 hook timeline, `groupEdgeEvents`, or `TimelineGroupRow`; task rail #2 ("do not duplicate P0 timeline components; extend reusable lanes") honored.
+- Tests (22 new): `MCPLane.test.tsx` (10) covers all event-kind rendering, the chip-toggle filter, the empty state, the bare-leak defense, the trusted `_redacted` pass-through, approval-link navigation, the artifact-pointer chip, the strict axe-core gate, the XSS escape, and URL parsing. `MCPInspector.test.tsx` (3) covers six-field render and absent-data fallbacks. `redaction.test.ts` (9) covers the field- and payload-level sanitizer contracts.
+- `docs/mcp-server.md` — new "Dashboard MCP Lane" section documenting the lane surface, filter chip UX, inspector layout, redaction contract, empty state, and accessibility posture.
+
+#### Tools — Self-test harness for the EDGE-068 argv-only exec lint (2026-05-17, task-c000a477)
+
+- `tools/scripts/lint_no_secret_log.test.sh` (new, executable) — exercises Phase 4 of `lint_no_secret_log.sh` against three fixture corpora under `tools/scripts/testdata/lint_no_secret_log/`:
+  - `phase4_pass/` — argv-only `exec.Command` plus the `go test -c` false-positive defense (the `-c` flag here is the go-test compile flag, not a shell command flag).
+  - `phase4_fail/` — eight shell-spawn patterns: `sh -c`, `/bin/sh -c`, `bash -c`, `cmd /C`, `cmd.exe /c`, `powershell -Command`, a multi-line `exec.CommandContext` split across source lines (exercises the awk paren tracker), and `/usr/bin/sh -c` (absolute path).
+  - `phase4_exception/` — the `cmd/cordumctl/doctor.go:878-883` runtime.GOOS branch with `// no-shell-exec-lint: operator-confirmed doctor repair only` markers, plus a minimum-shape inline marker.
+  Plus T11 default-tree invariant: with `LINT_SCAN_ROOTS_OVERRIDE` unset, the lint must still exit 0 on the real `cmd/` and `core/` trees so the fixture corpus cannot bleed into the production scan.
+- `tools/scripts/lint_no_secret_log.sh` — Phase 4 only: new `LINT_SCAN_ROOTS_OVERRIDE` env var (colon-separated dirs) replaces the default `cmd/` + `core/` find roots when set. Used exclusively by the test harness. Unset preserves the historical scan behaviour bit-for-bit.
+- `docs/no-shell-exec-lint.md` (new) — documents the argv-only convention, why hook-boundary subprocesses must not route through a shell, the `// no-shell-exec-lint: <reason>` marker shape and required reason text, the current exception list (`cmd/cordumctl/doctor.go:880,882`), and the procedure for adding a new exception (architect review + marker + exception-list update in the same commit).
+- `.github/workflows/ci.yml` — `go-test` job now runs `bash tools/scripts/lint_no_secret_log.test.sh` immediately after `lint_no_secret_log.sh` so a regression that silently weakens the guard fails CI.
+
 ### Changed
 
 #### Dashboard — Jobs + Job Detail refresh: unified search, fold I/O into Overview, remove Policy Trace tab (2026-05-16, task-cafacca3)
