@@ -1797,29 +1797,21 @@ func TestGetApprovalsByActionHash_AppliesAuditLimit(t *testing.T) {
 		}
 	}
 
-	// DoD #3 latency proof: with 300 approvals indexed the bounded call
-	// must finish well under 100ms even on a cold miniredis fixture.
-	// This guards against a regression that reintroduces the unbounded
-	// ZRevRange(0,-1) — which on a hot index would push latency into the
-	// tens of seconds. miniredis runs in-process so the measurement is
-	// reproducible across CI hardware.
+	// DoD #3 bounded-scan proof: with 300 approvals indexed the call must
+	// return exactly maxApprovalsByActionHashAudit rows, most-recent first.
+	// Result-count is the deterministic contract verifier — a regression to
+	// unbounded ZRevRange(0,-1) would return all 300 rows and fail the
+	// len() check below immediately. Wall-clock elapsed is logged for
+	// telemetry only; hard latency thresholds in unit tests are flake-prone
+	// on slow CI runners (PR #276 CodeRabbit #19) and perf bounds belong
+	// in benchmarks, not unit tests.
 	start := time.Now()
 	all, err := store.GetApprovalsByActionHash(ctx, tenant, sharedHash)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("GetApprovalsByActionHash: %v", err)
 	}
-	// Log the wall-clock latency for telemetry but only fail at a coarse
-	// upper bound that's robust to slow CI runners. The contract being
-	// guarded is "bounded ZRangeByScore" — an unbounded ZRevRange(0,-1)
-	// regression on a 300-row miniredis fixture would push the measurement
-	// well over a second, so 1s leaves ample headroom over CI variance
-	// while still tripping if the bound is removed.
 	t.Logf("GetApprovalsByActionHash latency over %d-approval index: %v", created, elapsed)
-	if elapsed > time.Second {
-		t.Fatalf("GetApprovalsByActionHash latency = %v over %d-approval index; DoD #3 bounded scan regression suspected (>1s suggests unbounded ZRevRange)",
-			elapsed, created)
-	}
 	if len(all) != maxApprovalsByActionHashAudit {
 		t.Fatalf("GetApprovalsByActionHash len = %d; want %d (audit cap)", len(all), maxApprovalsByActionHashAudit)
 	}
