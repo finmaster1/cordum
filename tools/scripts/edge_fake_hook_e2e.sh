@@ -1535,6 +1535,15 @@ JSON
 # ---------------------------------------------------------------------------
 gate_approval_rejected() {
   local gate=edge_approval_rejected
+  # Distinct fixture so the action_hash differs from gate_approval_flow's
+  # consumed approval (handlers_edge_evaluate.go findReusableEdgeApprovalForAction
+  # scopes by (tenant, session, execution, action_hash); the principal-status
+  # index retains consumed entries on purpose so terminal "already consumed"
+  # retries fire — but a fresh gate reusing FIXTURE_APPROVE_PATH inherits the
+  # consumed terminal state and never sees REQUIRE_APPROVAL). Mirrors the
+  # protected-expired.go / protected-expired-recovery.go fixture isolation
+  # already used by gate_approval_expired below.
+  local rejected_path="${FIXTURE_DIR}/src/protected-rejected.go"
 
   # 1. First evaluate — REQUIRE_APPROVAL.
   local req
@@ -1548,7 +1557,7 @@ gate_approval_rejected() {
   "kind": "hook.pre_tool_use",
   "tool_name": "Edit",
   "input_redacted": {
-    "file_path": "${FIXTURE_APPROVE_PATH}"
+    "file_path": "${rejected_path}"
   },
   "cwd": "${TMP_ROOT}"
 }
