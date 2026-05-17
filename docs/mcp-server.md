@@ -1105,6 +1105,101 @@ register so the table is consistent across environments; the
 misconfiguration surfaces as a logged warning + per-request 503
 instead of a missing-route 404.
 
+## Dashboard MCP Lane
+
+The Edge Session detail page (`/edge/sessions/:sessionId`) renders a
+dedicated **MCP lane** below the primary hook timeline. The lane
+surfaces every MCP-layer event recorded for the session so operators
+can audit upstream tool invocations without sifting through the full
+event stream.
+
+### What it shows
+
+| Event kind | Lane icon | Category |
+| --- | --- | --- |
+| `mcp.server.connected` | Plug (cyan) | Servers |
+| `mcp.server.failed` | Unplug (red) | Failures |
+| `mcp.tool.pre` | Send (cyan) | Tools |
+| `mcp.tool.post` | CornerDownLeft (emerald) | Tools |
+| `mcp.tool.failed` (or any `mcp.tool.*` with `status=failed`) | AlertOctagon (red) | Failures |
+| `approval.requested` (when `layer=mcp`) | Shield (amber) | Approvals |
+| `approval.granted` (when `layer=mcp`) | ShieldCheck (emerald) | Approvals |
+| `approval.rejected` (when `layer=mcp`) | ShieldOff (red) | Approvals |
+
+Other layers and kinds remain on the existing P0 hook timeline above
+the MCP lane; the MCP lane never re-renders or replaces P0 lanes.
+
+### Filter chips
+
+Four chip toggles — **Servers · Tools · Approvals · Failures** — gate
+which rows the lane shows. All four chips are active by default. The
+chip state persists in the URL via `?mcp_lane=`:
+
+- `?mcp_lane=tools` — show only Tools-category rows.
+- `?mcp_lane=tools,approvals` — show Tools and Approvals.
+- Default (every chip active) omits the query param.
+
+Invalid tokens (`?mcp_lane=bogus`) are silently dropped; a parse that
+yields zero valid chips falls back to the default all-active state so
+a typo never traps users in the empty filter state.
+
+### Inspector row-expand
+
+Clicking a row expands an inline inspector body with six fields:
+
+1. **Upstream server** — `event.labels.mcp_server` (with
+   `agentProduct` fallback when the label is absent on legacy events).
+2. **Tool** — `event.toolName`.
+3. **Decision** — coloured `StatusBadge` (ALLOW / DENY /
+   REQUIRE_APPROVAL / RECORDED).
+4. **Approval** — when `event.approvalRef` is set, a router `Link`
+   to `/approvals/<approvalRef>` opens the approval-detail page;
+   "—" otherwise.
+5. **Args (redacted)** — JSON-stringified
+   `event.inputRedacted` after the client-side defense-in-depth
+   sanitizer pass.
+6. **Result (redacted)** — `event.labels.result_redacted` after the
+   sanitizer pass.
+
+When an event carries an artifact pointer, an artifact chip with the
+sha256-short and an external link to the artifact-store URI appears
+below the six fields. The chip opens in a new tab with
+`rel="noopener noreferrer"`.
+
+### Redaction contract
+
+The dashboard trusts server-side redaction: any `<field>_redacted`
+key (suffix contract) is rendered verbatim. As a defense-in-depth
+layer, the dashboard also runs `sanitizeMCPField` /
+`sanitizeMCPPayload` (from `dashboard/src/lib/redaction.ts`) over
+every payload before display. If a bare sensitive field name
+(`prompt`, `tool_input`, `tool_output`, `result`, `args`, etc.)
+slips past the server, the sanitizer replaces its value with
+`"[redacted by client sanitizer]"`. The contract memo lives at
+`project_edge_redaction_contract`; EDGE-041 tracks the matching
+server-side rename.
+
+### Empty state
+
+When a session emits no MCP events, the lane still mounts and
+shows a discoverable empty card: muted `Plug` icon plus the
+text "No MCP activity recorded for this session". This keeps the
+surface visible so operators don't conclude the lane is broken when
+a particular session simply did not call any MCP tools.
+
+### Accessibility
+
+- The lane passes the dashboard's strict axe-core gate
+  (`runAxe: true` — WCAG 2 A/AA, every impact, all rules enabled
+  except the jsdom-incompatible `color-contrast`).
+- Reduced motion is honored automatically via the global
+  `<MotionConfig reducedMotion="user">` wrapper in `App.tsx`; the
+  lane's `motion.li` entries respect `prefers-reduced-motion: reduce`
+  without per-component code.
+- Filter chips are wrapped in a `role="group"` with an
+  `aria-label="MCP lane filters"`; every chip exposes
+  `aria-pressed` for the toggle state.
+
 ## Cross References
 
 - [API Reference](./api-reference.md)
