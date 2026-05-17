@@ -1900,6 +1900,7 @@ func clonePolicy(policy *config.SafetyPolicy) *config.SafetyPolicy {
 		DefaultDecision: policy.DefaultDecision,
 		InputPolicy:     policy.InputPolicy,
 		OutputPolicy:    policy.OutputPolicy,
+		RequireHuman:    policy.RequireHuman,
 		Rules:           append([]config.PolicyRule{}, policy.Rules...),
 		OutputRules:     append([]config.OutputPolicyRule{}, policy.OutputRules...),
 		InputRules:      append([]config.InputPolicyRule{}, policy.InputRules...),
