@@ -43,13 +43,16 @@ type signalCandidate struct {
 // collectSignals runs every §7.1 extractor against the listed
 // resources and returns the union of candidates. Order is deterministic
 // across runs: heartbeat → process → mcp service → workload → image →
-// untenanted ns → egress. The ephemeral indicator is recorded via
-// updateInventory rather than emit per §14 (no auto-promotion).
+// untenanted ns → admission → egress → ephemeral. The ephemeral
+// indicator emits per-disappeared-pod candidates that the
+// applyEphemeralCorroboration pass filters against §14 FP rules.
 func (d *Detector) collectSignals(
+	ctx context.Context,
 	pods []corev1.Pod,
 	namespaces []corev1.Namespace,
 	services []corev1.Service,
 	netpols []networkingv1.NetworkPolicy,
+	now time.Time,
 ) []signalCandidate {
 	var out []signalCandidate
 	out = append(out, d.heartbeatMissingSignal(pods)...)
@@ -58,7 +61,39 @@ func (d *Detector) collectSignals(
 	out = append(out, d.unmanagedWorkloadSignal(pods)...)
 	out = append(out, d.untrustedAgentImageSignal(pods)...)
 	out = append(out, d.namespaceUntenantedSignal(namespaces, pods)...)
+	out = append(out, d.admissionObservedSignal(ctx, now)...)
 	out = append(out, d.egressBypassSignal(netpols)...)
+	out = append(out, d.ephemeralIndicatorSignal(pods)...)
+	return out
+}
+
+// applyEphemeralCorroboration drops ephemeral_indicator candidates
+// unless another signal in the same scan touches the same namespace.
+// §14 FP control: a lone pod disappearance is noise (normal restarts,
+// scale-down) — promote only when another agent-shaped signal is
+// already firing in that namespace this cycle. Other signals pass
+// through unchanged.
+func applyEphemeralCorroboration(in []signalCandidate) []signalCandidate {
+	if len(in) == 0 {
+		return in
+	}
+	corroboratingNs := make(map[string]struct{}, len(in))
+	for _, c := range in {
+		if c.Signal == "ephemeral_indicator" {
+			continue
+		}
+		corroboratingNs[c.Namespace] = struct{}{}
+	}
+	out := make([]signalCandidate, 0, len(in))
+	for _, c := range in {
+		if c.Signal != "ephemeral_indicator" {
+			out = append(out, c)
+			continue
+		}
+		if _, ok := corroboratingNs[c.Namespace]; ok {
+			out = append(out, c)
+		}
+	}
 	return out
 }
 
@@ -438,6 +473,115 @@ func (d *Detector) egressIsBroad(rule networkingv1.NetworkPolicyEgressRule) bool
 	return false
 }
 
+// admissionObservedSignal: §7.1 row 7. Replays the operator's existing
+// admission-controller log; the detector NEVER installs a webhook or
+// emits an admission decision. A signal fires when an admission event
+// references a known-agent image — a workload was admitted to the
+// cluster carrying agent identity. Nil log source disables the signal.
+func (d *Detector) admissionObservedSignal(ctx context.Context, now time.Time) []signalCandidate {
+	if d.config.AdmissionLog == nil {
+		return nil
+	}
+	since := now.Add(-d.config.ScanInterval)
+	events := d.config.AdmissionLog(ctx, since)
+	var out []signalCandidate
+	for _, ev := range events {
+		product := d.matchKnownAgentImage(ev.Image)
+		if product == "" {
+			continue
+		}
+		out = append(out, signalCandidate{
+			Signal:          "admission_observed",
+			EvidenceType:    "k8s_admission_observed",
+			Risk:            shadow.FindingRiskLow,
+			AgentProduct:    redactField(product),
+			WorkloadKind:    redactField(ev.Kind),
+			WorkloadName:    redactField(ev.Name),
+			Namespace:       redactField(ev.Namespace),
+			EvidenceSummary: redactField("admission webhook observed " + ev.Kind + "/" + ev.Name + " carrying agent image"),
+			SignalSet:       []string{"admission_observed"},
+		})
+	}
+	return out
+}
+
+// ephemeralIndicatorSignal: §7.1 row 9. Pods present last scan but
+// absent this scan. Promotes the disappearance to a candidate when the
+// prior image matched a known agent; applyEphemeralCorroboration then
+// gates emission against §14 (other concurrent signals in same ns).
+// Stand-alone disappearances stay candidates only — never emitted —
+// per the design-doc no-auto-promotion contract.
+func (d *Detector) ephemeralIndicatorSignal(currentPods []corev1.Pod) []signalCandidate {
+	if len(d.state.priorPodKeys) == 0 {
+		return nil
+	}
+	curr := make(map[string]struct{}, len(currentPods))
+	for i := range currentPods {
+		curr[podKey(currentPods[i].Namespace, currentPods[i].Name)] = struct{}{}
+	}
+	var out []signalCandidate
+	for k := range d.state.priorPodKeys {
+		if _, stillThere := curr[k]; stillThere {
+			continue
+		}
+		meta := d.state.priorPodMetadata[k]
+		product := d.matchKnownAgentImage(meta.Image)
+		if product == "" {
+			continue // disappearance of a non-agent pod is not interesting
+		}
+		ns, name := splitPodKey(k)
+		out = append(out, signalCandidate{
+			Signal:          "ephemeral_indicator",
+			EvidenceType:    "k8s_ephemeral_indicator",
+			Risk:            shadow.FindingRiskLow,
+			AgentProduct:    redactField(product),
+			WorkloadKind:    "Pod",
+			WorkloadName:    redactField(name),
+			Namespace:       redactField(ns),
+			EvidenceSummary: redactField("agent-image pod disappeared between scans"),
+			SignalSet:       []string{"ephemeral_indicator"},
+		})
+	}
+	return out
+}
+
+func splitPodKey(k string) (ns, name string) {
+	if i := strings.IndexByte(k, '/'); i >= 0 {
+		return k[:i], k[i+1:]
+	}
+	return "", k
+}
+
+// buildRedactedPath returns the §7.2 stable identifier for a K8s
+// finding: "k8s://<cluster>/<ns>/<kind>/<name>[/<pod>]". The pod-name
+// suffix is only appended when the candidate references a specific
+// pod beneath a higher-level workload (cand.WorkloadKind != "Pod").
+// All segments are redactField'ed at boundary; the store also applies
+// shadow.RedactPath as defense in depth.
+func (d *Detector) buildRedactedPath(cand signalCandidate) string {
+	cluster := strings.TrimSpace(d.config.ClusterID)
+	if cluster == "" {
+		cluster = "unknown"
+	}
+	ns := cand.Namespace
+	if ns == "" {
+		ns = "_"
+	}
+	kind := cand.WorkloadKind
+	if kind == "" {
+		kind = "Unknown"
+	}
+	name := cand.WorkloadName
+	if name == "" {
+		name = "_"
+	}
+	path := "k8s://" + cluster + "/" + ns + "/" + kind + "/" + name
+	if cand.SourcePod != nil && kind != "Pod" && cand.SourcePod.Name != "" {
+		path += "/" + redactField(cand.SourcePod.Name)
+	}
+	return path
+}
+
 // emit resolves tenant + principal, builds a CreateFindingRequest, and
 // persists the finding via shadow.Store. Observer is notified on
 // success only — failed persistence does not count toward emit
@@ -468,7 +612,12 @@ func (d *Detector) emit(ctx context.Context, cand signalCandidate, nsByName map[
 		Risk:             cand.Risk,
 		EvidenceType:     cand.EvidenceType,
 		EvidenceSummary:  redactField(cand.EvidenceSummary),
-		DetectedAt:       now,
+		// §7.2: hostname = cluster-id, NOT the host that ran the
+		// detector. The store also TrimSpace'es; redactField provides
+		// boundary scrubbing of operator-supplied cluster names.
+		Hostname:    redactField(d.config.ClusterID),
+		RedactedPath: d.buildRedactedPath(cand),
+		DetectedAt:  now,
 
 		SourceType:      shadow.SourceTypeKubernetes,
 		SourceID:        redactField(d.sourceID),
@@ -525,6 +674,10 @@ func confidenceFor(signal string) float64 {
 		return 0.6
 	case "egress_bypass":
 		return 0.9
+	case "admission_observed":
+		return 0.4
+	case "ephemeral_indicator":
+		return 0.3
 	default:
 		return 0.5
 	}

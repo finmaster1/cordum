@@ -185,6 +185,22 @@ func TestK8sDetector_Emit_TypedFields(t *testing.T) {
 	if got.TenantSource == "" {
 		t.Errorf("TenantSource empty; want a §6.1 source")
 	}
+	// §7.2: hostname MUST be the cluster-id, not the host that ran the
+	// detector. Defends against silent regressions that would attribute
+	// findings to the detector pod's hostname.
+	if got.Hostname != testClusterID {
+		t.Errorf("Hostname = %q, want %q (§7.2: hostname = cluster-id)", got.Hostname, testClusterID)
+	}
+	// §7.2: redacted_path = "k8s://<cluster>/<ns>/<kind>/<name>[/<pod>]".
+	// For a Pod-kind candidate the pod-name suffix is implicit in
+	// WorkloadName, so the path has 4 segments.
+	wantPath := "k8s://" + testClusterID + "/agents/Pod/agent-pod"
+	if got.RedactedPath != wantPath {
+		t.Errorf("RedactedPath = %q, want %q (§7.2 stable identifier)", got.RedactedPath, wantPath)
+	}
+	if !strings.HasPrefix(got.RedactedPath, "k8s://") {
+		t.Errorf("RedactedPath = %q, want k8s:// scheme", got.RedactedPath)
+	}
 }
 
 func TestK8sDetector_Observability(t *testing.T) {

@@ -45,7 +45,31 @@ type Config struct {
 	ClusterTenantMap         map[string]string
 	LLMProxyEndpoints        []string
 	QuarantineTenantID       string
+	// AdmissionLog is the operator-supplied feed of admission-controller
+	// observations consumed by §7.1 row 7 (admission_observed). The
+	// detector never installs a webhook — it only reads what the
+	// operator has already captured. Nil = signal disabled.
+	AdmissionLog AdmissionLogSource
 }
+
+// AdmissionEvent is one row from the operator's admission-controller
+// log. Fields are populated from the operator's existing observability
+// pipeline; the detector treats them as already-redacted boundary
+// inputs and applies extraction-time redaction once more (defense in
+// depth) before persistence.
+type AdmissionEvent struct {
+	Timestamp time.Time
+	Namespace string
+	Kind      string // workload kind, e.g. "Deployment", "Pod"
+	Name      string
+	Image     string // primary container image, if applicable
+}
+
+// AdmissionLogSource yields the admission events seen since `since`.
+// Implementations MUST be observe-only — no webhook installation, no
+// admission-decision mutation. Returning an empty slice or nil disables
+// the signal for that scan cycle.
+type AdmissionLogSource func(ctx context.Context, since time.Time) []AdmissionEvent
 
 // QuarantineTenant is the terminal default tenant when §6.1 precedence
 // fails to resolve any other source. Operators can override via
@@ -258,7 +282,12 @@ func (d *Detector) Scan(ctx context.Context) error {
 	nsByName := indexNamespaces(namespaces)
 	now := d.clock()
 
-	candidates := d.collectSignals(pods, namespaces, services, netpols)
+	// collectSignals reads prior-scan state (priorPodKeys /
+	// priorPodMetadata) for the ephemeral_indicator diff. Inventory
+	// snapshot MUST happen after the read so the next cycle sees this
+	// scan's pods, not the prior cycle's.
+	candidates := d.collectSignals(ctx, pods, namespaces, services, netpols, now)
+	candidates = applyEphemeralCorroboration(candidates)
 	d.updateInventory(pods, now)
 	for _, cand := range candidates {
 		d.emit(ctx, cand, nsByName, now)

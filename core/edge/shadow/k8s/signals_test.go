@@ -3,6 +3,7 @@ package k8s_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -152,18 +153,204 @@ func TestK8sDetector_Signals_NamespaceUntenanted(t *testing.T) {
 }
 
 func TestK8sDetector_Signals_AdmissionObserved(t *testing.T) {
-	// Observe-mode: detector never installs a webhook. The signal is
-	// "observed only if the operator's existing admission log was fed in
-	// via config." With zero admission log entries, signal must NOT fire.
-	f := newFixture(t, k8s.Config{})
-	if err := f.detector.Scan(context.Background()); err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	for _, fnd := range f.listAll(t, testTenantA) {
-		if fnd.EvidenceType == "k8s_admission_observed" {
-			t.Fatalf("admission_observed fired without admission log input: %+v", fnd)
+	t.Run("nil_admission_log_disables_signal", func(t *testing.T) {
+		// Observe-mode: detector never installs a webhook. The signal is
+		// "observed only if the operator's existing admission log was fed in
+		// via config." With zero admission log entries, signal must NOT fire.
+		f := newFixture(t, k8s.Config{})
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("Scan: %v", err)
 		}
-	}
+		for _, fnd := range f.listAll(t, testTenantA) {
+			if fnd.EvidenceType == "k8s_admission_observed" {
+				t.Fatalf("admission_observed fired without admission log input: %+v", fnd)
+			}
+		}
+	})
+
+	t.Run("non_agent_image_does_not_fire", func(t *testing.T) {
+		// Admission event for a non-agent image is uninteresting.
+		ns := nsWith("default", map[string]string{testTenantLabel: testTenantA})
+		log := func(_ context.Context, _ time.Time) []k8s.AdmissionEvent {
+			return []k8s.AdmissionEvent{
+				{
+					Timestamp: time.Now(),
+					Namespace: "default",
+					Kind:      "Deployment",
+					Name:      "nginx",
+					Image:     "nginx:1.25",
+				},
+			}
+		}
+		f := newFixture(t, k8s.Config{AdmissionLog: log}, ns)
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		for _, fnd := range f.listAll(t, testTenantA) {
+			if fnd.EvidenceType == "k8s_admission_observed" {
+				t.Fatalf("admission_observed fired for non-agent image: %+v", fnd)
+			}
+		}
+	})
+
+	t.Run("agent_image_fires_observed_finding", func(t *testing.T) {
+		// Admission event carrying a known-agent image fires the signal.
+		ns := nsWith("agents", map[string]string{testTenantLabel: testTenantA})
+		log := func(_ context.Context, _ time.Time) []k8s.AdmissionEvent {
+			return []k8s.AdmissionEvent{
+				{
+					Timestamp: time.Now(),
+					Namespace: "agents",
+					Kind:      "Deployment",
+					Name:      "claude-runner",
+					Image:     "anthropic/claude-code:v1",
+				},
+			}
+		}
+		f := newFixture(t, k8s.Config{AdmissionLog: log}, ns)
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		got := findByType(t, f, testTenantA, "k8s_admission_observed")
+		if got.WorkloadKind != "Deployment" {
+			t.Errorf("WorkloadKind = %q, want Deployment", got.WorkloadKind)
+		}
+		if got.WorkloadName != "claude-runner" {
+			t.Errorf("WorkloadName = %q, want claude-runner", got.WorkloadName)
+		}
+		if got.Namespace != "agents" {
+			t.Errorf("Namespace = %q, want agents", got.Namespace)
+		}
+		if got.AgentProduct == "" {
+			t.Errorf("AgentProduct empty; want resolved from anthropic/claude-code image")
+		}
+		if !containsSignal(got.SignalSet, "admission_observed") {
+			t.Errorf("SignalSet = %v, want contains admission_observed", got.SignalSet)
+		}
+	})
+}
+
+func TestK8sDetector_Signals_EphemeralIndicator(t *testing.T) {
+	// §7.1 row 9 + §14 corroboration: ephemeral_indicator fires on a
+	// known-agent pod that disappeared between scans, but only when
+	// another agent-shaped signal in the same namespace corroborates.
+	// Without corroboration, the candidate is filtered out by
+	// applyEphemeralCorroboration to avoid restart-noise.
+
+	t.Run("disappearance_alone_is_filtered", func(t *testing.T) {
+		// Scan 1: an agent pod exists, ns is tenanted (no other signals
+		// will fire on later scans). Scan 2: pod is gone — but no other
+		// signal corroborates in that namespace, so ephemeral is dropped.
+		ns := nsWith("calm", map[string]string{testTenantLabel: testTenantA})
+		pod := podWith("agent-pod", "calm", "anthropic/claude-code:v1",
+			map[string]string{
+				testTenantLabel:    testTenantA,
+				testHeartbeatLabel: "sess-1", // carries heartbeat, no other signal will fire
+			}, nil)
+		f := newFixture(t, k8s.Config{}, pod, ns)
+
+		// scan 1: seed inventory
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("scan 1: %v", err)
+		}
+		// remove the pod between scans
+		if err := f.client.Tracker().Delete(
+			corev1.SchemeGroupVersion.WithResource("pods"),
+			"calm", "agent-pod",
+		); err != nil {
+			t.Fatalf("delete pod: %v", err)
+		}
+		// scan 2: pod is gone, but nothing else flags ns=calm
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("scan 2: %v", err)
+		}
+		for _, fnd := range f.listAll(t, testTenantA) {
+			if fnd.EvidenceType == "k8s_ephemeral_indicator" {
+				t.Fatalf("ephemeral_indicator fired without corroboration: %+v", fnd)
+			}
+		}
+	})
+
+	t.Run("disappearance_with_namespace_corroboration_fires", func(t *testing.T) {
+		// Scan 1: two agent pods in same ns — pod-A carries heartbeat,
+		// pod-B does NOT. Scan 2: pod-A vanishes; pod-B is still missing
+		// heartbeat → triggers heartbeat_missing after threshold. The
+		// concurrent in-ns heartbeat_missing corroborates the ephemeral.
+		ns := nsWith("agents", map[string]string{testTenantLabel: testTenantA})
+		podA := podWith("agent-a", "agents", "anthropic/claude-code:v1",
+			map[string]string{
+				testTenantLabel:    testTenantA,
+				testHeartbeatLabel: "sess-a",
+			}, nil)
+		podB := podWith("agent-b", "agents", "anthropic/claude-code:v1",
+			map[string]string{testTenantLabel: testTenantA}, // no heartbeat label
+			nil)
+		f := newFixture(t, k8s.Config{HeartbeatMissedThreshold: 1}, podA, podB, ns)
+
+		// scan 1: seed inventory (heartbeat misses pod-B once)
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("scan 1: %v", err)
+		}
+		// delete pod-A — pod-B remains and will trip heartbeat_missing
+		if err := f.client.Tracker().Delete(
+			corev1.SchemeGroupVersion.WithResource("pods"),
+			"agents", "agent-a",
+		); err != nil {
+			t.Fatalf("delete pod-A: %v", err)
+		}
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("scan 2: %v", err)
+		}
+		var ephemeral *shadow.ShadowAgentFinding
+		for i := range f.listAll(t, testTenantA) {
+			fnd := f.listAll(t, testTenantA)[i]
+			if fnd.EvidenceType == "k8s_ephemeral_indicator" {
+				ephemeral = &fnd
+				break
+			}
+		}
+		if ephemeral == nil {
+			t.Fatalf("ephemeral_indicator did not fire with same-ns corroboration")
+		}
+		if ephemeral.Namespace != "agents" {
+			t.Errorf("Namespace = %q, want agents", ephemeral.Namespace)
+		}
+		if ephemeral.WorkloadName != "agent-a" {
+			t.Errorf("WorkloadName = %q, want agent-a", ephemeral.WorkloadName)
+		}
+		if !containsSignal(ephemeral.SignalSet, "ephemeral_indicator") {
+			t.Errorf("SignalSet = %v, want contains ephemeral_indicator", ephemeral.SignalSet)
+		}
+	})
+
+	t.Run("non_agent_disappearance_ignored", func(t *testing.T) {
+		// A non-agent pod disappearing is never an ephemeral candidate
+		// even with corroboration in the namespace.
+		ns := nsWith("mixed", map[string]string{testTenantLabel: testTenantA})
+		nonAgent := podWith("nginx", "mixed", "nginx:1.25",
+			map[string]string{testTenantLabel: testTenantA}, nil)
+		agent := podWith("agent-x", "mixed", "anthropic/claude-code:v1",
+			map[string]string{testTenantLabel: testTenantA}, nil) // no heartbeat → triggers heartbeat_missing
+		f := newFixture(t, k8s.Config{HeartbeatMissedThreshold: 1}, nonAgent, agent, ns)
+
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("scan 1: %v", err)
+		}
+		if err := f.client.Tracker().Delete(
+			corev1.SchemeGroupVersion.WithResource("pods"),
+			"mixed", "nginx",
+		); err != nil {
+			t.Fatalf("delete nginx: %v", err)
+		}
+		if err := f.detector.Scan(context.Background()); err != nil {
+			t.Fatalf("scan 2: %v", err)
+		}
+		for _, fnd := range f.listAll(t, testTenantA) {
+			if fnd.EvidenceType == "k8s_ephemeral_indicator" {
+				t.Fatalf("ephemeral fired for non-agent pod disappearance: %+v", fnd)
+			}
+		}
+	})
 }
 
 func TestK8sDetector_Signals_EgressBypass(t *testing.T) {
