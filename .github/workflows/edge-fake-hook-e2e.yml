@@ -105,6 +105,49 @@ jobs:
           echo "Timed out waiting for https://127.0.0.1:8081/api/v1/status" >&2
           exit 1
 
+      # Bootstrap the cordum-edge-pack policy overlay so the strict-PASS
+      # assertion below has a green gate. Chosen approach per task-c94f1770:
+      # (A-light) — install via cordumctl from the runner against the gateway.
+      #
+      # Decision rationale (architect amendment comment-2843a2f6 Item 2):
+      # - (C) compose-mount: non-viable. Safety Kernel loads policy fragments
+      #   only via configSvc/Redis (core/controlplane/safetykernel/kernel.go
+      #   loadFragments:1653). No env-driven disk-fragment loader exists; adding
+      #   one would touch core gateway code, out of scope.
+      # - (A-full) scheduler+worker compose services: heavier than needed. The
+      #   gateway's POST /api/v1/packs/install (handlers_packs.go:88
+      #   handleInstallPack → installPackFromDir:143) applies overlays directly
+      #   to configSvc; no scheduler/worker dispatch involved.
+      # - (A-light) cordumctl from runner: production install path, zero extra
+      #   compose services. cordum-edge-pack is unsigned; gateway default
+      #   CORDUM_GATEWAY_PACK_STRICT=false accepts unsigned packs.
+      - name: Install cordum-edge-pack policy overlay
+        run: go run ./cmd/cordumctl pack install ./examples/cordum-edge-pack
+        env:
+          CORDUM_GATEWAY: https://localhost:8081
+          CORDUM_API_KEY: ${{ env.CORDUM_API_KEY }}
+          CORDUM_TENANT_ID: default
+          CORDUM_TLS_CA: ${{ github.workspace }}/certs/ca/ca.crt
+
+      - name: Wait for pack-loaded state
+        # Poll the pack registry endpoint until cordum-edge-pack returns 200,
+        # confirming installPackFromDir wrote the policy overlay to configSvc
+        # and the registry is queryable. 60s timeout (30 * 2s).
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -ks -o /dev/null -w '%{http_code}' \
+              --cacert "${{ github.workspace }}/certs/ca/ca.crt" \
+              -H "X-API-Key: ${CORDUM_API_KEY}" \
+              https://127.0.0.1:8081/api/v1/packs/cordum-edge-pack)
+            if [ "${code}" = "200" ]; then
+              echo "cordum-edge-pack loaded after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::cordum-edge-pack not loaded after 60s (last status: ${code})" >&2
+          exit 1
+
       - name: Run edge_fake_hook_e2e.sh (strict + bypass mode)
         # Strict mode (CORDUM_INTEGRATION=1) treats every missing prerequisite
         # as FAIL. Bypass mode (CORDUM_EDGE_E2E_BYPASS_HOOK=1) drives gates
@@ -121,60 +164,38 @@ jobs:
           CORDUM_GATEWAY: https://localhost:8081
           CORDUM_TLS_CA: ${{ github.workspace }}/certs/ca/ca.crt
 
-      # PASS-line assertion deferred to task-c94f1770 (pack-install bootstrap).
-      # Comment-in once that sibling ships.
-      #
-      # task-c94f1770 (HIGH/BACKLOG, governor-filed 2026-05-16 per
-      # comment-20eef1d1 on task-e6721225) covers loading the cordum-edge-pack
-      # overlay (`examples/cordum-edge-pack/overlays/policy.fragment.yaml`)
-      # into the gateway before edge_fake_hook_e2e.sh runs. Empirically: a
-      # fresh `docker compose up` gateway returns `.decision != "DENY"` on
-      # secret-like fixtures because the overlay is not loaded; the script's
-      # gate_pretooluse_deny correctly FAILs in that state.
-      #
-      # The workflow still exercises the rest of the scaffolding end-to-end:
-      # 2-key stack provisioning (DoD #2), strict + bypass mode invocation
-      # (DoD #3 scaffolding), script-mod CORDUM_APPROVER_API_KEY consumer
-      # (per architect msg-12fecd08), compose override (DoD #5). The
-      # uploaded artifact `edge-fake-hook-e2e.log` is the evidence-of-record
-      # until task-c94f1770 lands.
-      #
-      # - name: Assert 7 PASS lines
-      #   run: |
-      #     expected=(
-      #       "PASS edge_session_setup"
-      #       "PASS edge_pretooluse_deny"
-      #       "PASS edge_approval_flow"
-      #       "PASS edge_approval_rejected"
-      #       "PASS edge_approval_expired"
-      #       "PASS edge_posttooluse_artifact"
-      #       "PASS edge_evidence_export"
-      #     )
-      #     for line in "${expected[@]}"; do
-      #       if ! grep -Fqx -- "${line}" edge-fake-hook-e2e.log; then
-      #         echo "::error::missing expected PASS line: ${line}" >&2
-      #         exit 1
-      #       fi
-      #     done
-      #     actual=$(grep -c '^PASS ' edge-fake-hook-e2e.log)
-      #     if [ "${actual}" -ne "${#expected[@]}" ]; then
-      #       echo "::error::PASS line count mismatch: got ${actual}, want ${#expected[@]}" >&2
-      #       grep '^PASS ' edge-fake-hook-e2e.log || true
-      #       exit 1
-      #     fi
-      #     echo "All 7 PASS lines present."
-
-      - name: Record script outcome (assertion deferred)
-        # Per comment-20eef1d1 amendment: until task-c94f1770 lands the
-        # pack-install bootstrap, the workflow records the script's exit code
-        # + PASS line count as evidence rather than gating the job on it.
-        # Job stays green so the scaffolding remains a usable PR check.
+      - name: Assert 7 PASS lines
+        # Strict-PASS gate live per task-c94f1770 (governor amendment
+        # comment-2843a2f6 Item 3). The pack-bootstrap steps above install
+        # cordum-edge-pack so the script's gate_pretooluse_deny finds the
+        # demo policy overlay and emits DENY for secret-like fixtures.
+        # All 7 expected PASS lines (script lines 201-208) must be present;
+        # any missing line OR a count mismatch fails the job.
         run: |
-          pass_count=$(grep -c '^PASS ' edge-fake-hook-e2e.log || true)
-          fail_count=$(grep -c '^FAIL ' edge-fake-hook-e2e.log || true)
-          echo "edge_fake_hook_e2e.sh PASS lines: ${pass_count}"
-          echo "edge_fake_hook_e2e.sh FAIL lines: ${fail_count}"
-          echo "Strict-PASS assertion deferred to task-c94f1770 (pack-install bootstrap)."
+          expected=(
+            "PASS edge_session_setup"
+            "PASS edge_pretooluse_deny"
+            "PASS edge_approval_flow"
+            "PASS edge_approval_rejected"
+            "PASS edge_approval_expired"
+            "PASS edge_posttooluse_artifact"
+            "PASS edge_evidence_export"
+          )
+          for line in "${expected[@]}"; do
+            if ! grep -Fqx -- "${line}" edge-fake-hook-e2e.log; then
+              echo "::error::missing expected PASS line: ${line}" >&2
+              grep '^PASS ' edge-fake-hook-e2e.log || true
+              grep '^FAIL ' edge-fake-hook-e2e.log || true
+              exit 1
+            fi
+          done
+          actual=$(grep -c '^PASS ' edge-fake-hook-e2e.log)
+          if [ "${actual}" -ne "${#expected[@]}" ]; then
+            echo "::error::PASS line count mismatch: got ${actual}, want ${#expected[@]}" >&2
+            grep '^PASS ' edge-fake-hook-e2e.log || true
+            exit 1
+          fi
+          echo "All ${#expected[@]} PASS lines present."
 
       - name: Capture docker compose logs
         if: always()

@@ -249,17 +249,50 @@ compatibility — existing single-key callers still see the explicit
 than a silent regression. See the script's `ENVIRONMENT` block for the full
 contract.
 
-> **Strict-PASS assertion deferred.** The CI workflow
-> (`.github/workflows/edge-fake-hook-e2e.yml`) currently ships with the
-> "all 7 PASS lines" assertion commented out. The script's
-> `gate_pretooluse_deny` requires the `cordum-edge-pack` policy overlay
-> (`examples/cordum-edge-pack/overlays/policy.fragment.yaml`) to be loaded
-> on the gateway — a fresh `docker compose up` deployment has no overlay
-> loaded by default. Pack-install bootstrap is tracked in sibling
-> `task-c94f1770` (HIGH/BACKLOG, governor-filed 2026-05-16 per
-> `comment-20eef1d1` on `task-e6721225`); the assertion step is preserved
-> in the workflow file as a `#`-prefixed block ready to comment-in once
-> that sibling lands. Until then the workflow exercises the scaffolding
-> (2-key stack, strict + bypass mode invocation, script-mod consumer,
-> override file) end-to-end and uploads the script log as
-> `edge-fake-hook-e2e-artifacts` for inspection.
+### Pack-load contract
+
+The script's `gate_pretooluse_deny` requires the `cordum-edge-pack` policy
+overlay (`examples/cordum-edge-pack/overlays/policy.fragment.yaml`) to be
+loaded on the gateway before the strict-PASS assertion runs. A fresh
+`docker compose up` deployment has no overlay loaded by default — the
+Safety Kernel's policy loader (`core/controlplane/safetykernel/kernel.go`
+`loadFragments`) reads fragments only from `configSvc`/Redis, not from
+disk, so mounting the YAML into the container has no effect. The pack must
+be installed via the production install path (`POST /api/v1/packs/install`,
+`core/controlplane/gateway/handlers_packs.go` `installPackFromDir`) so the
+gateway writes the overlay into `configSvc` where `loadFragments` finds it.
+
+CI bootstraps the pack between gateway-health and the script run by calling
+`cordumctl pack install` from the workflow runner (no extra compose
+services required — the gateway handles install in-process):
+
+```
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+# wait for gateway /api/v1/status
+go run ./cmd/cordumctl pack install ./examples/cordum-edge-pack
+# wait for GET /api/v1/packs/cordum-edge-pack → 200
+bash tools/scripts/edge_fake_hook_e2e.sh
+```
+
+The pack is unsigned in-tree; the gateway accepts unsigned packs in default
+mode (`CORDUM_GATEWAY_PACK_STRICT` unset → false). Operators running the
+strict-mode gate against a hardened gateway with
+`CORDUM_GATEWAY_PACK_STRICT=true` must sign the pack first (see
+`docs/pack.md` for the signing workflow).
+
+With the pack installed, the workflow asserts all 7 PASS lines exit-0 (see
+`.github/workflows/edge-fake-hook-e2e.yml` "Assert 7 PASS lines" step):
+
+```
+PASS edge_session_setup
+PASS edge_pretooluse_deny
+PASS edge_approval_flow
+PASS edge_approval_rejected
+PASS edge_approval_expired
+PASS edge_posttooluse_artifact
+PASS edge_evidence_export
+```
+
+On any failure the workflow uploads `edge-fake-hook-e2e.log` and
+`docker-compose-edge-fake-hook-e2e.log` as the `edge-fake-hook-e2e-artifacts`
+artifact for triage.
