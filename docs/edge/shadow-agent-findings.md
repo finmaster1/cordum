@@ -5,6 +5,10 @@ The Edge Gateway persists redacted shadow-agent observations as
 `/api/v1/edge/shadow-agents/*`; the scanner emits one record per shadow
 observation, and the operator disposes of each via resolve or suppress.
 
+For advisory remediation guidance (action kinds, commands, MDM-vs-dev
+audience steering), see
+[shadow-remediation.md](shadow-remediation.md) (EDGE-142).
+
 **Observe / warn ONLY.** This subsystem does not enforce, does not
 remediate, does not create Cordum Jobs, and does not call the Safety
 Kernel. It is an evidence + operator-disposition surface. Enforcement

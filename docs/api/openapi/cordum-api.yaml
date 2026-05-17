@@ -2085,6 +2085,50 @@ paths:
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
           $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow-agents/{finding_id}/remediation:
+    post:
+      operationId: generateShadowAgentRemediation
+      summary: Generate an advisory remediation plan for a shadow-agent finding (EDGE-142)
+      description: |
+        Returns a deterministic, redacted RemediationPlan for the referenced finding.
+        Read-only: the handler does not mutate finding state, does not enqueue Cordum
+        Jobs, does not emit audit events, and does not call the Safety Kernel. All
+        commands inside the plan use literal placeholders (`<gateway-url>`,
+        `<tenant-id>`, etc.) and never carry live secrets or developer paths.
+      tags:
+      - Edge
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShadowAgentRemediationRequest'
+      responses:
+        '200':
+          description: Advisory remediation plan for the referenced finding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentRemediationResponse'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
   /api/v1/edge/binary-integrity/events:
     post:
       operationId: ingestBinaryVerify
@@ -9919,6 +9963,117 @@ components:
           type: string
           format: date-time
           description: Optional time-bound hint; the store records but does not auto-revert.
+    ShadowAgentRemediationRequest:
+      type: object
+      description: Optional body for generating a remediation plan. Both fields default to the generator's documented defaults when omitted.
+      properties:
+        audience:
+          type: string
+          enum: [dev, enterprise, both]
+          description: Selects wording + step layering. Defaults to "both" when omitted.
+        omit_commands:
+          type: boolean
+          description: When true, strips the Command and APIRequest.Body fields from emitted steps. Defaults to false.
+    ShadowAgentRemediationResponse:
+      type: object
+      required: [finding_id, tenant_id, remediation]
+      properties:
+        finding_id:
+          type: string
+        tenant_id:
+          type: string
+        remediation:
+          $ref: '#/components/schemas/ShadowRemediationPlan'
+    ShadowRemediationPlan:
+      type: object
+      required: [audience, severity, action_kind, summary, risk_explanation, recommended_action, steps, generator_version, generated_at, advisory_only]
+      description: Deterministic advisory remediation plan. All commands inside steps use literal placeholders and never carry live secrets or developer paths.
+      properties:
+        finding_id:
+          type: string
+          description: Empty when generated from a scanner-shape Finding (no persistent ID).
+        tenant_id:
+          type: string
+        audience:
+          type: string
+          enum: [dev, enterprise, both]
+        severity:
+          type: string
+          enum: [info, low, medium, high]
+        action_kind:
+          $ref: '#/components/schemas/ShadowRemediationActionKind'
+        summary:
+          type: string
+        risk_explanation:
+          type: string
+        recommended_action:
+          type: string
+        safety_notes:
+          type: array
+          items:
+            type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShadowRemediationStep'
+        generator_version:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        advisory_only:
+          type: boolean
+          description: Always true in this generator. Reserved field — a future enforcement mode (out of scope) may flip it without changing the type signature.
+    ShadowRemediationStep:
+      type: object
+      required: [id, title, kind]
+      properties:
+        id:
+          type: string
+          description: Stable, deterministic identifier within the plan.
+        title:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ShadowRemediationActionKind'
+        command:
+          type: string
+          description: Shell-runnable suggestion with literal placeholders. Empty when the step is API-only or when omit_commands=true.
+        api_request:
+          $ref: '#/components/schemas/ShadowRemediationAPIRequest'
+        requires_backup:
+          type: boolean
+        preview_only:
+          type: boolean
+        destructive:
+          type: boolean
+        docs_url:
+          type: string
+        conditions:
+          type: array
+          items:
+            type: string
+    ShadowRemediationAPIRequest:
+      type: object
+      required: [method, path]
+      properties:
+        method:
+          type: string
+        path:
+          type: string
+        body:
+          type: string
+          description: Stripped when omit_commands=true.
+    ShadowRemediationActionKind:
+      type: string
+      enum:
+        - attach_mcp_gateway
+        - use_cordumctl_edge_claude
+        - deploy_managed_settings
+        - disable_unmanaged_config
+        - route_through_llm_proxy
+        - run_edge_doctor
+        - investigate_process
+        - manual_review
     EdgeAgentActionEvent:
       type: object
       required: [event_id, session_id, execution_id, tenant_id, seq, ts, layer, kind, decision, status]
