@@ -48,6 +48,8 @@ const SchemasPage = lazy(() => import("./pages/SchemasPage"));
 const SchemaDetailPage = lazy(() => import("./pages/SchemaDetailPage"));
 const TopicsPage = lazy(() => import("./pages/TopicsPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
+// EDGE-151-DASHBOARD — Binary integrity dashboard surface.
+const EdgeBinaryIntegrityPage = lazy(() => import("./pages/EdgeBinaryIntegrityPage"));
 // DLQPage was deleted in task-100cc89c step 5 — /dlq folds into JobsPage
 // as ?status=dlq via the DlqRouteRedirect below.
 const SettingsHealthPage = lazy(() => import("./pages/SettingsHealthPage"));
@@ -191,6 +193,7 @@ function ProtectedRoutes() {
           <Route path="/jobs/:id" element={<RouteBoundary name="Job details"><JobDetailPage /></RouteBoundary>} />
           <Route path="/edge/sessions" element={<RouteBoundary name="Edge sessions"><EdgeSessionsPage /></RouteBoundary>} />
           <Route path="/edge/sessions/:sessionId" element={<RouteBoundary name="Edge session details"><EdgeSessionDetailPage /></RouteBoundary>} />
+          <Route path="/edge/binary-integrity" element={<RouteBoundary name="Binary integrity"><EdgeBinaryIntegrityPage /></RouteBoundary>} />
           {/* task-266f21ad: Edge sidebar items (Edge Approvals / Edge
               Audit) link to dedicated /edge/* paths so the Edge section
               stays highlighted in findActiveSection at click time. Each

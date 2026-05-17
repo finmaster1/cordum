@@ -1338,6 +1338,10 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	s.registerRoute(mux, "POST /api/v1/edge/approvals/{approval_ref}/reject", s.instrumented("/api/v1/edge/approvals/{approval_ref}/reject", s.handleRejectEdgeApproval))
 	s.registerRoute(mux, "POST /api/v1/edge/approvals/{approval_ref}/wait", s.instrumented("/api/v1/edge/approvals/{approval_ref}/wait", s.handleWaitEdgeApproval))
 	s.registerRoute(mux, "POST /api/v1/edge/evaluate", s.instrumented("/api/v1/edge/evaluate", s.handleEdgeEvaluate))
+	// EDGE-151-DASHBOARD — binary-verify outcomes from install.{sh,ps1}
+	// (docs/security/binary-signing.md §8) flow through the audit chain.
+	s.registerRoute(mux, "POST /api/v1/edge/binary-integrity/events", s.instrumented("/api/v1/edge/binary-integrity/events", s.handleIngestBinaryVerify))
+	s.registerRoute(mux, "GET /api/v1/edge/binary-integrity/events", s.instrumented("/api/v1/edge/binary-integrity/events", s.handleListBinaryVerify))
 	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleListMCPUpstreams))
 	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams/list", s.instrumented("/api/v1/edge/mcp/upstreams/list", s.handleListMCPUpstreams))
 	s.registerRoute(mux, "POST /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleCreateMCPUpstream))

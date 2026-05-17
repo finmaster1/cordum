@@ -207,6 +207,78 @@ secrets, no full paths.**
 
 These fields are stable; downstream SIEM mappings should pin to them.
 
+### Dashboard surface (EDGE-151-DASHBOARD)
+
+The Cordum admin dashboard's **Edge → Binary integrity** panel renders
+recent `binary-verify-{ok,fail}` events for the active tenant with
+filters by event class, `sig_scheme`, and endpoint. Failed events
+display a pinned-warning row with a deep link to the
+[§9 operator runbook](#9-operator-runbook) below. The panel is backed
+by the gateway endpoints:
+
+* `POST /api/v1/edge/binary-integrity/events` — operator ingest. Body
+  is `{"endpoint": "<host-label>", "events": [BinaryVerifyEvent, ...]}`
+  with up to 1000 events per request. Requires `audit.export`
+  permission and the admin role; the tenant is resolved from the
+  request's `X-Tenant-ID` header per the Edge auth rail. The handler
+  re-validates every event against the schema above (defense-in-depth
+  against relays that re-shape fields) and persists each accepted
+  event through the standard `audit.Chainer` so it shows up in
+  `/api/v1/audit/events` queries and SIEM exports alongside every
+  other audit event.
+* `GET /api/v1/edge/binary-integrity/events` — list view used by the
+  dashboard. Query params: `?event=ok|fail`, `?sig_scheme=gpg|codesign|authenticode|dev`,
+  `?endpoint=<host-label>`, `?limit=<1..200>`, `?cursor=<stream-id>`.
+  Requires `audit.read` permission and the admin role.
+
+### Operator ingest workflow
+
+The install path emits JSON-lines to **stderr**, not to a Cordum API
+directly — operators decide when and how to upload them, so the
+install can run offline (air-gapped fleet rollouts) without requiring
+gateway connectivity at install time. The supported workflow is:
+
+```sh
+# 1. Capture install-script stderr per host:
+bash tools/scripts/install.sh --release-dir ./release-bundle \
+  2> /var/log/cordum/install-binary-verify-$(hostname).log
+
+# 2. Filter to JSON-lines only (drop any human-readable warnings the
+#    script also writes to stderr) and post in bulk:
+jq -c 'select(.event == "binary-verify-ok" or .event == "binary-verify-fail")' \
+  /var/log/cordum/install-binary-verify-*.log \
+  | jq -s '{endpoint: "'"$(hostname)"'", events: .}' \
+  | curl -fsSL \
+      -H "X-Tenant-ID: $CORDUM_TENANT" \
+      -H "Authorization: Bearer $CORDUM_API_KEY" \
+      -H 'Content-Type: application/json' \
+      --data-binary @- \
+      "$CORDUM_GATEWAY_URL/api/v1/edge/binary-integrity/events"
+```
+
+Windows operators run the equivalent against
+`tools/scripts/install.ps1`'s stderr; the JSON-line shape is identical.
+
+The endpoint label is operator-chosen — a hostname, an asset tag, or
+any string ≤ 256 chars that identifies the install target. The
+dashboard filter uses this label verbatim, so a stable convention
+across the fleet helps SOC triage.
+
+The response shape:
+
+```jsonc
+{
+  "accepted": 12,
+  "rejected": 0,
+  "errors": []  // per-event validation errors when rejected > 0
+}
+```
+
+A `202 Accepted` status with `rejected > 0` indicates partial success —
+re-upload only the failed indices after fixing the cause. A `400 Bad
+Request` indicates the whole batch was rejected (zero accepted) and
+the operator should re-validate the input.
+
 ## 9. Operator runbook
 
 ### Verify a release manually
