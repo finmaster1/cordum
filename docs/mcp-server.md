@@ -143,6 +143,40 @@ expired / consumed / args_mismatch / policy_mismatch / self_approval /
 cross_tenant / not_found) surface as JSON-RPC `-32096` with
 `error.data.kind` carrying the typed conflict family.
 
+#### Retry dedupe
+
+`InvokeToolWithPolicy` collapses idempotent retries of the same MCP
+tool call into a single pre/post event pair via an in-process
+singleflight. The dedupe key is the hex SHA-256 over the canonical
+`(tenant, server, tool, action_hash, session, execution, principal)`
+tuple, joined with the 0x1F unit-separator byte so pipe-bearing
+tenant or tool identifiers cannot smuggle a delimiter and collide
+with neighboring fields. `action_hash` is `ActionTupleHash(tenant,
+server, tool, normalized_target_path)` — backslash and forward-slash
+path spellings produce the same hash.
+
+The key is derived BEFORE the policy pipeline runs, so the first
+caller wins the `sync.Map.LoadOrStore` slot, evaluates the gate,
+forwards to upstream, and emits the pre + post events; concurrent
+callers with identical semantic inputs block on the winner's done
+channel and return the cached result without re-running the pipeline
+or emitting duplicate events. The `EventID` stays random (one fresh
+ID per call for tracing); two retries with different `EventID`s but
+identical semantic inputs still dedupe.
+
+Successful outcomes stay cached in the singleflight map until the
+process restarts; error outcomes delete the entry so the next retry
+fires a fresh upstream attempt (transient transport failures do not
+become sticky).
+
+**Cross-process scope**: today's gateway is single-instance per
+deployment unit, so the in-process `sync.Map` is sufficient. A
+multi-instance HA gateway behind a load balancer would need a Redis
+SETNX-backed `DedupeStore` for cross-process collapse; this is
+tracked as a follow-up Moe task (PR #276 Sub-B deferred) — when
+adopted, the in-process backend stays the default and the Redis
+backend is gated by `CORDUM_MCP_DEDUPE_BACKEND=redis`.
+
 
 ## Upstream Server Registry (EDGE-101)
 

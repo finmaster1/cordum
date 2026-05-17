@@ -692,8 +692,11 @@ func (d PolicyDecision) requiresHuman() bool {
 }
 
 // defaultEventIDFactory returns a uuid-shaped 32-hex-char ID seeded
-// from crypto/rand. Compact + collision-resistant enough for retry
-// dedupe; not a security boundary.
+// from crypto/rand. EventID is for tracing / event payload identity;
+// retry dedupe identity is semantic, derived in dedupeBegin from
+// (tenant, server, tool, action_hash, session, execution, principal).
+// Two retries with the same EventID would still dedupe; two retries
+// with different EventIDs but identical semantic inputs ALSO dedupe.
 func defaultEventIDFactory() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -736,15 +739,22 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	if deps.EventIDFactory == nil {
 		deps.EventIDFactory = defaultEventIDFactory
 	}
-	// Pin the EventID for the entire InvokeToolWithPolicy lifecycle.
-	// dedupeLookup, EvaluateToolCall (event.EventID), and dedupeStore
-	// must observe the same string — otherwise retries with a stable
-	// caller-supplied factory still produce a fresh random per call
-	// inside the bridge and dedupe never hits. deps is passed by value
-	// here so overriding the factory does not leak to other callers.
+	// Pin the EventID for the entire InvokeToolWithPolicy lifecycle so
+	// the pre event and any post/failed event share a single tracing
+	// identifier. deps is passed by value here so overriding the factory
+	// does not leak to other callers. The EventID is no longer part of
+	// the retry-dedupe identity (dedupeBegin derives that from semantic
+	// inputs); the pin is purely for correlated tracing.
 	stableEventID := deps.EventIDFactory()
 	deps.EventIDFactory = func() string { return stableEventID }
-	myEntry, won, hit := dedupeBegin(ctx, deps, params, server)
+	// Compute the semantic dedupe key from CallMetadata + params BEFORE
+	// EvaluateToolCall so two retries with the same caller identity +
+	// tool + canonical action share a single slot regardless of the
+	// EventIDs the factory emits per call. Empty key means metadata was
+	// not stashed; dedupeBegin then short-circuits and EvaluateToolCall
+	// surfaces the real missing_mcp_metadata error below.
+	dedupeID := semanticDedupeKeyForCall(ctx, params, server)
+	myEntry, won, hit := dedupeBegin(ctx, deps, dedupeID)
 	if hit != nil {
 		return hit.result, hit.err
 	}
@@ -757,7 +767,7 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	)
 	if won {
 		defer func() {
-			dedupeFinish(deps, params, server, myEntry, finalResult, finalErr)
+			dedupeFinish(deps, dedupeID, myEntry, finalResult, finalErr)
 		}()
 	}
 	evalResult, err := EvaluateToolCall(ctx, deps, params, server)
@@ -929,33 +939,78 @@ type dedupeEntry struct {
 	err    error
 }
 
-func dedupeKey(deps ToolCallDeps, server, tool string) string {
-	id := ""
-	if deps.EventIDFactory != nil {
-		id = deps.EventIDFactory()
-	}
-	return server + "|" + tool + "|" + id
+// semanticDedupeSeparator is the unit-separator byte (0x1F) used to
+// join fields in the canonical form fed to SHA-256. Using a
+// non-printable control byte instead of `|` prevents pipe-bearing
+// tenant IDs or tool names from colliding with neighboring fields
+// (tenant=`foo|bar`+tool=`baz` no longer hashes the same as
+// tenant=`foo`+tool=`bar|baz`).
+const semanticDedupeSeparator = "\x1f"
+
+// computeSemanticDedupeKey returns the hex SHA-256 over the canonical
+// (tenant, server, tool, action_hash, session, execution, principal)
+// tuple. Two calls with identical semantic inputs produce the same
+// key across process retries even when the EventIDFactory emits a
+// different ID per call. Empty fields are allowed — the gate-level
+// validation (errMissingMCPMetadata) catches missing identity before
+// this function ever runs in the InvokeToolWithPolicy path.
+func computeSemanticDedupeKey(tenant, server, tool, actionHash, session, execution, principal string) string {
+	var b strings.Builder
+	b.Grow(len(tenant) + len(server) + len(tool) + len(actionHash) + len(session) + len(execution) + len(principal) + 6)
+	b.WriteString(tenant)
+	b.WriteString(semanticDedupeSeparator)
+	b.WriteString(server)
+	b.WriteString(semanticDedupeSeparator)
+	b.WriteString(tool)
+	b.WriteString(semanticDedupeSeparator)
+	b.WriteString(actionHash)
+	b.WriteString(semanticDedupeSeparator)
+	b.WriteString(session)
+	b.WriteString(semanticDedupeSeparator)
+	b.WriteString(execution)
+	b.WriteString(semanticDedupeSeparator)
+	b.WriteString(principal)
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
-// dedupeBegin reserves the singleflight slot for a (server, tool,
-// EventID) tuple. Three returns:
+// semanticDedupeKeyForCall derives the dedupe key from the CallMetadata
+// stashed in ctx plus the tool-call's canonical action hash. Returns
+// the empty string when metadata is missing or any identity field is
+// blank; dedupeBegin treats an empty key as "dedupe disabled" so the
+// real fail-closed path (errMissingMCPMetadata in EvaluateToolCall)
+// stays the single source of identity validation.
+func semanticDedupeKeyForCall(ctx context.Context, params ToolCallParams, server string) string {
+	meta, ok := CallMetadataFromContext(ctx)
+	if !ok || meta.Tenant == "" || meta.SessionID == "" || meta.ExecutionID == "" {
+		return ""
+	}
+	var targetPath string
+	if parsed, _ := parseArgsForDescriptor(params.Arguments); parsed != nil {
+		targetPath = extractTargetPathFromArgs(parsed)
+	}
+	actionHash := ActionTupleHash(meta.Tenant, server, params.Name, targetPath)
+	return computeSemanticDedupeKey(meta.Tenant, server, params.Name, actionHash, meta.SessionID, meta.ExecutionID, meta.Principal)
+}
+
+// dedupeBegin reserves the singleflight slot for the supplied semantic
+// dedupe key. Three returns:
 //
 //   - (entry, true, _)  caller is the winner; runs the body, then MUST
 //     call dedupeFinish so waiters unblock and the cache fills (or
 //     clears, on error).
 //   - (_, false, hit)   caller observed an already-completed entry;
 //     short-circuits with hit.result / hit.err.
-//   - (_, false, nil)   dedupe is disabled (no factory or no state).
+//   - (_, false, nil)   dedupe is disabled (no state or empty key).
 //
 // When LoadOrStore returns loaded=true but the existing entry is still
 // in flight (done not yet closed), the function blocks on done before
 // returning. Ctx cancellation surfaces as ctx.Err() so a SIGTERM-bound
 // caller doesn't get stuck waiting for a peer's upstream call.
-func dedupeBegin(ctx context.Context, deps ToolCallDeps, params ToolCallParams, server string) (*dedupeEntry, bool, *dedupeEntry) {
-	if deps.EventIDFactory == nil || deps.DedupeState == nil {
+func dedupeBegin(ctx context.Context, deps ToolCallDeps, key string) (*dedupeEntry, bool, *dedupeEntry) {
+	if deps.DedupeState == nil || key == "" {
 		return nil, false, nil
 	}
-	key := dedupeKey(deps, server, params.Name)
 	fresh := &dedupeEntry{done: make(chan struct{})}
 	existing, loaded := deps.DedupeState.LoadOrStore(key, fresh)
 	if !loaded {
@@ -982,14 +1037,14 @@ func dedupeBegin(ctx context.Context, deps ToolCallDeps, params ToolCallParams, 
 // success (err == nil) the entry stays in the map so subsequent retries
 // short-circuit. On error the entry is removed so the next attempt
 // fires upstream fresh — transient failures must not become sticky.
-func dedupeFinish(deps ToolCallDeps, params ToolCallParams, server string, entry *dedupeEntry, result *ToolCallResult, err error) {
+func dedupeFinish(deps ToolCallDeps, key string, entry *dedupeEntry, result *ToolCallResult, err error) {
 	if entry == nil || entry.done == nil {
 		return
 	}
 	entry.result = result
 	entry.err = err
 	close(entry.done)
-	if err != nil && deps.DedupeState != nil && deps.EventIDFactory != nil {
-		deps.DedupeState.Delete(dedupeKey(deps, server, params.Name))
+	if err != nil && deps.DedupeState != nil && key != "" {
+		deps.DedupeState.Delete(key)
 	}
 }

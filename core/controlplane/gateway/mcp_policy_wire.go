@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/cordum/cordum/core/edge"
 	"github.com/cordum/cordum/core/infra/config"
@@ -208,5 +209,14 @@ func BuildMCPPolicyDeps(pipeline *actiongates.Pipeline, gate *gatewayApprovalGat
 		ArtifactStore:   store,
 		ApprovalHandoff: gate,
 		Redactor:        mcp.DefaultRedactor(),
+		// In-process singleflight for retry dedupe. The semantic key
+		// (tenant, server, tool, action_hash, session, execution,
+		// principal) collapses idempotent retries of the same MCP tool
+		// call into a single pre/post pair so audit rows don't double
+		// when a client retries on transient transport failure. The
+		// sync.Map is scoped to this gateway instance — cross-process
+		// dedupe (multi-instance HA) is tracked as a follow-up Sub-B
+		// item; today's gateway is single-instance per deployment unit.
+		DedupeState: &sync.Map{},
 	}
 }
