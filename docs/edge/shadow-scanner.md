@@ -335,3 +335,116 @@ future):
 `shadow.Store.CreateFinding` API. No parallel finding store, no
 parallel ingest pipeline. The Source ID emitted is
 `"k8s-detector-" + ClusterID` so SIEM aggregators can correlate.
+
+### 9.3 EDGE-143.4 — Network-signal aggregator (shipped)
+
+Library package at `core/edge/shadow/network/`. Reads
+operator-supplied egress / proxy logs and emits ShadowAgentFinding
+records for traffic to direct LLM-provider endpoints (Anthropic /
+OpenAI / Google API hosts) from sources lacking a Cordum Edge attach.
+Design doc reference: [kubernetes-ci-shadow-detector-design.md §9](kubernetes-ci-shadow-detector-design.md)
++ binding governor ruling on Q2 PII handling
+([comment-a17f4f1c on task-de50a293](kubernetes-ci-shadow-detector-design.md)).
+
+**NG7 contract — observe-only, no Cordum-side capture.** Cordum does
+**not** intercept network traffic. The detector reads only log records
+the operator has already produced. No raw sockets, no TLS
+termination, no pcap / eBPF, no admission-side packet inspection.
+`TestNetworkDetector_Ingest_NoCaptureNG7` grep-asserts the absence of
+`pcap.*`, `gopacket`, `afpacket`, `net.ListenPacket`,
+`syscall.SOCK_RAW`, `crypto/tls.Server` / `NewListener`, and
+`x/sys/unix.SOCK_RAW` across the package source.
+
+**3 log ingest sources** (design doc §9.2):
+
+| Ingestor                  | Source                          | API |
+|---------------------------|---------------------------------|-----|
+| `network.NewFileIngestor` | Operator log file               | `bufio.Scanner` line-by-line; EOF terminates cleanly; ctx-cancel respected; 256 KiB line cap. |
+| `network.NewSyslogIngestor` | UDP syslog endpoint           | `net.ListenUDP` server bind (READ-only — never `Send`); 200 ms ctx-poll deadline; RFC 5424 messages parsed via shared parser. |
+| `network.NewStdinIngestor` | `io.Reader` (default `os.Stdin`) | `bufio.Scanner`; closes cleanly on EOF; 256 KiB line cap. |
+
+**§9.1 lawful metadata catalog** — the closed set of fields the
+detector persists. `enforceCatalog` strips every field outside the
+catalog at the ProcessRecord boundary so a careless ingestor cannot
+re-leak forbidden values.
+
+| MAY persist     | MUST NOT persist |
+|-----------------|------------------|
+| `hostname` (e.g. `api.anthropic.com`) | Full URLs with query strings |
+| `category` (`anthropic_api` \| `openai_api` \| `google_api`) | IP addresses |
+| `count_bucket` (1 / 10 / 100 / 1000 / 10000 / 100000+) | Bearer tokens / API keys |
+| `workload identity` (post-PII per below) | Request / response bodies |
+| `endpoint_hash` (opaque, operator-supplied) | User-Agent strings |
+
+The store also runs `stripSecretMarkers` again on `EvidenceSummary`
+at write time — two independent strip passes so a regression on one
+side does not silently leak.
+
+**Q2 PII_MODE env flag** (binding governor ruling, GDPR Art. 4(1)
+pseudonym handling). `principal_id` derived from `github.actor` or
+equivalent CI usernames IS personal data; the env flag controls how
+the raw value is transformed before persistence.
+
+| `CORDUM_EDGE_SHADOW_PII_MODE` | Effect |
+|-------------------------------|--------|
+| `pseudonymize` *(default)*    | `principal_id = <first-3-chars-of-raw> + <first-8-hex-chars-of-SHA256(raw)>` — stable correlation handle that does not reveal the full username. |
+| `hash`                        | `principal_id = <first-16-hex-chars-of-SHA256(raw)>` — no prefix; weakest correlation strength still preserved. |
+| `drop`                        | `principal_id = "dropped"` sentinel — no identity propagation whatsoever (strictest mode). |
+
+Invalid env values fail-fast at `network.NewDetector` startup. An
+empty raw input always collapses to the `"dropped"` sentinel
+regardless of mode (no useful pseudonymization of ``).
+
+**§9.3 risk classification** (recorded in finding `risk` field):
+
+| Trigger                                                       | Risk     |
+|---------------------------------------------------------------|----------|
+| Tenant resolves to quarantine (no workload-identity / OIDC mapping) | high |
+| Workload absent from `KnownAttachWorkloadIDs` (no Cordum Edge attach record) | medium |
+| Workload last-attach older than `HeartbeatStaleThreshold` (default 5 min) | high |
+| Workload present and fresh (still observably direct-to-provider)            | low |
+
+**Tenant + principal mapping precedence** (§6.1 / §6.2, recorded in
+`tenant_source` + `principal_source`):
+
+1. `workload_identity` — `Config.WorkloadTenantMap[record.WorkloadID]` hit.
+2. `oidc` — `Config.OIDCTenantMap[record.OIDCSub]` hit when no workload identity.
+3. `quarantine` — terminal default (`cordum.shadow.quarantine`).
+
+**Observability** (Observer interface; design doc §13):
+
+```go
+type Observer interface {
+    RecordFindingEmit(signal, risk, ingestSource string)
+    RecordPIIModeActive(mode string)
+    RecordLogRecord(ingestSource, result string)
+    EmitAudit(event audit.SIEMEvent)
+}
+```
+
+Bounded labels only — `signal` is always `direct_provider_traffic`,
+`risk` is the enum (`low|medium|high|critical`), `ingestSource` is
+`file|syslog|stdin`, `result` is `emitted|skipped_unknown_host|
+skipped_no_hostname|store_error|process_error`. `pii_mode_active` is
+emitted as a gauge label once at `NewDetector` so dashboards see the
+configured mode even before the first finding emits. Hostname /
+category / tenant / workload are NEVER metric labels (high
+cardinality); they live on the persisted finding and on
+`audit.SIEMEvent.Extra`. Audit events use
+`Action="shadow_agent.observed"` / `Decision="observed"` /
+`EventType="edge.shadow_finding_created"` with
+`Extra={finding_id, source_type=network, signal, hostname, category,
+count_bucket, tenant_id, tenant_src, principal_src, risk}`.
+
+**EDGE-141 reuse**: findings persist via `shadow.Store.CreateFinding`
+with `SourceType=network` + `SourceID="network:<Config.SourceID>"`.
+No parallel finding store, no parallel emit pipeline. The §10.1
+typed fields (`hostname`, `evidence_type=network_direct_provider_traffic`,
+`signal_set=[direct_provider_traffic]`, `retention_class=shadow_default`,
+`first_seen` / `last_seen`) ride the same path as the K8s detector
+in §9.2.
+
+**GDPR / UK-DPA processing record**: see
+[managed-settings-deploy.md §11](managed-settings-deploy.md) for the
+operator-facing template that documents data categories, lawful
+basis, retention, controller / processor split, and DSAR contact.

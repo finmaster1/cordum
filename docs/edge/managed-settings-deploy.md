@@ -375,10 +375,118 @@ shippable signal that a fleet has converged.
 | `doctor` shows `managed_settings_compliance: skip` on a managed host | `--managed-settings-path` not configured. | Set `CORDUM_EDGE_MANAGED_SETTINGS_PATH` system-wide via MDM, or pass `--managed-settings-path` in your scheduled doctor run. |
 | `doctor` shows `managed-settings.json not found` | The MDM push has not landed yet (or the path is wrong for the platform). | Check MDM sync status; confirm the platform-specific path matches §3-5 above. |
 
-## 11. Related docs
+## 11. GDPR / UK-DPA processing record (EDGE-143.4)
+
+This template documents the data-processing record operators MUST
+maintain when running the Cordum Edge **network-signal aggregator**
+(see [shadow-scanner.md §9.3](shadow-scanner.md)). The aggregator
+classifies `principal_id` (derived from `github.actor` or equivalent
+CI usernames) as **pseudonymous personal data** per GDPR Art. 4(1) /
+UK-DPA equivalent. The Q2 governor ruling
+([comment-a17f4f1c on task-de50a293](kubernetes-ci-shadow-detector-design.md))
+mandates this record alongside the
+`CORDUM_EDGE_SHADOW_PII_MODE=pseudonymize|hash|drop` env flag.
+
+Treat the following as a copy-and-fill checklist. Replace each
+placeholder with operator-specific values BEFORE production rollout.
+
+### 11.1 Data categories collected
+
+The collected fields are the **§9.1 lawful metadata catalog** — a
+closed set. Any extension requires a fresh ADR + governor re-rule.
+
+| Field            | Source                          | Privacy classification |
+|------------------|---------------------------------|------------------------|
+| `hostname`       | Operator egress / proxy log     | Non-personal — provider endpoint name. |
+| `category`       | Derived (`hostname → category`) | Non-personal — `anthropic_api` / `openai_api` / `google_api`. |
+| `count_bucket`   | Derived (bucketized count)      | Non-personal — order-of-magnitude. Exact request rate NOT retained. |
+| `workload_id`    | Operator log (post-PII)         | **Pseudonymous personal data** under the active PII mode. |
+| `principal_id`   | Derived (`workload_id` post-PII) | **Pseudonymous personal data**. |
+| `endpoint_hash`  | Operator log (opaque)            | Non-personal if operator follows the SHA-based hashing convention. |
+
+Fields **NEVER** collected (enforced by `enforceCatalog` at the
+detector boundary):
+
+- Full URLs with query strings (would leak `api_key=...`).
+- IP addresses (geolocation / network-attribution risk).
+- Bearer tokens / API keys (secret-shape regex enforced).
+- Request / response bodies (content classification risk).
+- User-Agent strings (de-anonymization vector).
+
+### 11.2 Lawful basis
+
+- **GDPR Art. 6(1)(f)** / **UK-DPA s.35** — legitimate interests in
+  **security operations**: identifying unauthorized direct LLM
+  provider traffic from CI runners and developer workstations is
+  necessary to enforce the operator's data-handling and tenant-
+  isolation policies.
+- A balancing test SHOULD be documented per Art. 6(1)(f)(ii). The
+  pseudonymize / hash / drop env flag is the proportionality control:
+  operators choose the minimum identity strength their security
+  posture requires.
+
+### 11.3 Retention
+
+- **Default**: 90 days terminal-retention TTL (`shadow_default` class
+  via `CORDUM_EDGE_SHADOW_RETENTION_DEFAULT`).
+- **Shortened**: `shadow_short` (7 days) for low-stakes deployments.
+- **Extended**: `shadow_long` (365 days) for regulated industries.
+- `detected` findings remain until operator triage (no auto-TTL); only
+  terminal states (`resolved` / `suppressed`) carry the per-class TTL.
+- See [shadow-scanner.md §9.1](shadow-scanner.md) for the env-var
+  override syntax (`time.ParseDuration`, e.g. `168h` for 7 days).
+
+### 11.4 Controller / Processor split
+
+- **Operator = data controller.** The operator decides which logs
+  feed the aggregator, which workload identities map to which
+  tenants, and what PII mode to apply. The operator's DPO owns DSAR
+  responses.
+- **Cordum = data processor.** Cordum reads the operator-supplied
+  log stream (NG7: no Cordum-side traffic capture), applies the
+  configured PII mode, persists findings to the operator's own
+  Redis-backed shadow store, and never exfiltrates findings to
+  Cordum-controlled infrastructure.
+- A processor agreement under GDPR Art. 28 / UK-DPA s.59 SHOULD
+  document this split. Cordum publishes no SaaS variant of this
+  pipeline; processor obligations apply only to the open-source
+  library code.
+
+### 11.5 DSAR contact
+
+Operators MUST publish a Data Subject Access Request contact route.
+Recommended template:
+
+```
+DSAR Contact:
+  Email: dpo@<operator-domain>
+  Acknowledgement SLA: 5 business days
+  Response SLA: 30 calendar days (GDPR Art. 12(3))
+  Verification: <operator-defined identity proof>
+  Scope: principal_id values matching the requester's CI identity
+         (e.g. github.actor=<requester-handle>) across all tenants
+         the requester is associated with.
+  Erasure: Operator runs `cordumctl edge shadow resolve <finding_id>
+           --reason='gdpr_erasure'` for each matching finding;
+           terminal-retention TTL applies thereafter.
+```
+
+The Cordum library itself does not expose a DSAR endpoint — operators
+serve DSAR requests from their own controller-side tooling.
+
+### 11.6 Cross-reference
+
+- `CORDUM_EDGE_SHADOW_PII_MODE` env flag — see
+  [shadow-scanner.md §9.3](shadow-scanner.md) for the three modes
+  and the worked SHA-256 example.
+- Q2 binding governor ruling lives on the design-doc parent task
+  ([comment-a17f4f1c on task-de50a293](kubernetes-ci-shadow-detector-design.md)).
+
+## 12. Related docs
 
 - [Managed settings template (synthetic excerpt)](managed-settings-template.md)
 - [cordumctl edge doctor — local diagnostics](cordumctl-edge-doctor.md)
 - [Cordum Edge index](README.md)
 - [cordumctl edge claude](cli.md)
 - [Edge configuration](configuration.md)
+- [Shadow scanner — EDGE-143.4 network aggregator §9.3](shadow-scanner.md)
