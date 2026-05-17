@@ -86,9 +86,9 @@ func PreviewAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.W
 			path, err)
 		return 2
 	}
-	fmt.Fprintf(stdout, "preview: %s (%s)\n", adapter.ClientName(), path)
-	fmt.Fprintln(stdout, redactSecrets(preview))
-	fmt.Fprintln(stdout, "next: re-run with `attach` + `--apply` to write the merged config (existing file backed up to <path>.bak.<unix_ms>)")
+	_, _ = fmt.Fprintf(stdout, "preview: %s (%s)\n", adapter.ClientName(), path)
+	_, _ = fmt.Fprintln(stdout, redactSecrets(preview))
+	_, _ = fmt.Fprintln(stdout, "next: re-run with `attach` + `--apply` to write the merged config (existing file backed up to <path>.bak.<unix_ms>)")
 	return 0
 }
 
@@ -98,18 +98,18 @@ func PreviewAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.W
 // target. Returns 0 on success, 2 on parse / IO failure.
 func ApplyAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Writer) int {
 	if adapter == nil {
-		fmt.Fprintln(stdout, "apply: adapter is nil")
+		_, _ = fmt.Fprintln(stdout, "apply: adapter is nil")
 		return 2
 	}
 	path := adapter.ConfigPath()
 	existing, missing, err := readMaybeMissing(path)
 	if err != nil {
-		fmt.Fprintf(stdout, "apply: read %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(stdout, "apply: read %s: %v\n", path, err)
 		return 2
 	}
 	merged, _, err := adapter.ReadAndMerge(existing, gateway)
 	if err != nil {
-		fmt.Fprintf(stdout, "apply: parse %s failed: %v (refusing to overwrite a config we cannot reason about)\n",
+		_, _ = fmt.Fprintf(stdout, "apply: parse %s failed: %v (refusing to overwrite a config we cannot reason about)\n",
 			path, err)
 		return 2
 	}
@@ -117,19 +117,19 @@ func ApplyAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Wri
 	if !missing {
 		backupPath, err = backupExistingFile(path, existing)
 		if err != nil {
-			fmt.Fprintf(stdout, "apply: backup %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(stdout, "apply: backup %s: %v\n", path, err)
 			return 2
 		}
 	}
 	if err := atomicWriteAttachConfig(path, merged); err != nil {
-		fmt.Fprintf(stdout, "apply: write %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(stdout, "apply: write %s: %v\n", path, err)
 		return 2
 	}
 	if backupPath != "" {
-		fmt.Fprintf(stdout, "attached cordum-gateway to %s at %s; backup at %s\n",
+		_, _ = fmt.Fprintf(stdout, "attached cordum-gateway to %s at %s; backup at %s\n",
 			adapter.ClientName(), path, backupPath)
 	} else {
-		fmt.Fprintf(stdout, "attached cordum-gateway to %s at %s (created new file; no prior backup)\n",
+		_, _ = fmt.Fprintf(stdout, "attached cordum-gateway to %s at %s (created new file; no prior backup)\n",
 			adapter.ClientName(), path)
 	}
 	return 0
@@ -140,31 +140,31 @@ func ApplyAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Wri
 // no backup is found.
 func RollbackAttach(adapter AttachAdapter, stdout io.Writer) int {
 	if adapter == nil {
-		fmt.Fprintln(stdout, "rollback: adapter is nil")
+		_, _ = fmt.Fprintln(stdout, "rollback: adapter is nil")
 		return 2
 	}
 	path := adapter.ConfigPath()
 	newest, err := newestBackup(path)
 	if err != nil {
-		fmt.Fprintf(stdout, "rollback: locate backups for %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(stdout, "rollback: locate backups for %s: %v\n", path, err)
 		return 2
 	}
 	if newest == "" {
-		fmt.Fprintf(stdout, "rollback: no backup found for %s (expected %s.bak.<unix_ms>)\n", path, path)
+		_, _ = fmt.Fprintf(stdout, "rollback: no backup found for %s (expected %s.bak.<unix_ms>)\n", path, path)
 		return 2
 	}
 	if err := os.Rename(newest, path); err != nil {
 		// Cross-filesystem rename failure: fall back to copy + remove.
 		if copyErr := copyFile(newest, path); copyErr != nil {
-			fmt.Fprintf(stdout, "rollback: rename failed (%v) and copy fallback failed (%v)\n", err, copyErr)
+			_, _ = fmt.Fprintf(stdout, "rollback: rename failed (%v) and copy fallback failed (%v)\n", err, copyErr)
 			return 2
 		}
 		if rmErr := os.Remove(newest); rmErr != nil {
-			fmt.Fprintf(stdout, "rollback: restored via copy but backup remove failed: %v\n", rmErr)
+			_, _ = fmt.Fprintf(stdout, "rollback: restored via copy but backup remove failed: %v\n", rmErr)
 			// Restored content is in place; backup leftover is harmless.
 		}
 	}
-	fmt.Fprintf(stdout, "rolled back %s to %s\n", path, filepath.Base(newest))
+	_, _ = fmt.Fprintf(stdout, "rolled back %s to %s\n", path, filepath.Base(newest))
 	return 0
 }
 
