@@ -1364,6 +1364,12 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents/{finding_id}/suppress", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}/suppress", s.handleSuppressShadowAgentFinding))
 	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents/{finding_id}/ignore", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}/ignore", s.handleSuppressShadowAgentFinding))
 	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents/{finding_id}/remediation", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}/remediation", s.handleGenerateShadowAgentRemediation))
+	// EDGE-143.6 — Shadow exception declarations (§10.3). Step-up auth
+	// (Q8 binding ruling) gates risk=high CREATE + matching REVOKE.
+	s.registerRoute(mux, "POST /api/v1/edge/shadow/exception", s.instrumented("/api/v1/edge/shadow/exception", s.handleCreateShadowException))
+	s.registerRoute(mux, "GET /api/v1/edge/shadow/exception/{exception_id}", s.instrumented("/api/v1/edge/shadow/exception/{exception_id}", s.handleGetShadowException))
+	s.registerRoute(mux, "DELETE /api/v1/edge/shadow/exception/{exception_id}", s.instrumented("/api/v1/edge/shadow/exception/{exception_id}", s.handleRevokeShadowException))
+	s.registerRoute(mux, "GET /api/v1/edge/shadow/exceptions", s.instrumented("/api/v1/edge/shadow/exceptions", s.handleListShadowExceptions))
 	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleListMCPUpstreams))
 	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams/list", s.instrumented("/api/v1/edge/mcp/upstreams/list", s.handleListMCPUpstreams))
 	s.registerRoute(mux, "POST /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleCreateMCPUpstream))

@@ -328,6 +328,28 @@ type Store interface {
 	// SuppressFinding transitions a detected finding to suppressed. Same
 	// idempotence/conflict rules as ResolveFinding apply.
 	SuppressFinding(ctx context.Context, tenantID, findingID string, req SuppressRequest) (*ShadowAgentFinding, error)
+
+	// EDGE-143.6 — exception API (§10.3).
+
+	// CreateException persists a new operator-defined exception. Returns
+	// ErrExceptionLimitExceeded when the tenant index is at cap.
+	CreateException(ctx context.Context, req CreateExceptionRequest) (*Exception, error)
+	// GetException loads an exception by id within the given tenant;
+	// returns ErrNotFound on cross-tenant probe (parity with GetFinding).
+	GetException(ctx context.Context, tenantID, exceptionID string) (*Exception, error)
+	// ListExceptions returns a bounded page of exceptions matching the
+	// query. Tenant-scoped; scope filters (source_type, risk) apply
+	// in-memory because the index dimensionality is bounded.
+	ListExceptions(ctx context.Context, q ListExceptionsQuery) (ExceptionPage, error)
+	// RevokeException transitions an active exception to revoked.
+	// Idempotent when already revoked with the same RevokedBy; returns
+	// ErrTerminalConflict on conflicting double-revoke.
+	RevokeException(ctx context.Context, tenantID, exceptionID string, req RevokeExceptionRequest) (*Exception, error)
+	// MatchActiveExceptions returns the bounded set of active,
+	// unexpired exceptions matching the given finding's scope. Used by
+	// CreateFinding at emit time to stamp exception_id on suppressed
+	// findings.
+	MatchActiveExceptions(ctx context.Context, f *ShadowAgentFinding) ([]Exception, error)
 }
 
 // Sentinel errors. Handlers map these to specific HTTP status codes.

@@ -200,6 +200,12 @@ func (s *server) handleCreateShadowAgentFinding(w http.ResponseWriter, r *http.R
 		return
 	}
 	s.emitShadowFindingAudit(r, audit.EventShadowAgentDetected, principalID, created, "")
+	// EDGE-143.6 — if the store stamped an ExceptionID at emit time,
+	// emit the per-finding shadow_agent.exception_applied audit event
+	// carrying the exception's recorded step_up_factor.
+	if created != nil && created.ExceptionID != "" {
+		s.emitShadowExceptionAppliedAudit(r, principalID, created)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, created)

@@ -65,6 +65,13 @@ const (
 	// HTTP 422 Unprocessable Entity (request well-formed but execution state
 	// precludes the operation).
 	edgeErrCodeEventListTooLarge = "event_list_too_large"
+	// EDGE-143.6 — POST /api/v1/edge/shadow/exception (and the matching
+	// DELETE) refuses the operation because the scope risk is high and
+	// the caller did not satisfy the Q8 step-up auth gate (admin role
+	// or PermShadowExceptionHighRisk). Maps to HTTP 403 Forbidden so
+	// SIEM correlation can distinguish step-up rejection from baseline
+	// access denial.
+	edgeErrCodeStepUpRequired = "step_up_required"
 )
 
 // edgeErrorEnvelope is the on-the-wire shape of a /api/v1/edge/* error.

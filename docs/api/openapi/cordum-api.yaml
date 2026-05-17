@@ -2129,6 +2129,197 @@ paths:
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
           $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow/exception:
+    post:
+      operationId: createShadowException
+      summary: Create an operator-defined shadow exception (EDGE-143.6)
+      description: |
+        Persists an operator-signed exception declaration that suppresses
+        future ShadowAgent findings matching its scope predicate
+        (source_type + source_id + risk_level + signal_set). Matching is
+        applied at finding emit time: matching findings are stamped with
+        exception_id, false_positive_reason="operator_exception", and
+        status=managed_skip; they are excluded from default-filter list
+        queries.
+
+        Q8 step-up auth: when scope_risk_level is "high", the caller MUST
+        hold the `admin` legacy role OR the `shadow.exception.high_risk`
+        permission. Failure returns 403 with code `step_up_required` and
+        details.required = "mfa_recent|signed_admin_token". The persisted
+        Exception records which factor satisfied the gate so SIEM rules
+        can pivot on the auth tier at the time of action.
+
+        expires_at MUST be in the future and within 90 days (§10.3
+        "longer requires re-affirmation").
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShadowExceptionRequest'
+      responses:
+        '201':
+          description: Exception accepted and persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowException'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '429':
+          description: Per-tenant exception cap reached (code=conflict).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeError'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow/exception/{exception_id}:
+    get:
+      operationId: getShadowException
+      summary: Read a single shadow exception (EDGE-143.6)
+      description: |
+        Returns the exception record scoped to the caller's tenant.
+        Cross-tenant probes return 404 (never 403) to avoid leaking
+        tuple existence.
+      tags:
+      - Edge
+      parameters:
+      - name: exception_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      responses:
+        '200':
+          description: Exception record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowException'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+    delete:
+      operationId: revokeShadowException
+      summary: Revoke an active shadow exception (EDGE-143.6)
+      description: |
+        Transitions an active exception to revoked. Revoke uses the SAME
+        auth tier as the original create: if the exception's
+        scope_risk_level is "high", the caller MUST satisfy the step-up
+        gate. Failure returns 403 with code `step_up_required`.
+
+        Idempotent when the exception is already revoked AND the caller
+        principal matches the original revoker; conflicting double-revoke
+        returns 409.
+      tags:
+      - Edge
+      parameters:
+      - name: exception_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeShadowExceptionRequest'
+      responses:
+        '204':
+          description: Exception revoked.
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow/exceptions:
+    get:
+      operationId: listShadowExceptions
+      summary: List shadow exceptions for the caller's tenant (EDGE-143.6)
+      description: |
+        Returns a bounded, cursor-paginated page of exceptions for the
+        requested tenant. Optional filters: status (active|revoked|
+        expired), source_type (local|kubernetes|ci|network), risk
+        (low|medium|high|critical).
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [active, revoked, expired]
+      - name: source_type
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [local, kubernetes, ci, network]
+      - name: risk
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [low, medium, high, critical]
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Page of exceptions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListShadowExceptionsResponse'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
   /api/v1/edge/binary-integrity/events:
     post:
       operationId: ingestBinaryVerify
@@ -9963,6 +10154,108 @@ components:
           type: string
           format: date-time
           description: Optional time-bound hint; the store records but does not auto-revert.
+    ShadowException:
+      type: object
+      required: [exception_id, tenant_id, created_by, created_at, expires_at, scope_source_type, scope_risk_level, status, step_up_factor]
+      description: |
+        Operator-defined exception declaration (EDGE-143.6 / §10.3). Suppresses
+        future ShadowAgent findings matching its scope predicate. The
+        step_up_factor records which auth tier satisfied the Q8 step-up gate
+        at creation time so SIEM rules can pivot on authority-at-time-of-action.
+      properties:
+        exception_id:
+          type: string
+          description: Opaque id with `shadow_exc_` prefix.
+        tenant_id:
+          type: string
+        created_by:
+          type: string
+          description: Authenticated principal at create time. Not trusted from the wire body.
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: Maximum 90 days from creation (longer requires re-affirmation per §10.3).
+        reason:
+          type: string
+          description: Free-text operator rationale, up to 512 bytes.
+        scope_source_type:
+          type: string
+          enum: [local, kubernetes, ci, network]
+        scope_source_id:
+          type: string
+          description: Optional detector instance id; further narrows scope.
+        scope_signal_set:
+          type: array
+          items:
+            type: string
+          description: At most 16 detector signal names; any-of overlap with a finding's signal_set satisfies the predicate.
+        scope_risk_level:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [active, revoked, expired]
+        step_up_factor:
+          type: string
+          enum: [mfa_recent, signed_admin_token, none]
+          description: |
+            Auth tier that satisfied the Q8 step-up gate at create time.
+            "signed_admin_token" when the legacy admin role matched;
+            "mfa_recent" when the explicit shadow.exception.high_risk
+            permission matched; "none" when the gate was not required.
+        revoked_by:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+        revocation_reason:
+          type: string
+    CreateShadowExceptionRequest:
+      type: object
+      required: [expires_at, scope_source_type, scope_risk_level]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+          description: MUST be in the future and within 90 days of now.
+        reason:
+          type: string
+          maxLength: 512
+        scope_source_type:
+          type: string
+          enum: [local, kubernetes, ci, network]
+        scope_source_id:
+          type: string
+          maxLength: 128
+        scope_signal_set:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            pattern: '^[a-z0-9_]{1,32}$'
+        scope_risk_level:
+          type: string
+          enum: [low, medium, high, critical]
+    RevokeShadowExceptionRequest:
+      type: object
+      description: Optional body for revoking an exception. Empty body is allowed.
+      properties:
+        reason:
+          type: string
+          maxLength: 512
+    ListShadowExceptionsResponse:
+      type: object
+      required: [exceptions]
+      properties:
+        exceptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShadowException'
+        next_cursor:
+          type: string
     ShadowAgentRemediationRequest:
       type: object
       description: Optional body for generating a remediation plan. Both fields default to the generator's documented defaults when omitted.

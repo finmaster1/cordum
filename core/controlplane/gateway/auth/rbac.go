@@ -34,6 +34,17 @@ const (
 	// impersonation through the delegation wire path. See #198
 	// Blocker 1 follow-up on split/delegation-security.
 	PermDelegationImpersonate  = "delegation.impersonate"
+	// PermShadowExceptionHighRisk authorises an operator to create or
+	// revoke an exception scoped to risk=high findings (EDGE-143.6, Q8
+	// binding governor ruling on task-de50a293). Acts as the step-up
+	// analogue to PermDelegationImpersonate: holders are presumed to
+	// have completed the recent-MFA workflow before the grant. Without
+	// this permission OR the admin legacy role, risk=high exception
+	// CREATE/REVOKE returns 403 with code `step_up_required`. Findings
+	// matching the exception scope are silenced from default operator
+	// queries, so this gate is materially privilege-equivalent to
+	// modifying the audit posture for an entire scope of findings.
+	PermShadowExceptionHighRisk = "shadow.exception.high_risk"
 	PermWorkflowsRead          = "workflows.read"
 	PermWorkflowsWrite         = "workflows.write"
 	PermWorkersRead            = "workers.read"
@@ -116,6 +127,7 @@ var AllPermissions = []string{
 	PermRolesRead, PermRolesWrite,
 	PermEvalsDatasetsRead, PermEvalsDatasetsWrite, PermEvalsDatasetsDelete,
 	PermEvalsRunsExecute, PermEvalsRunsRead, PermEvalsRunsDelete,
+	PermDelegationImpersonate, PermShadowExceptionHighRisk,
 }
 
 // ---------------------------------------------------------------------------

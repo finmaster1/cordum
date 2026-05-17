@@ -247,6 +247,29 @@ func (s *RedisStore) CreateFinding(ctx context.Context, req CreateFindingRequest
 	if err != nil {
 		return nil, err
 	}
+
+	// EDGE-143.6 — emit-time exception suppression. If the caller did
+	// NOT pre-stamp an exception_id (the operator-resolve path may
+	// pre-stamp), scan the tenant's active exception index for a scope
+	// match. A match flips the finding to managed_skip with
+	// false_positive_reason="operator_exception" before persistence so
+	// the suppressed record never appears in the default detected
+	// stream. The shadow_agent.exception_applied audit event is emitted
+	// by the gateway handler after CreateFinding returns (the store
+	// does not own the audit exporter).
+	if finding.ExceptionID == "" {
+		matches, matchErr := s.MatchActiveExceptions(ctx, finding)
+		if matchErr != nil {
+			return nil, matchErr
+		}
+		if len(matches) > 0 {
+			applied := matches[0]
+			finding.ExceptionID = applied.ExceptionID
+			finding.FalsePositiveReason = FalsePositiveReasonOperatorException
+			finding.Status = FindingStatusManagedSkip
+		}
+	}
+
 	payload, err := json.Marshal(finding)
 	if err != nil {
 		return nil, fmt.Errorf("shadow finding: marshal: %w", err)
@@ -308,6 +331,11 @@ func (s *RedisStore) CreateFinding(ctx context.Context, req CreateFindingRequest
 		// when GETing the missing record (stale index cleanup, below).
 		_ = s.client.Del(ctx, key).Err()
 		return nil, fmt.Errorf("shadow finding: pipeline: %w", err)
+	}
+	// EDGE-143.6 — record membership in the exception's per-exception
+	// finding index. Best-effort; index churn must not fail the create.
+	if finding.ExceptionID != "" {
+		_ = s.recordExceptionMembership(ctx, finding.ExceptionID, finding.FindingID, finding.CreatedAt)
 	}
 	return finding, nil
 }
@@ -475,6 +503,14 @@ func (s *RedisStore) listFindingsByMultiSignal(
 	normSignals []string,
 	limit int,
 ) (FindingPage, error) {
+	// Defence-in-depth: handler-layer parseShadowFindingListQuery already
+	// caps the signal set at maxShadowSignalSetEntries, but re-checking
+	// here ensures a future internal caller that bypasses the handler
+	// (e.g. a job runner or sibling store wrapper) cannot trigger
+	// unbounded fan-out across signal indexes.
+	if len(normSignals) > maxShadowSignalSetEntries {
+		return FindingPage{}, fmt.Errorf("%w: signals exceeds max %d entries", ErrValidation, maxShadowSignalSetEntries)
+	}
 	// Defence-in-depth: ListFindings already clamps via
 	// clampListPageSize, but re-clamping in-scope surfaces the bound
 	// at the make() sites below for static-analysis dataflow

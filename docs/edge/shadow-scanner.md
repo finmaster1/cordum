@@ -448,3 +448,82 @@ in §9.2.
 [managed-settings-deploy.md §11](managed-settings-deploy.md) for the
 operator-facing template that documents data categories, lawful
 basis, retention, controller / processor split, and DSAR contact.
+
+### 9.4 EDGE-143.6 — Operator-defined exception API (shipped)
+
+Adds the operator-signed exception API from
+[kubernetes-ci-shadow-detector-design.md §10.3](kubernetes-ci-shadow-detector-design.md).
+Gated by the Q8 binding governor ruling on task-de50a293
+(comment-a17f4f1c): risk=high exception creation **and revocation**
+require step-up auth.
+
+**Endpoints** (mounted under `/api/v1/edge/shadow/`):
+
+| Method + path | Operation | Auth |
+| --- | --- | --- |
+| POST `/api/v1/edge/shadow/exception` | Create an exception | baseline + step-up if `scope_risk_level=high` |
+| GET `/api/v1/edge/shadow/exception/{exception_id}` | Read one | baseline |
+| DELETE `/api/v1/edge/shadow/exception/{exception_id}` | Revoke | baseline + step-up if original's `scope_risk_level=high` |
+| GET `/api/v1/edge/shadow/exceptions` | List (paginated) | baseline |
+
+Baseline is `requireEdgePermissionOrRole(auth.PermAuditExport, "admin", "user")`
+— the same envelope EDGE-141 uses for the finding lifecycle. The
+step-up gate is `requirePermissionOrRole(auth.PermShadowExceptionHighRisk, "admin")`
+analogous to `auth.PermDelegationImpersonate` (no parallel auth
+subsystem). Step-up failure returns 403 with the typed code
+`step_up_required` and `details.required = "mfa_recent|signed_admin_token"`.
+
+**Scope predicate**: an Exception matches a Finding when all of the
+following hold: tenants agree, `scope_source_type` matches
+`finding.source_type`, `scope_source_id` is empty OR equals
+`finding.source_id`, `scope_risk_level` equals `finding.risk`, and
+`scope_signal_set` is empty OR overlaps `finding.signal_set` (any-of).
+Expired or revoked exceptions never match.
+
+**Suppression at emit time**: `RedisStore.CreateFinding` calls
+`MatchActiveExceptions` after validation, before persistence. A scope
+match stamps `exception_id`, sets `false_positive_reason="operator_exception"`,
+and flips `status=managed_skip` on the finding before the index
+pipeline runs. The existing `IncludeManagedSkip=false` default on
+`ListFindings` then hides the suppressed record from operator queries;
+`?include_managed_skip=true` returns them. The detector itself never
+auto-creates exceptions.
+
+**Expiry**: `expires_at` is required, must be in the future, and may
+not exceed 90 days from creation (§10.3 "longer requires re-affirmation").
+Expired exceptions stop matching at the next `MatchActiveExceptions`
+scan; `GetException` lazily promotes the status from `active` to
+`expired` on read.
+
+**Audit events** (severity HIGH when scope is high/critical, MEDIUM
+for medium, INFO for low):
+
+- `shadow_agent.exception_created` — emitted by the POST handler.
+  Extra: `exception_id, scope_source_type, scope_risk_level,
+  step_up_factor, expires_at, scope_source_id?, reason?`.
+- `shadow_agent.exception_revoked` — emitted by the DELETE handler.
+  Same Extra plus the revocation `reason?`.
+- `shadow_agent.exception_applied` — emitted by the POST
+  `/api/v1/edge/shadow-agents` handler when `CreateFinding` returns a
+  finding stamped with `ExceptionID`. Extra:
+  `exception_id, finding_id, scope_source_type, scope_risk_level,
+  step_up_factor`. The `step_up_factor` is the value persisted on the
+  Exception at create time, so SIEM rules can pivot on
+  authority-at-time-of-action without joining against a live RBAC
+  snapshot.
+
+**Step-up factor mapping** (`StepUpFactor` enum):
+
+- `signed_admin_token` — caller satisfied the gate via the legacy
+  `admin` role.
+- `mfa_recent` — caller satisfied via the explicit
+  `shadow.exception.high_risk` RBAC permission grant (presumes
+  recent-MFA workflow completed before the grant).
+- `none` — gate not required (scope risk is `medium` or `low`).
+  Audit events still record `"none"` so consumers can pivot on
+  field-presence without nil checks.
+
+**Per-tenant cap**: at most 1000 active exceptions per tenant; the
+1001st create returns HTTP 429 with the existing `conflict` envelope
+code. The cap bounds the `MatchActiveExceptions` scan that runs inline
+on every finding ingest.

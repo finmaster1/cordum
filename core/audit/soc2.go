@@ -121,6 +121,13 @@ func DefaultSOC2Mapping() SOC2Mapping {
 		EventShadowAgentDetected:   {"CC7.2"},
 		EventShadowAgentResolved:   {"CC7.2", "CC8.1"},
 		EventShadowAgentSuppressed: {"CC7.2", "CC8.1"},
+		// EDGE-143.6 — operator exception lifecycle (§10.3 + §11.1).
+		// Creation/revocation are operator change-management evidence
+		// (CC8.1). Apply events fit detection-control monitoring (CC7.2)
+		// because they record which findings were silenced.
+		EventShadowAgentExceptionCreated: {"CC7.2", "CC8.1"},
+		EventShadowAgentExceptionRevoked: {"CC7.2", "CC8.1"},
+		EventShadowAgentExceptionApplied: {"CC7.2"},
 	}
 }
 

@@ -139,6 +139,18 @@ const (
 	EventShadowAgentResolved   = "shadow_agent.resolved"
 	EventShadowAgentSuppressed = "shadow_agent.suppressed"
 
+	// EventShadowAgentException* are emitted by the EDGE-143.6 exception
+	// API handlers + the store's emit-time suppression hook. Extra
+	// carries exception_id, scope_source_type, scope_risk_level,
+	// expires_at, and step_up_factor (mfa_recent / signed_admin_token /
+	// none) so SIEM rules can pivot on whether the operator's auth tier
+	// matched the Q8 step-up requirement at the time of action.
+	// .exception_applied additionally carries finding_id for the
+	// suppressed finding.
+	EventShadowAgentExceptionCreated = "shadow_agent.exception_created"
+	EventShadowAgentExceptionRevoked = "shadow_agent.exception_revoked"
+	EventShadowAgentExceptionApplied = "shadow_agent.exception_applied"
+
 	// EventActionGateDenied is emitted by the Safety Kernel when an
 	// action-layer gate (tenant / file / url / mcp / mutation /
 	// provenance) short-circuits the legacy rule loop with a non-ALLOW
