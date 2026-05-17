@@ -27,7 +27,7 @@ func actionGateHTTPStatus(code string) int {
 		return http.StatusNotFound
 	case actiongates.CodeConflict:
 		return http.StatusConflict
-	case actiongates.CodeServiceUnavailable:
+	case actiongates.CodeServiceUnavailable, actiongates.CodeResolverError:
 		return http.StatusServiceUnavailable
 	case actiongates.CodeInternalError:
 		return http.StatusInternalServerError
@@ -51,7 +51,7 @@ func actionGateEdgeErrCode(code string) string {
 		return edgeErrCodeNotFound
 	case actiongates.CodeConflict:
 		return edgeErrCodeConflict
-	case actiongates.CodeServiceUnavailable:
+	case actiongates.CodeServiceUnavailable, actiongates.CodeResolverError:
 		return edgeErrCodeServiceUnavailable
 	case actiongates.CodeInternalError:
 		return edgeErrCodeInternalError
@@ -110,10 +110,10 @@ func sanitizeActionGateDetails(dec actiongates.ActionGateDecision) map[string]an
 func writeActionGatePolicyError(w http.ResponseWriter, r *http.Request, mode string, dec actiongates.ActionGateDecision) {
 	if dec.Code == actiongates.CodeRequireHuman && mode == "simulate" {
 		body := map[string]any{
-			"decision":  pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN.String(),
-			"reason":    dec.Reason,
-			"rule_id":   dec.GateID,
-			"gate":      dec.GateID,
+			"decision":   pb.DecisionType_DECISION_TYPE_REQUIRE_HUMAN.String(),
+			"reason":     dec.Reason,
+			"rule_id":    dec.GateID,
+			"gate":       dec.GateID,
 			"sub_reason": dec.SubReason,
 		}
 		w.Header().Set("Content-Type", "application/json")

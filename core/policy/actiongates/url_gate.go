@@ -5,11 +5,11 @@ import (
 	"net"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cordum/cordum/core/infra/config"
 	pb "github.com/cordum/cordum/core/protocol/pb/v1"
+	"golang.org/x/sync/singleflight"
 )
 
 // URLGate blocks outbound URL access to cloud metadata services, known
@@ -18,31 +18,25 @@ import (
 // prompt-stash signature.
 //
 // Resolution uses an injectable HostResolver (default: net.DefaultResolver)
-// so DNS rebinding tests are deterministic. A small LRU cache memoizes
-// resolution results for 60s to keep per-request latency predictable.
+// so DNS rebinding tests are deterministic. A bounded LRU cache memoizes
+// successful resolution results briefly to keep per-request latency
+// predictable without allowing attacker-chosen host cardinality to grow
+// memory without limit.
 type URLGate struct {
-	resolver    HostResolver
-	domainSeen  func(host string) bool
-	resCacheMu  sync.Mutex
-	resCache    map[string]resolverCacheEntry
-	resCacheTTL time.Duration
-	// resCacheMax bounds the resolver cache so attacker-influenced host
-	// inputs cannot grow it without limit. Inserts past the cap evict
-	// expired entries first, then drop the soonest-to-expire entry.
-	resCacheMax int
+	resolver      HostResolver
+	domainSeen    func(host string) bool
+	resCache      *urlGateResolverCache
+	resCacheTTL   time.Duration
+	resolverGroup singleflight.Group
 }
 
-type resolverCacheEntry struct {
-	ips    []string
-	err    error
-	expiry time.Time
-}
+// MaxResolverCacheEntries bounds attacker-influenced resolver cache
+// cardinality while leaving room for normal production host churn.
+const MaxResolverCacheEntries = 2048
 
-// defaultResolverCacheMax bounds the URL gate's resolver cache. Sized
-// large enough to absorb realistic traffic spikes (a few hundred unique
-// hosts per minute) while small enough to cap memory growth at a few
-// hundred KiB even when every entry holds the maximum IP set.
-const defaultResolverCacheMax = 4096
+// ResolverCacheTTL is the default lifetime for successful DNS answers;
+// stale entries are re-resolved so security decisions do not trust old IPs.
+const ResolverCacheTTL = 5 * time.Minute
 
 // URLGateOptions configures the URL gate. Resolver is required for DNS
 // rebinding tests; DomainSeen is optional and feeds the REQUIRE_HUMAN
@@ -64,19 +58,18 @@ func NewURLGate(opts URLGateOptions) *URLGate {
 		resolver = netResolver{}
 	}
 	ttl := opts.ResolverTTL
-	if ttl == 0 {
-		ttl = 60 * time.Second
+	if ttl <= 0 {
+		ttl = ResolverCacheTTL
 	}
 	maxEntries := opts.ResolverCacheMax
 	if maxEntries <= 0 {
-		maxEntries = defaultResolverCacheMax
+		maxEntries = MaxResolverCacheEntries
 	}
 	return &URLGate{
 		resolver:    resolver,
 		domainSeen:  opts.DomainSeen,
-		resCache:    make(map[string]resolverCacheEntry),
+		resCache:    newURLGateResolverCache(maxEntries),
 		resCacheTTL: ttl,
-		resCacheMax: maxEntries,
 	}
 }
 
@@ -90,15 +83,15 @@ func (netResolver) LookupHost(ctx context.Context, host string) ([]string, error
 
 // metadataHosts: hostnames that always indicate a cloud metadata service.
 var metadataHosts = map[string]string{
-	"metadata.google.internal":        "gcp",
-	"metadata.azure.com":              "azure",
-	"169.254.169.254":                 "aws",
-	"169.254.170.2":                   "aws_ecs",
-	"100.100.100.200":                 "alibaba",
-	"fd00:ec2::254":                   "aws_v6",
-	"fd00:ec2:0:0:0:0:0:254":          "aws_v6",
-	"fe80::a9fe:a9fe":                 "azure_link_local_v6",
-	"fe80:0:0:0:0:0:a9fe:a9fe":        "azure_link_local_v6",
+	"metadata.google.internal": "gcp",
+	"metadata.azure.com":       "azure",
+	"169.254.169.254":          "aws",
+	"169.254.170.2":            "aws_ecs",
+	"100.100.100.200":          "alibaba",
+	"fd00:ec2::254":            "aws_v6",
+	"fd00:ec2:0:0:0:0:0:254":   "aws_v6",
+	"fe80::a9fe:a9fe":          "azure_link_local_v6",
+	"fe80:0:0:0:0:0:a9fe:a9fe": "azure_link_local_v6",
 }
 
 // exfilHostPatterns: substring + suffix match against the hostname. Suffixes
@@ -213,15 +206,13 @@ func (g *URLGate) Evaluate(ctx context.Context, in *config.PolicyInput) ActionGa
 	// the easiest way for an attacker to skip the rebind check, so we
 	// refuse the request rather than treat the error as benign.
 	if isRebindWildcardHost(host) {
-		ips, _, err := g.resolve(ctx, host)
+		ips, _, err := g.resolveOrFail(ctx, host)
 		if err != nil {
-			return g.deny(CodeServiceUnavailable, "unable to validate destination host", "dns_rebind:resolver_error", raw, host, hasUserinfo)
+			return g.deny(CodeResolverError, "unable to validate destination host", "dns_rebind:resolver_error", raw, host, hasUserinfo)
 		}
 		for _, ip := range ips {
-			if pip := net.ParseIP(ip); pip != nil {
-				if class, ok := privateIPClass(pip); ok {
-					return g.deny(CodeAccessDenied, "dns rebinding denied", "dns_rebind:"+class, raw, host, hasUserinfo)
-				}
+			if class, ok := privateIPClass(ip); ok {
+				return g.deny(CodeAccessDenied, "dns rebinding denied", "dns_rebind:"+class, raw, host, hasUserinfo)
 			}
 		}
 	}
@@ -276,61 +267,54 @@ func (g *URLGate) deny(code, reason, subReason, raw, host string, hasUserinfo bo
 	}
 }
 
-func (g *URLGate) resolve(ctx context.Context, host string) ([]string, bool, error) {
-	g.resCacheMu.Lock()
-	if ent, ok := g.resCache[host]; ok && time.Now().Before(ent.expiry) {
-		g.resCacheMu.Unlock()
-		return ent.ips, true, ent.err
+func (g *URLGate) resolveOrFail(ctx context.Context, host string) ([]net.IP, bool, error) {
+	key := normalizeResolverCacheKey(host)
+	if ips, ok := g.resCache.get(key, time.Now()); ok {
+		return ips, true, nil
 	}
-	g.resCacheMu.Unlock()
 
-	ips, err := g.resolver.LookupHost(ctx, host)
-	g.resCacheMu.Lock()
-	g.evictIfFullLocked(host)
-	g.resCache[host] = resolverCacheEntry{ips: ips, err: err, expiry: time.Now().Add(g.resCacheTTL)}
-	g.resCacheMu.Unlock()
-	return ips, false, err
+	value, err, _ := g.resolverGroup.Do(key, func() (any, error) {
+		if ips, ok := g.resCache.get(key, time.Now()); ok {
+			return resolverLookupResult{ips: ips, cached: true}, nil
+		}
+		ips, err := g.resolver.LookupHost(ctx, key)
+		if err != nil {
+			return resolverLookupResult{}, err
+		}
+		parsed, err := parseResolvedIPs(ips)
+		if err != nil {
+			return resolverLookupResult{}, err
+		}
+		evictions := g.resCache.put(key, parsed, time.Now().Add(g.resCacheTTL))
+		recordURLGateResolverCacheEvictions(evictions)
+		return resolverLookupResult{ips: parsed}, nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	res, ok := value.(resolverLookupResult)
+	if !ok {
+		return nil, false, errUnexpectedResolverResult
+	}
+	return res.ips, res.cached, nil
 }
 
-// evictIfFullLocked enforces the resCacheMax bound. Caller must hold
-// resCacheMu. The two-pass strategy is intentionally simple: sweep
-// expired entries first (cheap; the common case once TTLs roll over),
-// and only if still over capacity drop the entry with the soonest
-// expiry. This caps worst-case memory regardless of attacker-driven
-// host cardinality without dragging in a full LRU.
-func (g *URLGate) evictIfFullLocked(replacingHost string) {
-	if g.resCacheMax <= 0 {
-		return
+func parseResolvedIPs(values []string) ([]net.IP, error) {
+	if len(values) == 0 {
+		return nil, errResolverNoAddresses
 	}
-	if _, replacing := g.resCache[replacingHost]; replacing {
-		// We're overwriting an existing entry; size doesn't grow.
-		return
-	}
-	if len(g.resCache) < g.resCacheMax {
-		return
-	}
-	now := time.Now()
-	for k, ent := range g.resCache {
-		if !now.Before(ent.expiry) {
-			delete(g.resCache, k)
+	ips := make([]net.IP, 0, len(values))
+	for _, value := range values {
+		ip := net.ParseIP(strings.TrimSpace(value))
+		if ip == nil {
+			return nil, errResolverInvalidAddress
 		}
+		ips = append(ips, cloneResolverIP(ip))
 	}
-	if len(g.resCache) < g.resCacheMax {
-		return
+	if len(ips) == 0 {
+		return nil, errResolverNoAddresses
 	}
-	var oldestKey string
-	var oldestExpiry time.Time
-	first := true
-	for k, ent := range g.resCache {
-		if first || ent.expiry.Before(oldestExpiry) {
-			oldestKey = k
-			oldestExpiry = ent.expiry
-			first = false
-		}
-	}
-	if oldestKey != "" {
-		delete(g.resCache, oldestKey)
-	}
+	return ips, nil
 }
 
 // unmapIPv4InIPv6 normalizes ::ffff:1.2.3.4 (IPv4-mapped IPv6) and the brackets

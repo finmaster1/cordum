@@ -29,7 +29,10 @@ const (
 	CodeConflict           = "conflict"
 	CodeInternalError      = "internal_error"
 	CodeServiceUnavailable = "service_unavailable"
-	CodeRequireHuman       = "require_human"
+	// CodeResolverError maps DNS validation failures to HTTP 503 at the
+	// gateway boundary; URLGate uses it to fail closed on uncertain hosts.
+	CodeResolverError = "RESOLVER_ERROR"
+	CodeRequireHuman  = "require_human"
 )
 
 // ActionGateDecision is the output of a single gate. A zero-value decision

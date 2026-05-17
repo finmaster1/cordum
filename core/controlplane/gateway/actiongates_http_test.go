@@ -21,6 +21,7 @@ func TestActionGateHTTPStatusMapping(t *testing.T) {
 		{actiongates.CodeNotFound, http.StatusNotFound},
 		{actiongates.CodeConflict, http.StatusConflict},
 		{actiongates.CodeServiceUnavailable, http.StatusServiceUnavailable},
+		{actiongates.CodeResolverError, http.StatusServiceUnavailable},
 		{actiongates.CodeInternalError, http.StatusInternalServerError},
 		{actiongates.CodeRequireHuman, http.StatusOK},
 		{"unknown_code", http.StatusInternalServerError},
@@ -47,6 +48,7 @@ func TestActionGateEdgeErrCodeMapping(t *testing.T) {
 		{actiongates.CodeNotFound, edgeErrCodeNotFound},
 		{actiongates.CodeConflict, edgeErrCodeConflict},
 		{actiongates.CodeServiceUnavailable, edgeErrCodeServiceUnavailable},
+		{actiongates.CodeResolverError, edgeErrCodeServiceUnavailable},
 		{actiongates.CodeInternalError, edgeErrCodeInternalError},
 		{"weird_value", edgeErrCodeInternalError},
 	}
@@ -64,16 +66,16 @@ func TestSanitizeActionGateDetails(t *testing.T) {
 	t.Parallel()
 	dec := actiongates.ActionGateDecision{
 		Extra: map[string]string{
-			"gate":         "actiongate.tenant",
-			"sub_reason":   "cross_tenant:owner_mismatch",
-			"target_type":  "user",
-			"auth_tenant":  "tnt_a",
-			"target_path":  "/etc/passwd",                 // should be stripped
-			"target_url":   "https://leak.example.com/dump", // should be stripped
-			"args":         "force=true",                  // should be stripped
+			"gate":          "actiongate.tenant",
+			"sub_reason":    "cross_tenant:owner_mismatch",
+			"target_type":   "user",
+			"auth_tenant":   "tnt_a",
+			"target_path":   "/etc/passwd",                   // should be stripped
+			"target_url":    "https://leak.example.com/dump", // should be stripped
+			"args":          "force=true",                    // should be stripped
 			"claim_present": "true",
-			"claim_chars":  "<=128",
-			"approval_ref": "appr_secret",                 // should be stripped
+			"claim_chars":   "<=128",
+			"approval_ref":  "appr_secret", // should be stripped
 		},
 	}
 	got := sanitizeActionGateDetails(dec)
@@ -121,6 +123,7 @@ func TestWriteActionGatePolicyErrorAllStatuses(t *testing.T) {
 		{"conflict_409", actiongates.CodeConflict, 409, edgeErrCodeConflict},
 		{"internal_500", actiongates.CodeInternalError, 500, edgeErrCodeInternalError},
 		{"unavailable_503", actiongates.CodeServiceUnavailable, 503, edgeErrCodeServiceUnavailable},
+		{"resolver_error_503", actiongates.CodeResolverError, 503, edgeErrCodeServiceUnavailable},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -218,6 +221,7 @@ func TestPolicySimulateActionGateMapping(t *testing.T) {
 		actiongates.CodeConflict:           409,
 		actiongates.CodeInternalError:      500,
 		actiongates.CodeServiceUnavailable: 503,
+		actiongates.CodeResolverError:      503,
 	}
 	for code, want := range codes {
 		if got := actionGateHTTPStatus(code); got != want {

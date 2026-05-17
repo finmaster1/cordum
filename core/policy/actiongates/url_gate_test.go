@@ -2,7 +2,9 @@ package actiongates
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cordum/cordum/core/infra/config"
@@ -10,18 +12,70 @@ import (
 )
 
 type fakeHostResolver struct {
-	resolve map[string][]string
-	err     map[string]error
+	mu               sync.Mutex
+	resolve          map[string][]string
+	orderedResponses map[string][][]string
+	err              map[string]error
+	orderedErrors    map[string][]error
+	calls            map[string]int
+	started          chan<- string
+	waitBeforeReturn <-chan struct{}
 }
 
-func (r *fakeHostResolver) LookupHost(_ context.Context, host string) ([]string, error) {
+func (r *fakeHostResolver) LookupHost(ctx context.Context, host string) ([]string, error) {
+	ips, err := r.resolveFor(host)
+	if r.started != nil {
+		select {
+		case r.started <- host:
+		default:
+		}
+	}
+	if r.waitBeforeReturn != nil {
+		select {
+		case <-r.waitBeforeReturn:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return ips, err
+}
+
+func (r *fakeHostResolver) resolveFor(host string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.calls == nil {
+		r.calls = make(map[string]int)
+	}
+	r.calls[host]++
+	callIndex := r.calls[host] - 1
+	if errs := r.orderedErrors[host]; callIndex < len(errs) && errs[callIndex] != nil {
+		return nil, errs[callIndex]
+	}
 	if err, ok := r.err[host]; ok {
 		return nil, err
 	}
+	if responses := r.orderedResponses[host]; callIndex < len(responses) {
+		return cloneStrings(responses[callIndex]), nil
+	}
 	if ips, ok := r.resolve[host]; ok {
-		return ips, nil
+		return cloneStrings(ips), nil
 	}
 	return []string{"203.0.113.5"}, nil
+}
+
+func (r *fakeHostResolver) callsFor(host string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls[host]
+}
+
+func cloneStrings(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }
 
 type urlGateCase struct {
@@ -143,10 +197,10 @@ func TestURLGate_DNSRebindingToRFC1918(t *testing.T) {
 	// resolve at eval time and DENY when the IP is RFC1918 / link-local.
 	resolver := &fakeHostResolver{
 		resolve: map[string][]string{
-			"169-254-169-254.nip.io":  {"169.254.169.254"},
-			"10-0-0-1.sslip.io":       {"10.0.0.1"},
-			"192-168-1-1.xip.io":      {"192.168.1.1"},
-			"172-16-0-1.nip.io":       {"172.16.0.1"},
+			"169-254-169-254.nip.io":    {"169.254.169.254"},
+			"10-0-0-1.sslip.io":         {"10.0.0.1"},
+			"192-168-1-1.xip.io":        {"192.168.1.1"},
+			"172-16-0-1.nip.io":         {"172.16.0.1"},
 			"public.example.com.nip.io": {"203.0.113.42"}, // public IP — allowed
 		},
 	}
@@ -251,3 +305,5 @@ func TestURLGate_MalformedURLAllowsPipelineContinue(t *testing.T) {
 		t.Fatalf("malformed url: gate fired (Decision=%v)", dec.Decision)
 	}
 }
+
+var errResolverUnavailable = errors.New("resolver unavailable")
