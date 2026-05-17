@@ -520,10 +520,12 @@ func apiKeyMiddleware(provider auth.AuthProvider, next http.Handler, auditSender
 			var scopeErr *auth.ScopeError
 			if errors.As(err, &scopeErr) {
 				if aSender != nil {
+					// Anonymous/pre-auth: tenant from X-Tenant-ID header or model.DefaultTenant fallback. authCtx is nil because auth itself failed.
 					aSender.Send(audit.SIEMEvent{
 						Timestamp: time.Now().UTC(),
 						EventType: audit.EventSystemAuth,
 						Severity:  audit.SeverityMedium,
+						TenantID:  model.ResolveTenantForAudit("", r.Header.Get("X-Tenant-ID")),
 						Action:    "auth.failure",
 						Reason:    "key_scope_insufficient",
 						Extra: map[string]string{
@@ -537,10 +539,12 @@ func apiKeyMiddleware(provider auth.AuthProvider, next http.Handler, auditSender
 				return
 			}
 			if aSender != nil {
+				// Anonymous/pre-auth: tenant from X-Tenant-ID header or model.DefaultTenant fallback. authCtx is nil because auth itself failed.
 				aSender.Send(audit.SIEMEvent{
 					Timestamp: time.Now().UTC(),
 					EventType: audit.EventSystemAuth,
 					Severity:  audit.SeverityMedium,
+					TenantID:  model.ResolveTenantForAudit("", r.Header.Get("X-Tenant-ID")),
 					Action:    "auth.failure",
 					Reason:    "request_auth_failed",
 					Extra: map[string]string{

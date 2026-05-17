@@ -2013,6 +2013,146 @@ paths:
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
           $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/binary-integrity/events:
+    post:
+      operationId: ingestBinaryVerify
+      summary: Ingest install-time binary-verify outcomes
+      description: |
+        Persists structured binary-verify outcomes emitted by
+        `tools/scripts/install.{sh,ps1}` (the pre-activation integrity
+        gate documented in `docs/security/binary-signing.md` §8).
+        Operators capture install-script stderr (one JSON line per
+        binary verified), batch it into the `events` array, and POST
+        here. Each event is validated against `model.BinaryVerifyEvent`
+        and persisted through the existing audit chain as a SIEMEvent
+        with `EventType = binary-verify-ok | binary-verify-fail`.
+
+        Partial-success semantics: per-event validation failures are
+        reported in the response `errors[]` and counted in `rejected`;
+        accepted events are persisted. A request with zero accepted
+        events returns 400.
+
+        Auth: requires `audit.export` permission or `admin` role,
+        plus tenant access enforced via `X-Tenant-ID`.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestBinaryVerifyRequest'
+      responses:
+        '202':
+          description: At least one event was accepted and persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestBinaryVerifyResponse'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '413':
+          $ref: '#/components/responses/EdgePayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+    get:
+      operationId: listBinaryVerify
+      summary: List binary-verify outcomes for a tenant
+      description: |
+        Returns a tenant-scoped reverse-chronological page of
+        binary-verify outcomes recovered from the tenant audit
+        stream. Filters narrow the page; values that fall outside
+        the accepted enums return 400. The response envelope mirrors
+        `/api/v1/audit/events` (items / next_cursor / returned) but
+        each item carries the original BinaryVerifyEvent shape plus a
+        server-side timestamp and endpoint label.
+
+        Auth: requires `audit.read` permission or `admin` role,
+        plus tenant access enforced via `X-Tenant-ID`.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: tenant
+        in: query
+        required: false
+        description: |
+          Tenant id whose audit stream should be read. Must match
+          caller scope; defaults to the authenticated/header tenant.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Maximum number of events in the response page. Default 100;
+          values above 200 are silently capped to 200 to bound the
+          Redis fetch cost.
+        schema:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 200
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          Opaque stream-id cursor returned as `next_cursor` from the
+          previous page. Format `<ms>-<seq>`; empty `next_cursor`
+          means end-of-stream.
+        schema:
+          type: string
+      - name: event
+        in: query
+        required: false
+        description: |
+          Filter by outcome. Short forms `ok` / `fail` are accepted
+          and normalized to the canonical `binary-verify-ok` /
+          `binary-verify-fail` event types.
+        schema:
+          type: string
+          enum: [ok, fail, binary-verify-ok, binary-verify-fail]
+      - name: sig_scheme
+        in: query
+        required: false
+        description: Filter by signing scheme.
+        schema:
+          type: string
+          enum: [gpg, codesign, authenticode, dev]
+      - name: endpoint
+        in: query
+        required: false
+        description: |
+          Filter by the endpoint label captured at ingest time
+          (operator-supplied; max 256 chars).
+        schema:
+          type: string
+          maxLength: 256
+      responses:
+        '200':
+          description: Binary-verify events page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BinaryVerifyEventsEnvelope'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
   /api/v1/jobs:
     post:
       operationId: submitJob
@@ -9220,6 +9360,170 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EdgeRuntimeIngestDropReport'
+    BinaryVerifyEvent:
+      type: object
+      description: |
+        One structured outcome from the pre-activation integrity gate
+        in `tools/scripts/install.{sh,ps1}`. Field names and order are
+        frozen to match `install.sh` `emit_audit` (line 24-32) and
+        `model.BinaryVerifyEvent` (`core/model/binary_verify.go`) —
+        downstream SIEM mappings pin to this shape.
+      properties:
+        event:
+          type: string
+          enum: [binary-verify-ok, binary-verify-fail]
+          description: Outcome kind. Maps to SIEMEvent.EventType.
+        hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA-256 of the verified binary, lowercase hex.
+        path:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: |
+            Manifest-relative basename of the verified binary. Absolute
+            paths, drive-rooted (Windows) paths, and any segment
+            containing `..` are rejected.
+        sig_scheme:
+          type: string
+          enum: [gpg, codesign, authenticode, dev]
+          description: Signing scheme that produced the verified signature.
+        fingerprint:
+          type: string
+          description: |
+            Empty when sig_scheme is codesign/authenticode/dev, or a
+            40-char uppercase-hex GPG key fingerprint when sig_scheme
+            is gpg. When non-empty, must match `^[A-F0-9]{40}$`.
+        reason:
+          type: string
+          maxLength: 512
+          description: |
+            Human-readable explanation of the outcome. Empty on success;
+            install-script controlled failure text on failure. Capped to
+            512 chars defensively (operator relays may splice in raw
+            gpg stderr).
+        exit_code:
+          type: integer
+          description: |
+            Exit code of the verifier. MUST be 0 when event is
+            `binary-verify-ok` and non-zero when event is
+            `binary-verify-fail`.
+      required:
+      - event
+      - hash
+      - path
+      - sig_scheme
+      - fingerprint
+      - reason
+      - exit_code
+    BinaryVerifyEventsEnvelope:
+      type: object
+      description: |
+        Paginated envelope returned by `GET /api/v1/edge/binary-integrity/events`.
+        `next_cursor` is opaque; pass it back as `?cursor=` on the next
+        request. Empty `next_cursor` means end-of-stream — clients should
+        stop polling.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BinaryVerifyListItem'
+        next_cursor:
+          type: string
+          description: Opaque cursor for the next page; empty when no more events.
+        returned:
+          type: integer
+          description: Number of items in this page (== `items.length`).
+      required:
+      - items
+      - next_cursor
+      - returned
+    BinaryVerifyListItem:
+      type: object
+      description: |
+        One row in the binary-verify list response. Carries the original
+        `BinaryVerifyEvent` shape plus the server-side audit-row metadata
+        captured at ingest time.
+      allOf:
+      - $ref: '#/components/schemas/BinaryVerifyEvent'
+      - type: object
+        properties:
+          timestamp:
+            type: string
+            format: date-time
+            description: Server-side ingest timestamp (UTC).
+          tenant_id:
+            type: string
+            description: Tenant that owns the event.
+          endpoint:
+            type: string
+            description: |
+              Operator-supplied label captured at ingest time. Empty when
+              the ingester did not provide one.
+        required:
+        - timestamp
+        - tenant_id
+    IngestBinaryVerifyError:
+      type: object
+      description: |
+        One per-event rejection from a partial-success `ingestBinaryVerify`
+        request. The accepted events have already been persisted.
+      properties:
+        index:
+          type: integer
+          description: |
+            Zero-based index of the rejected event within the request
+            `events` array.
+        error:
+          type: string
+          description: |
+            Human-readable validation reason, sourced from
+            `model.BinaryVerifyEvent.Validate`.
+      required:
+      - index
+      - error
+    IngestBinaryVerifyRequest:
+      type: object
+      description: |
+        Batch envelope for binary-verify outcomes. Up to 1000 events per
+        request; the body byte size is capped at 2 MB.
+      properties:
+        endpoint:
+          type: string
+          maxLength: 256
+          description: |
+            Optional operator-supplied label identifying the host that
+            ran the install script. Captured into every persisted event.
+        events:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/BinaryVerifyEvent'
+      required:
+      - events
+    IngestBinaryVerifyResponse:
+      type: object
+      description: |
+        Result of a binary-verify batch ingest. `accepted + rejected` may
+        be less than the submitted batch only when a hard error prevented
+        decoding; per-event validation failures are surfaced in `errors`.
+      properties:
+        accepted:
+          type: integer
+          description: Number of events persisted to the audit chain.
+        rejected:
+          type: integer
+          description: Number of events rejected by per-event validation.
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngestBinaryVerifyError'
+          description: Per-event rejections. Omitted when rejected is 0.
+      required:
+      - accepted
+      - rejected
     ShadowAgentFinding:
       type: object
       description: Persisted lifecycle record for one detected shadow agent. Distinct from the scanner-only `Finding` shape; this is the operator-visible triage record consumed by /api/v1/edge/shadow-agents.
