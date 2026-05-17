@@ -237,6 +237,28 @@ func TestManifestPathTraversalRejected(t *testing.T) {
 	}
 }
 
+func TestVerifyManifest_AcceptsEmbeddedVersionLine(t *testing.T) {
+	// EDGE-151-DOWNGRADE: parseManifest must skip `# version: vX.Y.Z` lines
+	// inserted by the release-time EmbedVersion helper so signature coverage
+	// includes the version metadata without breaking the hash loop.
+	ent := newTestEntity(t, "release")
+	manifest := []byte("# version: v1.2.3\n" +
+		manifestLine([]byte("hook-binary"), "cordum-hook-linux-amd64") + "\n")
+	sigBytes := detachSign(t, ent, manifest)
+
+	v := sign.NewVerifier([]string{entityFingerprint(ent)}, serializeArmoredPub(t, ent))
+	result, err := v.VerifyManifest(manifest, sigBytes)
+	if err != nil {
+		t.Fatalf("VerifyManifest: unexpected error: %v", err)
+	}
+	if _, ok := result.Entries["cordum-hook-linux-amd64"]; !ok {
+		t.Fatalf("expected entry for cordum-hook-linux-amd64; got entries: %v", result.Entries)
+	}
+	if _, ok := result.Entries["# version: v1.2.3"]; ok {
+		t.Fatalf("comment line leaked into manifest entries")
+	}
+}
+
 func TestNilSafety(t *testing.T) {
 	// Zero-value verifier must not panic; it must return typed errors.
 	t.Run("ZeroVerifier_VerifyManifest", func(t *testing.T) {

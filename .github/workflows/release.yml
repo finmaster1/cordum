@@ -26,8 +26,52 @@ permissions:
   contents: write
 
 jobs:
+  version-monotonicity:
+    # EDGE-151-DOWNGRADE: refuse a tag push whose semver is not strictly
+    # greater than the most recently published tag. Prevents accidental
+    # sibling-release downgrade at the moment a tag is created — the
+    # release-time companion to install.{sh,ps1}'s version-floor check.
+    name: tag monotonicity gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fetch tags
+        run: git fetch --tags --force
+      - name: Resolve pushed and prior tags
+        id: tags
+        run: |
+          set -euo pipefail
+          pushed="${GITHUB_REF#refs/tags/}"
+          # Most-recent prior tag, excluding the one being pushed. We fall
+          # back to v0.0.0 when no prior tag exists (first release ever).
+          prior="$(git tag --list 'v*' --sort=-v:refname \
+                    | grep -vxF "$pushed" | head -1)"
+          if [ -z "$prior" ]; then
+            prior="v0.0.0"
+          fi
+          echo "pushed=$pushed" >>"$GITHUB_OUTPUT"
+          echo "prior=$prior"   >>"$GITHUB_OUTPUT"
+          echo "Pushed: $pushed, Prior: $prior"
+      - name: Enforce monotonicity
+        run: |
+          set -euo pipefail
+          go run ./tools/sign/cmd/version-cli monotonic-or-fail \
+            "${{ steps.tags.outputs.pushed }}" \
+            "${{ steps.tags.outputs.prior }}" \
+            || {
+              echo "::error::release tag ${{ steps.tags.outputs.pushed }} is not strictly greater than prior ${{ steps.tags.outputs.prior }} — refusing to publish a downgrade"
+              exit 1
+            }
+
   build:
     name: build ${{ matrix.binary }} ${{ matrix.target.goos }}/${{ matrix.target.goarch }}
+    needs: [version-monotonicity]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -227,6 +271,14 @@ jobs:
           fi
           ./.manifest-cli $paths > SHA256SUMS
           rm -f .manifest-cli
+          # EDGE-151-DOWNGRADE: prepend `# version: <tag>` so install.{sh,ps1}
+          # can enforce monotonic floor on the operator endpoint.
+          tag="${GITHUB_REF#refs/tags/}"
+          {
+            printf '# version: %s\n' "$tag"
+            cat SHA256SUMS
+          } > SHA256SUMS.versioned
+          mv -f SHA256SUMS.versioned SHA256SUMS
           cat SHA256SUMS
       - name: Probe for Tier 1 secrets
         id: tier1_secrets

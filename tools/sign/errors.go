@@ -31,4 +31,17 @@ var (
 	// ErrPathTraversal is returned when a manifest entry references an
 	// absolute path, a parent-traversal segment, or a Windows drive root.
 	ErrPathTraversal = errors.New("sign: manifest contains path traversal or absolute path")
+	// ErrDowngradeAttempt is returned by VerifyVersionFloor when the
+	// candidate binary version is strictly older than the persisted floor
+	// and no operator-override has been authorised. EDGE-151-DOWNGRADE.
+	ErrDowngradeAttempt = errors.New("sign: downgrade attempt: candidate version below floor")
+	// ErrFloorAdvanceFailed is returned by AdvanceFloor when the
+	// version-floor file could not be written atomically.
+	ErrFloorAdvanceFailed = errors.New("sign: floor advance failed")
+	// ErrInvalidVersion is returned by VerifyVersionFloor when either
+	// argument is non-empty but cannot be parsed as a semver-2.0 string.
+	ErrInvalidVersion = errors.New("sign: invalid version")
+	// ErrNoVersionEmbedded is returned by ParseVersion when the manifest
+	// carries no leading `# version:` line.
+	ErrNoVersionEmbedded = errors.New("sign: no version embedded in manifest")
 )

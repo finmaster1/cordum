@@ -31,6 +31,110 @@ emit_audit() {
     "$event" "$hash" "$rel" "$CORDUM_AUDIT_SIG_SCHEME" "$CORDUM_AUDIT_FINGERPRINT" "$reason" "$exit_code" >&2
 }
 
+# emit_floor_audit emits a `binary-floor-advance` or `binary-floor-rollback`
+# JSON-line on stderr. Schema is intentionally additive over the
+# binary-verify event so downstream SIEMs can pin to the same field set
+# (event, sig_scheme, fingerprint, exit_code) and add three new fields
+# (from, to, operator, reason). EDGE-151-DOWNGRADE.
+emit_floor_audit() {
+  local event="$1" from="$2" to="$3" operator="${4:-unknown}" reason="${5:-}"
+  printf '{"event":"%s","from":"%s","to":"%s","sig_scheme":"%s","fingerprint":"%s","operator":"%s","reason":"%s","exit_code":0}\n' \
+    "$event" "$from" "$to" "$CORDUM_AUDIT_SIG_SCHEME" "$CORDUM_AUDIT_FINGERPRINT" "$operator" "$reason" >&2
+}
+
+# semver_lt returns 0 (true) if $1 is strictly less than $2, 1 (false)
+# otherwise. Returns 2 when either side is unparseable. Handles
+# vMAJOR.MINOR.PATCH[-PRE]; pre-release ordering uses natural-sort on the
+# alpha-prefix + digit-suffix pattern (rc2 < rc10) and falls back to lex.
+# Intentionally narrower than tools/sign/version.go's SemverCompare; if
+# release tags ever drift beyond this shape, update the Go and bash
+# comparators in lockstep so install scripts and CI gate agree.
+semver_lt() {
+  local a="${1#v}" b="${2#v}"
+  local a_main b_main a_pre b_pre
+  case "$a" in *-*) a_main="${a%%-*}"; a_pre="${a#*-}" ;; *) a_main="$a"; a_pre="" ;; esac
+  case "$b" in *-*) b_main="${b%%-*}"; b_pre="${b#*-}" ;; *) b_main="$b"; b_pre="" ;; esac
+  local IFS=.
+  set -- $a_main; [ "$#" -eq 3 ] || return 2
+  local a_maj="$1" a_min="$2" a_pat="$3"
+  set -- $b_main; [ "$#" -eq 3 ] || return 2
+  local b_maj="$1" b_min="$2" b_pat="$3"
+  unset IFS
+  case "$a_maj$a_min$a_pat" in *[!0-9]*) return 2 ;; esac
+  case "$b_maj$b_min$b_pat" in *[!0-9]*) return 2 ;; esac
+  if [ "$a_maj" -lt "$b_maj" ]; then return 0; fi
+  if [ "$a_maj" -gt "$b_maj" ]; then return 1; fi
+  if [ "$a_min" -lt "$b_min" ]; then return 0; fi
+  if [ "$a_min" -gt "$b_min" ]; then return 1; fi
+  if [ "$a_pat" -lt "$b_pat" ]; then return 0; fi
+  if [ "$a_pat" -gt "$b_pat" ]; then return 1; fi
+  # M.N.P equal — pre-release ordering.
+  if [ -z "$a_pre" ] && [ -z "$b_pre" ]; then return 1; fi
+  if [ -z "$a_pre" ]; then return 1; fi   # release > pre
+  if [ -z "$b_pre" ]; then return 0; fi   # pre < release
+  local a_alpha="${a_pre%%[0-9]*}" a_num="${a_pre#"${a_pre%%[0-9]*}"}"
+  local b_alpha="${b_pre%%[0-9]*}" b_num="${b_pre#"${b_pre%%[0-9]*}"}"
+  if [ "$a_alpha" = "$b_alpha" ]; then
+    case "$a_num" in *[!0-9]*|'') ;; *)
+      case "$b_num" in *[!0-9]*|'') ;; *)
+        if [ "$a_num" -lt "$b_num" ]; then return 0; fi
+        if [ "$a_num" -gt "$b_num" ]; then return 1; fi
+        return 1
+      ;; esac
+    ;; esac
+  fi
+  [ "$a_pre" \< "$b_pre" ] && return 0
+  return 1
+}
+
+# resolve_floor_path prints the resolved binary-version-floor.json path on
+# stdout. Honours $CORDUM_BINARY_FLOOR_FILE; falls back to
+# $HOME/.cordum/binary-version-floor.json (or $TMPDIR equivalent when
+# HOME is unset, matching agentd's defaultStateDir convention).
+resolve_floor_path() {
+  if [ -n "${CORDUM_BINARY_FLOOR_FILE:-}" ]; then
+    printf '%s' "$CORDUM_BINARY_FLOOR_FILE"
+    return
+  fi
+  local home="${HOME:-}"
+  if [ -z "$home" ]; then
+    home="${TMPDIR:-/tmp}/cordum-install-state"
+  fi
+  printf '%s' "$home/.cordum/binary-version-floor.json"
+}
+
+# read_floor_version prints the persisted floor version on stdout, or ""
+# when the floor file is missing or empty. Malformed JSON is an error
+# (callers verify_fail on non-zero exit).
+read_floor_version() {
+  local path="$1"
+  [ -f "$path" ] || { printf ''; return 0; }
+  # sed-only fallback to avoid jq requirement. Tolerates whitespace and
+  # any field ordering; reads the first `"version":"vN.N.N..."` value.
+  local v
+  v=$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$path" | head -1)
+  [ -n "$v" ] || { printf ''; return 0; }
+  printf '%s' "$v"
+}
+
+# write_floor_atomic writes a fresh floor file at $1 with version $2,
+# sig_scheme $3, fingerprint $4, operator $5, reason $6. Atomic via
+# write-tmp + rename in the same directory. Mirrors AdvanceFloor in
+# tools/sign/version.go.
+write_floor_atomic() {
+  local path="$1" version="$2" scheme="$3" fpr="$4" operator="$5" reason="$6"
+  local dir
+  dir="$(dirname "$path")"
+  mkdir -p "$dir"
+  local stamp
+  stamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  local tmp
+  tmp="$(mktemp "$dir/.binary-version-floor.json.tmp.XXXXXX")"
+  printf '{"version":"%s","advanced_at":"%s","sig_scheme":"%s","fingerprint":"%s","operator":"%s","reason":"%s"}\n' \
+    "$version" "$stamp" "$scheme" "$fpr" "$operator" "$reason" >"$tmp"
+  mv -f "$tmp" "$path"
+}
+
 verify_fail() {
   local reason="$*"
   emit_audit "binary-verify-fail" "$reason" "" "" 1
@@ -58,6 +162,7 @@ reject_path() {
 
 run_binary_verify() {
   local rdir="$1" dev="$2" install_to="$3"
+  local rollback_override="${4:-0}" rollback_reason="${5:-}"
   [ -d "$rdir" ] || verify_fail "release-dir not found: $rdir"
 
   local manifest="$rdir/SHA256SUMS"
@@ -129,8 +234,59 @@ run_binary_verify() {
   gpg --homedir "$tmp_home" --batch --quiet --verify "$sig" "$manifest" 2>/dev/null \
     || verify_fail "gpg signature invalid"
 
+  # EDGE-151-DOWNGRADE: parse the embedded `# version: vN.N.N` line (if
+  # present) and enforce the persisted version floor. Missing version line
+  # is allowed (legacy release-bundle compatibility), but if a floor is
+  # already persisted any version-less candidate triggers downgrade-refusal
+  # so an attacker cannot bypass the gate by stripping the metadata.
+  local candidate_version persisted_floor floor_path
+  candidate_version=$(sed -nE '1s/^# version:[[:space:]]*(.*)$/\1/p' "$manifest")
+  floor_path="$(resolve_floor_path)"
+  persisted_floor="$(read_floor_version "$floor_path")"
+
+  if [ -n "$persisted_floor" ] && [ -z "$candidate_version" ]; then
+    verify_fail "downgrade attempt: candidate manifest has no embedded version but floor is $persisted_floor"
+  fi
+  if [ -n "$candidate_version" ]; then
+    # Explicitly reject malformed candidate versions BEFORE the compare —
+    # semver_lt's exit-2 sentinel must never silently become "not less
+    # than" and ride the gate through. Probe against v0.0.0 (always
+    # parseable) to detect parseability of the candidate.
+    if ! semver_lt "v0.0.0" "$candidate_version" \
+        && ! semver_lt "$candidate_version" "v0.0.0" \
+        && [ "$candidate_version" != "v0.0.0" ]; then
+      verify_fail "invalid manifest version: $candidate_version"
+    fi
+  fi
+  if [ -n "$candidate_version" ] && [ -n "$persisted_floor" ]; then
+    # Validate persisted_floor too — a malformed floor file is a hard
+    # error (we never silently treat an unreadable floor as absent).
+    if ! semver_lt "v0.0.0" "$persisted_floor" \
+        && ! semver_lt "$persisted_floor" "v0.0.0" \
+        && [ "$persisted_floor" != "v0.0.0" ]; then
+      verify_fail "malformed floor file: persisted version $persisted_floor"
+    fi
+    set +e
+    semver_lt "$candidate_version" "$persisted_floor"
+    cmp_rc=$?
+    set -e
+    if [ "$cmp_rc" -eq 0 ]; then
+      if [ "$rollback_override" = "1" ]; then
+        if [ -z "$rollback_reason" ]; then
+          verify_fail "--rollback-operator-override requires --rollback-reason <text>"
+        fi
+      else
+        verify_fail "downgrade attempt $candidate_version < $persisted_floor"
+      fi
+    fi
+  fi
+
   while IFS= read -r line || [ -n "$line" ]; do
     [ -z "$line" ] && continue
+    # EDGE-151-DOWNGRADE: skip the leading `# version: vN.N.N` metadata
+    # line (and any other future `#`-prefixed comment lines) so the hash
+    # loop only sees real entries.
+    case "$line" in '#'*) continue ;; esac
     local hash="${line%% *}"
     local rel="${line#* }"
     rel="${rel# }"
@@ -159,6 +315,7 @@ run_binary_verify() {
     CORDUM_AUDIT_SIG_SCHEME="codesign"
     while IFS= read -r line || [ -n "$line" ]; do
       [ -z "$line" ] && continue
+      case "$line" in '#'*) continue ;; esac
       local rel="${line#* }"; rel="${rel# }"; rel="${rel#\*}"
       local target="$rdir/$rel"
       [ -f "$target" ] || continue
@@ -173,6 +330,7 @@ run_binary_verify() {
     mkdir -p "$install_to"
     while IFS= read -r line || [ -n "$line" ]; do
       [ -z "$line" ] && continue
+      case "$line" in '#'*) continue ;; esac
       local hash="${line%% *}"
       local rel="${line#* }"; rel="${rel# }"; rel="${rel#\*}"
       local src="$rdir/$rel"
@@ -194,10 +352,33 @@ run_binary_verify() {
       chmod +x "$dst" 2>/dev/null || true
       emit_audit "binary-verify-ok" "" "$post" "$rel" 0
     done < "$manifest"
-    echo "[install] activated $(grep -c '' "$manifest") binaries under $install_to"
+    # Skip the `# version:` metadata line from the activation count.
+    local activated_n
+    activated_n=$(grep -v -c -E '^#|^$' "$manifest")
+    echo "[install] activated ${activated_n} binaries under $install_to"
+
+    # EDGE-151-DOWNGRADE: advance the persisted floor on a successful
+    # activation. Upgrade and operator-override-rollback both funnel
+    # through write_floor_atomic — the audit event distinguishes them.
+    if [ -n "$candidate_version" ]; then
+      local operator="${USER:-${LOGNAME:-unknown}}"
+      if [ "$rollback_override" = "1" ] && semver_lt "$candidate_version" "${persisted_floor:-v0.0.0}"; then
+        write_floor_atomic "$floor_path" "$candidate_version" \
+          "$CORDUM_AUDIT_SIG_SCHEME" "$CORDUM_AUDIT_FINGERPRINT" \
+          "$operator" "$rollback_reason"
+        emit_floor_audit "binary-floor-rollback" "${persisted_floor:-}" \
+          "$candidate_version" "$operator" "$rollback_reason"
+      else
+        write_floor_atomic "$floor_path" "$candidate_version" \
+          "$CORDUM_AUDIT_SIG_SCHEME" "$CORDUM_AUDIT_FINGERPRINT" \
+          "$operator" ""
+        emit_floor_audit "binary-floor-advance" "${persisted_floor:-}" \
+          "$candidate_version" "$operator" ""
+      fi
+    fi
   else
     local n
-    n=$(grep -c '' "$manifest")
+    n=$(grep -v -c -E '^#|^$' "$manifest")
     echo "[install] release-dir verified: $rdir ($n binaries match manifest)"
   fi
 }
@@ -209,13 +390,18 @@ run_binary_verify() {
 RELEASE_DIR=""
 DEV_ALLOW_UNSIGNED=0
 INSTALL_TO="${CORDUM_INSTALL_DIR:-}"
+ROLLBACK_OVERRIDE=0
+ROLLBACK_REASON=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --release-dir)        RELEASE_DIR="$2"; shift 2 ;;
-    --release-dir=*)      RELEASE_DIR="${1#--release-dir=}"; shift ;;
-    --dev-allow-unsigned) DEV_ALLOW_UNSIGNED=1; shift ;;
-    --install-dir)        INSTALL_TO="$2"; shift 2 ;;
-    --install-dir=*)      INSTALL_TO="${1#--install-dir=}"; shift ;;
+    --release-dir)               RELEASE_DIR="$2"; shift 2 ;;
+    --release-dir=*)             RELEASE_DIR="${1#--release-dir=}"; shift ;;
+    --dev-allow-unsigned)        DEV_ALLOW_UNSIGNED=1; shift ;;
+    --install-dir)               INSTALL_TO="$2"; shift 2 ;;
+    --install-dir=*)             INSTALL_TO="${1#--install-dir=}"; shift ;;
+    --rollback-operator-override) ROLLBACK_OVERRIDE=1; shift ;;
+    --rollback-reason)           ROLLBACK_REASON="$2"; shift 2 ;;
+    --rollback-reason=*)         ROLLBACK_REASON="${1#--rollback-reason=}"; shift ;;
     --) shift; break ;;
     -*) break ;;
     *)  break ;;
@@ -223,7 +409,15 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -n "$RELEASE_DIR" ]; then
-  run_binary_verify "$RELEASE_DIR" "$DEV_ALLOW_UNSIGNED" "$INSTALL_TO"
+  # Cap rollback-reason at 256 chars per audit-event field hygiene.
+  if [ -n "$ROLLBACK_REASON" ]; then
+    ROLLBACK_REASON="${ROLLBACK_REASON:0:256}"
+  fi
+  if [ "$ROLLBACK_OVERRIDE" = "1" ] && [ -z "$ROLLBACK_REASON" ]; then
+    verify_fail "--rollback-operator-override requires --rollback-reason <text>"
+  fi
+  run_binary_verify "$RELEASE_DIR" "$DEV_ALLOW_UNSIGNED" "$INSTALL_TO" \
+    "$ROLLBACK_OVERRIDE" "$ROLLBACK_REASON"
   exit 0
 fi
 

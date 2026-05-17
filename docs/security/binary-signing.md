@@ -49,7 +49,7 @@ release?" — answered before any code in the binary runs.
 | d | A **root / local-administrator** process that substitutes the binary AND swaps the bundled `tools/keys/cordum-release.pub.asc` file AND adjusts `CORDUM_PROD_FINGERPRINT_PIN` in `install.sh`'s header **simultaneously** before any subsequent install or wrapper run. | Defeated only by OS-level integrity (Secure Boot, code-integrity policies, MDM) or by the `-ldflags`-baked fingerprint in already-installed binaries — see (4) below. EDGE-151 reduces the attack surface but does not pretend to defeat full-root substitution. |
 | e | **GitHub Actions secret compromise** (`GPG_RELEASE_KEY_PRIVATE` exfiltration). | The attacker can sign arbitrary manifests with the legitimate fingerprint. Mitigation is operational (secret scanning, rotation cadence in §5) not cryptographic. |
 | f | **Apple Developer ID certificate leak**, **Authenticode `.pfx` leak**. | Same shape as (e) for Tier 2. Tier 1 stays an independent gate even when Tier 2 keys are leaked, because Tier 1 is gated by a separate GPG key. |
-| g | **Downgrade attack**: serving an older, validly-signed binary that has a known CVE. | OUT OF SCOPE for EDGE-151; tracked separately. The verifier honours any signature by the trusted release key regardless of version. A sibling task (`EDGE-151-DOWNGRADE`) is the place to add minimum-version pinning. |
+| g | **Downgrade attack**: serving an older, validly-signed binary that has a known CVE. | **ADDRESSED** by EDGE-151-DOWNGRADE (task-3166dda6). Install scripts enforce a persisted monotonic version-floor: a release manifest embedding `# version: vN.N.N` below the floor is refused with `BINARY-VERIFY-FAIL: downgrade attempt`. Legitimate rollbacks during incident response require an explicit `--rollback-operator-override` flag + `--rollback-reason <text>` and emit a `binary-floor-rollback` audit event. CI release-tag publishing additionally refuses any tag whose semver is not strictly greater than the most-recent prior tag (`version-monotonicity` job in `.github/workflows/release.yml`). Floor file tampering — an attacker with write access to `$HOME/.cordum/binary-version-floor.json` can clear the gate — remains residual; the floor file inherits the same trust principal as the installed binaries and is defense-in-depth on top of signature verification, not a replacement. See §8A for the audit-event schema. |
 | h | **Build-environment supply-chain compromise** (malicious dependency, compromised runner image). | Out of scope; mitigated by GitHub's runner attestation, Renovate/Dependabot review, and the no-private-keys-leaked CI gate in `binaries-pr-validation.yml`. |
 
 ## 3. Two-tier scheme and per-platform trust marks
@@ -278,6 +278,134 @@ A `202 Accepted` status with `rejected > 0` indicates partial success —
 re-upload only the failed indices after fixing the cause. A `400 Bad
 Request` indicates the whole batch was rejected (zero accepted) and
 the operator should re-validate the input.
+
+## 8A. Version-floor enforcement (EDGE-151-DOWNGRADE)
+
+EDGE-151's signature verification accepts any binary signed by the
+trusted release key regardless of version. EDGE-151-DOWNGRADE layers a
+monotonic version-floor on top of that gate so an attacker who replays a
+validly-signed older release — for instance one known to have a public
+CVE — cannot ride the signature path through the install.
+
+### Manifest version embedding
+
+Every signed release manifest produced after EDGE-151-DOWNGRADE carries a
+`# version: vN.N.N` line as its first line. The line is covered by the
+detached GPG signature over `SHA256SUMS`, so an attacker cannot remove or
+edit it without invalidating the signature. The release CI runs the same
+embed via `.github/workflows/release.yml`'s sign-manifest job:
+
+```
+# version: v1.5.0
+0123abc...  cordum-hook-linux-amd64
+fedc987...  cordum-agentd-linux-amd64
+```
+
+Existing legacy bundles without an embedded `# version:` line still
+verify; they are only rejected when a floor is already persisted (i.e.
+after a first successful EDGE-151-DOWNGRADE-aware install).
+
+### Persisted floor file
+
+`tools/scripts/install.{sh,ps1}` read and write a JSON state file:
+
+```jsonc
+// $HOME/.cordum/binary-version-floor.json
+{
+  "version":     "v1.5.0",
+  "advanced_at": "2026-05-17T13:54:00Z",
+  "sig_scheme":  "gpg",
+  "fingerprint": "<40-hex>",
+  "operator":    "<USER env>",
+  "reason":      ""
+}
+```
+
+Path defaults to `$HOME/.cordum/binary-version-floor.json` (or
+`%USERPROFILE%\.cordum\binary-version-floor.json` on Windows); override
+via the `CORDUM_BINARY_FLOOR_FILE` env var or `-FloorFile` parameter to
+install.ps1. The file mirrors the agentd convention
+(`~/.cordum/edge/sessions/` in `core/edge/agentd/config.go`'s
+`defaultStateDir`); it carries only public material (a version, a 40-hex
+fingerprint, and the env-resolved operator handle) — no private key.
+
+Writes are atomic via write-tmp + `mv -f` (POSIX rename) on Linux/macOS
+and `[System.IO.File]::Move(tmp, dst, $true)` on Windows.
+
+### Operator override for legitimate rollback
+
+When an incident requires rolling back to a previous signed release —
+for instance to back out a regression discovered in production — pass:
+
+```sh
+bash tools/scripts/install.sh --release-dir ./v1.4.0-bundle \
+  --install-dir /usr/local/bin \
+  --rollback-operator-override \
+  --rollback-reason 'incident INC-2026-05-17: cordum-agentd v1.5.0 deadlock'
+```
+
+```pwsh
+pwsh -NoProfile -File tools\scripts\install.ps1 -ReleaseDir .\v1.4.0-bundle `
+  -InstallDir 'C:\Program Files\Cordum' `
+  -RollbackOperatorOverride -RollbackReason 'incident INC-2026-05-17 ...'
+```
+
+Both flags are required together — the override flag without a non-empty
+reason is refused at argv-parse time with
+`BINARY-VERIFY-FAIL: --rollback-operator-override requires --rollback-reason <text>`.
+Reason strings are truncated at 256 chars before being written to the
+audit event.
+
+### Audit-event schema
+
+The install path emits structured stderr JSON-lines for floor mutations,
+following the existing §8 audit-event shape with three additive fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `event` | string | `binary-floor-advance` or `binary-floor-rollback` |
+| `from` | string | Previous floor (`""` when no floor was set). |
+| `to` | string | New floor — always the verified candidate version. |
+| `sig_scheme` | string | Same values as §8 (`gpg`, `codesign`, `authenticode`, `dev`). |
+| `fingerprint` | string | Same 40-hex value as §8. |
+| `operator` | string | `$USER`/`%USERNAME%` of the install-script invoker, or `unknown` when empty. |
+| `reason` | string | Always populated on `binary-floor-rollback`; empty on `binary-floor-advance`. |
+| `exit_code` | integer | Always `0` (the script aborted before emitting the event on any failure path). |
+
+`binary-floor-rollback` is mandatory whenever the override path advances
+the floor *downward*; there is no silent-rollback path through
+install.{sh,ps1}. Operators piping install stderr into the existing
+EDGE-151-DASHBOARD ingest workflow (§8 sample `curl`) will see floor
+events alongside per-binary verify events with no schema changes
+required upstream.
+
+### CI release-tag monotonicity gate
+
+`.github/workflows/release.yml`'s `version-monotonicity` job runs before
+the build matrix on every `v*` tag push. It refuses any tag whose semver
+is not strictly greater than the most recent prior `v*` tag, preventing
+an accidental sibling-release downgrade at tag time. The job uses
+`tools/sign/cmd/version-cli monotonic-or-fail` which shares
+`tools/sign.SemverCompare` with the install path, so CI and install
+endpoints always agree on ordering.
+
+### Out-of-scope residuals
+
+* **Floor-file tampering by a local attacker with write access to
+  `$HOME/.cordum/`** — the floor inherits the same trust principal as
+  the installed binaries; defense-in-depth, not a replacement for OS-
+  level integrity (see (d) above).
+* **CI gate bypass by a repo admin publishing outside the workflow** —
+  a privileged user can override branch protection rules or push a
+  release artefact directly via the GitHub API; addressed by repo
+  governance, not by the install path.
+* **Semver tag forms outside `vMAJOR.MINOR.PATCH[-PRE]`** — non-semver
+  tags fail the version-cli parse and cause the monotonicity job to
+  refuse the publish; intentional, false-positive failures on malformed
+  tags are preferable to silent acceptance.
+* **CVE-database integration** — automated lookups against an external
+  vulnerability database to refuse a vulnerable-but-monotonic version
+  are out of scope; tracked as a separate P2+ task.
 
 ## 9. Operator runbook
 

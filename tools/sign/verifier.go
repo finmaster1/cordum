@@ -177,6 +177,12 @@ func parseManifest(b []byte) (map[string]string, error) {
 		if line == "" {
 			continue
 		}
+		// EDGE-151-DOWNGRADE: tolerate `# version: vN.N.N` metadata lines
+		// inserted by EmbedVersion at release time. These are
+		// signature-covered but carry no per-binary hash.
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
 		sep := strings.Index(line, "  ")
 		if sep == -1 {
 			return nil, fmt.Errorf("sign: malformed manifest line: %q", line)

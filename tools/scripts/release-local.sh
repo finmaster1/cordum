@@ -63,6 +63,19 @@ for target in cordum-hook cordum-agentd cordum-claude; do
 done
 
 ( cd "$OUT_DIR" && sha256sum --text cordum-* ) >"$OUT_DIR/SHA256SUMS"
+
+# EDGE-151-DOWNGRADE: embed the source semver into the manifest as a
+# `# version: vN.N.N` comment line so install.{sh,ps1} can enforce a
+# monotonic version floor. Dev releases default to v0.0.0-dev so they
+# never block a subsequent production install of any released tag.
+RELEASE_LOCAL_VERSION="${RELEASE_LOCAL_VERSION:-v0.0.0-dev}"
+tmp_manifest="$(mktemp -t cordum-release-local-manifest-XXXXXX)"
+{
+  printf '# version: %s\n' "$RELEASE_LOCAL_VERSION"
+  cat "$OUT_DIR/SHA256SUMS"
+} >"$tmp_manifest"
+mv -f "$tmp_manifest" "$OUT_DIR/SHA256SUMS"
+
 gpg --homedir "$GPG_HOME" --batch --yes --quiet --detach-sign --armor \
   --local-user "$FPR" \
   --output "$OUT_DIR/SHA256SUMS.asc" \
@@ -70,3 +83,4 @@ gpg --homedir "$GPG_HOME" --batch --yes --quiet --detach-sign --armor \
 
 echo "release-local: built $OUT_DIR/{cordum-hook${ext},cordum-agentd${ext},cordum-claude${ext}}"
 echo "release-local: signed manifest with TEST-ONLY fingerprint $FPR"
+echo "release-local: embedded version $RELEASE_LOCAL_VERSION (override via RELEASE_LOCAL_VERSION env)"
