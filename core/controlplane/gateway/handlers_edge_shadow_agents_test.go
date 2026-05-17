@@ -300,7 +300,7 @@ func TestShadowAgents_SuppressAndIgnoreAliasShareHandler(t *testing.T) {
 func TestShadowAgents_RejectsRawEvidence_StripsSecrets(t *testing.T) {
 	s := newShadowGateway(t)
 	body := validShadowCreateBody("tenant-a")
-	body.EvidenceSummary = "sk-ant-abcdef1234567890ABCDEFGH found in mcp config"
+	body.EvidenceSummary = "cordum_fake_sk-ant-abcdef1234567890ABCDEFGH found in mcp config"
 	rec := postShadow(t, s, "tenant-a", "/api/v1/edge/shadow-agents", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)

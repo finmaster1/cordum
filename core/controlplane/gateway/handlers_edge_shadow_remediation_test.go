@@ -136,7 +136,7 @@ func TestShadowRemediation_StoreUnavailable(t *testing.T) {
 func TestShadowRemediation_NoRawEvidenceLeakage(t *testing.T) {
 	s := newShadowGateway(t)
 	// Seed a finding whose evidence summary contains a secret marker.
-	leakingSummary := "leaked sk-ant-realsecret0123456789 in summary"
+	leakingSummary := "leaked cordum_fake_sk-ant-realsecret0123456789 in summary"
 	if _, err := s.shadowFindingStore.CreateFinding(context.Background(), shadow.CreateFindingRequest{
 		TenantID:         "tenant-leak",
 		OwnerPrincipalID: "owner",

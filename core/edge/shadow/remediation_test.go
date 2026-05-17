@@ -207,10 +207,10 @@ func TestGenerateForFinding_EmptyFinding(t *testing.T) {
 func TestGenerateForFinding_NoSecretsInOutput(t *testing.T) {
 	f := newFindingForTest("redact-1")
 	// Inject a value that, if echoed verbatim, would leak.
-	f.EvidenceSummary = "live token sk-ant-abcdef1234567890 leaked"
+	f.EvidenceSummary = "live token cordum_fake_sk-ant-abcdef1234567890 leaked"
 	f.RedactedPath = "/Users/realdev/secrets/key.pem"
 	f.Metadata = map[string]string{
-		"raw_command": "curl -H 'Authorization: Bearer ghp_abcdef1234567890' https://api.example.com",
+		"raw_command": "curl -H 'Authorization: Bearer cordum_fake_ghp_abcdef1234567890' https://api.example.com",
 		"home":        "/Users/realdev",
 	}
 
@@ -421,7 +421,7 @@ func TestGenerateForFinding_NoForbiddenPathPatterns(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFindingForTest(c.name)
-			f.EvidenceSummary = "summary with sk-ant-abcdef0123456789 and /Users/dev/secret"
+			f.EvidenceSummary = "summary with cordum_fake_sk-ant-abcdef0123456789 and /Users/dev/secret"
 			f.RedactedPath = "/Users/dev/secret/config.json"
 			c.mut(f)
 			plan, err := GenerateForFinding(f, GeneratorOptions{Now: fixedClock()})
@@ -463,7 +463,7 @@ func TestGenerateForFinding_SeverityFromRisk(t *testing.T) {
 
 func TestGenerateForFinding_SecretInProductLabel(t *testing.T) {
 	f := newFindingForTest("prodsec-1")
-	f.AgentProduct = "claude-code sk-ant-abcdef0123456789"
+	f.AgentProduct = "claude-code cordum_fake_sk-ant-abcdef0123456789"
 	plan, err := GenerateForFinding(f, GeneratorOptions{Now: fixedClock()})
 	if err != nil {
 		t.Fatalf("GenerateForFinding: %v", err)
@@ -476,7 +476,7 @@ func TestGenerateForFinding_SecretInProductLabel(t *testing.T) {
 
 func TestGenerateForFinding_SecretInSignalLabel(t *testing.T) {
 	f := newFindingForTest("sigsec-1")
-	f.SignalSet = []string{"unmanaged_mcp_server", "sk-ant-realsecret0123456789"}
+	f.SignalSet = []string{"unmanaged_mcp_server", "cordum_fake_sk-ant-realsecret0123456789"}
 	plan, err := GenerateForFinding(f, GeneratorOptions{Now: fixedClock()})
 	if err != nil {
 		t.Fatalf("GenerateForFinding: %v", err)

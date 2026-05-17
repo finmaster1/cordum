@@ -98,7 +98,7 @@ func TestCreateFinding_RedactsSecretsInSummary(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 	req := minimalCreateReq("t1", "o1", "p1", "claude-code", FindingRiskHigh, "config_file",
-		"sk-ant-abcdef1234567890ABCDEFGHIJ saw key in config")
+		"cordum_fake_sk-ant-abcdef1234567890ABCDEFGHIJ saw key in config")
 	got, err := s.CreateFinding(ctx, req)
 	if err != nil {
 		t.Fatalf("CreateFinding: %v", err)

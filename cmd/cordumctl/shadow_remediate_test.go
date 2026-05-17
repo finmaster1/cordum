@@ -243,11 +243,11 @@ func TestShadowRemediateCmd_NoSecretLeakage(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	path := writeFixtureToTemp(t, lifecycleFindingFixture(t, func(f *shadow.ShadowAgentFinding) {
-		f.EvidenceSummary = "leaked sk-ant-realsecret0123456789 in summary"
+		f.EvidenceSummary = "leaked cordum_fake_sk-ant-realsecret0123456789 in summary"
 		f.SignalSet = []string{"unmanaged_claude_settings"}
 		f.Metadata = map[string]string{
 			"home_path": "/Users/realdev/secrets",
-			"raw":       "Authorization: Bearer ghp_abcdef1234567890",
+			"raw":       "Authorization: Bearer cordum_fake_ghp_abcdef1234567890",
 		}
 	}))
 

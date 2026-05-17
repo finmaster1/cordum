@@ -268,11 +268,11 @@ func TestK8sDetector_TenantMapping_Precedence(t *testing.T) {
 
 func TestK8sDetector_DataMinimization_NeverCapturesSecrets(t *testing.T) {
 	canaries := []string{
-		"sk-ant-LEAKEDCANARY1234567890",
-		"sk-LEAKEDOPENAI1234567890",
+		"cordum_fake_sk-ant-LEAKEDCANARY1234567890",
+		"cordum_fake_sk-LEAKEDOPENAI1234567890",
 		"OPENSSH PRIVATE KEY",
 		"secret-prompt-content-CANARY",
-		"ghp_LEAKEDGITHUBTOKEN1234",
+		"cordum_fake_ghp_LEAKEDGITHUBTOKEN1234",
 	}
 	pod := podWith("agent", "agents", "evil.example.com/claude-agent:v1",
 		map[string]string{testTenantLabel: testTenantA}, nil)
