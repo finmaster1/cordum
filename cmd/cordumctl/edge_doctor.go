@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -70,7 +71,12 @@ func runEdgeDoctorCmd(args []string, stdout, stderr io.Writer) int {
 	settingsPath := fs.String("settings-path", firstEnvDefault(defaultClaudeSettingsPath(), "CORDUM_EDGE_SETTINGS_PATH", "CLAUDE_SETTINGS_PATH"), "Claude settings.json path to validate")
 	managedSettingsPath := fs.String("managed-settings-path", firstEnv("CORDUM_EDGE_MANAGED_SETTINGS_PATH"), "managed-settings.json path for the managed_settings_compliance check (empty = skip)")
 	dashboardURL := fs.String("dashboard-url", firstEnv("CORDUM_EDGE_DASHBOARD_URL", "CORDUM_DASHBOARD_URL"), "dashboard URL to probe")
+	shadowCluster, shadowCI := registerEdgeDoctorShadowFlags(fs.FlagSet)
 	fs.ParseArgs(args)
+
+	if exit, handled := dispatchEdgeDoctorShadow(fs.FlagSet, shadowCluster, shadowCI, *jsonOutput, stdout, stderr); handled {
+		return exit
+	}
 
 	env, err := buildEdgeDoctorEnv(fs, edgeDoctorOptions{
 		policyMode:          *policyMode,
@@ -102,6 +108,30 @@ func runEdgeDoctorCmd(args []string, stdout, stderr io.Writer) int {
 		emitEdgeDoctorHumanTo(stdout, results, env.policyMode, exitCode)
 	}
 	return exitCode
+}
+
+// dispatchEdgeDoctorShadow returns (exitCode, true) when one of the
+// preview flags is set; the standard doctor checks pipeline is skipped
+// in that case because previews invoke the EDGE-143.1/.2/.3 detectors
+// directly. When neither flag is set the second return value is false
+// and runEdgeDoctorCmd falls through to its existing flow.
+func dispatchEdgeDoctorShadow(fs *flag.FlagSet, shadowCluster, shadowCI *string, asJSON bool, stdout, stderr io.Writer) (int, bool) {
+	var clusterSet, ciSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "shadow-cluster":
+			clusterSet = true
+		case "shadow-ci":
+			ciSet = true
+		}
+	})
+	if ciSet {
+		return runShadowCIPreview(*shadowCI, asJSON, stdout, stderr), true
+	}
+	if clusterSet {
+		return runShadowClusterPreview(*shadowCluster, asJSON, stdout, stderr), true
+	}
+	return 0, false
 }
 
 func edgeDoctorWriters(stdout, stderr io.Writer) (io.Writer, io.Writer) {
