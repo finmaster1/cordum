@@ -1710,6 +1710,256 @@ paths:
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
           $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow-agents:
+    post:
+      operationId: createShadowAgentFinding
+      summary: Ingest one redacted shadow-agent finding
+      description: Persists a single ShadowAgentFinding lifecycle record. Evidence must be either a bounded redacted summary or an artifact pointer; raw payloads are rejected. Observe/warn only — no enforcement, no remediation execution, no Cordum Job creation. Audit event `shadow_agent.detected` is emitted on success.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShadowAgentFindingRequest'
+      responses:
+        '201':
+          description: Shadow finding persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentFinding'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '413':
+          $ref: '#/components/responses/EdgePayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+    get:
+      operationId: listShadowAgentFindings
+      summary: List shadow-agent findings
+      description: Returns a tenant-scoped cursor-paginated page of ShadowAgentFinding records. Filters narrow the result set; the narrowest filter is selected as the primary index path. Resolved/suppressed records past terminal retention are hidden.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum: [detected, resolved, suppressed]
+      - name: risk
+        in: query
+        schema:
+          type: string
+          enum: [low, medium, high, critical]
+      - name: agent
+        in: query
+        description: Alias for `agent_product`. The two parameter names are interchangeable.
+        schema:
+          type: string
+      - name: agent_product
+        in: query
+        schema:
+          type: string
+      - name: owner
+        in: query
+        description: Filter by `owner_principal_id`.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Shadow finding page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentFindingPage'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow-agents/{finding_id}:
+    get:
+      operationId: getShadowAgentFinding
+      summary: Get a shadow-agent finding by id
+      description: Returns one ShadowAgentFinding scoped to the caller's tenant. Cross-tenant lookups return 404 (not 403) to prevent tuple-existence probing.
+      tags:
+      - Edge
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      responses:
+        '200':
+          description: Shadow finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentFinding'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow-agents/{finding_id}/resolve:
+    post:
+      operationId: resolveShadowAgentFinding
+      summary: Resolve a shadow-agent finding
+      description: Flips a detected finding to resolved. Idempotent on a resolved finding; returns 409 when called on a suppressed terminal record. Emits `shadow_agent.resolved` audit event on success.
+      tags:
+      - Edge
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveShadowAgentFindingRequest'
+      responses:
+        '200':
+          description: Updated shadow finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentFinding'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow-agents/{finding_id}/suppress:
+    post:
+      operationId: suppressShadowAgentFinding
+      summary: Suppress a shadow-agent finding
+      description: Flips a detected finding to suppressed. Idempotent on a suppressed finding; returns 409 when called on a resolved terminal record. Optional `suppressed_until` records a time-bound exception for downstream re-evaluation. Emits `shadow_agent.suppressed` audit event on success.
+      tags:
+      - Edge
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuppressShadowAgentFindingRequest'
+      responses:
+        '200':
+          description: Updated shadow finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentFinding'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/shadow-agents/{finding_id}/ignore:
+    post:
+      operationId: ignoreShadowAgentFinding
+      summary: Suppress a shadow-agent finding (compat alias for /suppress)
+      description: Compatibility alias for POST /api/v1/edge/shadow-agents/{finding_id}/suppress. Shares the same handler and emits the same audit event; new clients should use /suppress.
+      tags:
+      - Edge
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuppressShadowAgentFindingRequest'
+      responses:
+        '200':
+          description: Updated shadow finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShadowAgentFinding'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '409':
+          $ref: '#/components/responses/EdgeConflict'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
   /api/v1/jobs:
     post:
       operationId: submitJob
@@ -8773,6 +9023,161 @@ components:
         next_cursor:
           type: string
           nullable: true
+    ShadowAgentFinding:
+      type: object
+      description: Persisted lifecycle record for one detected shadow agent. Distinct from the scanner-only `Finding` shape; this is the operator-visible triage record consumed by /api/v1/edge/shadow-agents.
+      required: [finding_id, tenant_id, owner_principal_id, principal_id, agent_product, risk, status, evidence_type, detected_at, created_at, updated_at]
+      properties:
+        finding_id:
+          type: string
+          description: Server-generated id prefixed with `edge_shadow_`.
+        tenant_id:
+          type: string
+        owner_principal_id:
+          type: string
+        principal_id:
+          type: string
+          description: Detector identity (scanner principal); falls back to authenticated caller when omitted.
+        agent_product:
+          type: string
+        agent_id:
+          type: string
+        hostname:
+          type: string
+        risk:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [detected, resolved, suppressed]
+        evidence_type:
+          type: string
+        evidence_summary:
+          type: string
+          description: Bounded (≤2 KiB) redacted summary safe to persist and return. Secret-shaped values are stripped at ingest.
+        evidence_artifact_ptr:
+          $ref: '#/components/schemas/ShadowEvidencePointer'
+        redacted_path:
+          type: string
+          description: Home-prefix-stripped path; never an absolute developer-machine path.
+        detected_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          type: string
+        resolution_reason:
+          type: string
+          description: Bounded (≤512 bytes) human reason supplied at resolve/suppress; secret markers stripped.
+        suppressed_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Optional hint for a time-bound suppression. The store does NOT auto-revert when the timestamp lapses.
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Small free-form map (≤16 entries, ≤64-byte keys, ≤256-byte values).
+    ShadowEvidencePointer:
+      type: object
+      description: Reference to redacted evidence stored outside the finding record. Distinct from `ArtifactPointer` because shadow findings have no session/execution context.
+      required: [tenant_id, uri, sha256, retention_class, redaction_level, created_at]
+      properties:
+        tenant_id:
+          type: string
+          description: MUST match the parent finding's tenant_id; cross-tenant pointers are rejected.
+        uri:
+          type: string
+        sha256:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        retention_class:
+          type: string
+          enum: [short, standard, audit]
+        redaction_level:
+          type: string
+          enum: [standard, strict]
+        created_at:
+          type: string
+          format: date-time
+    ShadowAgentFindingPage:
+      type: object
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShadowAgentFinding'
+        next_cursor:
+          type: string
+          nullable: true
+    CreateShadowAgentFindingRequest:
+      type: object
+      required: [owner_principal_id, agent_product, risk, evidence_type, detected_at]
+      properties:
+        finding_id:
+          type: string
+          description: Optional caller-supplied id. When omitted, server generates with `edge_shadow_` prefix.
+        tenant_id:
+          type: string
+          description: Optional, must match X-Tenant-ID header when supplied.
+        owner_principal_id:
+          type: string
+        principal_id:
+          type: string
+          description: Detector identity; falls back to authenticated caller.
+        agent_product:
+          type: string
+        agent_id:
+          type: string
+        hostname:
+          type: string
+        risk:
+          type: string
+          enum: [low, medium, high, critical]
+        evidence_type:
+          type: string
+        evidence_summary:
+          type: string
+        evidence_artifact_ptr:
+          $ref: '#/components/schemas/ShadowEvidencePointer'
+        redacted_path:
+          type: string
+        detected_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    ResolveShadowAgentFindingRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Bounded reason for resolution; ≤512 bytes, secret markers stripped.
+    SuppressShadowAgentFindingRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Bounded reason for suppression; ≤512 bytes, secret markers stripped.
+        suppressed_until:
+          type: string
+          format: date-time
+          description: Optional time-bound hint; the store records but does not auto-revert.
     EdgeAgentActionEvent:
       type: object
       required: [event_id, session_id, execution_id, tenant_id, seq, ts, layer, kind, decision, status]

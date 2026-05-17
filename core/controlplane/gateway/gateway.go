@@ -30,6 +30,7 @@ import (
 	"github.com/cordum/cordum/core/controlplane/topicregistry"
 	"github.com/cordum/cordum/core/controlplane/workercredentials"
 	edgecore "github.com/cordum/cordum/core/edge"
+	"github.com/cordum/cordum/core/edge/shadow"
 	"github.com/cordum/cordum/core/governance"
 	"github.com/cordum/cordum/core/infra/artifacts"
 	"github.com/cordum/cordum/core/infra/buildinfo"
@@ -129,6 +130,7 @@ type server struct {
 	memStore              store.Store
 	jobStore              *store.RedisJobStore // Typed for ListRecentJobs
 	edgeStore             edgecore.Store
+	shadowFindingStore    shadow.Store
 	mcpUpstreamRegistry   edgecore.MCPUpstreamRegistry
 	decisionLogStore      model.DecisionLogStore
 	copilotStore          copilot.Store
@@ -655,10 +657,16 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 		return err
 	}
 	edgeStore := edgecore.NewRedisStoreFromClient(jobStore.Client(), edgecore.WithRecorder(edgeRecorder))
+	// EDGE-141 — Shadow finding store shares the existing Redis client; it
+	// does NOT own connection lifecycle. nil-safe: NewRedisStore returns
+	// nil when the client is nil so unit-test gateways without Redis
+	// continue to surface a clean 503 envelope via shadowFindingStoreOrUnavailable.
+	shadowFindingStore := shadow.NewRedisStore(jobStore.Client())
 	s := &server{
 		memStore:               memStore,
 		jobStore:               jobStore,
 		edgeStore:              edgeStore,
+		shadowFindingStore:     shadowFindingStore,
 		mcpUpstreamRegistry:    edgecore.NewRedisMCPUpstreamRegistryFromClient(jobStore.Client()),
 		decisionLogStore:       decisionLogStore,
 		copilotStore:           copilot.NotImplementedStore{},
@@ -1342,6 +1350,13 @@ func (s *server) registerRoutes(mux *http.ServeMux) error {
 	// (docs/security/binary-signing.md §8) flow through the audit chain.
 	s.registerRoute(mux, "POST /api/v1/edge/binary-integrity/events", s.instrumented("/api/v1/edge/binary-integrity/events", s.handleIngestBinaryVerify))
 	s.registerRoute(mux, "GET /api/v1/edge/binary-integrity/events", s.instrumented("/api/v1/edge/binary-integrity/events", s.handleListBinaryVerify))
+	// EDGE-141 — Shadow agent finding lifecycle.
+	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents", s.instrumented("/api/v1/edge/shadow-agents", s.handleCreateShadowAgentFinding))
+	s.registerRoute(mux, "GET /api/v1/edge/shadow-agents", s.instrumented("/api/v1/edge/shadow-agents", s.handleListShadowAgentFindings))
+	s.registerRoute(mux, "GET /api/v1/edge/shadow-agents/{finding_id}", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}", s.handleGetShadowAgentFinding))
+	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents/{finding_id}/resolve", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}/resolve", s.handleResolveShadowAgentFinding))
+	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents/{finding_id}/suppress", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}/suppress", s.handleSuppressShadowAgentFinding))
+	s.registerRoute(mux, "POST /api/v1/edge/shadow-agents/{finding_id}/ignore", s.instrumented("/api/v1/edge/shadow-agents/{finding_id}/ignore", s.handleSuppressShadowAgentFinding))
 	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleListMCPUpstreams))
 	s.registerRoute(mux, "GET /api/v1/edge/mcp/upstreams/list", s.instrumented("/api/v1/edge/mcp/upstreams/list", s.handleListMCPUpstreams))
 	s.registerRoute(mux, "POST /api/v1/edge/mcp/upstreams", s.instrumented("/api/v1/edge/mcp/upstreams", s.handleCreateMCPUpstream))

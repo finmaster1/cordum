@@ -129,6 +129,16 @@ const (
 	EventEdgeApprovalExpired   = "edge.approval_expired"
 	EventEdgeArtifactExported  = "edge.artifact_exported"
 
+	// EventShadowAgent* are emitted by the Edge Gateway shadow-finding
+	// lifecycle handlers (EDGE-141). Extra carries finding_id, agent_product,
+	// agent_id, risk, evidence_type, redacted_path (already home-prefix
+	// stripped), and the optional artifact pointer URI/SHA256. Raw evidence
+	// summaries are NEVER attached — only the already-redacted
+	// shadow.RedactConfigSummary output, capped at 2 KiB.
+	EventShadowAgentDetected   = "shadow_agent.detected"
+	EventShadowAgentResolved   = "shadow_agent.resolved"
+	EventShadowAgentSuppressed = "shadow_agent.suppressed"
+
 	// EventActionGateDenied is emitted by the Safety Kernel when an
 	// action-layer gate (tenant / file / url / mcp / mutation /
 	// provenance) short-circuits the legacy rule loop with a non-ALLOW
@@ -138,9 +148,9 @@ const (
 	// MEDIUM for REQUIRE_HUMAN outcomes. SIEM rules pivot on this
 	// event to surface privilege-escalation probes that never reached
 	// the existing rule evaluator.
-	EventActionGateDenied = "actiongate.denied"
-	EventEdgeAgentdDegraded    = "edge.agentd_degraded"
-	EventEdgeFailClosed        = "edge.fail_closed"
+	EventActionGateDenied   = "actiongate.denied"
+	EventEdgeAgentdDegraded = "edge.agentd_degraded"
+	EventEdgeFailClosed     = "edge.fail_closed"
 
 	// EventGovernanceDecision is emitted by the multi-agent governance
 	// evaluator for every non-ALLOW decision (DENY or REQUIRE_HUMAN).
