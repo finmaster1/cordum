@@ -89,7 +89,7 @@ universal "no claim text wins" rule.
 | Decision | Behaviour |
 | --- | --- |
 | `ALLOW` | Forward to upstream; emit `mcp.tool.pre` then `mcp.tool.post`. |
-| `ALLOW_WITH_CONSTRAINTS` | Same as ALLOW; constraint metadata travels on the post event's `Extra` map. |
+| `ALLOW_WITH_CONSTRAINTS` | Forward to upstream like ALLOW; emit `mcp.tool.pre` then `mcp.tool.post` with `Decision=CONSTRAIN` (not `ALLOW`) and the gate's constraint map carried on `AgentActionEvent.Constraints` (`json:"constraints,omitempty"`). Failed-upstream events emit `mcp.tool.failed` preserving the same constraints. `logToolCallDecision` records `constraint_count` only — never values. |
 | `DENY` | Short-circuit; emit `mcp.tool.failed`; return `IsError=true` with sanitized reason. |
 | `THROTTLE` | Short-circuit; emit `mcp.tool.failed` with code `throttled`; caller back-pressures. |
 | `REQUIRE_HUMAN` | Bridge calls `ApprovalHandoff.ConsumeActionGateDecision`; upstream is not invoked. |
