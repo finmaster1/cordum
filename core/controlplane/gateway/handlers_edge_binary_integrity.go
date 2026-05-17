@@ -144,7 +144,7 @@ func (s *server) handleIngestBinaryVerify(w http.ResponseWriter, r *http.Request
 	}
 
 	body := http.MaxBytesReader(w, r.Body, MaxBinaryVerifyRequestBodyBytes)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	raw, readErr := io.ReadAll(body)
 	if readErr != nil {
 		if errors.Is(readErr, &http.MaxBytesError{}) || strings.Contains(readErr.Error(), "request body too large") {

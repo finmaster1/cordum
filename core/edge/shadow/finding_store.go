@@ -345,13 +345,9 @@ var (
 	ErrStoreUnavailable = errors.New("shadow finding: store unavailable")
 )
 
-// validFindingStatus / validFindingRisk gate enum inputs.
+// validFindingRisk gates enum inputs. (Status gating moved to inline
+// switch in normalizeAndValidateCreate; the map form was dead code.)
 var (
-	validFindingStatus = map[FindingStatus]struct{}{
-		FindingStatusDetected:   {},
-		FindingStatusResolved:   {},
-		FindingStatusSuppressed: {},
-	}
 	validFindingRisk = map[FindingRisk]struct{}{
 		FindingRiskLow:      {},
 		FindingRiskMedium:   {},

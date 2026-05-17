@@ -37,7 +37,7 @@ func run(args []string, stdout, stderr *os.File) error {
 		if len(args) != 3 {
 			return fmt.Errorf("version-cli: compare requires two version arguments")
 		}
-		fmt.Fprintln(stdout, sign.SemverCompare(args[1], args[2]))
+		_, _ = fmt.Fprintln(stdout, sign.SemverCompare(args[1], args[2]))
 		return nil
 	case "monotonic-or-fail":
 		if len(args) != 3 {
@@ -49,7 +49,7 @@ func run(args []string, stdout, stderr *os.File) error {
 		}
 		if prior == "" || prior == "v0.0.0" {
 			// First-tag corner case: anything monotonic is fine.
-			fmt.Fprintf(stdout, "ok: %s is the first release\n", newer)
+			_, _ = fmt.Fprintf(stdout, "ok: %s is the first release\n", newer)
 			return nil
 		}
 		if _, _, _, _, ok := sign.ParseSemver(prior); !ok {
@@ -58,7 +58,7 @@ func run(args []string, stdout, stderr *os.File) error {
 		if sign.SemverCompare(newer, prior) <= 0 {
 			return fmt.Errorf("release tag %s is not strictly greater than prior %s", newer, prior)
 		}
-		fmt.Fprintf(stdout, "ok: %s > %s\n", newer, prior)
+		_, _ = fmt.Fprintf(stdout, "ok: %s > %s\n", newer, prior)
 		return nil
 	default:
 		return fmt.Errorf("version-cli: unknown subcommand %q", args[0])

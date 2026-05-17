@@ -18,7 +18,7 @@ import (
 // gateway flags.
 func runMCPAttachCmd(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: cordumctl mcp <preview|attach|rollback> --client <claude_code|codex|cursor>")
+		_, _ = fmt.Fprintln(stderr, "usage: cordumctl mcp <preview|attach|rollback> --client <claude_code|codex|cursor>")
 		return 2
 	}
 	verb := args[0]
@@ -36,7 +36,7 @@ func runMCPAttachCmd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *client == "" {
-		fmt.Fprintln(stderr, "missing --client (claude_code | codex | cursor)")
+		_, _ = fmt.Fprintln(stderr, "missing --client (claude_code | codex | cursor)")
 		return 2
 	}
 	adapter, err := buildAttachAdapter(*client, *configPath)
@@ -65,7 +65,7 @@ func runMCPAttachCmd(args []string, stdout, stderr io.Writer) int {
 	case "rollback":
 		return RollbackAttach(adapter, stdout)
 	default:
-		fmt.Fprintf(stderr, "unknown mcp attach verb %q (want preview | attach | rollback)\n", verb)
+		_, _ = fmt.Fprintf(stderr, "unknown mcp attach verb %q (want preview | attach | rollback)\n", verb)
 		return 2
 	}
 }
