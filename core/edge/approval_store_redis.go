@@ -1007,10 +1007,14 @@ func classifyApprovalClaimMismatch(approval *EdgeApproval, req ApprovalClaimRequ
 	if approval == nil {
 		return ApprovalConflictKindNotFound, "approval missing"
 	}
+	// Self-approval check: deny only when the caller (the agent presenting the
+	// claim) matches the ResolverID (the principal who issued /approve). In
+	// MCP retry semantics the agent re-issues the original tool call with
+	// _approval_ref, so caller==Requester is the normal case, NOT
+	// self-approval. The approve-time requesterMatchesApprover guard already
+	// rejects Requester==ResolverID at the API surface; this store-level
+	// check is defense-in-depth backing that guard.
 	if req.CallerAgentID != "" {
-		if approval.Requester != "" && approval.Requester == req.CallerAgentID {
-			return ApprovalConflictKindSelfApproval, "caller is requester"
-		}
 		if approval.ResolverID != "" && approval.ResolverID == req.CallerAgentID {
 			return ApprovalConflictKindSelfApproval, "caller is approver"
 		}

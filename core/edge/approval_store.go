@@ -150,10 +150,15 @@ type ApprovalResolution struct {
 // CallerAgentID is the authenticated identity of the agent presenting the
 // claim. When non-empty, the store-level CAS adds a defense-in-depth
 // self-approval check: a claim where CallerAgentID matches the approval's
-// Requester or ResolverID is refused with
-// ApprovalConflictError{Kind:ApprovalConflictKindSelfApproval}. The
-// MutationGate enforces the same constraint upstream — keeping the check
-// at both layers survives a future refactor that bypasses one of them.
+// ResolverID (the principal who issued /approve) is refused with
+// ApprovalConflictError{Kind:ApprovalConflictKindSelfApproval}. In real MCP
+// retry semantics the caller is the same principal as the original Requester
+// (the agent re-issues the tool call with _approval_ref), so the Requester
+// field is NOT a comparison target — only ResolverID is. The approve-time
+// requesterMatchesApprover guard enforces Requester != ResolverID at the
+// /approve API surface; this store-level check is defense-in-depth backing
+// that guard so a refactor that bypasses the API-layer check still fails
+// closed at the store.
 type ApprovalClaimRequest struct {
 	TenantID       string
 	ApprovalRef    string
