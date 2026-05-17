@@ -1992,9 +1992,16 @@ gate_evidence_export() {
     assert_json "${gate}" \
       '[.events[]? | select(.kind == "hook.post_tool_use" and (.artifact_ptrs | length) >= 1)] | length >= 1' \
       'export events[] missing PostToolUse with artifact pointer'
+    # Bypass mode attaches a synthetic artifact pointer to the PostToolUse
+    # event but does not write the artifact body to the artifact store.
+    # SessionExportAssembler.collectArtifacts (core/edge/export.go:418)
+    # calls ArtifactStore.Stat per pointer URI; an unresolved URI lands in
+    # bundle.missing_artifacts[] (reason=not_found), not bundle.artifacts[].
+    # Either array proves the pointer round-tripped through the export
+    # pipeline keyed on our session.
     assert_json "${gate}" \
-      '[.artifacts[]? | select(.session_id == "'"${EDGE_SESSION_ID}"'")] | length >= 1' \
-      'export artifacts[] missing entries for our session'
+      '(([.artifacts[]? | select(.session_id == "'"${EDGE_SESSION_ID}"'")] | length) + ([.missing_artifacts[]? | select(.session_id == "'"${EDGE_SESSION_ID}"'")] | length)) >= 1' \
+      'export artifacts[]/missing_artifacts[] missing entries for our session'
   else
     assert_json "${gate}" \
       '[.events[]? | select(.kind == "hook.post_tool_use" and .execution_id == "'"${EDGE_EXECUTION_ID}"'")] | length >= 1' \
