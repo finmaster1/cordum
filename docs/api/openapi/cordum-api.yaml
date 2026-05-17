@@ -1491,6 +1491,59 @@ paths:
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
           $ref: '#/components/responses/EdgeInternalServerError'
+  /api/v1/edge/runtime/events:
+    post:
+      operationId: ingestEdgeRuntimeEvents
+      summary: Ingest bounded runtime telemetry from a trusted sidecar
+      description: >-
+        Disabled by default. When `CORDUM_EDGE_RUNTIME_INGEST_ENABLED` is unset
+        (or set to a non-truthy value), the route returns 503 `service_unavailable`
+        and persists nothing. When enabled, the endpoint accepts a bounded,
+        redacted runtime event batch (process exec, file read/write, network
+        connect, DNS query) from a trusted source identity and persists mapped
+        `AgentActionEvent` records with `layer=runtime` and `decision=RECORDED`
+        through the existing Edge store. Raw argv, file contents, packet
+        payloads, DNS response bodies, request bodies, headers, secrets, and
+        tokens are rejected at the strict-schema decode boundary. All-or-nothing
+        batch acceptance — a single invalid envelope aborts the whole batch.
+        See `docs/edge/runtime-ingestion.md` for the full contract.
+      tags:
+      - Edge
+      parameters:
+      - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EdgeRuntimeIngestRequest'
+      responses:
+        '201':
+          description: Runtime events appended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeRuntimeIngestResponse'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
+        '401':
+          $ref: '#/components/responses/EdgeUnauthorized'
+        '403':
+          $ref: '#/components/responses/EdgeForbidden'
+        '404':
+          $ref: '#/components/responses/EdgeNotFound'
+        '413':
+          $ref: '#/components/responses/EdgePayloadTooLarge'
+        '429':
+          description: Per-execution event cap exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeError'
+        '503':
+          $ref: '#/components/responses/EdgeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/EdgeInternalServerError'
   /api/v1/edge/sessions/{session_id}/events:
     get:
       operationId: listEdgeSessionEvents
@@ -9023,6 +9076,150 @@ components:
         next_cursor:
           type: string
           nullable: true
+    EdgeRuntimeIngestSource:
+      type: object
+      required: [source_id]
+      description: Trusted sidecar identity that produced the batch.
+      properties:
+        source_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Stable identifier for the runtime collector instance.
+    EdgeRuntimeProcessSummary:
+      type: object
+      description: Bounded redacted summary of a process exec event. Raw argv / env / cmdline are forbidden.
+      properties:
+        executable_basename:
+          type: string
+          maxLength: 256
+        executable_sha256:
+          type: string
+          maxLength: 80
+        argument_count:
+          type: integer
+          minimum: 0
+    EdgeRuntimeFileSummary:
+      type: object
+      properties:
+        operation:
+          type: string
+          enum: [read, write]
+        path_redacted:
+          type: string
+          maxLength: 256
+    EdgeRuntimeNetworkSummary:
+      type: object
+      properties:
+        host_redacted:
+          type: string
+          maxLength: 256
+        ip_prefix:
+          type: string
+          maxLength: 64
+        port:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        protocol:
+          type: string
+          enum: [tcp, udp]
+    EdgeRuntimeDNSSummary:
+      type: object
+      properties:
+        qname_redacted:
+          type: string
+          maxLength: 256
+        qtype:
+          type: string
+          maxLength: 16
+    EdgeRuntimeEventEnvelope:
+      type: object
+      required: [tenant_id, session_id, execution_id, source_event_id, observed_at, kind]
+      description: One bounded, redacted runtime telemetry record. Forbidden top-level keys (argv, args, cmdline, command_line, env, environment, file_content, file_contents, packet, payload, body, request_body, response_body, headers, header, cookie, cookies, secret, secrets, token, tokens, password, passwords, api_key, apikey, private_key, dns_response, response) are rejected at the strict-schema decode boundary.
+      additionalProperties: false
+      properties:
+        tenant_id:
+          type: string
+        session_id:
+          type: string
+        execution_id:
+          type: string
+        source_event_id:
+          type: string
+          minLength: 1
+        observed_at:
+          type: string
+          format: date-time
+        kind:
+          type: string
+          enum:
+          - runtime.process.exec
+          - runtime.file.read
+          - runtime.file.write
+          - runtime.network.connect
+          - runtime.dns.query
+        outcome_status:
+          type: string
+          enum: ["", ok, failed, degraded]
+        process:
+          $ref: '#/components/schemas/EdgeRuntimeProcessSummary'
+        file:
+          $ref: '#/components/schemas/EdgeRuntimeFileSummary'
+        network:
+          $ref: '#/components/schemas/EdgeRuntimeNetworkSummary'
+        dns:
+          $ref: '#/components/schemas/EdgeRuntimeDNSSummary'
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          maxProperties: 16
+        artifact_ptrs:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/EdgeArtifactPointer'
+    EdgeRuntimeIngestRequest:
+      type: object
+      required: [source, events]
+      additionalProperties: false
+      properties:
+        source:
+          $ref: '#/components/schemas/EdgeRuntimeIngestSource'
+        batch_id:
+          type: string
+          maxLength: 256
+        events:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/EdgeRuntimeEventEnvelope'
+    EdgeRuntimeIngestDropReport:
+      type: object
+      properties:
+        source_event_id:
+          type: string
+        kind:
+          type: string
+        reason:
+          type: string
+          enum: [sampled_out]
+    EdgeRuntimeIngestResponse:
+      type: object
+      required: [accepted_count, dropped_count]
+      properties:
+        accepted_count:
+          type: integer
+          minimum: 0
+        dropped_count:
+          type: integer
+          minimum: 0
+        dropped:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeRuntimeIngestDropReport'
     ShadowAgentFinding:
       type: object
       description: Persisted lifecycle record for one detected shadow agent. Distinct from the scanner-only `Finding` shape; this is the operator-visible triage record consumed by /api/v1/edge/shadow-agents.
