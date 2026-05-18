@@ -26,6 +26,8 @@ const complianceExportMaxRangeSpread = 366 * 24 * time.Hour
 // Clients with slightly skewed clocks shouldn't fail the request.
 const defaultComplianceExportClockSkew = 2 * time.Minute
 
+const complianceExportGenericError = "export failed"
+
 // complianceExportEntitledMaxEvents returns the upper bound on events
 // per export call for the caller's current entitlement. Enterprise
 // licences get the audit.DefaultComplianceExportMaxEvents ceiling;
@@ -158,9 +160,9 @@ func (s *server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 		// Headers already written; best we can do is stream an error
 		// footer the downstream parser can recognise.
 		if opts.Format == audit.ComplianceExportFormatJSON {
-			_ = writeJSONLineErr(w, werr)
+			_ = writeJSONLineErr(w)
 		} else {
-			_, _ = fmt.Fprintf(w, "# cordum-error: %s\n", strings.ReplaceAll(werr.Error(), "\n", " "))
+			_, _ = fmt.Fprintln(w, "# cordum-error: "+complianceExportGenericError)
 		}
 		slog.Error("compliance export failed",
 			"tenant", tenant,
@@ -272,10 +274,10 @@ func sanitiseFilenameSegment(in string) string {
 // distinguish "ok export with 0 events" from "export aborted". Not
 // a full manifest because by the time we're here the stream has
 // already started and we just need to signal the trailing state.
-func writeJSONLineErr(w http.ResponseWriter, werr error) error {
+func writeJSONLineErr(w http.ResponseWriter) error {
 	payload := map[string]any{
 		"type":  "error",
-		"error": werr.Error(),
+		"error": complianceExportGenericError,
 		"at":    time.Now().UTC(),
 	}
 	b, mErr := json.Marshal(payload)
