@@ -1,8 +1,9 @@
 package k8s
 
 import (
-	"regexp"
 	"strings"
+
+	"github.com/cordum/cordum/core/edge/shadow"
 )
 
 // maxFieldBytes caps the size of every persisted string field this
@@ -10,33 +11,16 @@ import (
 // per design doc §5.3.
 const maxFieldBytes = 2048
 
-// secretMarkerPatterns mirrors core/edge/shadow/redaction.go:23-36 so
-// the K8s detector can run the EDGE-140 8-pattern strip at extraction
-// time without depending on the unexported shadow.stripSecretMarkers
-// helper. Keeping the two lists in sync is intentional: this package
-// is the FIRST line of defense (extraction time) and the shadow store
-// is the SECOND line (write time on EvidenceSummary). The duplication
-// is documented in CHANGELOG.md so future patterns are added to both.
-var secretMarkerPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+PRIVATE KEY[-A-Z]*-----`),
-	regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+CERTIFICATE-----`),
-	regexp.MustCompile(`sk-ant-[A-Za-z0-9_\-]{16,}`),
-	regexp.MustCompile(`sk-[A-Za-z0-9_\-]{16,}`),
-	regexp.MustCompile(`ghp_[A-Za-z0-9]{16,}`),
-	regexp.MustCompile(`gho_[A-Za-z0-9]{16,}`),
-	regexp.MustCompile(`xoxb-[A-Za-z0-9\-]{16,}`),
-	regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-_\.]{8,}`),
-}
-
 // redactField is the universal entry point for every string the
-// detector persists. It strips the 8 secret patterns and caps the
-// output at maxFieldBytes. Detector code MUST funnel every
-// caller-visible string through redactField — never through
-// fmt.Sprintf directly — so a single contract change here propagates.
+// detector persists. It delegates the secret-shape scrub to
+// shadow.StripSecretMarkers — the single source of truth for the
+// 8-pattern + homoglyph-hyphen + ROT13 + base64 redaction pipeline —
+// then applies the k8s-specific maxFieldBytes cap. Detector code MUST
+// funnel every caller-visible string through redactField — never
+// through fmt.Sprintf directly — so a single contract change in
+// shadow propagates here automatically.
 func redactField(s string) string {
-	for _, re := range secretMarkerPatterns {
-		s = re.ReplaceAllString(s, "<REDACTED>")
-	}
+	s = shadow.StripSecretMarkers(s)
 	if len(s) > maxFieldBytes {
 		s = s[:maxFieldBytes-len(" …truncated")] + " …truncated"
 	}
@@ -44,8 +28,9 @@ func redactField(s string) string {
 }
 
 // imageTagSafe returns the registry+name portion of a container image
-// string with the tag scrubbed if it shows secret-shape. Plain semver
-// tags pass through unchanged; anything matching secretMarkerPatterns
+// string with the tag scrubbed if it shows secret-shape (direct,
+// homoglyph, ROT13, or base64). Plain semver tags pass through
+// unchanged; anything that the shared shadow redactor would scrub
 // degrades to "<image>:<redacted>".
 func imageTagSafe(image string) string {
 	if image == "" {
@@ -56,15 +41,13 @@ func imageTagSafe(image string) string {
 	if at > 0 {
 		image = image[:at] // drop @sha256:... digest, not a leak but noisy
 	}
-	if colon <= 0 {
+	if colon <= 0 || colon >= len(image) {
 		return redactField(image)
 	}
 	base := image[:colon]
 	tag := image[colon+1:]
-	for _, re := range secretMarkerPatterns {
-		if re.MatchString(tag) {
-			return redactField(base) + ":<redacted>"
-		}
+	if shadow.StripSecretMarkers(tag) != tag {
+		return redactField(base) + ":<redacted>"
 	}
 	return redactField(base) + ":" + redactField(tag)
 }

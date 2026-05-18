@@ -244,6 +244,15 @@ func stripSecretMarkers(s string) string {
 	return s
 }
 
+// StripSecretMarkers is the exported entry point for the encoding-aware
+// secret redactor. Callers in sibling subpackages (e.g.
+// core/edge/shadow/k8s) compose this primitive instead of duplicating
+// the regex + homoglyph + ROT13 + base64 pipeline. Returns s with every
+// recognised credential shape replaced by "<REDACTED>".
+func StripSecretMarkers(s string) string {
+	return stripSecretMarkers(s)
+}
+
 func normalizeHomoglyphHyphens(s string) string {
 	if !strings.ContainsAny(s, "\u2010\u2011\u2012\u2013\u2014\uff0d") {
 		return s
