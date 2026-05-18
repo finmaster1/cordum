@@ -3,6 +3,7 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -258,6 +259,87 @@ func TestVerifyManagedSettingsRejectsMalformedJSON(t *testing.T) {
 	t.Parallel()
 	if _, err := VerifyManagedSettings([]byte("{ not valid json")); err == nil {
 		t.Fatalf("expected parse error for malformed JSON; got nil")
+	}
+}
+
+// TestValidateLoopbackAgentdURL is the PR #276 Sub-G #20 regression. Every
+// invalid input is asserted against a typed sentinel (errors.Is) so a future
+// refactor of error wording cannot regress the violation taxonomy — and the
+// raw URL bytes (which may carry userinfo credentials) are NEVER substring-
+// matched against expected text. The full VerifyManagedSettings round-trip is
+// also exercised per input so the drift reported to operators stays scoped to
+// env.CORDUM_AGENTD_URL without echoing userinfo into the Got field.
+func TestValidateLoopbackAgentdURL(t *testing.T) {
+	t.Parallel()
+
+	const (
+		validV4    = "http://127.0.0.1:8765/v1/edge/hooks/claude"
+		validV6    = "http://[::1]:8765/v1/edge/hooks/claude"
+		validHost  = "http://localhost:8765/v1/edge/hooks/claude"
+		validHTTPS = "https://127.0.0.1:8765/v1/edge/hooks/claude"
+	)
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr error // nil = expect valid
+	}{
+		// VALID inputs — production contract accepts http+https loopback.
+		{name: "valid_loopback_v4", raw: validV4, wantErr: nil},
+		{name: "valid_loopback_v6", raw: validV6, wantErr: nil},
+		{name: "valid_loopback_localhost", raw: validHost, wantErr: nil},
+		{name: "valid_loopback_https", raw: validHTTPS, wantErr: nil},
+		// INVALID — one row per violation class, typed sentinel.
+		{name: "empty_string", raw: "", wantErr: errAgentdURLEmpty},
+		{name: "whitespace_only", raw: "   ", wantErr: errAgentdURLEmpty},
+		{name: "missing_scheme", raw: "127.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLScheme},
+		{name: "scheme_ftp", raw: "ftp://127.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLScheme},
+		{name: "scheme_file", raw: "file:///v1/edge/hooks/claude", wantErr: errAgentdURLScheme},
+		{name: "remote_host_dns", raw: "http://example.com:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
+		{name: "remote_host_v4", raw: "http://10.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
+		{name: "remote_host_unspecified", raw: "http://0.0.0.0:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
+		{name: "remote_host_link_local_v6", raw: "http://[fe80::1]:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
+		{name: "userinfo_password", raw: "http://user:pass@127.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLUserinfo},
+		{name: "userinfo_username_only", raw: "http://user@127.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLUserinfo},
+		{name: "missing_port", raw: "http://127.0.0.1/v1/edge/hooks/claude", wantErr: errAgentdURLPort},
+		{name: "port_zero", raw: "http://127.0.0.1:0/v1/edge/hooks/claude", wantErr: errAgentdURLPort},
+		{name: "port_out_of_range_high", raw: "http://127.0.0.1:65536/v1/edge/hooks/claude", wantErr: errAgentdURLPort},
+		{name: "wrong_path_admin", raw: "http://127.0.0.1:8765/admin", wantErr: errAgentdURLPath},
+		{name: "wrong_path_traversal", raw: "http://127.0.0.1:8765/v1/edge/hooks/claude/../admin", wantErr: errAgentdURLPath},
+		{name: "query_present", raw: validV4 + "?token=abc", wantErr: errAgentdURLQuery},
+		{name: "fragment_present", raw: validV4 + "#frag", wantErr: errAgentdURLFragment},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotErr := validateLoopbackAgentdURL(tc.raw)
+			if tc.wantErr == nil {
+				if gotErr != nil {
+					t.Fatalf("validateLoopbackAgentdURL(%q) returned %v, want nil", tc.raw, gotErr)
+				}
+				return
+			}
+			if !errors.Is(gotErr, tc.wantErr) {
+				t.Fatalf("validateLoopbackAgentdURL(%q): errors.Is(%v, %v) = false", tc.raw, gotErr, tc.wantErr)
+			}
+			// Round-trip through VerifyManagedSettings: every invalid URL
+			// must surface as a critical drift on env.CORDUM_AGENTD_URL
+			// without ever echoing userinfo (the password is the canonical
+			// secret-shaped substring credentials could carry).
+			drifts := agentdURLDrifts(map[string]string{"CORDUM_AGENTD_URL": tc.raw})
+			if len(drifts) == 0 {
+				t.Fatalf("agentdURLDrifts(%q) = empty; want 1 critical drift", tc.raw)
+			}
+			d := drifts[0]
+			if d.Field != "env.CORDUM_AGENTD_URL" {
+				t.Fatalf("drift field = %q, want env.CORDUM_AGENTD_URL", d.Field)
+			}
+			if d.Severity != managedSettingsDriftCritical {
+				t.Fatalf("drift severity = %q, want %q", d.Severity, managedSettingsDriftCritical)
+			}
+			if strings.Contains(d.Got, "pass") || strings.Contains(d.Got, "user:") {
+				t.Fatalf("drift.Got %q leaked userinfo from raw %q", d.Got, tc.raw)
+			}
+		})
 	}
 }
 

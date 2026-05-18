@@ -89,6 +89,13 @@ func LoadSecret(
 	}
 
 	value, err := kr.Get(ctx, secretName)
+	// Re-wrap any error from a 3rd-party Keyring impl through the safe
+	// sentinel-wrapper BEFORE inspecting/logging. Mock keyrings, custom
+	// production impls, and platform backends all converge on the same
+	// keyringBackendError type so .Error() never echoes raw backend
+	// bytes via fmt.Errorf("%w", ...) at the caller.
+	safeErr := safeBackendError(err)
+	category := classifyBootstrapErr(safeErr)
 	switch {
 	case err == nil:
 		logger.Debug(
@@ -99,17 +106,18 @@ func LoadSecret(
 		)
 		return value, nil
 
-	case errors.Is(err, ErrKeyringNotFound):
+	case errors.Is(safeErr, ErrKeyringNotFound):
 		if mode == ModeStrict {
 			logger.Error(
 				"keychain.load.miss",
 				slog.String("secret_name", secretName),
 				slog.String("mode", mode.String()),
+				slog.String("keyring_error_class", category),
 			)
 			return "", ErrKeyringNotFound
 		}
 		if envFallback != "" {
-			warnEnvFallback(logger, secretName, mode, "keychain miss")
+			warnEnvFallback(logger, secretName, mode, category)
 			return envFallback, nil
 		}
 		return "", ErrKeyringNotFound
@@ -119,25 +127,23 @@ func LoadSecret(
 		// Keyring impl could embed the secret value or other sensitive
 		// material (raw command output, JWT, base64 token) in its error
 		// string and we don't want that flowing to stderr / journald.
-		// The Go type name + classifyBootstrapErr label is enough for
-		// an operator to tell "permission" from "ipc unavailable" from
-		// "other" without exposing payload bytes.
-		category := classifyBootstrapErr(err)
+		// The keyring_error_class label is sufficient for an operator to
+		// tell "permission" from "ipc unavailable" from "other" without
+		// exposing payload bytes.
 		if mode == ModeStrict {
 			logger.Error(
 				"keychain.load.unavailable",
 				slog.String("secret_name", secretName),
 				slog.String("mode", mode.String()),
-				slog.String("err_type", fmt.Sprintf("%T", err)),
-				slog.String("err_class", category),
+				slog.String("keyring_error_class", category),
 			)
-			return "", err
+			return "", safeErr
 		}
 		if envFallback != "" {
-			warnEnvFallback(logger, secretName, mode, "keychain unavailable: "+category)
+			warnEnvFallback(logger, secretName, mode, category)
 			return envFallback, nil
 		}
-		return "", err
+		return "", safeErr
 	}
 }
 
@@ -164,6 +170,6 @@ func warnEnvFallback(logger *slog.Logger, secretName string, mode BootstrapMode,
 		slog.String("secret_name", secretName),
 		slog.String("source", "env-fallback"),
 		slog.String("mode", mode.String()),
-		slog.String("reason", reason),
+		slog.String("keyring_error_class", reason),
 	)
 }

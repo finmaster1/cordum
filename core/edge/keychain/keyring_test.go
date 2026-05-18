@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -127,8 +128,7 @@ func TestKeyringDevModeFallsBackToEnv(t *testing.T) {
 	if strings.Contains(buf.String(), sentinelLeakToken) {
 		t.Fatalf("logger leaked sentinel token during env fallback: %s", buf.String())
 	}
-	if !strings.Contains(strings.ToLower(buf.String()), "keychain miss") &&
-		!strings.Contains(strings.ToLower(buf.String()), "env fallback") {
+	if !strings.Contains(strings.ToLower(buf.String()), "keychain.env_fallback") {
 		t.Fatalf("dev fallback emitted no banner-warn: %s", buf.String())
 	}
 }
@@ -177,6 +177,127 @@ func TestKeyringLoadSecretEmptyName(t *testing.T) {
 	_, err := LoadSecret(ctx, kr, ModeStrict, "", "", logger)
 	if !errors.Is(err, ErrKeyringNotFound) {
 		t.Fatalf("empty secret name: err=%v, want ErrKeyringNotFound", err)
+	}
+}
+
+// TestRedactBackendErrorSecretPatterns is the PR #276 Sub-G #22 regression.
+// Third-party Keyring backends (godbus on Linux, security CLI on macOS,
+// wincred on Windows) format their errors however they like; a value the
+// caller passed in could be echoed back inside an error message. Every
+// secret-shape we plausibly leak through `%w` / `Errorf("%s: %w", ...)` /
+// slog %v MUST be redacted before the message reaches stderr or journald.
+//
+// Fixtures are deterministic synthetic strings (NEVER real secrets) chosen
+// so that any verbatim substring appearance in the output is detectable
+// with a single Contains() check — i.e. the test catches a "pattern
+// missed entirely" failure mode, not just "regex wrote wrong replacement".
+func TestRedactBackendErrorSecretPatterns(t *testing.T) {
+	t.Parallel()
+
+	const syntheticPEMBody = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDSENTINELPEMxyzABCDEFG12345"
+	syntheticPEM := "-----BEGIN RSA PRIVATE KEY-----\n" + syntheticPEMBody + "\n-----END RSA PRIVATE KEY-----"
+	const (
+		syntheticBase64 = "U0VOVElORUxfQkFTRTY0X1RPS0VOX2FiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6"
+		syntheticHex    = "abcdef0123456789abcdef0123456789sentinelhexfullsuffix01"
+		syntheticJWT    = "eyJhbGciSENT.eyJzdWIiSENT.SIG_SENTINEL_3f9b2c11e4a87de9"
+		syntheticSK     = "sk-SENTINELabcdefghijklmnopqrstuvwxyz0123456789ABCD"
+		syntheticGHP    = "ghp_SENTINELabcdefghijklmnopqrstuvwxyz1234"
+		syntheticGitPAT = "github_pat_SENTINELabcdefghijklmnopqrstuvwxyz1234"
+		syntheticAKIA   = "AKIASENTINEL12345678"
+		syntheticBearer = "Authorization: Bearer sentinel-bearer-token-3f9b2c11"
+		syntheticUUID   = "11111111-2222-3333-4444-555566667777"
+	)
+
+	cases := []struct {
+		name   string
+		secret string
+		input  string
+	}{
+		{name: "pem_private_key", secret: syntheticPEMBody, input: "keyring decode failed: " + syntheticPEM},
+		{name: "long_base64_token", secret: syntheticBase64, input: "secret-service: invalid token " + syntheticBase64},
+		{name: "long_hex_run", secret: syntheticHex, input: "wincred returned digest " + syntheticHex},
+		{name: "jwt_three_segments", secret: syntheticJWT, input: "dbus returned token: " + syntheticJWT},
+		{name: "openai_sk_token", secret: syntheticSK, input: "credential leak " + syntheticSK + " in backend"},
+		{name: "github_classic_token", secret: syntheticGHP, input: "credential: " + syntheticGHP},
+		{name: "github_fine_grained_pat", secret: syntheticGitPAT, input: "stored value " + syntheticGitPAT},
+		{name: "aws_access_key", secret: syntheticAKIA, input: "wincred error: returned " + syntheticAKIA},
+		{name: "authorization_bearer_header", secret: syntheticBearer, input: "keyring returned: " + syntheticBearer},
+		{name: "uuid_secret_ref", secret: syntheticUUID, input: "keychain lookup failed for id " + syntheticUUID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := redactBackendError(tc.input)
+			if !strings.Contains(out, "[REDACTED") {
+				t.Fatalf("redactBackendError(%q): no [REDACTED marker present in %q", tc.name, out)
+			}
+			if strings.Contains(out, tc.secret) {
+				t.Fatalf("redactBackendError(%q): output %q still contains secret substring %q", tc.name, out, tc.secret)
+			}
+		})
+	}
+}
+
+// TestLoadSecretLogsKeyringErrorClass is the PR #276 Sub-G #21 regression.
+// When the backend fails, the structured log MUST surface a non-empty
+// `keyring_error_class` attribute so operators can dispatch on category
+// without parsing free-text. It MUST NOT echo the raw backend error text
+// (custom Keyring impls may embed secrets in their error strings) and MUST
+// NOT echo the env-fallback secret on the strict-mode failure path.
+func TestLoadSecretLogsKeyringErrorClass(t *testing.T) {
+	t.Parallel()
+
+	const (
+		syntheticBackend = "raw-backend-bytes-3f9b2c11-LEAK-IF-LOGGED"
+		envFallback      = "WOULD-LEAK-IF-USED-IN-STRICT-MODE"
+	)
+	cases := []struct {
+		name      string
+		failWith  error
+		mode      BootstrapMode
+		wantClass string
+	}{
+		{
+			name:      "unavailable_strict_logs_class",
+			failWith:  fmt.Errorf("%w: %s", ErrKeyringUnavailable, syntheticBackend),
+			mode:      ModeStrict,
+			wantClass: "backend_unavailable",
+		},
+		{
+			name:      "permission_strict_logs_class",
+			failWith:  fmt.Errorf("%w: %s", ErrKeyringPermissionDenied, syntheticBackend),
+			mode:      ModeStrict,
+			wantClass: "permission_denied",
+		},
+		{
+			name:      "not_found_strict_logs_class",
+			failWith:  fmt.Errorf("%w: %s", ErrKeyringNotFound, syntheticBackend),
+			mode:      ModeStrict,
+			wantClass: "secret_not_found",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			kr := NewMockKeyring()
+			kr.SetFailure(tc.failWith)
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			_, err := LoadSecret(context.Background(), kr, tc.mode, envFallback, "cordum_agentd_nonce", logger)
+			if err == nil {
+				t.Fatalf("LoadSecret returned nil error for backend failure %v", tc.failWith)
+			}
+			out := buf.String()
+			if !strings.Contains(out, "keyring_error_class="+tc.wantClass) {
+				t.Fatalf("logs missing keyring_error_class=%q attribute; got %q", tc.wantClass, out)
+			}
+			if strings.Contains(out, syntheticBackend) {
+				t.Fatalf("logs leaked raw backend bytes %q; got %q", syntheticBackend, out)
+			}
+			if strings.Contains(out, envFallback) {
+				t.Fatalf("strict-mode logs leaked env-fallback secret %q; got %q", envFallback, out)
+			}
+		})
 	}
 }
 

@@ -116,6 +116,11 @@ func (o *osKeyring) Delete(ctx context.Context, key string) error {
 // error not explicitly recognized as "not found" or "permission denied" is
 // classified as ErrKeyringUnavailable, so strict-mode callers fail closed
 // rather than continuing with an ambiguous backend state.
+//
+// The returned error is a *keyringBackendError that (a) carries a redacted
+// summary in Error() — third-party backend impls may embed secret-shaped
+// substrings in their raw error text and Error() must never echo them —
+// and (b) preserves errors.Is for the package sentinels via Unwrap.
 func normalizeBackendError(err error) error {
 	if err == nil {
 		return nil
@@ -124,12 +129,13 @@ func normalizeBackendError(err error) error {
 		return ErrKeyringNotFound
 	}
 	msg := strings.ToLower(err.Error())
+	summary := redactBackendError(msg)
 	switch {
 	case strings.Contains(msg, "permission denied"),
 		strings.Contains(msg, "access denied"),
 		strings.Contains(msg, "user interaction not allowed"),
 		strings.Contains(msg, "keychain item not granted"):
-		return fmt.Errorf("%w: %s", ErrKeyringPermissionDenied, redactBackendError(msg))
+		return &keyringBackendError{sentinel: ErrKeyringPermissionDenied, summary: summary}
 	case strings.Contains(msg, "no such interface"),
 		strings.Contains(msg, "service_unknown"),
 		strings.Contains(msg, "could not get session"),
@@ -139,9 +145,67 @@ func normalizeBackendError(err error) error {
 		strings.Contains(msg, "no credential manager"),
 		strings.Contains(msg, "element not found"),
 		strings.Contains(msg, "the system cannot find"):
-		return fmt.Errorf("%w: %s", ErrKeyringUnavailable, redactBackendError(msg))
+		return &keyringBackendError{sentinel: ErrKeyringUnavailable, summary: summary}
 	default:
-		return fmt.Errorf("%w: %s", ErrKeyringUnavailable, redactBackendError(msg))
+		return &keyringBackendError{sentinel: ErrKeyringUnavailable, summary: summary}
+	}
+}
+
+// keyringBackendError is the safe wrapper returned by the keychain package
+// (and used to re-wrap errors from non-osKeyring impls in LoadSecret). Its
+// Error() exposes ONLY the sentinel's category and a pre-redacted summary;
+// raw backend bytes — which a custom Keyring backend MAY include secret-
+// shaped substrings in — never reach stderr/journald via fmt.Errorf("%w").
+// Unwrap() preserves the sentinel so callers keep using errors.Is.
+type keyringBackendError struct {
+	sentinel error  // ErrKeyringUnavailable / ErrKeyringPermissionDenied / ErrKeyringNotFound
+	summary  string // already passed through redactBackendError
+}
+
+func (e *keyringBackendError) Error() string {
+	if e == nil || e.sentinel == nil {
+		return "keychain: unknown backend error"
+	}
+	if e.summary == "" {
+		return e.sentinel.Error()
+	}
+	return e.sentinel.Error() + ": " + e.summary
+}
+
+func (e *keyringBackendError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.sentinel
+}
+
+// safeBackendError wraps an arbitrary error coming back from a Keyring impl
+// (production OS keyring or test mock) into a keyringBackendError whose
+// Error() text is guaranteed redacted. Sentinels pass through unchanged.
+// Context errors propagate verbatim so callers can errors.Is them.
+func safeBackendError(err error) error {
+	if err == nil {
+		return nil
+	}
+	// Already-wrapped: nothing to do.
+	var be *keyringBackendError
+	if errors.As(err, &be) {
+		return err
+	}
+	// Context errors must propagate verbatim so cancellation/timeout
+	// stays catchable via errors.Is(err, context.Canceled/DeadlineExceeded).
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	switch {
+	case errors.Is(err, ErrKeyringNotFound):
+		return ErrKeyringNotFound
+	case errors.Is(err, ErrKeyringPermissionDenied):
+		return &keyringBackendError{sentinel: ErrKeyringPermissionDenied, summary: redactBackendError(err.Error())}
+	case errors.Is(err, ErrKeyringUnavailable):
+		return &keyringBackendError{sentinel: ErrKeyringUnavailable, summary: redactBackendError(err.Error())}
+	default:
+		return &keyringBackendError{sentinel: ErrKeyringUnavailable, summary: redactBackendError(err.Error())}
 	}
 }
 
@@ -173,8 +237,34 @@ type backendRedactRule struct {
 
 // backendErrorRedactPatterns scrubs long high-entropy substrings before
 // the truncation pass. Ordered most-specific → most-general so a JWT is
-// caught before its base64 segments individually trip the generic rule.
+// caught before its base64 segments individually trip the generic rule
+// and explicit credential markers (Bearer/PEM/AKIA/GitHub) are caught
+// before the catch-all hex/base64 rules so the replacement classifier
+// reads "[REDACTED:jwt]" instead of a generic "[REDACTED:base64]".
+//
+// Mirrors core/edge/redaction.go patterns where the surface overlap is
+// safe — kept local because that file's helpers operate on JSON/values,
+// not raw error-string bytes, and importing core/edge here would create
+// a cycle through core/edge → core/edge/keychain → core/edge.
+// TODO(post-PR-#276): unify into a single redactBackendString helper
+// once the Sub-E argument_redactor/policy_evaluate slice lands.
 var backendErrorRedactPatterns = []backendRedactRule{
+	// PEM block — match BEGIN/END framing across newlines (which the
+	// caller pre-normalizes to spaces). Body is base64+whitespace.
+	{regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), "[REDACTED:pem]"},
+	// Authorization: Bearer <token> header.
+	{regexp.MustCompile(`(?i)authorization\s*:\s*bearer\s+[^\s,;}]+`), "[REDACTED:bearer]"},
+	// Standalone `Bearer <token>` without the Authorization prefix.
+	{regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=\-]{8,}\b`), "[REDACTED:bearer]"},
+	// AWS access key id — fixed prefix + 16 char body.
+	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), "[REDACTED:aws]"},
+	// GitHub token families (classic, OAuth, user, server, refresh,
+	// fine-grained PAT). Case-insensitive prefix; tail is alnum+_=-.
+	{regexp.MustCompile(`(?i)\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_=-]{8,}\b`), "[REDACTED:github]"},
+	// OpenAI / Anthropic style sk- tokens.
+	{regexp.MustCompile(`\bsk-[A-Za-z0-9_\-]{12,}\b`), "[REDACTED:sk]"},
+	// Generic `key=value` / `key:"value"` secret-bearing assignments.
+	{regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|credential)(\s*[=:]\s*|"\s*:\s*")[^\s",;}]+`), "[REDACTED:assignment]"},
 	// JWT (three base64url segments separated by dots).
 	{regexp.MustCompile(`\b[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b`), "[REDACTED:jwt]"},
 	// UUID v1..v5.

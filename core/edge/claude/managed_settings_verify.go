@@ -2,13 +2,29 @@ package claude
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+)
+
+// Loopback-URL validation sentinels. Each violation class returns a unique
+// sentinel so tests assert via errors.Is rather than brittle error-text
+// substring matches and so operator log analyzers can dispatch on category.
+var (
+	errAgentdURLEmpty    = errors.New("CORDUM_AGENTD_URL is empty")
+	errAgentdURLScheme   = errors.New("CORDUM_AGENTD_URL: scheme must be http or https")
+	errAgentdURLUserinfo = errors.New("CORDUM_AGENTD_URL: userinfo credentials not permitted on loopback URL")
+	errAgentdURLHost     = errors.New("CORDUM_AGENTD_URL: host must be a loopback address (127.0.0.1, ::1, or localhost)")
+	errAgentdURLPort     = errors.New("CORDUM_AGENTD_URL: explicit port in range 1-65535 required")
+	errAgentdURLPath     = errors.New("CORDUM_AGENTD_URL: path must be /v1/edge/hooks/claude")
+	errAgentdURLQuery    = errors.New("CORDUM_AGENTD_URL: query string not permitted")
+	errAgentdURLFragment = errors.New("CORDUM_AGENTD_URL: fragment not permitted")
 )
 
 // maxManagedSettingsFileBytes caps the size we will read from a managed
@@ -250,63 +266,107 @@ func isReservedEnvKey(key string) bool {
 	return slices.Contains(reservedManagedEnvKeys, key)
 }
 
-func agentdURLDrifts(env map[string]string) []ManagedSettingsDrift {
-	raw := strings.TrimSpace(env["CORDUM_AGENTD_URL"])
-	if raw == "" {
-		return []ManagedSettingsDrift{{
-			Field:    "env.CORDUM_AGENTD_URL",
-			Got:      "empty",
-			Want:     "loopback hook URL",
-			Severity: managedSettingsDriftCritical,
-		}}
+// validateLoopbackAgentdURL enforces the loopback-only contract for the
+// CORDUM_AGENTD_URL env var. Operators provision this URL via managed
+// settings (Jamf/Intune/MDM) and a non-loopback value would route hook
+// decisions off-box — a SSRF target on a misconfigured fleet host, or a
+// silent man-in-the-middle for enforcement decisions. The function rejects:
+//
+//   - empty / whitespace-only string (errAgentdURLEmpty)
+//   - unparseable URL or missing/unsupported scheme (errAgentdURLScheme)
+//   - any userinfo, even username-only (errAgentdURLUserinfo)
+//   - host outside {127.0.0.1, ::1, localhost} (errAgentdURLHost)
+//   - missing/non-numeric/out-of-range port (errAgentdURLPort)
+//   - path != /v1/edge/hooks/claude (errAgentdURLPath)
+//   - any RawQuery (errAgentdURLQuery)
+//   - any Fragment (errAgentdURLFragment)
+//
+// Each sentinel is exported within-package so tests assert via errors.Is
+// instead of brittle error-text substring matches. nil indicates the URL
+// satisfies every loopback invariant.
+func validateLoopbackAgentdURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return errAgentdURLEmpty
 	}
-	parsed, err := url.Parse(raw)
+	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return []ManagedSettingsDrift{{
-			Field:    "env.CORDUM_AGENTD_URL",
-			Got:      redactDiagnostic(raw),
-			Want:     "valid URL",
-			Severity: managedSettingsDriftCritical,
-		}}
+		// Parse errors here are dominated by missing- or malformed-scheme
+		// values (`127.0.0.1:8765/...` triggers url.Parse to fail when the
+		// scheme prefix is not a valid RFC 3986 alpha-leading scheme).
+		// Surface them under the scheme sentinel so the operator gets a
+		// single category to remediate instead of a noisy split.
+		return errAgentdURLScheme
 	}
-	if strings.TrimSpace(parsed.RawQuery) != "" {
-		return []ManagedSettingsDrift{{
-			Field:    "env.CORDUM_AGENTD_URL",
-			Got:      "url with query string",
-			Want:     "url without query string",
-			Severity: managedSettingsDriftCritical,
-		}}
-	}
-	// The hook URL must be a loopback http(s) endpoint pointed at the
-	// per-host /v1/edge/hooks/claude path. A scheme-less value (e.g.
-	// "agentd.example.com/v1/...") parses without error but reaches a
-	// non-local network; a non-loopback host can be a SSRF target or a
-	// silent man-in-the-middle for hook decisions. Enforce all three
-	// invariants here so the verify pass refuses to ratify a config that
-	// would route enforcement decisions off-box.
 	scheme := strings.ToLower(parsed.Scheme)
 	if scheme != "http" && scheme != "https" {
-		return []ManagedSettingsDrift{{
-			Field:    "env.CORDUM_AGENTD_URL",
-			Got:      redactDiagnostic(raw),
-			Want:     "http(s) loopback URL",
-			Severity: managedSettingsDriftCritical,
-		}}
+		return errAgentdURLScheme
+	}
+	// User MUST appear NOWHERE in a loopback hook URL. Even username-only
+	// (no password) is an antipattern: credentials encoded in URLs are
+	// frequently echoed into logs and tcpdump captures.
+	if parsed.User != nil {
+		return errAgentdURLUserinfo
 	}
 	host := parsed.Hostname()
 	if !isLoopbackHookHost(host) {
-		return []ManagedSettingsDrift{{
-			Field:    "env.CORDUM_AGENTD_URL",
-			Got:      redactDiagnostic(raw),
-			Want:     "loopback host (127.0.0.1, ::1, or localhost)",
-			Severity: managedSettingsDriftCritical,
-		}}
+		return errAgentdURLHost
+	}
+	port := parsed.Port()
+	if port == "" {
+		return errAgentdURLPort
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 1 || portNum > 65535 {
+		return errAgentdURLPort
 	}
 	if parsed.Path != "/v1/edge/hooks/claude" {
+		return errAgentdURLPath
+	}
+	if strings.TrimSpace(parsed.RawQuery) != "" {
+		return errAgentdURLQuery
+	}
+	if strings.TrimSpace(parsed.Fragment) != "" {
+		return errAgentdURLFragment
+	}
+	return nil
+}
+
+// agentdURLDriftLabels maps each validation sentinel to a (got, want) pair
+// suitable for an operator-facing ManagedSettingsDrift. Each Got is a fixed
+// safe label so userinfo, query payload, or fragment text CANNOT leak from
+// raw input into the diagnostic output.
+func agentdURLDriftLabels(err error) (got, want string) {
+	switch {
+	case errors.Is(err, errAgentdURLEmpty):
+		return "empty", "loopback hook URL"
+	case errors.Is(err, errAgentdURLScheme):
+		return "unparseable URL or unsupported scheme", "http(s) loopback URL"
+	case errors.Is(err, errAgentdURLUserinfo):
+		return "url with userinfo credentials", "url without userinfo"
+	case errors.Is(err, errAgentdURLHost):
+		return "non-loopback host", "loopback host (127.0.0.1, ::1, or localhost)"
+	case errors.Is(err, errAgentdURLPort):
+		return "missing or invalid port", "explicit port 1-65535"
+	case errors.Is(err, errAgentdURLPath):
+		return "wrong path", "path /v1/edge/hooks/claude"
+	case errors.Is(err, errAgentdURLQuery):
+		return "url with query string", "url without query string"
+	case errors.Is(err, errAgentdURLFragment):
+		return "url with fragment", "url without fragment"
+	default:
+		return "invalid", "valid loopback hook URL"
+	}
+}
+
+func agentdURLDrifts(env map[string]string) []ManagedSettingsDrift {
+	raw := env["CORDUM_AGENTD_URL"]
+	if err := validateLoopbackAgentdURL(raw); err != nil {
+		got, want := agentdURLDriftLabels(err)
 		return []ManagedSettingsDrift{{
 			Field:    "env.CORDUM_AGENTD_URL",
-			Got:      redactDiagnostic(raw),
-			Want:     "path /v1/edge/hooks/claude",
+			Got:      got,
+			Want:     want,
 			Severity: managedSettingsDriftCritical,
 		}}
 	}
