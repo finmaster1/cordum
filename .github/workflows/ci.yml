@@ -115,6 +115,12 @@ jobs:
         go mod edit -dropreplace github.com/cordum-io/cap/v2
         go mod tidy
 
+    - name: Repo-root build
+      run: go build ./...
+
+    - name: Repo-root vet
+      run: go vet ./...
+
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v7
       with:
