@@ -105,9 +105,31 @@ jobs:
       - name: Install Gpg4Win
         shell: pwsh
         run: |
-          choco install --no-progress --yes gnupg
-          $env:Path = "$env:Path;C:\Program Files (x86)\GnuPG\bin"
-          gpg --version
+          $ErrorActionPreference = 'Stop'
+          $gpg4winVersion = '5.0.2'
+          $url = "https://files.gpg4win.org/gpg4win-$gpg4winVersion.exe"
+          $exe = Join-Path $env:RUNNER_TEMP "gpg4win-$gpg4winVersion.exe"
+          Write-Host "Downloading Gpg4Win $gpg4winVersion from $url"
+          Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing -TimeoutSec 300
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Gpg4Win installer was not downloaded to $exe"
+          }
+          $sizeBytes = (Get-Item -LiteralPath $exe).Length
+          if ($sizeBytes -lt 20MB) {
+            throw "Gpg4Win installer at $exe is only $sizeBytes bytes (< 20 MB); aborting"
+          }
+          Write-Host "Downloaded installer size: $sizeBytes bytes"
+          Write-Host "Running silent install: $exe /S"
+          $proc = Start-Process -FilePath $exe -ArgumentList '/S' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            throw "Gpg4Win installer exited with code $($proc.ExitCode)"
+          }
+          $gpgExe = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe'
+          if (-not (Test-Path -LiteralPath $gpgExe)) {
+            throw "Expected Gpg4Win gpg.exe not found at $gpgExe after install"
+          }
+          $env:Path = "C:\Program Files (x86)\GnuPG\bin;$env:Path"
+          & $gpgExe --version
       - name: install_test.ps1 — Gpg4Win/native gpg
         shell: pwsh
         run: |
