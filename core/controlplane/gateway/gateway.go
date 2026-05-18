@@ -128,11 +128,15 @@ const (
 
 type server struct {
 	pb.UnimplementedCordumApiServer
-	memStore              store.Store
-	jobStore              *store.RedisJobStore // Typed for ListRecentJobs
-	edgeStore             edgecore.Store
-	shadowFindingStore    shadow.Store
-	mcpUpstreamRegistry   edgecore.MCPUpstreamRegistry
+	memStore            store.Store
+	jobStore            *store.RedisJobStore // Typed for ListRecentJobs
+	edgeStore           edgecore.Store
+	shadowFindingStore  shadow.Store
+	mcpUpstreamRegistry edgecore.MCPUpstreamRegistry
+	// mcpUpstreamRegistryMu guards lazy fallback initialization for
+	// test/minimal server instances that do not set mcpUpstreamRegistry
+	// during construction.
+	mcpUpstreamRegistryMu sync.Mutex
 	decisionLogStore      model.DecisionLogStore
 	copilotStore          copilot.Store
 	governanceHealthCache *governance.Cache

@@ -13,12 +13,19 @@ import (
 )
 
 func (s *server) mcpUpstreamRegistryOrUnavailable(w http.ResponseWriter, r *http.Request) edgecore.MCPUpstreamRegistry {
-	if s != nil && s.mcpUpstreamRegistry != nil {
-		return s.mcpUpstreamRegistry
+	if s == nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeStoreUnavailable, "mcp upstream registry unavailable", nil)
+		return nil
 	}
-	if s != nil && s.jobStore != nil && s.jobStore.Client() != nil {
-		s.mcpUpstreamRegistry = edgecore.NewRedisMCPUpstreamRegistryFromClient(s.jobStore.Client())
-		return s.mcpUpstreamRegistry
+	s.mcpUpstreamRegistryMu.Lock()
+	registry := s.mcpUpstreamRegistry
+	if registry == nil && s.jobStore != nil && s.jobStore.Client() != nil {
+		registry = edgecore.NewRedisMCPUpstreamRegistryFromClient(s.jobStore.Client())
+		s.mcpUpstreamRegistry = registry
+	}
+	s.mcpUpstreamRegistryMu.Unlock()
+	if registry != nil {
+		return registry
 	}
 	writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeStoreUnavailable, "mcp upstream registry unavailable", nil)
 	return nil
