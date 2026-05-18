@@ -160,6 +160,23 @@ func TestShadowException_Create_HighRisk_RequiresStepUp(t *testing.T) {
 	}
 }
 
+func TestShadowException_Create_CriticalRisk_RequiresStepUp(t *testing.T) {
+	s := newShadowGateway(t)
+	body := validExceptionCreateBody()
+	body.ScopeRiskLevel = shadow.FindingRiskCritical
+	rec := postShadowAs(t, s, "user", "tenant-a", "/api/v1/edge/shadow/exception", body)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("critical-risk POST as user: status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	var env edgeErrorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Code != edgeErrCodeStepUpRequired {
+		t.Fatalf("error code = %q, want %q", env.Code, edgeErrCodeStepUpRequired)
+	}
+}
+
 func TestShadowException_Create_HighRisk_AdminStepUp(t *testing.T) {
 	s := newShadowGateway(t)
 	rec := postShadowAs(t, s, "admin", "tenant-a", "/api/v1/edge/shadow/exception", validExceptionCreateBody())
@@ -197,6 +214,26 @@ func TestShadowException_Create_HighRisk_AdminStepUp(t *testing.T) {
 	}
 	if createdEvent.Extra["exception_id"] != created.ExceptionID {
 		t.Errorf("audit exception_id = %q, want %q", createdEvent.Extra["exception_id"], created.ExceptionID)
+	}
+}
+
+func TestShadowException_Create_CriticalRisk_AdminStepUp(t *testing.T) {
+	s := newShadowGateway(t)
+	body := validExceptionCreateBody()
+	body.ScopeRiskLevel = shadow.FindingRiskCritical
+	rec := postShadowAs(t, s, "admin", "tenant-a", "/api/v1/edge/shadow/exception", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("admin critical-risk POST: status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var created shadow.Exception
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.ScopeRiskLevel != shadow.FindingRiskCritical {
+		t.Fatalf("ScopeRiskLevel = %q, want critical", created.ScopeRiskLevel)
+	}
+	if created.StepUpFactor != shadow.StepUpFactorSignedAdminToken {
+		t.Errorf("StepUpFactor = %q, want signed_admin_token", created.StepUpFactor)
 	}
 }
 
@@ -299,6 +336,52 @@ func TestShadowException_Delete_HighRiskRequiresStepUp(t *testing.T) {
 	okRec := deleteShadowAs(t, s, "admin", "tenant-a", "/api/v1/edge/shadow/exception/"+created.ExceptionID)
 	if okRec.Code != http.StatusNoContent {
 		t.Fatalf("admin revoke status = %d, want 204; body=%s", okRec.Code, okRec.Body.String())
+	}
+}
+
+func TestShadowException_Delete_CriticalRiskRequiresStepUp(t *testing.T) {
+	s := newShadowGateway(t)
+	body := validExceptionCreateBody()
+	body.ScopeRiskLevel = shadow.FindingRiskCritical
+	rec := postShadowAs(t, s, "admin", "tenant-a", "/api/v1/edge/shadow/exception", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("critical create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var created shadow.Exception
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if created.StepUpFactor != shadow.StepUpFactorSignedAdminToken {
+		t.Fatalf("critical create StepUpFactor = %q, want signed_admin_token", created.StepUpFactor)
+	}
+
+	delRec := deleteShadowAs(t, s, "user", "tenant-a", "/api/v1/edge/shadow/exception/"+created.ExceptionID)
+	if delRec.Code != http.StatusForbidden {
+		t.Fatalf("user revoke of critical-risk exception status = %d, want 403; body=%s", delRec.Code, delRec.Body.String())
+	}
+	var env edgeErrorEnvelope
+	_ = json.Unmarshal(delRec.Body.Bytes(), &env)
+	if env.Code != edgeErrCodeStepUpRequired {
+		t.Errorf("critical revoke error code = %q, want %q", env.Code, edgeErrCodeStepUpRequired)
+	}
+
+	okRec := deleteShadowAs(t, s, "admin", "tenant-a", "/api/v1/edge/shadow/exception/"+created.ExceptionID)
+	if okRec.Code != http.StatusNoContent {
+		t.Fatalf("admin revoke critical-risk status = %d, want 204; body=%s", okRec.Code, okRec.Body.String())
+	}
+	exp := s.auditExporter.(*shadowFindingAuditExporter)
+	var revoked *audit.SIEMEvent
+	for i := range exp.events {
+		if exp.events[i].EventType == audit.EventShadowAgentExceptionRevoked {
+			revoked = &exp.events[i]
+		}
+	}
+	if revoked == nil {
+		t.Fatalf("no shadow_agent.exception_revoked audit event; got %+v", exp.events)
+	}
+	if revoked.Extra["step_up_factor"] != string(shadow.StepUpFactorSignedAdminToken) {
+		t.Errorf("revoked step_up_factor = %q, want signed_admin_token", revoked.Extra["step_up_factor"])
+	}
+	if revoked.Extra["scope_risk_level"] != string(shadow.FindingRiskCritical) {
+		t.Errorf("revoked scope_risk_level = %q, want critical", revoked.Extra["scope_risk_level"])
 	}
 }
 

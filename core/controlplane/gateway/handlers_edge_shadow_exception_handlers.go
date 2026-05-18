@@ -10,9 +10,9 @@
 //   - GET    /api/v1/edge/shadow/exceptions                — list
 //
 // Baseline auth: requireEdgePermissionOrRole(auth.PermAuditExport,
-// "admin", "user"). When scope.risk_level == high (CREATE) or the
-// referenced exception was created with risk_level == high (REVOKE),
-// the handler additionally requires the step-up gate
+// "admin", "user"). When scope.risk_level == high/critical (CREATE) or
+// the referenced exception was created with risk_level == high/critical
+// (REVOKE), the handler additionally requires the step-up gate
 // requirePermissionOrRole(auth.PermShadowExceptionHighRisk, "admin").
 // Gate failure returns 403 with code "step_up_required". The Exception
 // record persists the StepUpFactor that satisfied the gate
@@ -57,11 +57,24 @@ type shadowExceptionRevokeRequest struct {
 
 const maxExceptionsListLimit = 1000
 
+// shadowExceptionRequiresStepUp is the single create/revoke severity
+// gate. High and critical exception scopes require the elevated
+// operator authorization path; lower severities keep the baseline
+// audit-export permission behavior.
+func shadowExceptionRequiresStepUp(risk shadow.FindingRisk) bool {
+	switch risk {
+	case shadow.FindingRiskHigh, shadow.FindingRiskCritical:
+		return true
+	default:
+		return false
+	}
+}
+
 // requireExceptionStepUp returns ok=true on pass, ok=false after
 // writing the 403 envelope on denial. factor is the StepUpFactor that
 // satisfied the gate ("signed_admin_token" when the admin legacy role
 // matched; "mfa_recent" when the explicit permission matched). When
-// the gate is not required (risk != high), the caller passes
+// the gate is not required (risk != high/critical), the caller passes
 // required=false and gets back factor="none" without invoking the
 // permission checker.
 func (s *server) requireExceptionStepUp(w http.ResponseWriter, r *http.Request, required bool) (shadow.StepUpFactor, bool) {
@@ -85,7 +98,7 @@ func (s *server) requireExceptionStepUp(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	writeEdgeError(w, r, http.StatusForbidden, edgeErrCodeStepUpRequired,
-		"high-risk shadow exception requires recent MFA or signed admin token",
+		"high or critical shadow exception requires recent MFA or signed admin token",
 		map[string]any{"required": "mfa_recent|signed_admin_token"})
 	return "", false
 }
@@ -116,11 +129,11 @@ func (s *server) handleCreateShadowException(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Q8 step-up gate: required when the exception scopes risk=high
-	// findings. Returns the StepUpFactor that satisfied the gate, or
-	// writes the 403 envelope itself.
+	// Q8 step-up gate: required when the exception scopes high or
+	// critical-risk findings. Returns the StepUpFactor that satisfied
+	// the gate, or writes the 403 envelope itself.
 	risk := shadow.FindingRisk(strings.ToLower(strings.TrimSpace(string(body.ScopeRiskLevel))))
-	factor, ok := s.requireExceptionStepUp(w, r, risk == shadow.FindingRiskHigh)
+	factor, ok := s.requireExceptionStepUp(w, r, shadowExceptionRequiresStepUp(risk))
 	if !ok {
 		return
 	}
@@ -234,7 +247,7 @@ func (s *server) handleRevokeShadowException(w http.ResponseWriter, r *http.Requ
 		writeShadowExceptionStoreError(w, r, err, "get shadow exception")
 		return
 	}
-	if _, ok := s.requireExceptionStepUp(w, r, existing.ScopeRiskLevel == shadow.FindingRiskHigh); !ok {
+	if _, ok := s.requireExceptionStepUp(w, r, shadowExceptionRequiresStepUp(existing.ScopeRiskLevel)); !ok {
 		return
 	}
 
