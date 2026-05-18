@@ -96,6 +96,55 @@ func getShadowAs(t *testing.T, s *server, role, tenant, path string) *httptest.R
 	return rec
 }
 
+func TestParseShadowExceptionListQuery_Limit(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantOK    bool
+		wantLimit int
+	}{
+		{name: "missing limit uses store default", query: "", wantOK: true},
+		{name: "empty limit uses store default", query: "?limit=", wantOK: true},
+		{name: "valid limit", query: "?limit=10", wantOK: true, wantLimit: 10},
+		{name: "max boundary", query: "?limit=1000", wantOK: true, wantLimit: 1000},
+		{name: "zero invalid", query: "?limit=0"},
+		{name: "negative invalid", query: "?limit=-1"},
+		{name: "over max invalid", query: "?limit=1001"},
+		{name: "non-numeric invalid", query: "?limit=abc"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/edge/shadow/exceptions"+tc.query, nil)
+			rec := httptest.NewRecorder()
+
+			got, ok := parseShadowExceptionListQuery(rec, req, "tenant-a")
+
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v; query=%q body=%s", ok, tc.wantOK, tc.query, rec.Body.String())
+			}
+			if tc.wantOK {
+				if got.TenantID != "tenant-a" {
+					t.Fatalf("TenantID = %q, want tenant-a", got.TenantID)
+				}
+				if got.Limit != tc.wantLimit {
+					t.Fatalf("Limit = %d, want %d", got.Limit, tc.wantLimit)
+				}
+				return
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			var env edgeErrorEnvelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode envelope: %v; body=%s", err, rec.Body.String())
+			}
+			if env.Code != edgeErrCodeInvalidRequest {
+				t.Fatalf("error code = %q, want %q", env.Code, edgeErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
 func TestShadowException_Create_HighRisk_RequiresStepUp(t *testing.T) {
 	s := newShadowGateway(t)
 	rec := postShadowAs(t, s, "user", "tenant-a", "/api/v1/edge/shadow/exception", validExceptionCreateBody())

@@ -25,6 +25,7 @@ package gateway
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,8 @@ type shadowExceptionCreateRequest struct {
 type shadowExceptionRevokeRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
+
+const maxExceptionsListLimit = 1000
 
 // requireExceptionStepUp returns ok=true on pass, ok=false after
 // writing the 403 envelope on denial. factor is the StepUpFactor that
@@ -264,6 +267,14 @@ func parseShadowExceptionListQuery(w http.ResponseWriter, r *http.Request, tenan
 		ScopeSourceType: strings.ToLower(strings.TrimSpace(q.Get("source_type"))),
 		ScopeRiskLevel:  shadow.FindingRisk(strings.ToLower(strings.TrimSpace(q.Get("risk")))),
 		Cursor:          strings.TrimSpace(q.Get("cursor")),
+	}
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxExceptionsListLimit {
+			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "limit must be between 1 and "+strconv.Itoa(maxExceptionsListLimit), nil)
+			return shadow.ListExceptionsQuery{}, false
+		}
+		out.Limit = n
 	}
 	if v := out.ScopeSourceType; v != "" {
 		if _, ok := validShadowQuerySourceType[v]; !ok {
