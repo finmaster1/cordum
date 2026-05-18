@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -298,6 +299,28 @@ func TestNetworkDetector_Ingest_StdinStream(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestNetworkDetector_Ingest_StdinCancelBlockedReader(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	fx := newFixture(t, network.Config{})
+	ing := network.NewStdinIngestor(pr)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- fx.detector.IngestFrom(ctx, ing) }()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("IngestFrom error = %v, want context.Canceled", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("IngestFrom did not return within 500ms after cancel")
+	}
 }
 
 func TestNetworkDetector_Ingest_NoCaptureNG7(t *testing.T) {

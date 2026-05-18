@@ -100,8 +100,8 @@ type Config struct {
 // three providers called out in the design doc.
 func DefaultProviderHostnames() map[string]string {
 	return map[string]string{
-		"api.anthropic.com":                "anthropic_api",
-		"api.openai.com":                   "openai_api",
+		"api.anthropic.com":                 "anthropic_api",
+		"api.openai.com":                    "openai_api",
 		"generativelanguage.googleapis.com": "google_api",
 	}
 }
@@ -409,9 +409,9 @@ func (d *Detector) ProcessRecord(ctx context.Context, rec LogRecord, ingestSourc
 
 // Stable string constants used across the package.
 const (
-	networkAgentProduct          = "network_direct_provider"
-	evidenceTypeDirectProvider   = "network_direct_provider_traffic"
-	signalDirectProviderTraffic  = "direct_provider_traffic"
+	networkAgentProduct         = "network_direct_provider"
+	evidenceTypeDirectProvider  = "network_direct_provider_traffic"
+	signalDirectProviderTraffic = "direct_provider_traffic"
 )
 
 func ptrTime(t time.Time) *time.Time { return &t }

@@ -34,6 +34,17 @@ func (i *StdinIngestor) SourceLabel() string { return "stdin" }
 
 // Stream satisfies LogIngestor.
 func (i *StdinIngestor) Stream(ctx context.Context, out chan<- LogRecord) error {
+	if closer, ok := i.r.(io.Closer); ok {
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = closer.Close()
+			case <-done:
+			}
+		}()
+	}
 	sc := bufio.NewScanner(i.r)
 	sc.Buffer(make([]byte, 0, 64*1024), stdinScanBufferMax)
 	for sc.Scan() {
@@ -49,6 +60,9 @@ func (i *StdinIngestor) Stream(ctx context.Context, out chan<- LogRecord) error 
 			return ctx.Err()
 		case out <- rec:
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := sc.Err(); err != nil {
 		return fmt.Errorf("network: scan stdin: %w", err)
