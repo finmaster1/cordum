@@ -50,7 +50,7 @@ func NewPrometheusObserver(reg prometheus.Registerer, audits AuditEmitter) Obser
 }
 
 func (o *PrometheusObserver) RecordFindingEmit(signal, risk string) {
-	o.findingEmit.WithLabelValues(shadow.SourceTypeCI, boundedSignal(signal), boundedRisk(risk)).Inc()
+	o.findingEmit.WithLabelValues(githubActionsSourceType, boundedSignal(signal), boundedRisk(risk)).Inc()
 }
 
 func (o *PrometheusObserver) EmitAudit(event audit.SIEMEvent) {

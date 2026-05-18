@@ -355,8 +355,8 @@ for GitHub Actions signals, §6.3/§6.4 for tenant/principal mapping,
 
 | Signal | Trigger |
 | --- | --- |
-| `agent_action_used` | Workflow YAML references a known agent action (`anthropic-ai/claude-code-action`, Cursor, Codex). |
-| `missing_cordum_attach` | Agent action is present but the workflow does not reference `cordum/cordum-edge-attach`. |
+| `agent_action_used` | Workflow YAML references a known agent action (`uses:`) or a known `run:` leading token (`claude`, `codex`, `cursor`). |
+| `missing_cordum_attach` | Agent use is present and both `cordum/cordum-edge-attach` and a Cordum EdgeSession heartbeat are absent. |
 | `self_hosted_runner_unlabeled` | Job runner labels include `self-hosted` without a Cordum managed-runner label. |
 | `env_var_name_indicator` | Workflow/job/step env-var **names** are present; values are never read. |
 | `agent_config_present` | Known agent/MCP config-file path exists; only redacted path + structural summary are recorded. |
@@ -370,13 +370,15 @@ for GitHub Actions signals, §6.3/§6.4 for tenant/principal mapping,
 | `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_github` | `cordum-edge` | Expected OIDC audience for verified claims. |
 | `Config.OrgRepoMap` | operator-supplied | Tier-2 `org/repo → tenant_id` map. |
 | `Config.QuarantineTenantID` | required by constructor | Terminal fallback tenant for unmapped/untrusted runs. |
-| `Config.KnownAgentActionRefs` / `AgentConfigPaths` / `ProviderEndpointHosts` | operator-supplied with fixture defaults in tests | Closed sets for action refs, config paths, and provider hostnames. |
+| `Config.KnownAgentActionRefs` / `KnownAgentRunTokens` / `AgentConfigPaths` / `ProviderEndpointHosts` | operator-supplied with safe defaults for run tokens | Closed sets for action refs, run-command leading tokens, config paths, and provider hostnames. |
+| `Config.EdgeSessionHeartbeat` | optional | Read-only seam for cross-referencing workflow runs against Cordum EdgeSession heartbeats. |
 
 **Tenant + principal mapping**:
 
 1. Verified OIDC claims first (`iss` + `aud` match the configured trust
-   root; `sub=repo:<org>/<repo>:ref:<ref>` resolves through
-   `OrgRepoMap`; `actor` becomes `principal_id`).
+   root via discovery/JWKS signature + expiry verification;
+   `sub=repo:<org>/<repo>:ref:<ref>` resolves through `OrgRepoMap`
+   and is captured verbatim as `principal_id`).
 2. Configured `org/repo` map from workflow/repository metadata.
 3. Quarantine tenant + `principal_id="unknown"`.
 
@@ -407,7 +409,7 @@ even if the base repo maps to a tenant.
   query strings, Authorization headers, and raw log bodies are not
   collected by the detector.
 - Metrics use bounded labels only:
-  `cordum_edge_shadow_finding_emit_total{source_type,signal,risk}`,
+  `cordum_edge_shadow_finding_emit_total{source_type="github_actions",signal,risk}`,
   `cordum_edge_shadow_oidc_verify_total{provider,result}`, and
   `cordum_edge_shadow_gh_rate_limit_remaining{provider}`. Repo, run,
   workflow, job, and tenant identifiers remain on findings/audit events,

@@ -7,8 +7,10 @@ require (
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/cordum-io/cap/v2 v2.13.1
 	github.com/cordum/cordum/sdk v0.0.0
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/crewjam/saml v0.5.1
 	github.com/expr-lang/expr v1.17.8
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/go-github/v74 v74.0.0
 	github.com/google/uuid v1.6.0

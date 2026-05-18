@@ -45,6 +45,8 @@ const (
 
 const maxGitHubPagesPerScan = 10
 
+const githubActionsSourceType = shadow.CIProviderGitHubActions
+
 // JobLogHostHitFn is the contract a caller can plug to feed
 // directProviderEndpoint signals into the detector without forcing the
 // package to vendor a job-log streaming dependency. Returning a
@@ -52,11 +54,20 @@ const maxGitHubPagesPerScan = 10
 // provider hostname from inside the job run. Empty slice = no hits.
 type JobLogHostHitFn func(ctx context.Context, org, repo string, runID int64) ([]string, error)
 
-// OIDCClaimsProvider returns a claims subset that has already been
+// EdgeSessionHeartbeatLookup reports whether the workflow run already
+// produced a Cordum EdgeSession heartbeat. A true result suppresses the
+// missing_cordum_attach signal for managed CI runs.
+type EdgeSessionHeartbeatLookup func(ctx context.Context, run *gogithub.WorkflowRun) (bool, error)
+
+// OIDCTokenProvider supplies a raw GitHub Actions OIDC JWT for a
+// workflow run. The detector verifies the token with coreos/go-oidc
+// before using any claims for tenant/principal mapping.
+type OIDCTokenProvider func(ctx context.Context, run *gogithub.WorkflowRun) (string, error)
+
+// OIDCClaimsProvider returns a claims subset that has been
 // cryptographically verified against the configured issuer + audience.
-// Production wiring is expected to validate signature, expiry, iss, and
-// aud before returning; the detector re-checks issuer/audience as a
-// defense-in-depth gate before using claims for §6.3 tier-1 mapping.
+// NewDetector wires a real go-oidc-backed provider automatically when
+// OIDCTokenProvider is configured; tests may inject a provider directly.
 type OIDCClaimsProvider func(ctx context.Context, run *gogithub.WorkflowRun) (*OIDCClaims, error)
 
 // Config drives a Detector. Every field has a safe zero-value default,
@@ -94,6 +105,11 @@ type Config struct {
 	// absent).
 	KnownAgentActionRefs []string
 
+	// KnownAgentRunTokens is the closed set of leading shell tokens that
+	// indicate run-command agent use. Only the leading token is compared;
+	// arguments are never persisted.
+	KnownAgentRunTokens []string
+
 	// CordumAttachActionRef is the action ref that, when present in a
 	// workflow, marks the workflow as governed by Cordum Edge. Default
 	// `cordum/cordum-edge-attach`.
@@ -121,6 +137,11 @@ type Config struct {
 	// job-log streamer. Nil == the signal is never raised.
 	JobLogHostHits JobLogHostHitFn
 
+	// EdgeSessionHeartbeat reports whether a run has a live Cordum
+	// EdgeSession heartbeat. Nil == no heartbeat observed, so unmanaged
+	// agent workflows still emit missing_cordum_attach.
+	EdgeSessionHeartbeat EdgeSessionHeartbeatLookup
+
 	// OIDCIssuer is the expected JWT `iss` claim. Defaults to
 	// DefaultGitHubOIDCIssuer when LoadOIDCConfigFromEnv is used and the
 	// env var is unset; operator override is honored when present.
@@ -135,10 +156,15 @@ type Config struct {
 	// operator pins CORDUM_EDGE_SHADOW_OIDC_TRUST_github=disabled.
 	OIDCDisabled bool
 
-	// OIDCClaimsProvider supplies already-verified GitHub Actions OIDC
-	// claims for a workflow run. Nil means the scanner cannot observe a
-	// signed claim and falls through to the org/repo map. Mutually safe
-	// with OIDCDisabled: when disabled, this provider is not called.
+	// OIDCTokenProvider supplies a raw GitHub Actions OIDC JWT. When set
+	// and OIDCClaimsProvider is nil, NewDetector wires the real go-oidc
+	// verifier using OIDCIssuer + OIDCAudience.
+	OIDCTokenProvider OIDCTokenProvider
+
+	// OIDCClaimsProvider supplies verified GitHub Actions OIDC claims for
+	// a workflow run. Nil means the scanner cannot observe a signed claim
+	// and falls through to the org/repo map. Mutually safe with
+	// OIDCDisabled: when disabled, this provider is not called.
 	OIDCClaimsProvider OIDCClaimsProvider
 
 	// ScanInterval is the loop period for Run. Defaults to 5 minutes
@@ -212,8 +238,21 @@ func NewDetector(cfg Config, ghClient *gogithub.Client, store shadow.Store, obse
 	if cfg.CordumAttachActionRef == "" {
 		cfg.CordumAttachActionRef = "cordum/cordum-edge-attach"
 	}
+	if len(cfg.KnownAgentRunTokens) == 0 {
+		cfg.KnownAgentRunTokens = []string{"claude", "codex", "cursor"}
+	}
 	if cfg.ScanInterval <= 0 {
 		cfg.ScanInterval = 5 * time.Minute
+	}
+	if !cfg.OIDCDisabled && cfg.OIDCClaimsProvider == nil && cfg.OIDCTokenProvider != nil {
+		cfg.OIDCClaimsProvider, err = NewOIDCClaimsProvider(OIDCVerifierConfig{
+			Issuer:        cfg.OIDCIssuer,
+			Audience:      cfg.OIDCAudience,
+			TokenProvider: cfg.OIDCTokenProvider,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if observer == nil {
 		observer = nopObserver{}
@@ -321,7 +360,7 @@ func (d *Detector) scanRepo(ctx context.Context, org, repoName string) error {
 		return err
 	}
 	slog.Info("shadow_detector scan_repo",
-		"source_type", shadow.SourceTypeCI,
+		"source_type", githubActionsSourceType,
 		"ci_provider", shadow.CIProviderGitHubActions,
 		"repo", org+"/"+repoName,
 		"run_count", len(runs))

@@ -127,6 +127,13 @@ func sanitizeEvidenceText(raw string, limit int) string {
 	return s
 }
 
+func sanitizeDegradedError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return sanitizeEvidenceText(err.Error(), 160)
+}
+
 func capEvidenceSummary(raw string) string {
 	const suffix = " …truncated"
 	if len(raw) <= shadow.MaxEvidenceSummaryBytes {

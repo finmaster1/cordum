@@ -16,12 +16,10 @@ const (
 	TenantSourceQuarantine = "quarantine"
 )
 
-// Principal-source labels surfaced on emitted findings per §6.4. The
-// detector prefers OIDC-actor over workflow-actor because workflow
-// actors include `github-actions[bot]` for scheduled runs, which is a
-// platform-identity, not a human owner.
+// Principal-source labels surfaced on emitted findings per §6.4.
 const (
-	PrincipalSourceOIDCActor     = "oidc_actor"
+	PrincipalSourceOIDCSubject   = "oidc_subject"
+	PrincipalSourceOIDCActor     = PrincipalSourceOIDCSubject // deprecated alias
 	PrincipalSourceWorkflowActor = "workflow_actor"
 	PrincipalSourceQuarantine    = "quarantine"
 )
@@ -45,12 +43,16 @@ type OIDCClaims struct {
 	// the JWT subject. Informational; not used for tenant mapping.
 	Ref string
 	// Actor is the `actor` claim — the human (or bot) that triggered
-	// the workflow. Tier-1 principal mapping uses this verbatim.
+	// the workflow. It is informational; tier-1 principal mapping uses
+	// Subject per §6.4.
 	Actor string
 	// Audience is the verified `aud` claim — the detector REQUIRES this
 	// to match cfg.OIDCAudience at verify time (caller's
 	// responsibility). Surfaced here for downstream audit logging.
 	Audience string
+	// Audiences is the verified `aud` claim set when the token carries
+	// multiple audiences. Audience remains for legacy one-audience tests.
+	Audiences []string
 	// Issuer is the verified `iss` claim. It must match the Cordum
 	// default GitHub Actions issuer or the operator override before the
 	// claims can drive tier-1 tenant/principal mapping.
@@ -113,7 +115,7 @@ func (r *DefaultResolver) ResolveTenant(_ context.Context, claims *OIDCClaims, r
 
 // ResolvePrincipal implements §6.4 precedence:
 //
-//  1. OIDC actor claim (source=oidc_actor).
+//  1. OIDC subject claim (source=oidc_subject).
 //  2. WorkflowRun actor login (source=workflow_actor).
 //  3. Quarantine principal (source=quarantine).
 //
@@ -122,8 +124,8 @@ func (r *DefaultResolver) ResolveTenant(_ context.Context, claims *OIDCClaims, r
 // the shadow store validation also rejects empty principal_id.
 func (r *DefaultResolver) ResolvePrincipal(_ context.Context, claims *OIDCClaims, run *gogithub.WorkflowRun) (string, string) {
 	if claims != nil {
-		if actor := strings.TrimSpace(claims.Actor); actor != "" {
-			return actor, PrincipalSourceOIDCActor
+		if subject := strings.TrimSpace(claims.Subject); subject != "" {
+			return subject, PrincipalSourceOIDCSubject
 		}
 	}
 	if run != nil {

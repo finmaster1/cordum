@@ -650,11 +650,11 @@ func TestGHDetector_OIDC_VerifiedClaimsPrecedeOrgRepo(t *testing.T) {
 	if got.TenantSource != ghdetector.TenantSourceOIDC {
 		t.Fatalf("TenantSource = %q, want %q", got.TenantSource, ghdetector.TenantSourceOIDC)
 	}
-	if got.PrincipalSource != ghdetector.PrincipalSourceOIDCActor {
-		t.Fatalf("PrincipalSource = %q, want %q", got.PrincipalSource, ghdetector.PrincipalSourceOIDCActor)
+	if got.PrincipalSource != ghdetector.PrincipalSourceOIDCSubject {
+		t.Fatalf("PrincipalSource = %q, want %q", got.PrincipalSource, ghdetector.PrincipalSourceOIDCSubject)
 	}
-	if got.PrincipalID != "oidc-alice" {
-		t.Fatalf("PrincipalID = %q, want oidc-alice", got.PrincipalID)
+	if got.PrincipalID != "repo:acme/web:ref:refs/heads/main" {
+		t.Fatalf("PrincipalID = %q, want OIDC subject", got.PrincipalID)
 	}
 	if len(f.observer.oidcOutcomes) != 1 || f.observer.oidcOutcomes[0] != "ok" {
 		t.Fatalf("OIDC outcomes = %+v, want [ok]", f.observer.oidcOutcomes)
@@ -1060,6 +1060,9 @@ func TestGHDetector_Observability(t *testing.T) {
 	if f.observer.audits[0].EventType != "edge.shadow_finding_created" {
 		t.Errorf("audit.EventType = %q, want %q", f.observer.audits[0].EventType, "edge.shadow_finding_created")
 	}
+	if got := f.observer.audits[0].Extra["source_type"]; got != "github_actions" {
+		t.Errorf("audit source_type = %q, want github_actions", got)
+	}
 }
 
 func TestGHDetector_Observability_PrometheusObserver(t *testing.T) {
@@ -1073,7 +1076,7 @@ func TestGHDetector_Observability_PrometheusObserver(t *testing.T) {
 	obs.EmitAudit(audit.SIEMEvent{EventType: "edge.shadow_finding_created"})
 
 	requireMetricValue(t, reg, "cordum_edge_shadow_finding_emit_total", map[string]string{
-		"source_type": "ci",
+		"source_type": "github_actions",
 		"signal":      "missing_cordum_attach",
 		"risk":        "high",
 	}, 1)

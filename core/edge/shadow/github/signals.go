@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	gogithub "github.com/google/go-github/v74/github"
 
@@ -52,6 +51,7 @@ type scanContext struct {
 	jobs            []*gogithub.WorkflowJob
 	workflow        *workflowSpec
 	workflowPath    string
+	edgeHeartbeat   bool
 	configPaths     []string
 	configSummaries []string
 	hostHits        []string
@@ -74,18 +74,22 @@ func (d *Detector) scanRun(ctx context.Context, org, repoName string, run *gogit
 	if workflowPath == "" {
 		workflowPath = ".github/workflows/ci.yml"
 	}
-	workflowYAML, _ := d.fetchWorkflowYAML(ctx, org, repoName, workflowPath, run.GetHeadSHA())
+	workflowYAML, yamlErr := d.fetchWorkflowYAML(ctx, org, repoName, workflowPath, run.GetHeadSHA())
+	if yamlErr != nil {
+		d.emitWorkflowFetchDegraded(workflowPath, yamlErr, run)
+	}
 	parsed := parseWorkflowYAML(workflowYAML)
 
 	repoFull := fmt.Sprintf("%s/%s", org, repoName)
 	scan := &scanContext{
-		org:          org,
-		repo:         repoName,
-		run:          run,
-		repoFull:     repoFull,
-		jobs:         jobs,
-		workflow:     parsed,
-		workflowPath: workflowPath,
+		org:           org,
+		repo:          repoName,
+		run:           run,
+		repoFull:      repoFull,
+		jobs:          jobs,
+		workflow:      parsed,
+		workflowPath:  workflowPath,
+		edgeHeartbeat: d.edgeSessionHeartbeat(ctx, run),
 	}
 
 	if d.cfg.JobLogHostHits != nil {
@@ -110,6 +114,10 @@ func (d *Detector) scanRun(ctx context.Context, org, repoName string, run *gogit
 		tenantSource = TenantSourceQuarantine
 	}
 	principal, principalSource := d.resolver.ResolvePrincipal(ctx, claims, run)
+	if tenantSource == TenantSourceQuarantine {
+		principal = "unknown"
+		principalSource = PrincipalSourceQuarantine
+	}
 
 	risk := signalsToRisk(signals)
 	signalIDs := signalIDsOf(signals)
@@ -160,7 +168,7 @@ func (d *Detector) scanRun(ctx context.Context, org, repoName string, run *gogit
 	}
 
 	slog.Info("shadow_detector finding_emit",
-		"source_type", shadow.SourceTypeCI,
+		"source_type", githubActionsSourceType,
 		"ci_provider", shadow.CIProviderGitHubActions,
 		"repo", repoFull,
 		"run_id", req.RunID,
@@ -181,7 +189,7 @@ func (d *Detector) scanRun(ctx context.Context, org, repoName string, run *gogit
 		Identity:      principal,
 		PolicyVersion: "edge-shadow-v1",
 		Extra: map[string]string{
-			"source_type":           shadow.SourceTypeCI,
+			"source_type":           githubActionsSourceType,
 			"ci_provider":           shadow.CIProviderGitHubActions,
 			"repo":                  repoFull,
 			"workflow_id":           req.WorkflowID,
@@ -256,7 +264,7 @@ func (d *Detector) emitOIDCVerifyFailed(result string, run *gogithub.WorkflowRun
 		Decision:  "rejected",
 		Reason:    result,
 		Extra: map[string]string{
-			"source_type": shadow.SourceTypeCI,
+			"source_type": githubActionsSourceType,
 			"ci_provider": shadow.CIProviderGitHubActions,
 			"repo":        safeRunRepo(run),
 			"run_id":      strconv.FormatInt(run.GetID(), 10),
@@ -268,10 +276,24 @@ func (d *Detector) emitOIDCVerifyFailed(result string, run *gogithub.WorkflowRun
 func claimMatchesOIDCConfig(claims *OIDCClaims, cfg Config) bool {
 	issuer := strings.TrimRight(strings.TrimSpace(claims.Issuer), "/")
 	expectedIssuer := strings.TrimRight(strings.TrimSpace(cfg.OIDCIssuer), "/")
-	audience := strings.TrimSpace(claims.Audience)
 	expectedAudience := strings.TrimSpace(cfg.OIDCAudience)
 	return issuer != "" && issuer == expectedIssuer &&
-		audience != "" && audience == expectedAudience
+		oidcAudienceMatches(claims, expectedAudience)
+}
+
+func oidcAudienceMatches(claims *OIDCClaims, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	for _, aud := range claims.Audiences {
+		if strings.TrimSpace(aud) == expected {
+			return true
+		}
+	}
+	for _, aud := range strings.Split(claims.Audience, ",") {
+		if strings.TrimSpace(aud) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 // signalCandidate is the internal shape produced by every extractor.
@@ -288,7 +310,7 @@ type signalCandidate struct {
 // are sorted + deduped so SignalSet has a deterministic order at emit
 // time.
 func (d *Detector) collectSignals(ctx context.Context, scan *scanContext, hardSuppress map[string]bool) []signalCandidate {
-	out := make([]signalCandidate, 0, 6)
+	out := make([]signalCandidate, 0, 8)
 	out = append(out, extractRunnerIdentitySignal(scan)...)
 	out = append(out, extractAgentActionSignals(scan, d.cfg)...)
 	out = append(out, extractEnvVarNameSignals(scan)...)
@@ -386,9 +408,9 @@ func extractRunnerIdentitySignal(scan *scanContext) []signalCandidate {
 
 // extractAgentActionSignals walks the parsed workflow YAML and emits:
 //
-//   - agent_action_used — at least one known agent action ref in `uses:`
-//   - missing_cordum_attach — at least one known agent action AND no
-//     cordum-edge-attach action in the same workflow.
+//   - agent_action_used — known agent action ref or run-token observed
+//   - missing_cordum_attach — known agent use AND no attach action or
+//     EdgeSession heartbeat in the same workflow run.
 //
 // Both signals contribute to the finding so dashboards can distinguish
 // "agent present but managed" from "agent present without attach".
@@ -407,12 +429,16 @@ func extractAgentActionSignals(scan *scanContext, cfg Config) []signalCandidate 
 		}
 	}
 	if !agentUsed {
+		agentUsed = scan.workflow.HasRunLeadToken(cfg.KnownAgentRunTokens)
+	}
+	if !agentUsed {
+		return nil
+	}
+	if attachUsed || scan.edgeHeartbeat {
 		return nil
 	}
 	out := []signalCandidate{{id: signalAgentActionUsed, weight: 0.2}}
-	if !attachUsed {
-		out = append(out, signalCandidate{id: signalMissingCordumAttach, weight: 0.6})
-	}
+	out = append(out, signalCandidate{id: signalMissingCordumAttach, weight: 0.6})
 	return out
 }
 
@@ -528,6 +554,49 @@ func (d *Detector) fetchWorkflowYAML(ctx context.Context, org, repo, path, ref s
 		return *c, nil
 	}
 	return "", nil
+}
+
+func (d *Detector) edgeSessionHeartbeat(ctx context.Context, run *gogithub.WorkflowRun) bool {
+	if d.cfg.EdgeSessionHeartbeat == nil {
+		return false
+	}
+	alive, err := d.cfg.EdgeSessionHeartbeat(ctx, run)
+	if err == nil {
+		return alive
+	}
+	d.observer.EmitAudit(audit.SIEMEvent{
+		Timestamp: d.now(),
+		EventType: "edge.shadow_session_lookup_error",
+		Severity:  "warning",
+		Action:    "shadow_agent.session_lookup",
+		Decision:  "error",
+		Reason:    "edge_session_lookup_error",
+		Extra: map[string]string{
+			"source_type": githubActionsSourceType,
+			"ci_provider": shadow.CIProviderGitHubActions,
+			"repo":        safeRunRepo(run),
+			"run_id":      strconv.FormatInt(run.GetID(), 10),
+		},
+	})
+	return false
+}
+
+func (d *Detector) emitWorkflowFetchDegraded(path string, err error, run *gogithub.WorkflowRun) {
+	d.observer.EmitAudit(audit.SIEMEvent{
+		Timestamp: d.now(),
+		EventType: "edge.shadow_workflow_fetch_degraded",
+		Severity:  "warning",
+		Action:    "shadow_agent.workflow_fetch",
+		Decision:  "degraded",
+		Reason:    "workflow_yaml_unavailable",
+		Extra: map[string]string{
+			"source_type": githubActionsSourceType,
+			"ci_provider": shadow.CIProviderGitHubActions,
+			"path":        redactCIPath(safeRunRepo(run), path),
+			"run_id":      strconv.FormatInt(run.GetID(), 10),
+			"error":       sanitizeDegradedError(err),
+		},
+	})
 }
 
 // dedupSignals keeps the first occurrence of each signal id; output is
@@ -700,6 +769,3 @@ func primaryJob(jobs []*gogithub.WorkflowJob) *gogithub.WorkflowJob {
 	}
 	return nil
 }
-
-// time-package import retained for future scan-window heuristics.
-var _ = time.Duration(0)

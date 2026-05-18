@@ -63,6 +63,52 @@ func (s *workflowSpec) AllUses() []string {
 	return out
 }
 
+// HasRunLeadToken reports whether any `run:` step starts with a known
+// agent command. It inspects only the leading token of each non-empty
+// line and never returns or persists shell arguments.
+func (s *workflowSpec) HasRunLeadToken(tokens []string) bool {
+	if s == nil || len(tokens) == 0 {
+		return false
+	}
+	allowed := map[string]struct{}{}
+	for _, token := range tokens {
+		if t := strings.ToLower(strings.TrimSpace(token)); t != "" {
+			allowed[t] = struct{}{}
+		}
+	}
+	for _, job := range s.Jobs {
+		for _, step := range job.Steps {
+			if runScriptHasLeadToken(step.Run, allowed) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runScriptHasLeadToken(script string, allowed map[string]struct{}) bool {
+	for _, line := range strings.Split(script, "\n") {
+		token := leadingShellToken(line)
+		if _, ok := allowed[token]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func leadingShellToken(line string) string {
+	s := strings.TrimSpace(line)
+	s = strings.TrimLeft(s, "- ")
+	if s == "" || strings.HasPrefix(s, "#") {
+		return ""
+	}
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(strings.Trim(fields[0], `"'`))
+}
+
 // AllEnvKeys returns the SORTED, DEDUPED set of env-var NAMES used
 // across workflow/job/step scopes. VALUES ARE NEVER READ — only keys.
 // The §5.2 data-minimization contract depends on this method never
