@@ -188,12 +188,12 @@ func (s *dryRunStore) MatchActiveExceptions(context.Context, *shadow.ShadowAgent
 // are emitted to stdout via JSON or human helpers.
 func runShadowClusterPreview(kubeconfigPath string, asJSON bool, stdout, stderr io.Writer) int {
 	if strings.TrimSpace(kubeconfigPath) == "" {
-		fmt.Fprintln(stderr, "cordumctl edge doctor: --shadow-cluster requires a kubeconfig path")
+		_, _ = fmt.Fprintln(stderr, "cordumctl edge doctor: --shadow-cluster requires a kubeconfig path")
 		return 2
 	}
 	client, err := edgeDoctorKubeClientBuilder(kubeconfigPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "cordumctl edge doctor: --shadow-cluster: %s\n", err.Error())
+		_, _ = fmt.Fprintf(stderr, "cordumctl edge doctor: --shadow-cluster: %s\n", err.Error())
 		return 1
 	}
 
@@ -203,7 +203,7 @@ func runShadowClusterPreview(kubeconfigPath string, asJSON bool, stdout, stderr 
 	ctx, cancel := context.WithTimeout(context.Background(), shadowPreviewTimeout)
 	defer cancel()
 	if err := detector.Scan(ctx); err != nil {
-		fmt.Fprintf(stderr, "cordumctl edge doctor: --shadow-cluster scan failed: %s\n", err.Error())
+		_, _ = fmt.Fprintf(stderr, "cordumctl edge doctor: --shadow-cluster scan failed: %s\n", err.Error())
 		return 1
 	}
 
@@ -236,7 +236,7 @@ func defaultEdgeDoctorShadowK8sConfig() k8s.Config {
 func runShadowCIPreview(spec string, asJSON bool, stdout, stderr io.Writer) int {
 	provider, configRef, ok := splitShadowCISpec(spec)
 	if !ok {
-		fmt.Fprintf(stderr,
+		_, _ = fmt.Fprintf(stderr,
 			"cordumctl edge doctor: --shadow-ci value must be in <provider>:<token-or-config-path> format; got %q\n",
 			spec)
 		return 2
@@ -249,7 +249,7 @@ func runShadowCIPreview(spec string, asJSON bool, stdout, stderr io.Writer) int 
 		}
 	}
 	if !knownProvider {
-		fmt.Fprintf(stderr,
+		_, _ = fmt.Fprintf(stderr,
 			"cordumctl edge doctor: provider %s not recognized; supported: %s\n",
 			provider, strings.Join(supportedCIProviders, "/"))
 		return 2
@@ -261,7 +261,7 @@ func runShadowCIPreview(spec string, asJSON bool, stdout, stderr io.Writer) int 
 	_ = edgeDoctorCIHTTPTransport
 	_ = configRef
 
-	fmt.Fprintf(stderr,
+	_, _ = fmt.Fprintf(stderr,
 		"cordumctl edge doctor: provider %s not supported in this build; EDGE-143.2/.3 detector(s) must DONE first\n",
 		provider)
 	_ = asJSON
@@ -284,12 +284,18 @@ func splitShadowCISpec(spec string) (provider, configRef string, ok bool) {
 }
 
 func emitShadowFindingsHuman(w io.Writer, banner string, findings []shadow.ShadowAgentFinding) int {
-	fmt.Fprintf(w, "Cordum Edge doctor — %s (dry-run, no findings persisted)\n", banner)
-	fmt.Fprintf(w, "Findings: %d\n", len(findings))
+	if _, err := fmt.Fprintf(w, "Cordum Edge doctor — %s (dry-run, no findings persisted)\n", banner); err != nil {
+		return 1
+	}
+	if _, err := fmt.Fprintf(w, "Findings: %d\n", len(findings)); err != nil {
+		return 1
+	}
 	for _, f := range findings {
-		fmt.Fprintf(w, "  - [%s] source=%s ns=%s workload=%s signals=%s evidence=%s\n",
+		if _, err := fmt.Fprintf(w, "  - [%s] source=%s ns=%s workload=%s signals=%s evidence=%s\n",
 			f.Risk, f.SourceType, f.Namespace, f.WorkloadName,
-			strings.Join(f.SignalSet, ","), f.EvidenceType)
+			strings.Join(f.SignalSet, ","), f.EvidenceType); err != nil {
+			return 1
+		}
 	}
 	return 0
 }

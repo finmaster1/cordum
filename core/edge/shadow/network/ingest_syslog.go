@@ -67,7 +67,7 @@ func (i *SyslogIngestor) Stream(ctx context.Context, out chan<- LogRecord) error
 	if err != nil {
 		return fmt.Errorf("network: listen %q: %w", i.addr, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	buf := make([]byte, syslogReadBuf)
 	for {

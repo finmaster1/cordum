@@ -25,6 +25,7 @@ import type {
   BinaryVerifyEventsEnvelope,
   CreateEdgeMCPUpstreamParams,
   CreateShadowAgentFindingRequest,
+  CreateShadowExceptionRequest,
   EdgeAgentActionEvent,
   EdgeAgentActionEventBatchRequest,
   EdgeAgentActionEventBatchResponse,
@@ -72,15 +73,19 @@ import type {
   ListEdgeSessionEventsParams,
   ListEdgeSessionsParams,
   ListShadowAgentFindingsParams,
+  ListShadowExceptionsParams,
+  ListShadowExceptionsResponse,
   MCPUpstreamListResponse,
   MCPUpstreamServer,
   MCPUpstreamServerWriteRequest,
   MCPUpstreamValidationResponse,
   ResolveShadowAgentFindingRequest,
+  RevokeShadowExceptionRequest,
   ShadowAgentFinding,
   ShadowAgentFindingPage,
   ShadowAgentRemediationRequest,
   ShadowAgentRemediationResponse,
+  ShadowException,
   SuppressShadowAgentFindingRequest,
   WaitEdgeApprovalBody,
 } from ".././model";
@@ -4952,6 +4957,622 @@ export const useGenerateShadowAgentRemediation = <
 
   return useMutation(mutationOptions, queryClient);
 };
+/**
+ * Persists an operator-signed exception declaration that suppresses
+future ShadowAgent findings matching its scope predicate
+(source_type + source_id + risk_level + signal_set). Matching is
+applied at finding emit time: matching findings are stamped with
+exception_id, false_positive_reason="operator_exception", and
+status=managed_skip; they are excluded from default-filter list
+queries.
+
+Q8 step-up auth: when scope_risk_level is "high", the caller MUST
+hold the `admin` legacy role OR the `shadow.exception.high_risk`
+permission. Failure returns 403 with code `step_up_required` and
+details.required = "mfa_recent|signed_admin_token". The persisted
+Exception records which factor satisfied the gate so SIEM rules
+can pivot on the auth tier at the time of action.
+
+expires_at MUST be in the future and within 90 days (§10.3
+"longer requires re-affirmation").
+
+ * @summary Create an operator-defined shadow exception (EDGE-143.6)
+ */
+export const createShadowException = (
+  createShadowExceptionRequest: CreateShadowExceptionRequest,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowException>({
+    url: `/api/v1/edge/shadow/exception`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: createShadowExceptionRequest,
+    signal,
+  });
+};
+
+export const getCreateShadowExceptionMutationOptions = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeError
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createShadowException>>,
+    TError,
+    { data: CreateShadowExceptionRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createShadowException>>,
+  TError,
+  { data: CreateShadowExceptionRequest },
+  TContext
+> => {
+  const mutationKey = ["createShadowException"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createShadowException>>,
+    { data: CreateShadowExceptionRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createShadowException(data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateShadowExceptionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createShadowException>>
+>;
+export type CreateShadowExceptionMutationBody = CreateShadowExceptionRequest;
+export type CreateShadowExceptionMutationError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeError
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Create an operator-defined shadow exception (EDGE-143.6)
+ */
+export const useCreateShadowException = <
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeError
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createShadowException>>,
+      TError,
+      { data: CreateShadowExceptionRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createShadowException>>,
+  TError,
+  { data: CreateShadowExceptionRequest },
+  TContext
+> => {
+  const mutationOptions = getCreateShadowExceptionMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Returns the exception record scoped to the caller's tenant.
+Cross-tenant probes return 404 (never 403) to avoid leaking
+tuple existence.
+
+ * @summary Read a single shadow exception (EDGE-143.6)
+ */
+export const getShadowException = (
+  exceptionId: string,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ShadowException>({
+    url: `/api/v1/edge/shadow/exception/${exceptionId}`,
+    method: "GET",
+    signal,
+  });
+};
+
+export const getGetShadowExceptionQueryKey = (exceptionId?: string) => {
+  return [`/api/v1/edge/shadow/exception/${exceptionId}`] as const;
+};
+
+export const getGetShadowExceptionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getShadowException>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  exceptionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowException>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetShadowExceptionQueryKey(exceptionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getShadowException>>
+  > = ({ signal }) => getShadowException(exceptionId, signal);
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!exceptionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getShadowException>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type GetShadowExceptionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getShadowException>>
+>;
+export type GetShadowExceptionQueryError =
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useGetShadowException<
+  TData = Awaited<ReturnType<typeof getShadowException>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  exceptionId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowException>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getShadowException>>,
+          TError,
+          Awaited<ReturnType<typeof getShadowException>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useGetShadowException<
+  TData = Awaited<ReturnType<typeof getShadowException>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  exceptionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowException>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getShadowException>>,
+          TError,
+          Awaited<ReturnType<typeof getShadowException>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useGetShadowException<
+  TData = Awaited<ReturnType<typeof getShadowException>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  exceptionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowException>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary Read a single shadow exception (EDGE-143.6)
+ */
+
+export function useGetShadowException<
+  TData = Awaited<ReturnType<typeof getShadowException>>,
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  exceptionId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getShadowException>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getGetShadowExceptionQueryOptions(exceptionId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * Transitions an active exception to revoked. Revoke uses the SAME
+auth tier as the original create: if the exception's
+scope_risk_level is "high", the caller MUST satisfy the step-up
+gate. Failure returns 403 with code `step_up_required`.
+
+Idempotent when the exception is already revoked AND the caller
+principal matches the original revoker; conflicting double-revoke
+returns 409.
+
+ * @summary Revoke an active shadow exception (EDGE-143.6)
+ */
+export const revokeShadowException = (
+  exceptionId: string,
+  revokeShadowExceptionRequest?: RevokeShadowExceptionRequest,
+) => {
+  return apiClient<void>({
+    url: `/api/v1/edge/shadow/exception/${exceptionId}`,
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    data: revokeShadowExceptionRequest,
+  });
+};
+
+export const getRevokeShadowExceptionMutationOptions = <
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revokeShadowException>>,
+    TError,
+    { exceptionId: string; data: RevokeShadowExceptionRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof revokeShadowException>>,
+  TError,
+  { exceptionId: string; data: RevokeShadowExceptionRequest },
+  TContext
+> => {
+  const mutationKey = ["revokeShadowException"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof revokeShadowException>>,
+    { exceptionId: string; data: RevokeShadowExceptionRequest }
+  > = (props) => {
+    const { exceptionId, data } = props ?? {};
+
+    return revokeShadowException(exceptionId, data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RevokeShadowExceptionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof revokeShadowException>>
+>;
+export type RevokeShadowExceptionMutationBody = RevokeShadowExceptionRequest;
+export type RevokeShadowExceptionMutationError =
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeNotFoundResponse
+  | EdgeConflictResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+/**
+ * @summary Revoke an active shadow exception (EDGE-143.6)
+ */
+export const useRevokeShadowException = <
+  TError =
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeNotFoundResponse
+    | EdgeConflictResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof revokeShadowException>>,
+      TError,
+      { exceptionId: string; data: RevokeShadowExceptionRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof revokeShadowException>>,
+  TError,
+  { exceptionId: string; data: RevokeShadowExceptionRequest },
+  TContext
+> => {
+  const mutationOptions = getRevokeShadowExceptionMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * Returns a bounded, cursor-paginated page of exceptions for the
+requested tenant. Optional filters: status (active|revoked|
+expired), source_type (local|kubernetes|ci|network), risk
+(low|medium|high|critical).
+
+ * @summary List shadow exceptions for the caller's tenant (EDGE-143.6)
+ */
+export const listShadowExceptions = (
+  params?: ListShadowExceptionsParams,
+  signal?: AbortSignal,
+) => {
+  return apiClient<ListShadowExceptionsResponse>({
+    url: `/api/v1/edge/shadow/exceptions`,
+    method: "GET",
+    params,
+    signal,
+  });
+};
+
+export const getListShadowExceptionsQueryKey = (
+  params?: ListShadowExceptionsParams,
+) => {
+  return [
+    `/api/v1/edge/shadow/exceptions`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListShadowExceptionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listShadowExceptions>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowExceptionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowExceptions>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListShadowExceptionsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listShadowExceptions>>
+  > = ({ signal }) => listShadowExceptions(params, signal);
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listShadowExceptions>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData> };
+};
+
+export type ListShadowExceptionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listShadowExceptions>>
+>;
+export type ListShadowExceptionsQueryError =
+  | EdgeBadRequestResponse
+  | EdgeUnauthorizedResponse
+  | EdgeForbiddenResponse
+  | EdgeInternalServerErrorResponse
+  | EdgeServiceUnavailableResponse;
+
+export function useListShadowExceptions<
+  TData = Awaited<ReturnType<typeof listShadowExceptions>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params: undefined | ListShadowExceptionsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowExceptions>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listShadowExceptions>>,
+          TError,
+          Awaited<ReturnType<typeof listShadowExceptions>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData>;
+};
+export function useListShadowExceptions<
+  TData = Awaited<ReturnType<typeof listShadowExceptions>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowExceptionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowExceptions>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listShadowExceptions>>,
+          TError,
+          Awaited<ReturnType<typeof listShadowExceptions>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+export function useListShadowExceptions<
+  TData = Awaited<ReturnType<typeof listShadowExceptions>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowExceptionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowExceptions>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
+/**
+ * @summary List shadow exceptions for the caller's tenant (EDGE-143.6)
+ */
+
+export function useListShadowExceptions<
+  TData = Awaited<ReturnType<typeof listShadowExceptions>>,
+  TError =
+    | EdgeBadRequestResponse
+    | EdgeUnauthorizedResponse
+    | EdgeForbiddenResponse
+    | EdgeInternalServerErrorResponse
+    | EdgeServiceUnavailableResponse,
+>(
+  params?: ListShadowExceptionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listShadowExceptions>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> } {
+  const queryOptions = getListShadowExceptionsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
 /**
  * Persists structured binary-verify outcomes emitted by
 `tools/scripts/install.{sh,ps1}` (the pre-activation integrity
