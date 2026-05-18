@@ -238,6 +238,89 @@ func TestRedactBackendErrorSecretPatterns(t *testing.T) {
 	}
 }
 
+// TestNormalizeBackendError_PreservesCaseSensitiveRedaction guards the fix
+// for the SECURITY CRITICAL bug where `normalizeBackendError` lowercased the
+// raw backend error text BEFORE handing it to `redactBackendError`. Two of
+// the redactor's secret patterns are intentionally case-sensitive — the AWS
+// access-key prefix `\bAKIA[0-9A-Z]{16}\b` (line 260) and the PEM framing
+// `-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----` (line 254) — and pre-lowercasing
+// destroys both, allowing custom Keyring backends or future libsecret/wincred
+// error text that embeds an AWS access key or PEM block to propagate
+// verbatim through `Error()` → `formatBootstrapError(%w)` → stderr/journald.
+//
+// Each case asserts (1) the rendered `Error()` contains a `[REDACTED` marker,
+// (2) it does NOT contain any substring of the raw secret-shape fixture, and
+// (3) `errors.Is(outErr, ErrKeyringUnavailable)` still routes correctly so
+// strict-mode callers continue to fail closed. Fixtures use deterministic
+// synthetic shapes — never real secrets — and follow the EDGE-071 lint
+// allowlist conventions (`synthetic*` naming, EXAMPLE markers).
+func TestNormalizeBackendError_PreservesCaseSensitiveRedaction(t *testing.T) {
+	t.Parallel()
+
+	const syntheticAKIATail = "SENTINEL12345678" // 16 uppercase alnum chars after the AKIA prefix
+	syntheticAKIA := "AKIA" + syntheticAKIATail
+	const syntheticPEMBody = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDSENTINELPEMxyzABCDEFG12345"
+	syntheticRSAPEM := "-----BEGIN RSA PRIVATE KEY-----\n" + syntheticPEMBody + "\n-----END RSA PRIVATE KEY-----"
+	syntheticPKCS8PEM := "-----BEGIN PRIVATE KEY-----\n" + syntheticPEMBody + "\n-----END PRIVATE KEY-----"
+
+	// wantMarker is the category-specific replacement that proves the
+	// case-sensitive regex actually fired. Checking just "[REDACTED" would
+	// pass today on PEM input even with the bug present, because the long
+	// inner base64 body is caught by the case-insensitive base64-catchall
+	// at the bottom of backendErrorRedactPatterns — masking the framing
+	// leak (`-----begin rsa private key-----` survives lowercased).
+	// Asserting the category marker ensures the AKIA / PEM regexes ran on
+	// original-case bytes.
+	cases := []struct {
+		name         string
+		secret       string
+		input        string
+		wantMarker   string
+		wantSentinel error
+	}{
+		{
+			name:         "aws_access_key_mid_error",
+			secret:       syntheticAKIATail, // tail alone proves the AKIA-anchored regex ran on original case
+			input:        "keyring backend returned: " + syntheticAKIA + " inside",
+			wantMarker:   "[REDACTED:aws]",
+			wantSentinel: ErrKeyringUnavailable,
+		},
+		{
+			name:         "rsa_labelled_pem_block",
+			secret:       syntheticPEMBody,
+			input:        "keyring decode failed: " + syntheticRSAPEM,
+			wantMarker:   "[REDACTED:pem]",
+			wantSentinel: ErrKeyringUnavailable,
+		},
+		{
+			name:         "pkcs8_bare_pem_block",
+			secret:       syntheticPEMBody,
+			input:        "keyring returned pkcs8: " + syntheticPKCS8PEM,
+			wantMarker:   "[REDACTED:pem]",
+			wantSentinel: ErrKeyringUnavailable,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			outErr := normalizeBackendError(errors.New(tc.input))
+			if outErr == nil {
+				t.Fatalf("normalizeBackendError returned nil for non-nil input")
+			}
+			msg := outErr.Error()
+			if !strings.Contains(msg, tc.wantMarker) {
+				t.Fatalf("normalizeBackendError(%q): want marker %q in output, got %q", tc.name, tc.wantMarker, msg)
+			}
+			if strings.Contains(msg, tc.secret) {
+				t.Fatalf("normalizeBackendError(%q): output %q still contains secret substring", tc.name, msg)
+			}
+			if !errors.Is(outErr, tc.wantSentinel) {
+				t.Fatalf("normalizeBackendError(%q): errors.Is mismatch, want sentinel %v, got %v", tc.name, tc.wantSentinel, outErr)
+			}
+		})
+	}
+}
+
 // TestLoadSecretLogsKeyringErrorClass is the PR #276 Sub-G #21 regression.
 // When the backend fails, the structured log MUST surface a non-empty
 // `keyring_error_class` attribute so operators can dispatch on category

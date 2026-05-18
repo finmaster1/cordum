@@ -128,23 +128,31 @@ func normalizeBackendError(err error) error {
 	if errors.Is(err, zkeyring.ErrNotFound) {
 		return ErrKeyringNotFound
 	}
-	msg := strings.ToLower(err.Error())
+	// Redact on the ORIGINAL-case bytes — backendErrorRedactPatterns has
+	// rules that are intentionally case-sensitive (AWS `\bAKIA[0-9A-Z]{16}\b`,
+	// PEM `-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----`) and pre-lowercasing them
+	// destroys the match, letting backend error text leak AKIA tokens and
+	// PEM framing verbatim through Error() → fmt.Errorf("%w") → stderr/
+	// journald. Lowercasing is only applied to the classification copy used
+	// by the substring switch below, whose targets are all-lowercase tokens.
+	msg := err.Error()
 	summary := redactBackendError(msg)
+	msgLower := strings.ToLower(msg)
 	switch {
-	case strings.Contains(msg, "permission denied"),
-		strings.Contains(msg, "access denied"),
-		strings.Contains(msg, "user interaction not allowed"),
-		strings.Contains(msg, "keychain item not granted"):
+	case strings.Contains(msgLower, "permission denied"),
+		strings.Contains(msgLower, "access denied"),
+		strings.Contains(msgLower, "user interaction not allowed"),
+		strings.Contains(msgLower, "keychain item not granted"):
 		return &keyringBackendError{sentinel: ErrKeyringPermissionDenied, summary: summary}
-	case strings.Contains(msg, "no such interface"),
-		strings.Contains(msg, "service_unknown"),
-		strings.Contains(msg, "could not get session"),
-		strings.Contains(msg, "no dbus session"),
-		strings.Contains(msg, "dbus-launch"),
-		strings.Contains(msg, "secret service"),
-		strings.Contains(msg, "no credential manager"),
-		strings.Contains(msg, "element not found"),
-		strings.Contains(msg, "the system cannot find"):
+	case strings.Contains(msgLower, "no such interface"),
+		strings.Contains(msgLower, "service_unknown"),
+		strings.Contains(msgLower, "could not get session"),
+		strings.Contains(msgLower, "no dbus session"),
+		strings.Contains(msgLower, "dbus-launch"),
+		strings.Contains(msgLower, "secret service"),
+		strings.Contains(msgLower, "no credential manager"),
+		strings.Contains(msgLower, "element not found"),
+		strings.Contains(msgLower, "the system cannot find"):
 		return &keyringBackendError{sentinel: ErrKeyringUnavailable, summary: summary}
 	default:
 		return &keyringBackendError{sentinel: ErrKeyringUnavailable, summary: summary}
