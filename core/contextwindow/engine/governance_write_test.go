@@ -97,6 +97,47 @@ func TestValidateGovernanceWrite(t *testing.T) {
 	}
 }
 
+func TestGovernanceWrite_TenantPrefixWithoutTenantID_FailsClosed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		req  *pb.UpdateMemoryRequest
+	}{
+		{
+			name: "memory_id",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:           "t-victim/mem-1",
+				WriteKind:          pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_POLICY_STATE,
+				WriterAgentId:      "writer-1",
+				ProvenanceRef:      "prov-1",
+				ProvenanceVerified: true,
+			},
+		},
+		{
+			name: "target_agent_id",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:           "mem-1",
+				WriteKind:          pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_POLICY_STATE,
+				WriterAgentId:      "writer-1",
+				TargetAgentId:      "t-victim/agent-1",
+				ProvenanceRef:      "prov-1",
+				ProvenanceVerified: true,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateGovernanceWrite(tc.req)
+			if !errors.Is(err, ErrSharedWriteTenantMismatch) {
+				t.Fatalf("got %v, want %v", err, ErrSharedWriteTenantMismatch)
+			}
+		})
+	}
+}
+
 func TestIsSharedWriteKind(t *testing.T) {
 	t.Parallel()
 	for _, k := range []pb.MemoryWriteKind{
@@ -125,11 +166,11 @@ func TestTenantPrefix(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		"":                {"", false},
-		"   ":             {"", false},
-		"mem-1":           {"", false},
-		"/mem-1":          {"", false},
-		"t-a/mem-1":       {"t-a", true},
+		"":                 {"", false},
+		"   ":              {"", false},
+		"mem-1":            {"", false},
+		"/mem-1":           {"", false},
+		"t-a/mem-1":        {"t-a", true},
 		"tenant-a/agent/x": {"tenant-a", true},
 	}
 	for id, tc := range cases {

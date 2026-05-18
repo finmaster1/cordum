@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,41 @@ func TestManagedSettingsExportAllowsOverwriteWithForce(t *testing.T) {
 	code, _, stderr := runManagedSettingsForTest(t, args...)
 	if code != 0 {
 		t.Fatalf("force overwrite expected exit 0; got %d stderr=%s", code, stderr)
+	}
+}
+
+func TestWriteManagedSettingsOutput_ForceUsesAtomicReplace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "managed-settings.json")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write existing managed settings: %v", err)
+	}
+
+	if err := writeManagedSettingsOutput(path, []byte("new"), true); err != nil {
+		t.Fatalf("force write managed settings: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rewritten managed settings: %v", err)
+	}
+	if string(data) != "new" {
+		t.Fatalf("rewritten content = %q, want %q", data, "new")
+	}
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".managed-settings-*.tmp"))
+	if err != nil {
+		t.Fatalf("glob managed-settings temp files: %v", err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("force write left temp files: %v", leftovers)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat rewritten managed settings: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("rewritten mode = %#o, want 0600", got)
+		}
 	}
 }
 

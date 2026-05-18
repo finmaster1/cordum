@@ -199,6 +199,48 @@ func TestWriteActionGatePolicyErrorRequireHumanSimulateIs200(t *testing.T) {
 	}
 }
 
+func TestWriteActionGatePolicyErrorRequireHumanEvaluateIs409(t *testing.T) {
+	t.Parallel()
+	dec := actiongates.ActionGateDecision{
+		Code:      actiongates.CodeRequireHuman,
+		GateID:    "actiongate.mutation",
+		Reason:    "destructive action requires human approval",
+		SubReason: "missing_approval",
+		Extra: map[string]string{
+			"gate":        "actiongate.mutation",
+			"sub_reason":  "missing_approval",
+			"target_path": "/secrets/prod.env",
+		},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/policy/evaluate", nil)
+	writeActionGatePolicyError(rr, req, "evaluate", dec)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for evaluate REQUIRE_HUMAN", rr.Code)
+	}
+	var env edgeErrorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode edge envelope: %v body=%s", err, rr.Body.String())
+	}
+	if env.Code != edgeErrCodeConflict {
+		t.Fatalf("envelope.code = %q, want %q", env.Code, edgeErrCodeConflict)
+	}
+	if env.Code == edgeErrCodeInternalError || rr.Code == http.StatusOK {
+		t.Fatalf("legacy REQUIRE_HUMAN shape returned: status=%d code=%q", rr.Code, env.Code)
+	}
+	if env.Message != "destructive action requires human approval" {
+		t.Fatalf("message = %q, want sanitized policy reason", env.Message)
+	}
+	if env.Details == nil || env.Details["gate"] != "actiongate.mutation" ||
+		env.Details["sub_reason"] != "missing_approval" {
+		t.Fatalf("details = %#v, want sanitized gate and sub_reason", env.Details)
+	}
+	if _, leaked := env.Details["target_path"]; leaked {
+		t.Fatalf("details leaked unsafe target_path: %#v", env.Details)
+	}
+}
+
 func TestSafeActionGateExtraKeysCoverDefaults(t *testing.T) {
 	t.Parallel()
 	must := []string{"gate", "sub_reason", "target_type", "auth_tenant"}
