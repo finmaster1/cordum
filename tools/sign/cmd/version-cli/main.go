@@ -22,13 +22,13 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, stdout, stderr *os.File) error {
+func run(args []string, stdout *os.File) error {
 	if len(args) < 1 {
 		return fmt.Errorf("version-cli: missing subcommand (compare|monotonic-or-fail)")
 	}

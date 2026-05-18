@@ -331,7 +331,7 @@ var grpcPublicMethods = map[string]bool{
 	"/grpc.health.v1.Health/Watch": true,
 }
 
-func rateLimitUnaryInterceptor(auth auth.AuthProvider, apiRL, publicRL rateLimiter) grpc.UnaryServerInterceptor {
+func rateLimitUnaryInterceptor(_ auth.AuthProvider, apiRL, publicRL rateLimiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if apiRL == nil && publicRL == nil {
 			return handler(ctx, req)

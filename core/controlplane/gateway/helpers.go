@@ -81,21 +81,21 @@ type policyMetaRequest struct {
 }
 
 type policyCheckRequest struct {
-	JobId           string                    `json:"job_id"`
-	Topic           string                    `json:"topic"`
-	Tenant          string                    `json:"tenant"`
-	OrgId           string                    `json:"org_id"`
-	TeamId          string                    `json:"team_id"`
-	WorkflowId      string                    `json:"workflow_id"`
-	StepId          string                    `json:"step_id"`
-	PrincipalId     string                    `json:"principal_id"`
-	Priority        string                    `json:"priority"`
-	EstimatedCost   float64                   `json:"estimated_cost"`
-	Budget          *pb.Budget                `json:"budget"`
-	Labels          map[string]string         `json:"labels"`
-	MemoryId        string                    `json:"memory_id"`
-	EffectiveConfig any                       `json:"effective_config"`
-	Meta            *policyMetaRequest        `json:"meta"`
+	JobId           string             `json:"job_id"`
+	Topic           string             `json:"topic"`
+	Tenant          string             `json:"tenant"`
+	OrgId           string             `json:"org_id"`
+	TeamId          string             `json:"team_id"`
+	WorkflowId      string             `json:"workflow_id"`
+	StepId          string             `json:"step_id"`
+	PrincipalId     string             `json:"principal_id"`
+	Priority        string             `json:"priority"`
+	EstimatedCost   float64            `json:"estimated_cost"`
+	Budget          *pb.Budget         `json:"budget"`
+	Labels          map[string]string  `json:"labels"`
+	MemoryId        string             `json:"memory_id"`
+	EffectiveConfig any                `json:"effective_config"`
+	Meta            *policyMetaRequest `json:"meta"`
 	// Action carries structured request metadata for deterministic
 	// pre-rule action-layer gates (file/url/tenant/mutation/mcp/
 	// provenance). When non-nil and the gateway is wired with a
@@ -874,7 +874,7 @@ func appendUniqueTag(tags []string, tag string) []string {
 	return append(tags, tag)
 }
 
-func parseContextMode(topic, explicit string) string {
+func parseContextMode(_, explicit string) string {
 	switch strings.ToLower(explicit) {
 	case "chat":
 		return "chat"
@@ -926,7 +926,7 @@ func (s *server) enforceMemoryID(ctx context.Context, orgID, teamID, workflowID,
 	return nil
 }
 
-func deriveMemoryIDFromReq(topic, explicit, jobID string) string {
+func deriveMemoryIDFromReq(_, explicit, jobID string) string {
 	if explicit != "" {
 		return store.NormalizeMemoryID(explicit)
 	}

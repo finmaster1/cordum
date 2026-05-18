@@ -643,7 +643,7 @@ func (s *server) planSchemas(ctx context.Context, dir string, manifest *packs.Pa
 						}
 					}
 				}
-			} else if err != nil && !errors.Is(err, redis.Nil) {
+			} else if !errors.Is(err, redis.Nil) {
 				return nil, err
 			}
 		}
@@ -673,7 +673,7 @@ func (s *server) planWorkflows(ctx context.Context, dir string, manifest *packs.
 			} else if !upgrade {
 				return nil, fmt.Errorf("workflow %s exists; rerun with upgrade", ref.ID)
 			}
-		} else if err != nil && !errors.Is(err, redis.Nil) {
+		} else if !errors.Is(err, redis.Nil) {
 			return nil, err
 		}
 		plans = append(plans, plan)

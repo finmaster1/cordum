@@ -18,13 +18,10 @@ import (
 func runArgs(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	stdout, _ := os.CreateTemp(t.TempDir(), "stdout.*")
-	stderr, _ := os.CreateTemp(t.TempDir(), "stderr.*")
 	defer func() { _ = stdout.Close() }()
-	defer func() { _ = stderr.Close() }()
-	err := run(args, stdout, stderr)
+	err := run(args, stdout)
 	outBytes, _ := os.ReadFile(stdout.Name())
-	errBytes, _ := os.ReadFile(stderr.Name())
-	return string(outBytes), string(errBytes), err
+	return string(outBytes), "", err
 }
 
 func TestMonotonicOrFail_Greater(t *testing.T) {

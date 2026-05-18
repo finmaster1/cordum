@@ -523,7 +523,7 @@ func writeShadowFindingStoreError(w http.ResponseWriter, r *http.Request, err er
 // emitShadowFindingAudit emits the lifecycle audit event through the
 // existing gateway exporter. Payloads carry already-redacted summary +
 // artifact pointer metadata; raw evidence summaries are NEVER included.
-func (s *server) emitShadowFindingAudit(r *http.Request, eventType, actor string, f *shadow.ShadowAgentFinding, reason string) {
+func (s *server) emitShadowFindingAudit(_ *http.Request, eventType, actor string, f *shadow.ShadowAgentFinding, reason string) {
 	if s == nil || s.auditExporter == nil || f == nil {
 		return
 	}

@@ -56,7 +56,7 @@ func (e *shadowFindingAuditExporter) Send(ev audit.SIEMEvent) {
 
 func (e *shadowFindingAuditExporter) Close() error { return nil }
 
-func validShadowCreateBody(tenant string) shadowAgentCreateRequest {
+func validShadowCreateBody(_ string) shadowAgentCreateRequest {
 	return shadowAgentCreateRequest{
 		OwnerPrincipalID: "owner-alice",
 		AgentProduct:     "claude-code",

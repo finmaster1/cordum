@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -412,23 +413,23 @@ var (
 
 // §10.1 byte caps for the new string fields.
 const (
-	maxShadowSourceIDBytes      = 128
-	maxShadowClusterIDBytes     = 64
-	maxShadowNamespaceBytes     = 63
-	maxShadowWorkloadKindBytes  = 32
-	maxShadowWorkloadNameBytes  = 253
-	maxShadowPodUIDBytes        = 36
-	maxShadowRepoBytes          = 256
-	maxShadowRefBytes           = 256
-	maxShadowWorkflowIDBytes    = 128
-	maxShadowJobIDBytes         = 128
-	maxShadowRunIDBytes         = 128
-	maxShadowRunnerIDBytes      = 128
-	maxShadowTenantSourceBytes  = 64
-	maxShadowPrincipalSrcBytes  = 64
-	maxShadowFPReasonBytes      = 64
-	maxShadowExceptionIDBytes   = 64
-	maxShadowSignalSetEntries   = 16
+	maxShadowSourceIDBytes     = 128
+	maxShadowClusterIDBytes    = 64
+	maxShadowNamespaceBytes    = 63
+	maxShadowWorkloadKindBytes = 32
+	maxShadowWorkloadNameBytes = 253
+	maxShadowPodUIDBytes       = 36
+	maxShadowRepoBytes         = 256
+	maxShadowRefBytes          = 256
+	maxShadowWorkflowIDBytes   = 128
+	maxShadowJobIDBytes        = 128
+	maxShadowRunIDBytes        = 128
+	maxShadowRunnerIDBytes     = 128
+	maxShadowTenantSourceBytes = 64
+	maxShadowPrincipalSrcBytes = 64
+	maxShadowFPReasonBytes     = 64
+	maxShadowExceptionIDBytes  = 64
+	maxShadowSignalSetEntries  = 16
 )
 
 // normalizeAndValidateCreate normalizes a CreateFindingRequest into a
@@ -751,9 +752,7 @@ func copyMetadata(m map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 

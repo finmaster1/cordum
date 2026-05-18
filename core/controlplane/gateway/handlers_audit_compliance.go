@@ -121,8 +121,8 @@ func (s *server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts.StreamKey = audit.NewChainer(client, "").StreamKey(tenant)
-	opts.BundleLookup = func(ctx context.Context, tenantID string, from, to time.Time) ([]audit.SignedBundleSnapshot, error) {
-		return s.listSignedBundleSnapshots(ctx, tenantID, from, to)
+	opts.BundleLookup = func(ctx context.Context, _ string, from, to time.Time) ([]audit.SignedBundleSnapshot, error) {
+		return s.listSignedBundleSnapshots(ctx, from, to)
 	}
 	opts.SOC2Mapping = audit.LoadSOC2MappingFromEnv()
 	opts.SOC2Legend = audit.DefaultSOC2Legend()
