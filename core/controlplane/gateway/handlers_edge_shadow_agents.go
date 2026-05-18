@@ -378,6 +378,14 @@ func parseShadowFindingListQuery(w http.ResponseWriter, r *http.Request, tenantI
 			writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "limit must be a positive integer", nil)
 			return shadow.ListFindingsQuery{}, false
 		}
+		// Boundary cap: clamp adversarial caller values at decode time so
+		// the bound is visible at the request boundary and not solely
+		// dependent on the shadow.RedisStore.clampListPageSize re-clamp.
+		// This is the defense-in-depth gate DoD requires for the CodeQL
+		// uncontrolled-allocation-size class (alerts #34-39 on PR #276).
+		if n > shadow.MaxListPageSize {
+			n = shadow.MaxListPageSize
+		}
 		out.Limit = n
 	}
 	if out.Status != "" && out.Status != shadow.FindingStatusDetected && out.Status != shadow.FindingStatusResolved && out.Status != shadow.FindingStatusSuppressed {

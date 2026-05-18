@@ -5,8 +5,12 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/cordum/cordum/core/edge/shadow"
 )
 
 // TestShadowAgentListExtensions_Validation hits parseShadowFindingListQuery
@@ -50,6 +54,85 @@ func TestShadowAgentListExtensions_Validation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestShadowAgentListExtensions_LimitCappedAtMax asserts the gateway
+// boundary enforces shadow.MaxListPageSize on the caller-supplied
+// `?limit=` query value. Without a boundary cap, an oversized
+// caller value flows into shadow.ListFindingsQuery.Limit and depends
+// solely on the store-layer clampListPageSize re-clamp. This test
+// pins boundary-level defense-in-depth required by task-7beba845 DoD
+// ("Boundary-level cap applied (request decode) AND store-level cap").
+func TestShadowAgentListExtensions_LimitCappedAtMax(t *testing.T) {
+	t.Run("parse layer clamps adversarial limit to MaxListPageSize", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/edge/shadow-agents?limit=99999999", nil)
+		rec := httptest.NewRecorder()
+		q, ok := parseShadowFindingListQuery(rec, req, "tenant-a")
+		if !ok {
+			t.Fatalf("parseShadowFindingListQuery rejected adversarial limit, want clamped+ok=true; body=%s", rec.Body.String())
+		}
+		if q.Limit > shadow.MaxListPageSize {
+			t.Fatalf("parsed q.Limit = %d, want <= MaxListPageSize=%d (boundary cap missing)", q.Limit, shadow.MaxListPageSize)
+		}
+		if q.Limit != shadow.MaxListPageSize {
+			t.Fatalf("parsed q.Limit = %d, want exactly MaxListPageSize=%d when caller asks for more", q.Limit, shadow.MaxListPageSize)
+		}
+	})
+
+	t.Run("parse layer preserves under-cap limit", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/edge/shadow-agents?limit=42", nil)
+		rec := httptest.NewRecorder()
+		q, ok := parseShadowFindingListQuery(rec, req, "tenant-a")
+		if !ok {
+			t.Fatalf("parseShadowFindingListQuery rejected limit=42; body=%s", rec.Body.String())
+		}
+		if q.Limit != 42 {
+			t.Fatalf("parsed q.Limit = %d, want 42 (under-cap value must pass through)", q.Limit)
+		}
+	})
+
+	t.Run("parse layer preserves omitted limit as zero so store applies default", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/edge/shadow-agents", nil)
+		rec := httptest.NewRecorder()
+		q, ok := parseShadowFindingListQuery(rec, req, "tenant-a")
+		if !ok {
+			t.Fatalf("parseShadowFindingListQuery rejected no-limit query; body=%s", rec.Body.String())
+		}
+		if q.Limit != 0 {
+			t.Fatalf("parsed q.Limit = %d, want 0 (omitted → store applies DefaultListPageSize)", q.Limit)
+		}
+	})
+
+	t.Run("http end-to-end caps page even when client requests millions", func(t *testing.T) {
+		s := newShadowGateway(t)
+		// Seed > MaxListPageSize findings so the cap actually fires.
+		const total = shadow.MaxListPageSize + 25
+		for i := 0; i < total; i++ {
+			body := validShadowCreateBody("tenant-cap")
+			body.AgentID = ""
+			rec := postShadow(t, s, "tenant-cap", "/api/v1/edge/shadow-agents", body)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("seed[%d] create status = %d; body=%s", i, rec.Code, rec.Body.String())
+			}
+		}
+		rec := getShadow(t, s, "tenant-cap", "/api/v1/edge/shadow-agents?limit=99999999")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		var page shadow.FindingPage
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode list: %v", err)
+		}
+		if len(page.Findings) > shadow.MaxListPageSize {
+			t.Fatalf("list returned %d findings, exceeds MaxListPageSize=%d", len(page.Findings), shadow.MaxListPageSize)
+		}
+		if len(page.Findings) != shadow.MaxListPageSize {
+			t.Fatalf("list returned %d findings, want exactly MaxListPageSize=%d (enough seeded)", len(page.Findings), shadow.MaxListPageSize)
+		}
+	})
 }
 
 // TestShadowAgentListExtensions_SignalCap asserts the per-request signal

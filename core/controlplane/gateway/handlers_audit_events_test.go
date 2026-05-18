@@ -347,10 +347,14 @@ func TestHandleAuditEvents_RedactsSecretsInExtra(t *testing.T) {
 	}
 }
 
-// TestHandleAuditEvents_BoundedLimit pins the hard cap: a request asking
-// for many more rows than the maximum is clamped silently to the maximum
-// — clients cannot DoS the gateway by demanding unbounded fetches.
-func TestHandleAuditEvents_BoundedLimit(t *testing.T) {
+// TestAuditEvents_LimitCappedAtMax pins the hard cap on the audit-events
+// allocation path end-to-end: the boundary clamp in parseAuditEventsQuery
+// AND the store-level re-clamp in readAuditEventsPage must each refuse to
+// honor a caller-supplied limit beyond MaxAuditEventsLimit, so a single
+// over-eager (or malicious) request can never DoS the gateway by forcing
+// an oversized slice allocation. Resolves CodeQL go/uncontrolled-allocation-size
+// alerts #34-36 (GHAS #886/#889/#890) on PR #276.
+func TestAuditEvents_LimitCappedAtMax(t *testing.T) {
 	s, _, _ := newTestGateway(t)
 	events := make([]audit.SIEMEvent, MaxAuditEventsLimit+25)
 	for i := range events {
@@ -362,18 +366,83 @@ func TestHandleAuditEvents_BoundedLimit(t *testing.T) {
 	}
 	seedAuditEvents(t, s, "default", events)
 
-	rec := httptest.NewRecorder()
-	req := adminCtx(httptest.NewRequest(http.MethodGet,
-		"/api/v1/audit/events?tenant=default&limit=99999", nil))
-	s.handleListAuditEvents(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d: %s", rec.Code, rec.Body.String())
-	}
-	resp := decodeAuditEventsResponse(t, rec)
-	if len(resp.Items) != MaxAuditEventsLimit {
-		t.Errorf("returned %d items, want clamped to MaxAuditEventsLimit=%d",
-			len(resp.Items), MaxAuditEventsLimit)
-	}
+	t.Run("http boundary clamps adversarial limit", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := adminCtx(httptest.NewRequest(http.MethodGet,
+			"/api/v1/audit/events?tenant=default&limit=99999999", nil))
+		s.handleListAuditEvents(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d: %s", rec.Code, rec.Body.String())
+		}
+		resp := decodeAuditEventsResponse(t, rec)
+		if len(resp.Items) > MaxAuditEventsLimit {
+			t.Fatalf("returned %d items, exceeds MaxAuditEventsLimit=%d — the cap is what bounds the allocation",
+				len(resp.Items), MaxAuditEventsLimit)
+		}
+		if len(resp.Items) != MaxAuditEventsLimit {
+			t.Errorf("returned %d items, want exactly MaxAuditEventsLimit=%d (enough seeded events exist)",
+				len(resp.Items), MaxAuditEventsLimit)
+		}
+		// next_cursor must be non-empty because more events remain past the
+		// capped page; an empty cursor here would silently hide the rest of
+		// the stream from a client that asked for everything.
+		if resp.NextCursor == "" {
+			t.Error("next_cursor is empty, want non-empty (seeded events exceed the cap)")
+		}
+		if resp.Returned != len(resp.Items) {
+			t.Errorf("returned=%d but items=%d — wire envelope drift", resp.Returned, len(resp.Items))
+		}
+	})
+
+	t.Run("store path direct call clamps adversarial limit", func(t *testing.T) {
+		// Defense-in-depth: even if a future internal caller bypasses the
+		// HTTP boundary (e.g. a job runner or sibling handler reuse) and
+		// hands readAuditEventsPage an adversarial limit, the function must
+		// refuse to over-allocate. 1<<30 is the static-analysis-recognised
+		// adversarial MaxInt-class value mirroring TestClampListPageSize.
+		streamKey := audit.NewChainer(s.redisClient(), "").StreamKey("default")
+		items, nextCursor, err := readAuditEventsPage(
+			context.Background(),
+			s.redisClient(),
+			streamKey,
+			"",
+			1<<30,
+			auditEventsFilters{},
+		)
+		if err != nil {
+			t.Fatalf("readAuditEventsPage(limit=1<<30) errored: %v — must not error on oversized limit, must clamp", err)
+		}
+		if len(items) > MaxAuditEventsLimit {
+			t.Fatalf("items len = %d, want <= MaxAuditEventsLimit=%d", len(items), MaxAuditEventsLimit)
+		}
+		if len(items) != MaxAuditEventsLimit {
+			t.Fatalf("items len = %d, want exactly MaxAuditEventsLimit=%d (enough seeded events exist)",
+				len(items), MaxAuditEventsLimit)
+		}
+		if nextCursor == "" {
+			t.Error("next_cursor empty after capped page, want non-empty (seeded events exceed the cap)")
+		}
+	})
+
+	t.Run("store path zero limit returns no rows without error", func(t *testing.T) {
+		// Below-zero/zero must be a no-op rather than a NIL-deref or an
+		// OOM. The current implementation early-returns; pin it.
+		streamKey := audit.NewChainer(s.redisClient(), "").StreamKey("default")
+		items, nextCursor, err := readAuditEventsPage(
+			context.Background(),
+			s.redisClient(),
+			streamKey,
+			"",
+			0,
+			auditEventsFilters{},
+		)
+		if err != nil {
+			t.Fatalf("readAuditEventsPage(limit=0) errored: %v", err)
+		}
+		if len(items) != 0 || nextCursor != "" {
+			t.Fatalf("zero-limit returned items=%d cursor=%q, want empty/empty", len(items), nextCursor)
+		}
+	})
 }
 
 // TestHandleAuditEvents_NoEventsForFreshTenant pins that a tenant with a

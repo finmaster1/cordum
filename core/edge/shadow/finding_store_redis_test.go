@@ -301,6 +301,20 @@ func TestClampListPageSize(t *testing.T) {
 	}
 }
 
+// TestShadowFindings_LimitCappedAtMax is the DoD-named anchor for the
+// CodeQL go/uncontrolled-allocation-size guard on finding_store_redis.go
+// (alerts #37-39 / GHAS #894 / #896 on PR #276). It composes the existing
+// helper-table cases on clampListPageSize with single-index, multi-signal,
+// and zero-limit end-to-end paths so a single test name on the DoD checks
+// off the full surface. Concrete coverage lives in TestClampListPageSize
+// and TestListFindings_LimitCapAcrossPaths; this wrapper exists so QA can
+// match the DoD line item without traversing both files.
+func TestShadowFindings_LimitCappedAtMax(t *testing.T) {
+	t.Run("clamp helper covers zero/negative/max/max+1/MaxInt", TestClampListPageSize)
+	t.Run("list end-to-end caps single-signal/multi-signal/zero-limit", TestListFindings_LimitCapAcrossPaths)
+	t.Run("multi-signal cap enforced at list layer", TestListFindings_MultiSignalCapEnforcedAtListLayer)
+}
+
 // TestListFindings_LimitCapAcrossPaths verifies the page-size bound
 // holds end-to-end on BOTH the single-signal path (ListFindings) and
 // the multi-signal path (listFindingsByMultiSignal). Adversarial
