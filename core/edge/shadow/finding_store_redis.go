@@ -1,6 +1,7 @@
 package shadow
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -47,7 +48,8 @@ const (
 	// overScanFactor controls how many index entries we pull per page when
 	// secondary filters require post-fetch JSON validation. 3x balances
 	// read amplification vs. round-trips on dense filter combinations.
-	overScanFactor = 3
+	overScanFactor            = 3
+	createFindingMaxTxRetries = 5
 )
 
 // RedisStore is the production Store backed by the shared gateway Redis
@@ -276,25 +278,76 @@ func (s *RedisStore) CreateFinding(ctx context.Context, req CreateFindingRequest
 	}
 
 	key := findingKey(finding.FindingID)
-	// SETNX-style idempotence: if the key already exists and is byte-equal,
-	// treat as a successful re-create. Otherwise, ErrAlreadyExists.
-	existing, getErr := s.client.Get(ctx, key).Bytes()
-	if getErr == nil {
-		var prev ShadowAgentFinding
-		if err := json.Unmarshal(existing, &prev); err == nil && prev.TenantID == finding.TenantID {
-			// Same id, same tenant — idempotent re-create. Return the existing
-			// record so callers (and tests) observe the stable state.
-			return &prev, nil
-		}
-		return nil, fmt.Errorf("%w: finding_id %s", ErrAlreadyExists, finding.FindingID)
+	created, err := s.createFindingAtomically(ctx, key, finding, payload)
+	if err != nil {
+		return nil, err
 	}
-	if !errors.Is(getErr, redis.Nil) {
-		return nil, fmt.Errorf("shadow finding: probe: %w", getErr)
+	// EDGE-143.6 — record membership in the exception's per-exception
+	// finding index. Best-effort; index churn must not fail the create.
+	if created == finding && created.ExceptionID != "" {
+		_ = s.recordExceptionMembership(ctx, created.ExceptionID, created.FindingID, created.CreatedAt)
 	}
+	return created, nil
+}
 
-	score := float64(finding.CreatedAt.UnixMilli())
-	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, key, payload, 0)
+func (s *RedisStore) createFindingAtomically(
+	ctx context.Context,
+	key string,
+	finding *ShadowAgentFinding,
+	payload []byte,
+) (*ShadowAgentFinding, error) {
+	var created *ShadowAgentFinding
+	for attempt := 0; attempt < createFindingMaxTxRetries; attempt++ {
+		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
+			existing, getErr := tx.Get(ctx, key).Bytes()
+			if getErr == nil {
+				prev, err := decodeExistingFindingForCreate(existing)
+				if err != nil {
+					return err
+				}
+				if prev.TenantID == finding.TenantID && bytes.Equal(existing, payload) {
+					created = prev
+					return nil
+				}
+				return fmt.Errorf("%w: finding_id %s", ErrAlreadyExists, finding.FindingID)
+			}
+			if !errors.Is(getErr, redis.Nil) {
+				return fmt.Errorf("shadow finding: probe: %w", getErr)
+			}
+			_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Set(ctx, key, payload, 0)
+				addFindingIndexWrites(ctx, pipe, finding, float64(finding.CreatedAt.UnixMilli()))
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("shadow finding: create transaction: %w", err)
+			}
+			created = finding
+			return nil
+		}, key)
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if created != nil {
+			return created, nil
+		}
+	}
+	return nil, fmt.Errorf("shadow finding: create transaction retries exhausted: %w", redis.TxFailedErr)
+}
+
+func decodeExistingFindingForCreate(raw []byte) (*ShadowAgentFinding, error) {
+	var prev ShadowAgentFinding
+	if err := json.Unmarshal(raw, &prev); err != nil {
+		return nil, fmt.Errorf("shadow finding: unmarshal existing: %w", err)
+	}
+	applyReadDefaults(&prev)
+	return &prev, nil
+}
+
+func addFindingIndexWrites(ctx context.Context, pipe redis.Pipeliner, finding *ShadowAgentFinding, score float64) {
 	pipe.ZAdd(ctx, tenantIndexKey(finding.TenantID), redis.Z{Score: score, Member: finding.FindingID})
 	pipe.ZAdd(ctx, secondaryIndexKey(finding.TenantID, redisIndexSegStatus, string(finding.Status)),
 		redis.Z{Score: score, Member: finding.FindingID})
@@ -304,40 +357,19 @@ func (s *RedisStore) CreateFinding(ctx context.Context, req CreateFindingRequest
 		redis.Z{Score: score, Member: finding.FindingID})
 	pipe.ZAdd(ctx, secondaryIndexKey(finding.TenantID, redisIndexSegOwner, finding.OwnerPrincipalID),
 		redis.Z{Score: score, Member: finding.FindingID})
-	// EDGE-143.5 — §10.5 shared (non-tenant-scoped) indexes. source is
-	// always populated (defaults to "local"). cluster/repo/signal are
-	// conditional on the corresponding field(s) being non-empty so
-	// local-source findings don't pollute the K8s/CI indexes.
-	pipe.ZAdd(ctx, sourceIndexKey(finding.SourceType),
-		redis.Z{Score: score, Member: finding.FindingID})
+	// EDGE-143.5 — §10.5 shared (non-tenant-scoped) indexes.
+	pipe.ZAdd(ctx, sourceIndexKey(finding.SourceType), redis.Z{Score: score, Member: finding.FindingID})
 	if finding.ClusterID != "" {
-		pipe.ZAdd(ctx, clusterIndexKey(finding.ClusterID),
-			redis.Z{Score: score, Member: finding.FindingID})
+		pipe.ZAdd(ctx, clusterIndexKey(finding.ClusterID), redis.Z{Score: score, Member: finding.FindingID})
 	}
 	if finding.CIProvider != "" && finding.Repo != "" {
-		pipe.ZAdd(ctx, repoIndexKey(finding.CIProvider, finding.Repo),
-			redis.Z{Score: score, Member: finding.FindingID})
+		pipe.ZAdd(ctx, repoIndexKey(finding.CIProvider, finding.Repo), redis.Z{Score: score, Member: finding.FindingID})
 	}
 	for _, sig := range finding.SignalSet {
-		if sig == "" {
-			continue
+		if sig != "" {
+			pipe.ZAdd(ctx, signalIndexKey(sig), redis.Z{Score: score, Member: finding.FindingID})
 		}
-		pipe.ZAdd(ctx, signalIndexKey(sig),
-			redis.Z{Score: score, Member: finding.FindingID})
 	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		// Best-effort rollback on the JSON key. The index entries are
-		// keyed by finding_id only, so future list calls will skip them
-		// when GETing the missing record (stale index cleanup, below).
-		_ = s.client.Del(ctx, key).Err()
-		return nil, fmt.Errorf("shadow finding: pipeline: %w", err)
-	}
-	// EDGE-143.6 — record membership in the exception's per-exception
-	// finding index. Best-effort; index churn must not fail the create.
-	if finding.ExceptionID != "" {
-		_ = s.recordExceptionMembership(ctx, finding.ExceptionID, finding.FindingID, finding.CreatedAt)
-	}
-	return finding, nil
 }
 
 // GetFinding loads a finding and enforces tenant ownership. Cross-tenant
@@ -728,29 +760,45 @@ func (s *RedisStore) opportunisticCleanup(ctx context.Context, tenant string, id
 	}
 	pipe := s.client.Pipeline()
 	for _, id := range ids {
-		pipe.Del(ctx, findingKey(id))
-		pipe.ZRem(ctx, tenantIndexKey(tenant), id)
-		for _, seg := range []string{redisIndexSegStatus, redisIndexSegRisk, redisIndexSegAgent, redisIndexSegOwner} {
-			// We don't know which secondary-index buckets the id lives
-			// in without re-deriving the original fields, which we no
-			// longer have once the JSON is gone. ZREM is idempotent and
-			// O(log N) so blasting every well-known status/risk value
-			// per stale id is acceptable for the small set of values.
-			for _, v := range knownEnumValuesForSeg(seg) {
-				pipe.ZRem(ctx, secondaryIndexKey(tenant, seg, v), id)
+		raw, err := s.client.Get(ctx, findingKey(id)).Bytes()
+		if err == nil {
+			var current ShadowAgentFinding
+			if json.Unmarshal(raw, &current) == nil {
+				applyReadDefaults(&current)
+				if current.TenantID != "" && current.TenantID != tenant {
+					addTenantScopedFindingCleanup(ctx, pipe, tenant, id)
+					continue
+				}
 			}
+		} else if !errors.Is(err, redis.Nil) {
+			continue
 		}
-		// EDGE-143.5 — §10.5 source index is closed-enum, so we blast
-		// all 4 values. cluster/repo/signal indexes are open-set and
-		// intentionally leak stale members (matches the agent/owner
-		// pattern). The leak does not affect correctness because list
-		// reads GET the finding JSON and the deleted key returns redis.Nil,
-		// which the read path treats as stale and skips.
-		for _, src := range []string{SourceTypeLocal, SourceTypeKubernetes, SourceTypeCI, SourceTypeNetwork} {
-			pipe.ZRem(ctx, sourceIndexKey(src), id)
-		}
+		pipe.Del(ctx, findingKey(id))
+		addTenantScopedFindingCleanup(ctx, pipe, tenant, id)
+		addSharedFindingCleanup(ctx, pipe, id)
 	}
 	_, _ = pipe.Exec(ctx)
+}
+
+func addTenantScopedFindingCleanup(ctx context.Context, pipe redis.Pipeliner, tenant, id string) {
+	pipe.ZRem(ctx, tenantIndexKey(tenant), id)
+	for _, seg := range []string{redisIndexSegStatus, redisIndexSegRisk, redisIndexSegAgent, redisIndexSegOwner} {
+		// We don't know which secondary-index buckets the id lives in
+		// without the original fields. ZREM is idempotent and O(log N),
+		// so blasting every known closed-set value is acceptable.
+		for _, v := range knownEnumValuesForSeg(seg) {
+			pipe.ZRem(ctx, secondaryIndexKey(tenant, seg, v), id)
+		}
+	}
+}
+
+func addSharedFindingCleanup(ctx context.Context, pipe redis.Pipeliner, id string) {
+	// EDGE-143.5 — source index is closed-enum, so we blast all values.
+	// cluster/repo/signal indexes are open-set and intentionally leak stale
+	// members; list reads GET the JSON and skip missing records.
+	for _, src := range []string{SourceTypeLocal, SourceTypeKubernetes, SourceTypeCI, SourceTypeNetwork} {
+		pipe.ZRem(ctx, sourceIndexKey(src), id)
+	}
 }
 
 // knownEnumValuesForSeg returns the closed-set values we ZREM during

@@ -123,6 +123,224 @@ func TestCreateFinding_RejectsOversizedSummary(t *testing.T) {
 	}
 }
 
+func TestCreateFinding_ExplicitIDIdempotencyRequiresEquivalentPayload(t *testing.T) {
+	fixedNow := time.Date(2026, 5, 17, 14, 0, 0, 0, time.UTC)
+
+	t.Run("same tenant byte equivalent returns existing without duplicate indexes", func(t *testing.T) {
+		s, _ := newTestStore(t, WithClock(func() time.Time { return fixedNow }))
+		ctx := context.Background()
+		req := minimalCreateReq("tenant-a", "owner-1", "principal-1", "claude-code", FindingRiskHigh, "config_file", "same payload")
+		req.FindingID = "atomic-same-id"
+
+		first, err := s.CreateFinding(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateFinding first: %v", err)
+		}
+		again, err := s.CreateFinding(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateFinding duplicate: %v", err)
+		}
+		if again.FindingID != first.FindingID || again.TenantID != first.TenantID || again.EvidenceSummary != first.EvidenceSummary {
+			t.Fatalf("duplicate returned %+v, want existing %+v", again, first)
+		}
+
+		assertZSetMemberCount(t, ctx, s.client, tenantIndexKey("tenant-a"), first.FindingID, 1)
+		assertZSetMemberCount(t, ctx, s.client, secondaryIndexKey("tenant-a", redisIndexSegStatus, string(FindingStatusDetected)), first.FindingID, 1)
+		assertZSetMemberCount(t, ctx, s.client, sourceIndexKey(SourceTypeLocal), first.FindingID, 1)
+	})
+
+	t.Run("same tenant different payload conflicts", func(t *testing.T) {
+		s, _ := newTestStore(t, WithClock(func() time.Time { return fixedNow }))
+		ctx := context.Background()
+		req := minimalCreateReq("tenant-a", "owner-1", "principal-1", "claude-code", FindingRiskHigh, "config_file", "original payload")
+		req.FindingID = "atomic-conflict-id"
+		first, err := s.CreateFinding(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateFinding first: %v", err)
+		}
+
+		conflict := req
+		conflict.EvidenceSummary = "changed payload"
+		if _, err := s.CreateFinding(ctx, conflict); !errors.Is(err, ErrAlreadyExists) {
+			t.Fatalf("CreateFinding conflict = %v, want ErrAlreadyExists", err)
+		}
+		got, err := s.GetFinding(ctx, "tenant-a", first.FindingID)
+		if err != nil {
+			t.Fatalf("GetFinding tenant-a: %v", err)
+		}
+		if got.EvidenceSummary != first.EvidenceSummary {
+			t.Fatalf("stored summary = %q, want original %q", got.EvidenceSummary, first.EvidenceSummary)
+		}
+	})
+
+	t.Run("different tenant same id conflicts without tenant leak", func(t *testing.T) {
+		s, _ := newTestStore(t, WithClock(func() time.Time { return fixedNow }))
+		ctx := context.Background()
+		req := minimalCreateReq("tenant-a", "owner-1", "principal-1", "claude-code", FindingRiskHigh, "config_file", "tenant-a payload")
+		req.FindingID = "atomic-cross-tenant-id"
+		first, err := s.CreateFinding(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateFinding tenant-a: %v", err)
+		}
+
+		crossTenant := req
+		crossTenant.TenantID = "tenant-b"
+		crossTenant.OwnerPrincipalID = "owner-2"
+		crossTenant.PrincipalID = "principal-2"
+		if _, err := s.CreateFinding(ctx, crossTenant); !errors.Is(err, ErrAlreadyExists) {
+			t.Fatalf("CreateFinding tenant-b duplicate = %v, want ErrAlreadyExists", err)
+		}
+		if _, err := s.GetFinding(ctx, "tenant-b", first.FindingID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetFinding tenant-b = %v, want ErrNotFound", err)
+		}
+		page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: "tenant-b"})
+		if err != nil {
+			t.Fatalf("ListFindings tenant-b: %v", err)
+		}
+		for _, f := range page.Findings {
+			if f.FindingID == first.FindingID {
+				t.Fatalf("tenant-b list leaked conflicting finding: %+v", f)
+			}
+		}
+	})
+}
+
+func TestCreateFinding_ConcurrentSameIDCrossTenantIsSingleWinner(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), PoolSize: 8})
+	t.Cleanup(func() { _ = client.Close(); mr.Close() })
+
+	fixedNow := time.Date(2026, 5, 17, 14, 15, 0, 0, time.UTC)
+	store, err := NewRedisStore(client,
+		WithClock(func() time.Time { return fixedNow }),
+		WithIDGen(func() string { return "unused-by-explicit-id" }),
+	)
+	if err != nil {
+		t.Fatalf("NewRedisStore: %v", err)
+	}
+
+	type createResult struct {
+		tenant  string
+		finding *ShadowAgentFinding
+		err     error
+	}
+	reqs := []CreateFindingRequest{
+		minimalCreateReq("tenant-a", "owner-a", "principal-a", "claude-code", FindingRiskHigh, "config_file", "tenant-a evidence"),
+		minimalCreateReq("tenant-b", "owner-b", "principal-b", "claude-code", FindingRiskCritical, "config_file", "tenant-b evidence"),
+	}
+	for i := range reqs {
+		reqs[i].FindingID = "atomic-concurrent-cross-tenant"
+	}
+
+	start := make(chan struct{})
+	results := make(chan createResult, len(reqs))
+	var wg sync.WaitGroup
+	for _, req := range reqs {
+		req := req
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, err := store.CreateFinding(context.Background(), req)
+			results <- createResult{tenant: req.TenantID, finding: got, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var winner createResult
+	successes := 0
+	failures := 0
+	for res := range results {
+		if res.err == nil {
+			successes++
+			winner = res
+			continue
+		}
+		failures++
+		if !errors.Is(res.err, ErrAlreadyExists) {
+			t.Fatalf("CreateFinding loser %s error = %v, want ErrAlreadyExists", res.tenant, res.err)
+		}
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("successes=%d failures=%d, want exactly one winner and one ErrAlreadyExists loser", successes, failures)
+	}
+	if winner.finding == nil {
+		t.Fatalf("winner %s returned nil finding", winner.tenant)
+	}
+
+	loserTenant := "tenant-a"
+	if winner.tenant == "tenant-a" {
+		loserTenant = "tenant-b"
+	}
+	persisted, err := store.GetFinding(context.Background(), winner.tenant, winner.finding.FindingID)
+	if err != nil {
+		t.Fatalf("GetFinding winner tenant %s: %v", winner.tenant, err)
+	}
+	if persisted.TenantID != winner.tenant {
+		t.Fatalf("persisted tenant = %q, want winner %q", persisted.TenantID, winner.tenant)
+	}
+	if _, err := store.GetFinding(context.Background(), loserTenant, winner.finding.FindingID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetFinding loser tenant %s = %v, want ErrNotFound", loserTenant, err)
+	}
+	page, err := store.ListFindings(context.Background(), ListFindingsQuery{TenantID: loserTenant})
+	if err != nil {
+		t.Fatalf("ListFindings loser tenant %s: %v", loserTenant, err)
+	}
+	for _, f := range page.Findings {
+		if f.FindingID == winner.finding.FindingID {
+			t.Fatalf("loser tenant %s list leaked winner finding: %+v", loserTenant, f)
+		}
+	}
+}
+
+func TestListFindings_StaleCleanupDoesNotDeleteCrossTenantFinding(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	req := minimalCreateReq("tenant-b", "owner-b", "principal-b", "claude-code", FindingRiskHigh, "config_file", "tenant-b evidence")
+	created, err := s.CreateFinding(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateFinding tenant-b: %v", err)
+	}
+
+	score := float64(created.CreatedAt.UnixMilli())
+	corruptIndexes := []string{
+		tenantIndexKey("tenant-a"),
+		secondaryIndexKey("tenant-a", redisIndexSegStatus, string(FindingStatusDetected)),
+		sourceIndexKey(SourceTypeLocal),
+	}
+	for _, key := range corruptIndexes {
+		if err := s.client.ZAdd(ctx, key, redis.Z{Score: score, Member: created.FindingID}).Err(); err != nil {
+			t.Fatalf("ZAdd corrupt index %s: %v", key, err)
+		}
+	}
+
+	page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: "tenant-a", Status: FindingStatusDetected})
+	if err != nil {
+		t.Fatalf("ListFindings tenant-a: %v", err)
+	}
+	if len(page.Findings) != 0 {
+		t.Fatalf("tenant-a list returned cross-tenant findings: %+v", page.Findings)
+	}
+
+	// ListFindings schedules cleanup asynchronously. Invoke the same helper
+	// directly as well so the data-loss assertion is deterministic.
+	s.opportunisticCleanup(ctx, "tenant-a", []string{created.FindingID})
+
+	if _, err := s.client.Get(ctx, findingKey(created.FindingID)).Bytes(); err != nil {
+		t.Fatalf("tenant-b primary finding was deleted by tenant-a cleanup: %v", err)
+	}
+	got, err := s.GetFinding(ctx, "tenant-b", created.FindingID)
+	if err != nil {
+		t.Fatalf("GetFinding tenant-b after tenant-a cleanup: %v", err)
+	}
+	if got.TenantID != "tenant-b" {
+		t.Fatalf("finding tenant after cleanup = %q, want tenant-b", got.TenantID)
+	}
+	assertZSetMemberCount(t, ctx, s.client, sourceIndexKey(SourceTypeLocal), created.FindingID, 1)
+}
+
 func TestCreateFinding_ArtifactPointerTenantMustMatch(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -138,6 +356,23 @@ func TestCreateFinding_ArtifactPointerTenantMustMatch(t *testing.T) {
 	_, err := s.CreateFinding(ctx, req)
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("mismatched-tenant-pointer error = %v, want ErrValidation", err)
+	}
+}
+
+func assertZSetMemberCount(t *testing.T, ctx context.Context, client redis.UniversalClient, key, member string, want int) {
+	t.Helper()
+	members, err := client.ZRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		t.Fatalf("ZRange %s: %v", key, err)
+	}
+	var got int
+	for _, m := range members {
+		if m == member {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("member %q count in %s = %d, want %d; members=%v", member, key, got, want, members)
 	}
 }
 
