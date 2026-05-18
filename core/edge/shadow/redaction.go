@@ -1,6 +1,7 @@
 package shadow
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -13,7 +14,14 @@ import (
 // summaryByteCap bounds the size of RedactConfigSummary output regardless
 // of input size, so a malicious oversized config can never blow up SIEM
 // ingestion (matches task rail #1 'do not over-collect private data').
-const summaryByteCap = 2048
+const (
+	summaryByteCap = 2048
+
+	// encodedSecretCandidateMinBytes avoids decoding short ordinary words.
+	encodedSecretCandidateMinBytes = 16
+	// encodedSecretCandidateMaxBytes bounds attacker-controlled decode CPU/memory.
+	encodedSecretCandidateMaxBytes = 4096
+)
 
 // secretMarkerPatterns matches values whose shape suggests live credentials.
 // The patterns are intentionally aggressive — false positives are a
@@ -34,6 +42,18 @@ var secretMarkerPatterns = []*regexp.Regexp{
 	// HTTP Authorization headers with bearer tokens.
 	regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9\-_\.]{8,}`),
 }
+
+var (
+	base64SecretCandidatePattern = regexp.MustCompile(`[A-Za-z0-9+/]{16,}={0,2}`)
+	homoglyphHyphenReplacer      = strings.NewReplacer(
+		"\u2010", "-",
+		"\u2011", "-",
+		"\u2012", "-",
+		"\u2013", "-",
+		"\u2014", "-",
+		"\uff0d", "-",
+	)
+)
 
 // RedactPath returns a path safe to record in an audit finding. It strips
 // the developer's home prefix (cross-platform), strips drive letters, and
@@ -217,8 +237,117 @@ func sortedSet(in []string) []string {
 }
 
 func stripSecretMarkers(s string) string {
+	s = normalizeHomoglyphHyphens(s)
+	s = replaceSecretMarkers(s)
+	s = redactROT13SecretMarkers(s)
+	s = redactBase64SecretMarkers(s)
+	return s
+}
+
+func normalizeHomoglyphHyphens(s string) string {
+	if !strings.ContainsAny(s, "\u2010\u2011\u2012\u2013\u2014\uff0d") {
+		return s
+	}
+	return homoglyphHyphenReplacer.Replace(s)
+}
+
+func replaceSecretMarkers(s string) string {
 	for _, re := range secretMarkerPatterns {
 		s = re.ReplaceAllString(s, "<REDACTED>")
+	}
+	return s
+}
+
+func redactROT13SecretMarkers(s string) string {
+	return replaceByteRanges(s, secretMarkerRanges(rot13ASCII(s)))
+}
+
+func rot13ASCII(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune('A' + (r-'A'+13)%26)
+		case r >= 'a' && r <= 'z':
+			b.WriteRune('a' + (r-'a'+13)%26)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func redactBase64SecretMarkers(s string) string {
+	matches := base64SecretCandidatePattern.FindAllStringIndex(s, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		start, end := matches[i][0], matches[i][1]
+		token := s[start:end]
+		if len(token) < encodedSecretCandidateMinBytes || len(token) > encodedSecretCandidateMaxBytes {
+			continue
+		}
+		if base64TokenContainsSecret(token) {
+			s = s[:start] + "<REDACTED>" + s[end:]
+		}
+	}
+	return s
+}
+
+func base64TokenContainsSecret(token string) bool {
+	// False-positive redaction is safer than leaking, but decoding must stay
+	// bounded: malformed and oversized attacker strings are skipped.
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding} {
+		decoded, err := enc.DecodeString(token)
+		if err == nil && hasSecretMarker(string(decoded)) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSecretMarker(s string) bool {
+	s = normalizeHomoglyphHyphens(s)
+	for _, re := range secretMarkerPatterns {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+type byteRange struct {
+	start int
+	end   int
+}
+
+func secretMarkerRanges(s string) []byteRange {
+	ranges := []byteRange{}
+	for _, re := range secretMarkerPatterns {
+		for _, match := range re.FindAllStringIndex(s, -1) {
+			candidate := byteRange{start: match[0], end: match[1]}
+			if !overlapsAny(candidate, ranges) {
+				ranges = append(ranges, candidate)
+			}
+		}
+	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start > ranges[j].start })
+	return ranges
+}
+
+func overlapsAny(candidate byteRange, ranges []byteRange) bool {
+	for _, existing := range ranges {
+		if candidate.start < existing.end && existing.start < candidate.end {
+			return true
+		}
+	}
+	return false
+}
+
+func replaceByteRanges(s string, ranges []byteRange) string {
+	for _, r := range ranges {
+		if r.start >= 0 && r.start <= r.end && r.end <= len(s) {
+			s = s[:r.start] + "<REDACTED>" + s[r.end:]
+		}
 	}
 	return s
 }

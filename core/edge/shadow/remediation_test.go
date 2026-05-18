@@ -615,11 +615,6 @@ func TestSecretRedaction_Homoglyphic(t *testing.T) {
 		// the rendered plan verbatim.
 		mut        func(*ShadowAgentFinding) string
 		extraLeaks []string
-		// skipReason marks subcases that document REAL gaps in the
-		// current redactor (encoding-aware redaction is tracked in the
-		// follow-up Moe task). Skipped subcases re-enable as soon as
-		// that task lands. See task-9fc62484.
-		skipReason string
 	}{
 		{
 			name: "base64-in-evidence-and-metadata",
@@ -658,15 +653,9 @@ func TestSecretRedaction_Homoglyphic(t *testing.T) {
 				f.SignalSet = []string{"unmanaged_mcp_server", homo}
 				return homo
 			},
-			// stripSecretMarkers-redacted form of the canonical fake
-			// after stripUnsafeRunes drops the U+2010 dashes: the
-			// fused-letter shape still echoes through. See
-			// task-9fc62484 follow-up for the encoding-aware redactor.
+			// Fused-letter shape that appeared before the encoding-aware
+			// redactor normalized U+2010 before stripUnsafeRunes.
 			extraLeaks: []string{"cordumtest2026realfakekey0123"},
-			skipReason: "encoding-aware redactor pending — see task-9fc62484. " +
-				"U+2010 dashes are stripped by stripUnsafeRunes, leaving a fused-letter " +
-				"shape that no secretMarkerPatterns regex matches; result leaks into " +
-				"summary + risk_explanation. Verified failing 2026-05-17 worker-0a92bd61.",
 		},
 		{
 			name: "rot13-in-metadata-and-signals",
@@ -676,18 +665,11 @@ func TestSecretRedaction_Homoglyphic(t *testing.T) {
 				f.SignalSet = []string{"unmanaged_mcp_server", encoded}
 				return encoded
 			},
-			skipReason: "encoding-aware redactor pending — see task-9fc62484. " +
-				"ROT13-encoded secret is pure ASCII alnum + dashes + underscores; passes " +
-				"stripUnsafeRunes unchanged, doesn't match any secretMarkerPatterns regex, " +
-				"echoed verbatim in risk_explanation. Verified failing 2026-05-17 worker-0a92bd61.",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.skipReason != "" {
-				t.Skip(tc.skipReason)
-			}
 			f := newFindingForTest("homo-" + tc.name)
 			f.RedactedPath = "~/.claude/settings.json"
 			f.SignalSet = []string{"unmanaged_claude_settings"}
