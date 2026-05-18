@@ -56,6 +56,8 @@ func writeMCPUpstreamStoreError(w http.ResponseWriter, r *http.Request, err erro
 		status, code, message = http.StatusNotFound, edgeErrCodeNotFound, "mcp upstream not found"
 	case errors.Is(err, edgecore.ErrUpstreamAlreadyExists):
 		status, code, message = http.StatusConflict, edgeErrCodeConflict, "mcp upstream already exists"
+	case errors.Is(err, edgecore.ErrUpstreamLimitExceeded):
+		status, code, message = http.StatusTooManyRequests, edgeErrCodeConflict, "mcp upstream tenant cap reached"
 	case errors.Is(err, edgecore.ErrUpstreamNotAllowlisted):
 		status, code, message = http.StatusForbidden, edgeErrCodeAccessDenied, "mcp upstream not allowlisted"
 	case errors.Is(err, edgecore.ErrInvalidUpstream), errors.Is(err, edgecore.ErrInvalidTransport), errors.Is(err, edgecore.ErrUnsafeEndpoint), errors.Is(err, edgecore.ErrSecretMustUseRef), errors.Is(err, edgecore.ErrShellMetacharsRejected):

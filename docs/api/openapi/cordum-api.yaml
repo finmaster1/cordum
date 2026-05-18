@@ -1217,6 +1217,8 @@ paths:
           $ref: '#/components/responses/EdgeConflict'
         '413':
           $ref: '#/components/responses/EdgePayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/EdgeConflict'
         '503':
           $ref: '#/components/responses/EdgeServiceUnavailable'
         '500':
