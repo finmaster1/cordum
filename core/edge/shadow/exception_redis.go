@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cordum/cordum/core/infra/redisutil"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -32,7 +33,8 @@ const (
 	// (maxExceptionsPerTenant=1000) is the upper bound; this default
 	// keeps responses small enough to render in the dashboard without
 	// pagination ceremony for the common case.
-	exceptionListDefaultLimit = 50
+	exceptionListDefaultLimit     = 50
+	exceptionCreateCASMaxAttempts = 10
 )
 
 // exceptionKey returns the per-record JSON key.
@@ -68,28 +70,43 @@ func (s *RedisStore) CreateException(ctx context.Context, req CreateExceptionReq
 		return nil, err
 	}
 
-	// Enforce per-tenant cap to bound MatchActiveExceptions scans.
 	tenantIdxKey := exceptionTenantIndexKey(exc.TenantID)
-	count, err := s.client.ZCard(ctx, tenantIdxKey).Result()
-	if err != nil {
-		return nil, fmt.Errorf("shadow exception: zcard: %w", err)
-	}
-	if count >= int64(maxExceptionsPerTenant) {
-		return nil, fmt.Errorf("%w: tenant has %d active exceptions (cap %d)", ErrExceptionLimitExceeded, count, maxExceptionsPerTenant)
-	}
-
 	payload, err := json.Marshal(exc)
 	if err != nil {
 		return nil, fmt.Errorf("shadow exception: marshal: %w", err)
 	}
 	score := float64(exc.CreatedAt.UnixMilli())
-	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, exceptionKey(exc.ExceptionID), payload, 0)
-	pipe.ZAdd(ctx, tenantIdxKey, redis.Z{Score: score, Member: exc.ExceptionID})
-	if _, err := pipe.Exec(ctx); err != nil {
-		// Best-effort rollback on the JSON key.
-		_ = s.client.Del(ctx, exceptionKey(exc.ExceptionID)).Err()
-		return nil, fmt.Errorf("shadow exception: pipeline: %w", err)
+
+	err = redisutil.Retry(ctx, s.client, func(tx *redis.Tx) error {
+		// Enforce per-tenant cap inside the watched transaction so
+		// concurrent creators cannot all pass the same stale ZCARD.
+		count, err := tx.ZCard(ctx, tenantIdxKey).Result()
+		if err != nil {
+			return fmt.Errorf("shadow exception: zcard: %w", err)
+		}
+		if count >= int64(maxExceptionsPerTenant) {
+			return fmt.Errorf("%w: tenant has %d active exceptions (cap %d)", ErrExceptionLimitExceeded, count, maxExceptionsPerTenant)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, exceptionKey(exc.ExceptionID), payload, 0)
+			pipe.ZAdd(ctx, tenantIdxKey, redis.Z{Score: score, Member: exc.ExceptionID})
+			return nil
+		})
+		if err != nil {
+			if !errors.Is(err, redis.TxFailedErr) {
+				// Preserve the previous best-effort cleanup behavior for
+				// non-CAS pipeline failures after Redis executes commands.
+				_ = s.client.Del(ctx, exceptionKey(exc.ExceptionID)).Err()
+			}
+			return fmt.Errorf("shadow exception: pipeline: %w", err)
+		}
+		return nil
+	}, redisutil.WithKeys(tenantIdxKey), redisutil.WithMaxAttempts(exceptionCreateCASMaxAttempts))
+	if errors.Is(err, redisutil.ErrMaxAttemptsExceeded) {
+		return nil, fmt.Errorf("%w: tenant cap update retry exhausted", ErrExceptionLimitExceeded)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return exc, nil
 }
