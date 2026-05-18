@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -51,16 +52,23 @@ const (
 	overScanFactor            = 3
 	createFindingMaxTxRetries = 5
 	transitionMaxTxRetries    = 5
+	staleCleanupMaxIDs        = MaxListPageSize * overScanFactor
+	staleCleanupMaxConcurrent = 1
+	staleCleanupTimeout       = 2 * time.Second
 )
 
 // RedisStore is the production Store backed by the shared gateway Redis
 // client. It does NOT own the client (NewRedisStore stores the
 // caller-owned client by reference) so callers control lifecycle.
 type RedisStore struct {
-	client            redis.UniversalClient
-	now               func() time.Time
-	idGen             func() string
-	terminalRetention time.Duration
+	client                redis.UniversalClient
+	now                   func() time.Time
+	idGen                 func() string
+	terminalRetention     time.Duration
+	staleCleanupMu        sync.Mutex
+	staleCleanupSlots     chan struct{}
+	staleCleanupInFlight  map[string]struct{}
+	staleCleanupStartHook func(context.Context, string, []string)
 	// shadowRetention maps each §10.5 ShadowFindingRetentionClass to a
 	// terminal TTL. Empty class falls back to terminalRetention. Defaults
 	// from defaultShadowRetention(); overridable via
@@ -402,7 +410,7 @@ func (s *RedisStore) GetFinding(ctx context.Context, tenantID, findingID string)
 	}
 	if s.isExpiredTerminal(&f) {
 		// Hide expired-terminal records; the cleanup pass below removes them.
-		go s.purgeExpired(context.Background(), &f)
+		s.purgeExpired(ctx, &f)
 		return nil, ErrNotFound
 	}
 	return &f, nil
@@ -510,9 +518,7 @@ func (s *RedisStore) ListFindings(ctx context.Context, q ListFindingsQuery) (Fin
 	}
 
 	if len(staleIDs) > 0 {
-		// Fire-and-forget cleanup. We use a fresh context so the caller's
-		// canceled ctx does not abort cleanup work that survives the page.
-		go s.opportunisticCleanup(context.Background(), tenant, staleIDs)
+		s.scheduleStaleCleanup(ctx, tenant, staleIDs)
 	}
 
 	var nextCursor string
@@ -625,7 +631,7 @@ func (s *RedisStore) listFindingsByMultiSignal(
 		}
 	}
 	if len(staleIDs) > 0 {
-		go s.opportunisticCleanup(context.Background(), tenant, staleIDs)
+		s.scheduleStaleCleanup(ctx, tenant, staleIDs)
 	}
 	// Multi-signal path doesn't support cursor pagination (yet). Return
 	// the page without NextCursor; callers needing pagination must
@@ -789,12 +795,122 @@ func (s *RedisStore) purgeExpired(ctx context.Context, f *ShadowAgentFinding) {
 	}
 	tenant := f.TenantID
 	id := f.FindingID
-	s.opportunisticCleanup(ctx, tenant, []string{id})
+	s.scheduleStaleCleanup(ctx, tenant, []string{id})
+}
+
+func (s *RedisStore) scheduleStaleCleanup(ctx context.Context, tenant string, ids []string) {
+	if s == nil || s.client == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cleanupIDs := staleCleanupIDs(ids)
+	if strings.TrimSpace(tenant) == "" || len(cleanupIDs) == 0 {
+		return
+	}
+	cleanupIDs = s.markStaleCleanupInFlight(cleanupIDs)
+	if len(cleanupIDs) == 0 {
+		return
+	}
+	if !s.acquireStaleCleanupSlot() {
+		s.clearStaleCleanupInFlight(cleanupIDs)
+		return
+	}
+	go s.runScheduledStaleCleanup(ctx, tenant, cleanupIDs)
+}
+
+func staleCleanupIDs(ids []string) []string {
+	size := len(ids)
+	if size > staleCleanupMaxIDs {
+		size = staleCleanupMaxIDs
+	}
+	seen := make(map[string]struct{}, size)
+	out := make([]string, 0, size)
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+		if len(out) >= staleCleanupMaxIDs {
+			break
+		}
+	}
+	return out
+}
+
+func (s *RedisStore) markStaleCleanupInFlight(ids []string) []string {
+	s.staleCleanupMu.Lock()
+	defer s.staleCleanupMu.Unlock()
+	if s.staleCleanupInFlight == nil {
+		s.staleCleanupInFlight = make(map[string]struct{}, len(ids))
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := s.staleCleanupInFlight[id]; ok {
+			continue
+		}
+		s.staleCleanupInFlight[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func (s *RedisStore) acquireStaleCleanupSlot() bool {
+	s.staleCleanupMu.Lock()
+	if s.staleCleanupSlots == nil {
+		s.staleCleanupSlots = make(chan struct{}, staleCleanupMaxConcurrent)
+	}
+	slots := s.staleCleanupSlots
+	s.staleCleanupMu.Unlock()
+	select {
+	case slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *RedisStore) runScheduledStaleCleanup(ctx context.Context, tenant string, ids []string) {
+	defer s.releaseStaleCleanupSlot()
+	defer s.clearStaleCleanupInFlight(ids)
+	cleanupCtx, cancel := context.WithTimeout(ctx, staleCleanupTimeout)
+	defer cancel()
+	s.opportunisticCleanup(cleanupCtx, tenant, ids)
+}
+
+func (s *RedisStore) releaseStaleCleanupSlot() {
+	s.staleCleanupMu.Lock()
+	slots := s.staleCleanupSlots
+	s.staleCleanupMu.Unlock()
+	if slots == nil {
+		return
+	}
+	select {
+	case <-slots:
+	default:
+	}
+}
+
+func (s *RedisStore) clearStaleCleanupInFlight(ids []string) {
+	s.staleCleanupMu.Lock()
+	defer s.staleCleanupMu.Unlock()
+	for _, id := range ids {
+		delete(s.staleCleanupInFlight, id)
+	}
 }
 
 func (s *RedisStore) opportunisticCleanup(ctx context.Context, tenant string, ids []string) {
 	if s == nil || s.client == nil || len(ids) == 0 {
 		return
+	}
+	if s.staleCleanupStartHook != nil {
+		s.staleCleanupStartHook(ctx, tenant, append([]string(nil), ids...))
 	}
 	pipe := s.client.Pipeline()
 	for _, id := range ids {

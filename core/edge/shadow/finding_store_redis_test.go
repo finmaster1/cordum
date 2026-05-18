@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -361,6 +362,187 @@ func TestListFindings_StaleCleanupDoesNotDeleteCrossTenantFinding(t *testing.T) 
 	assertZSetMemberCount(t, ctx, s.client, sourceIndexKey(SourceTypeLocal), created.FindingID, 1)
 }
 
+func TestListFindings_StaleCleanupSchedulingIsBounded(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	const staleCount = 25
+	tenant := "tenant-stale"
+	for i := 0; i < staleCount; i++ {
+		id := fmt.Sprintf("stale-%02d", i)
+		if err := s.client.ZAdd(ctx, tenantIndexKey(tenant), redis.Z{
+			Score:  float64(i + 1),
+			Member: id,
+		}).Err(); err != nil {
+			t.Fatalf("ZAdd stale tenant member %s: %v", id, err)
+		}
+	}
+
+	started := make(chan []string, 32)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	s.staleCleanupStartHook = func(_ context.Context, cleanupTenant string, ids []string) {
+		if cleanupTenant != tenant {
+			t.Errorf("cleanup tenant = %q, want %q", cleanupTenant, tenant)
+		}
+		calls.Add(1)
+		started <- ids
+		<-release
+	}
+	defer func() {
+		if release != nil {
+			close(release)
+		}
+	}()
+
+	page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: tenant, Limit: staleCount})
+	if err != nil {
+		t.Fatalf("ListFindings first stale page: %v", err)
+	}
+	if len(page.Findings) != 0 {
+		t.Fatalf("stale-only page returned findings: %+v", page.Findings)
+	}
+	firstIDs := waitForCleanupStart(t, started)
+	if len(firstIDs) != staleCount {
+		t.Fatalf("first cleanup ids len = %d, want %d: %v", len(firstIDs), staleCount, firstIDs)
+	}
+
+	for i := 0; i < 5; i++ {
+		page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: tenant, Limit: staleCount})
+		if err != nil {
+			t.Fatalf("ListFindings repeat %d: %v", i, err)
+		}
+		if len(page.Findings) != 0 {
+			t.Fatalf("repeat %d returned findings: %+v", i, page.Findings)
+		}
+	}
+
+	select {
+	case extra := <-started:
+		t.Fatalf("cleanup started %d times while first cleanup was still in-flight; want one bounded/deduped cleanup, extra ids=%v", calls.Load(), extra)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	waitForZSetCard(t, ctx, s.client, tenantIndexKey(tenant), staleCount)
+	close(release)
+	release = nil
+	waitForZSetCard(t, ctx, s.client, tenantIndexKey(tenant), 0)
+}
+
+type cleanupContextMarker struct{}
+
+func TestGetFinding_ExpiredCleanupUsesCallerContext(t *testing.T) {
+	clock := time.Date(2026, 5, 17, 13, 0, 0, 0, time.UTC)
+	store, _ := newTestStore(t, WithTerminalRetention(time.Hour), WithClock(func() time.Time { return clock }))
+	f, err := store.CreateFinding(context.Background(), minimalCreateReq("tenant-a", "o", "p", "claude-code", FindingRiskHigh, "config_file", "summary"))
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	if _, err := store.ResolveFinding(context.Background(), "tenant-a", f.FindingID, ResolveRequest{ResolvedBy: "alice", Reason: "done"}); err != nil {
+		t.Fatalf("ResolveFinding: %v", err)
+	}
+	clock = clock.Add(2 * time.Hour)
+
+	result := make(chan error, 1)
+	store.staleCleanupStartHook = func(ctx context.Context, tenant string, ids []string) {
+		if tenant != "tenant-a" {
+			result <- fmt.Errorf("cleanup tenant = %q, want tenant-a", tenant)
+			return
+		}
+		if len(ids) != 1 || ids[0] != f.FindingID {
+			result <- fmt.Errorf("cleanup ids = %v, want [%s]", ids, f.FindingID)
+			return
+		}
+		if got := ctx.Value(cleanupContextMarker{}); got != "caller-context" {
+			result <- fmt.Errorf("cleanup context marker = %v, want caller-context", got)
+			return
+		}
+		result <- nil
+	}
+
+	ctx := context.WithValue(context.Background(), cleanupContextMarker{}, "caller-context")
+	if _, err := store.GetFinding(ctx, "tenant-a", f.FindingID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired GetFinding err = %v, want ErrNotFound", err)
+	}
+	if err := waitForCleanupResult(t, result); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStaleCleanupSchedulerCapsDedupesAndPreservesIndexCleanup(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	tenant := "tenant-cap-cleanup"
+	total := staleCleanupMaxIDs + 5
+	ids := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("stale-cap-%03d", i)
+		ids = append(ids, id)
+		for _, key := range []string{
+			tenantIndexKey(tenant),
+			secondaryIndexKey(tenant, redisIndexSegStatus, string(FindingStatusDetected)),
+			sourceIndexKey(SourceTypeLocal),
+		} {
+			if err := s.client.ZAdd(ctx, key, redis.Z{Score: float64(i + 1), Member: id}).Err(); err != nil {
+				t.Fatalf("ZAdd %s member %s: %v", key, id, err)
+			}
+		}
+	}
+
+	started := make(chan []string, 1)
+	s.staleCleanupStartHook = func(_ context.Context, cleanupTenant string, cleanupIDs []string) {
+		if cleanupTenant != tenant {
+			t.Errorf("cleanup tenant = %q, want %q", cleanupTenant, tenant)
+		}
+		started <- cleanupIDs
+	}
+	input := append(append([]string(nil), ids...), ids[0], ids[1], "", " ")
+	s.scheduleStaleCleanup(ctx, tenant, input)
+
+	cleanupIDs := waitForCleanupStart(t, started)
+	if len(cleanupIDs) != staleCleanupMaxIDs {
+		t.Fatalf("cleanup ids len = %d, want cap %d", len(cleanupIDs), staleCleanupMaxIDs)
+	}
+	if uniqueStringCount(cleanupIDs) != len(cleanupIDs) {
+		t.Fatalf("cleanup ids were not deduped: %v", cleanupIDs)
+	}
+	wantRemaining := total - staleCleanupMaxIDs
+	waitForZSetCard(t, ctx, s.client, tenantIndexKey(tenant), wantRemaining)
+	waitForZSetCard(t, ctx, s.client, secondaryIndexKey(tenant, redisIndexSegStatus, string(FindingStatusDetected)), wantRemaining)
+	waitForZSetCard(t, ctx, s.client, sourceIndexKey(SourceTypeLocal), wantRemaining)
+}
+
+func TestStaleCleanupSchedulerRespectsCanceledContext(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	tenant := "tenant-canceled-cleanup"
+	id := "stale-canceled"
+	if err := s.client.ZAdd(ctx, tenantIndexKey(tenant), redis.Z{Score: 1, Member: id}).Err(); err != nil {
+		t.Fatalf("ZAdd stale member: %v", err)
+	}
+
+	result := make(chan error, 1)
+	s.staleCleanupStartHook = func(ctx context.Context, cleanupTenant string, cleanupIDs []string) {
+		if cleanupTenant != tenant || len(cleanupIDs) != 1 || cleanupIDs[0] != id {
+			result <- fmt.Errorf("cleanup call = tenant %q ids %v, want tenant %q id %q", cleanupTenant, cleanupIDs, tenant, id)
+			return
+		}
+		if ctx.Err() == nil {
+			result <- errors.New("cleanup context is not canceled")
+			return
+		}
+		result <- nil
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.scheduleStaleCleanup(canceled, tenant, []string{id})
+	if err := waitForCleanupResult(t, result); err != nil {
+		t.Fatal(err)
+	}
+	waitForCleanupIdle(t, s)
+	waitForZSetCard(t, ctx, s.client, tenantIndexKey(tenant), 1)
+}
+
 func TestCreateFinding_ArtifactPointerTenantMustMatch(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -394,6 +576,74 @@ func assertZSetMemberCount(t *testing.T, ctx context.Context, client redis.Unive
 	if got != want {
 		t.Fatalf("member %q count in %s = %d, want %d; members=%v", member, key, got, want, members)
 	}
+}
+
+func waitForCleanupStart(t *testing.T, ch <-chan []string) []string {
+	t.Helper()
+	select {
+	case ids := <-ch:
+		return ids
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cleanup to start")
+		return nil
+	}
+}
+
+func waitForCleanupResult(t *testing.T, ch <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(2 * time.Second):
+		return errors.New("timed out waiting for cleanup hook")
+	}
+}
+
+func waitForZSetCard(t *testing.T, ctx context.Context, client redis.UniversalClient, key string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, err := client.ZCard(ctx, key).Result()
+		if err != nil {
+			t.Fatalf("ZCard %s: %v", key, err)
+		}
+		if got == int64(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ZCard %s = %d, want %d", key, got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForCleanupIdle(t *testing.T, s *RedisStore) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.staleCleanupMu.Lock()
+		inFlight := len(s.staleCleanupInFlight)
+		slotCount := 0
+		if s.staleCleanupSlots != nil {
+			slotCount = len(s.staleCleanupSlots)
+		}
+		s.staleCleanupMu.Unlock()
+		if inFlight == 0 && slotCount == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cleanup still busy: inFlight=%d slots=%d", inFlight, slotCount)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func uniqueStringCount(in []string) int {
+	seen := make(map[string]struct{}, len(in))
+	for _, s := range in {
+		seen[s] = struct{}{}
+	}
+	return len(seen)
 }
 
 func transitionBarrierClock(t *testing.T, parties int, at time.Time) func() time.Time {
