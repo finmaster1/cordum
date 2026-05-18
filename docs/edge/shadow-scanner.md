@@ -415,6 +415,96 @@ even if the base repo maps to a tenant.
   workflow, job, and tenant identifiers remain on findings/audit events,
   never metric labels.
 
+### 9.3.1 EDGE-143.3 — GitLab CI / Jenkins / Buildkite / CircleCI shadow detectors (shipped)
+
+Library package at `core/edge/shadow/ci/` provides observe-only shadow
+detectors for the four additional CI providers covered by design doc
+§8.2–§8.5. The package reuses EDGE-143.2's emit pattern (one
+`shadow.Store.CreateFinding` per run, no parallel store), OIDC verifier
+interface (generic over coreos/go-oidc), §6.3/§6.4 resolver vocabulary,
+and §14 false-positive controls — there is no parallel CI subsystem.
+
+Design references: [kubernetes-ci-shadow-detector-design.md §8.2–§8.5](kubernetes-ci-shadow-detector-design.md)
+for per-provider signals, §6.3/§6.4 for tenant/principal mapping, §14
+for false-positive controls, and binding governor ruling
+`comment-a17f4f1c` on task-de50a293 for Q6 OIDC trust roots.
+
+The four provider scanners share the same five signal extractors as
+§9.3 above (`agent_action_used`, `missing_cordum_attach`,
+`self_hosted_runner_unlabeled`, `env_var_name_indicator`,
+`direct_provider_endpoint`). Provider workflow file paths:
+`.gitlab-ci.yml`, `Jenkinsfile`, `.buildkite/pipeline.yml`,
+`.circleci/config.yml`.
+
+**Read-only API surface** (minimal HTTP clients; no provider SDK
+dependencies — `xanzy/go-gitlab` is archived March 2025 and a
+uniform httptest-injectable client gives one test contract across all
+four providers):
+
+| Provider | Endpoints consumed (GET only) | Auth |
+| --- | --- | --- |
+| GitLab CI | `/api/v4/projects/<id>`, `/projects/<id>/pipelines`, `/pipelines/<id>/jobs`, `/projects/<id>/variables` (names only), `/repository/files/.gitlab-ci.yml/raw` | `PRIVATE-TOKEN` header (read_api scope) |
+| Jenkins | `/job/<name>/api/json`, `/job/<name>/<build>/api/json`, `/job/<name>/config.xml` | HTTP Basic (no crumb fetch, no mutating endpoints) |
+| Buildkite | `/v2/organizations/<org>/pipelines/<slug>`, `/v2/organizations/<org>/pipelines/<slug>/builds` (jobs + agent + env names) | Bearer (read_pipelines, read_builds, read_pipeline_files) |
+| CircleCI | `/api/v2/project/<vcs>/<org>/<repo>`, `/api/v2/project/.../pipeline`, `/api/v2/pipeline/<id>/workflow`, `/api/v2/workflow/<id>/job`, `/api/v2/project/.../envvar` (names only), `/api/v1.1/project/.../configuration` | `Circle-Token` header |
+
+**OIDC trust roots** (Q6 binding governor ruling — operators MUST
+configure per-provider env vars; defaults differ by provider):
+
+| Provider | Env var | Default | Behavior |
+| --- | --- | --- | --- |
+| GitLab.com SaaS | `CORDUM_EDGE_SHADOW_OIDC_TRUST_gitlab` | `https://gitlab.com` | Cordum-default when `GitLabBaseURL` host is `gitlab.com`. |
+| GitLab self-hosted | `CORDUM_EDGE_SHADOW_OIDC_TRUST_gitlab` | (none) | Non-`gitlab.com` `GitLabBaseURL` requires operator override; absent override sets `Disabled=true` and falls back to tier-2 §6.3 map. |
+| Jenkins | `CORDUM_EDGE_SHADOW_OIDC_TRUST_jenkins` | (none) | Operator-only per Q6; absent override falls back to tier-2 §6.3 map. |
+| Buildkite | `CORDUM_EDGE_SHADOW_OIDC_TRUST_buildkite` | (none) | Operator-only per Q6; absent override falls back to tier-2 §6.3 map. |
+| CircleCI | `CORDUM_EDGE_SHADOW_OIDC_TRUST_circleci` | (none) | Operator-only per Q6; absent override falls back to tier-2 §6.3 map. |
+
+Each provider also accepts `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_<provider>`
+(default `cordum-edge`). The literal value `disabled` sets
+`OIDCConfig.Disabled=true` for any provider, forcing tier-2 fallback.
+
+**Tenant + principal mapping** (§6.3 / §6.4):
+
+1. Verified OIDC claim (`iss` + `aud` match, signature + expiry
+   verified). Subject parsing handles GitLab
+   `project_path:<group>/<project>:ref:<ref>` and Buildkite
+   `organization:<slug>:pipeline:<slug>:...` shapes; principal_id
+   captured verbatim from `sub`.
+2. Run's `Repo` field (`<owner>/<repo>`) → `OrgRepoMap` lookup.
+3. Quarantine tenant + `principal_id="unknown"`.
+
+Fork PRs and scheduled CI runs surface `false_positive_reason` per §14
+but never bypass quarantine. Each scanner sets `IsForkPR` / `IsScheduled`
+from native provider metadata (GitLab `source=external_pull_request_event|schedule`,
+Buildkite `source=schedule`, CircleCI `trigger.type=schedule|scheduled_pipeline`).
+
+**Data minimization**:
+
+- Env-var **names** only — GitLab variables endpoint values are
+  dropped; Jenkins build `environment` map keys captured (values
+  dropped); Buildkite job `env` map keys captured (values dropped);
+  CircleCI `/envvar` endpoint dropped (names only).
+- URL query strings stripped from all redacted paths via `RedactCIPath`
+  before persistence; bearer tokens never appear in error logs
+  (`redactURLForError` drops scheme://host + query before wrapping).
+- `shadow.StripSecretMarkers` runs as defense-in-depth on every
+  emitted evidence summary; the shadow store re-runs the same strip
+  on write.
+- `shadow.RedactPath` normalizes paths cross-platform; per-provider
+  scheme prefixes (`gitlab://`, `jenkins://`, `buildkite://`,
+  `circleci://`) plus repo identifier lets SIEM consumers pivot per
+  provider without parsing.
+- Metrics use bounded labels only:
+  `cordum_edge_shadow_finding_emit_total{source_type=gitlab_ci|jenkins|buildkite|circleci,signal,risk}`
+  and `cordum_edge_shadow_oidc_verify_total{provider,result}`. No
+  repo / pipeline / build / runner identifiers appear as label
+  values per design §13.1.
+
+**Observe-only guarantee**: enforced by type system (no scanner
+publishes a write/mutation method) plus a black-box test
+(`TestAllProviders_NoMutationCalls`) that asserts every HTTP method
+issued against all four mock servers is GET or HEAD.
+
 ### 9.4 EDGE-143.4 — Network-signal aggregator (shipped)
 
 Library package at `core/edge/shadow/network/`. Reads

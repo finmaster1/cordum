@@ -482,6 +482,31 @@ serve DSAR requests from their own controller-side tooling.
 - Q2 binding governor ruling lives on the design-doc parent task
   ([comment-a17f4f1c on task-de50a293](kubernetes-ci-shadow-detector-design.md)).
 
+### 11.7 Shadow CI detector OIDC trust config (EDGE-143.3, Q6 binding)
+
+The CI shadow detector library (`core/edge/shadow/ci/`) reads
+per-provider OIDC trust roots from the operator environment. Per Q6
+([comment-a17f4f1c on task-de50a293](kubernetes-ci-shadow-detector-design.md)),
+Cordum ships a default issuer ONLY for GitLab.com SaaS; every other
+provider is operator-only.
+
+| Env var | Default | Behavior |
+| --- | --- | --- |
+| `CORDUM_EDGE_SHADOW_OIDC_TRUST_gitlab` | `https://gitlab.com` when `GitLabBaseURL` host is `gitlab.com`; otherwise NONE | Self-hosted GitLab (any non-`gitlab.com` host) requires operator override; absent override sets `OIDCConfig.Disabled=true` and falls back to §6.3 tier-2 `OrgRepoMap`. Literal `disabled` forces fallback. |
+| `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_gitlab` | `cordum-edge` | Expected JWT `aud` claim. |
+| `CORDUM_EDGE_SHADOW_OIDC_TRUST_jenkins` | NONE (operator-only per Q6) | OIDC support varies by Jenkins plugin. Absent operator override sets `Disabled=true` and falls back to §6.3 tier-2. |
+| `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_jenkins` | `cordum-edge` | Expected JWT `aud` claim when OIDC is enabled. |
+| `CORDUM_EDGE_SHADOW_OIDC_TRUST_buildkite` | NONE (operator-only per Q6) | Buildkite OIDC issuer is `https://agent.buildkite.com`; operators MUST set this explicitly. Absent override falls back to §6.3 tier-2. |
+| `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_buildkite` | `cordum-edge` | Expected JWT `aud` claim when OIDC is enabled. |
+| `CORDUM_EDGE_SHADOW_OIDC_TRUST_circleci` | NONE (operator-only per Q6) | CircleCI OIDC issuer is org-scoped (`https://oidc.circleci.com/org/<org-id>`); operators MUST set their org-specific issuer. Absent override falls back to §6.3 tier-2. |
+| `CORDUM_EDGE_SHADOW_OIDC_AUDIENCE_circleci` | `cordum-edge` | Expected JWT `aud` claim when OIDC is enabled. |
+
+No new managed-settings JSON invariants are introduced — the OIDC
+trust config lives in the operator's environment / fleet config, not
+in `managed-settings.json`. Cordum's verifier checks the 14 invariants
+in §6 above; CI OIDC config is read by the detector at boot and
+re-checked at every Detector instantiation via `LoadOIDCConfigFromEnv`.
+
 ## 12. Related docs
 
 - [Managed settings template (synthetic excerpt)](managed-settings-template.md)
