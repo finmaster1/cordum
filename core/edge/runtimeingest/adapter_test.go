@@ -288,6 +288,106 @@ func TestAdapterRejectsLabelOverflow(t *testing.T) {
 	}
 }
 
+func TestAdapterSanitizesSecretLikeRuntimeLabels(t *testing.T) {
+	bearerToken := "Bearer cordum_fake_runtime_label_token_0123456789"
+	apiKey := "sk-test-runtime-label-secret-123456"
+	githubToken := "ghp_testRuntimeLabelToken123456"
+	privateKey := "-----BEGIN PRIVATE KEY-----\ncordum_fake_runtime_label_private_key\n-----END PRIVATE KEY-----"
+
+	got := mapOne(t, KindProcessExec, func(e *RuntimeEventEnvelope) {
+		e.Labels = map[string]string{
+			"node":                "node-a",
+			"authorization":       bearerToken,
+			"password":            "cordum_fake_password_value",
+			"api_key":             "cordum_fake_api_key_value",
+			"CLIENT-Secret":       "cordum_fake_client_secret_value",
+			"session_token":       githubToken,
+			bearerToken:           "bearer-token-as-key",
+			apiKey:                "api-key-as-key",
+			githubToken:           "github-token-as-key",
+			privateKey:            "private-key-as-key",
+			"runtime.source_id":   "attacker-supplied",
+			" runtime.source_id ": "spaced-attacker-supplied",
+			"trace_id":            bearerToken,
+			"api_status":          apiKey,
+			"note":                githubToken,
+			"pem_hint":            privateKey,
+		}
+	})
+
+	if got.Labels["node"] != "node-a" {
+		t.Fatalf("safe label was not preserved")
+	}
+	if got.Labels["runtime.source_id"] != testSourceID {
+		t.Fatalf("runtime.source_id = %q, want authenticated source id", got.Labels["runtime.source_id"])
+	}
+	if _, ok := got.Labels[" runtime.source_id "]; ok {
+		t.Fatalf("spaced runtime.source_id override label was persisted")
+	}
+	assertNoSecretLikeLabelKeys(t, got.Labels)
+	assertNoRuntimeLabelValueContains(t, got.Labels, "bearer token", bearerToken)
+	assertNoRuntimeLabelValueContains(t, got.Labels, "api key", apiKey)
+	assertNoRuntimeLabelValueContains(t, got.Labels, "github token", githubToken)
+	assertNoRuntimeLabelValueContains(t, got.Labels, "private key", privateKey)
+	assertNoRuntimeLabelKeyContains(t, got.Labels, "bearer token", bearerToken)
+	assertNoRuntimeLabelKeyContains(t, got.Labels, "api key", apiKey)
+	assertNoRuntimeLabelKeyContains(t, got.Labels, "github token", githubToken)
+	assertNoRuntimeLabelKeyContains(t, got.Labels, "private key", privateKey)
+}
+
+func TestAdapterRejectsOversizedSafeRuntimeLabelValue(t *testing.T) {
+	a := NewAdapter(AdapterOptions{})
+	oversized := strings.Repeat("a", edgecore.MaxLabelValueBytes+1)
+	_, err := a.Map(testBatch(testEnvelope(KindProcessExec, func(e *RuntimeEventEnvelope) {
+		e.Labels = map[string]string{"safe": oversized}
+	})))
+	if !errors.Is(err, ErrInvalidEnvelope) {
+		t.Fatalf("err = %v, want ErrInvalidEnvelope", err)
+	}
+	if strings.Contains(err.Error(), oversized) {
+		t.Fatalf("oversized label error leaked raw value")
+	}
+}
+
+func assertNoSecretLikeLabelKeys(t *testing.T, labels edgecore.Labels) {
+	t.Helper()
+	for key := range labels {
+		normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"), " ", "_"))
+		switch {
+		case normalized == "authorization",
+			normalized == "api_key",
+			normalized == "token",
+			normalized == "password",
+			normalized == "secret",
+			normalized == "client_secret",
+			strings.HasSuffix(normalized, "_token"),
+			strings.HasSuffix(normalized, "_password"),
+			strings.HasSuffix(normalized, "_secret"),
+			strings.HasSuffix(normalized, "_api_key"),
+			strings.HasSuffix(normalized, "_private_key"):
+			t.Fatalf("secret-like label key %q was persisted", key)
+		}
+	}
+}
+
+func assertNoRuntimeLabelValueContains(t *testing.T, labels edgecore.Labels, name, forbidden string) {
+	t.Helper()
+	for key, value := range labels {
+		if strings.Contains(value, forbidden) {
+			t.Fatalf("runtime label value leaked %s under key %q", name, key)
+		}
+	}
+}
+
+func assertNoRuntimeLabelKeyContains(t *testing.T, labels edgecore.Labels, name, forbidden string) {
+	t.Helper()
+	for key := range labels {
+		if strings.Contains(key, forbidden) {
+			t.Fatalf("runtime label key leaked %s", name)
+		}
+	}
+}
+
 func TestAdapterRedactsFilePath(t *testing.T) {
 	got := mapOne(t, KindFileRead, func(e *RuntimeEventEnvelope) {
 		e.File.PathRedacted = "/srv/AKIAIOSFODNN7EXAMPLE/key"

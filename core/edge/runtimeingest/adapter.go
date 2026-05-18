@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
-	"maps"
 	"strings"
 	"time"
 
@@ -318,8 +317,10 @@ func mapEnvelope(sourceID string, env RuntimeEventEnvelope) (edgecore.AgentActio
 	tenantID := strings.TrimSpace(env.TenantID)
 	sessionID := strings.TrimSpace(env.SessionID)
 	executionID := strings.TrimSpace(env.ExecutionID)
-	labels := edgecore.Labels{}
-	maps.Copy(labels, env.Labels)
+	labels, err := sanitizeRuntimeLabels(env.Labels)
+	if err != nil {
+		return edgecore.AgentActionEvent{}, err
+	}
 	labels["runtime.source_id"] = sourceID
 	var pointers []edgecore.ArtifactPointer
 	if len(env.ArtifactPtrs) > 0 {
@@ -349,6 +350,73 @@ func mapEnvelope(sourceID string, env RuntimeEventEnvelope) (edgecore.AgentActio
 		Labels:           labels,
 		ArtifactPointers: pointers,
 	}, nil
+}
+
+func sanitizeRuntimeLabels(labels map[string]string) (edgecore.Labels, error) {
+	if len(labels) == 0 {
+		return edgecore.Labels{}, nil
+	}
+	out := make(edgecore.Labels, len(labels))
+	for key, value := range labels {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			return nil, fmt.Errorf("%w: label key is required", ErrInvalidEnvelope)
+		}
+		if len(key) > edgecore.MaxLabelKeyBytes {
+			return nil, fmt.Errorf("%w: label key exceeds %d bytes", ErrInvalidEnvelope, edgecore.MaxLabelKeyBytes)
+		}
+		if trimmedKey == "runtime.source_id" || runtimeLabelKeyIsSensitive(key) {
+			continue
+		}
+		redacted, err := redactRuntimeLabelValue(value)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = redacted
+	}
+	return out, nil
+}
+
+func runtimeLabelKeyIsSensitive(key string) bool {
+	if runtimeLabelKeyNameIsSensitive(key) {
+		return true
+	}
+	result, err := edgecore.RedactValue(key, edgecore.RedactionOptions{
+		HashMode:       edgecore.RedactionHashNone,
+		MaxStringBytes: edgecore.MaxLabelKeyBytes,
+		MaxTotalBytes:  MaxRuntimeEnvelopeBytes,
+	})
+	return err != nil || result.Redacted
+}
+
+func runtimeLabelKeyNameIsSensitive(key string) bool {
+	probe := map[string]any{key: "runtime-label-probe"}
+	result, err := edgecore.RedactValue(probe, edgecore.RedactionOptions{
+		HashMode:       edgecore.RedactionHashNone,
+		MaxDepth:       1,
+		MaxItems:       MaxRuntimeLabelEntries + 1,
+		MaxStringBytes: edgecore.MaxLabelValueBytes,
+		MaxTotalBytes:  MaxRuntimeEnvelopeBytes,
+	})
+	return err != nil || result.Redacted
+}
+
+func redactRuntimeLabelValue(value string) (string, error) {
+	if len(value) > edgecore.MaxLabelValueBytes {
+		return "", fmt.Errorf("%w: label value exceeds %d bytes", ErrInvalidEnvelope, edgecore.MaxLabelValueBytes)
+	}
+	result, err := edgecore.RedactValue(value, edgecore.RedactionOptions{
+		HashMode:       edgecore.RedactionHashNone,
+		MaxStringBytes: edgecore.MaxLabelValueBytes,
+		MaxTotalBytes:  MaxRuntimeEnvelopeBytes,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: label redaction failed", ErrInvalidEnvelope)
+	}
+	if redacted, ok := result.Value.(string); ok {
+		return redacted, nil
+	}
+	return "", fmt.Errorf("%w: label redaction returned %T", ErrInvalidEnvelope, result.Value)
 }
 
 func buildInputFromSummaries(env RuntimeEventEnvelope) map[string]any {
