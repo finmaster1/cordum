@@ -16,6 +16,7 @@ var (
 	ErrUnsafeEndpoint         = errors.New("unsafe mcp upstream endpoint")
 	ErrShellMetacharsRejected = errors.New("mcp upstream command contains shell metacharacters")
 	ErrUpstreamNotAllowlisted = errors.New("mcp upstream not allowlisted")
+	ErrUpstreamLimitExceeded  = errors.New("mcp upstream tenant limit exceeded")
 )
 
 // UpstreamServer is the runtime registry record for an approved upstream MCP

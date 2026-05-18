@@ -16,14 +16,22 @@ import (
 const (
 	mcpUpstreamCASMaxAttempts = 5
 	mcpUpstreamBackupTTL      = 30 * 24 * time.Hour
+	// DefaultMaxMCPUpstreamsPerTenant bounds tenant/global MCP upstream
+	// indexes so create/list operations cannot grow without an operator
+	// limit. Tests may lower the value via RedisMCPUpstreamRegistry fields.
+	DefaultMaxMCPUpstreamsPerTenant = 1000
+	defaultMCPUpstreamListScanCount = 128
 )
 
 // RedisMCPUpstreamRegistry stores MCP upstream records in Redis with
 // tenant-scoped indexes. It intentionally stores secret references only; it
 // never resolves or expands credential material.
 type RedisMCPUpstreamRegistry struct {
-	client redis.UniversalClient
-	now    func() time.Time
+	client             redis.UniversalClient
+	now                func() time.Time
+	createMaxPerTenant int64
+	listScanBatchSize  int64
+	listScanHook       func(scope string, count int64)
 }
 
 func NewRedisMCPUpstreamRegistryFromClient(client redis.UniversalClient) *RedisMCPUpstreamRegistry {
@@ -42,6 +50,7 @@ func (r *RedisMCPUpstreamRegistry) Create(ctx context.Context, upstream *Upstrea
 		return err
 	}
 	key := mcpUpstreamKey(record.TenantID, record.Name)
+	indexKey := mcpUpstreamTenantIndexKey(record.TenantID)
 	payload, err := marshalMCPUpstream(record)
 	if err != nil {
 		return err
@@ -54,13 +63,45 @@ func (r *RedisMCPUpstreamRegistry) Create(ctx context.Context, upstream *Upstrea
 		if exists > 0 {
 			return ErrUpstreamAlreadyExists
 		}
+		count, err := tx.SCard(ctx, indexKey).Result()
+		if err != nil {
+			return err
+		}
+		if count >= r.tenantCreateLimit() {
+			return ErrUpstreamLimitExceeded
+		}
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.HSet(ctx, key, "payload", payload)
-			pipe.SAdd(ctx, mcpUpstreamTenantIndexKey(record.TenantID), record.Name)
+			pipe.SAdd(ctx, indexKey, record.Name)
 			return nil
 		})
 		return err
-	}, redisutil.WithKeys(key), redisutil.WithMaxAttempts(mcpUpstreamCASMaxAttempts))
+	}, redisutil.WithKeys(key, indexKey), redisutil.WithMaxAttempts(mcpUpstreamCASMaxAttempts))
+}
+
+func (r *RedisMCPUpstreamRegistry) tenantCreateLimit() int64 {
+	if r != nil && r.createMaxPerTenant > 0 {
+		return r.createMaxPerTenant
+	}
+	return DefaultMaxMCPUpstreamsPerTenant
+}
+
+func (r *RedisMCPUpstreamRegistry) listScanLimit() int64 {
+	if r != nil && r.listScanBatchSize > 0 {
+		return r.listScanBatchSize
+	}
+	return DefaultMaxMCPUpstreamsPerTenant
+}
+
+func (r *RedisMCPUpstreamRegistry) listScanCount(remaining int64) int64 {
+	count := int64(defaultMCPUpstreamListScanCount)
+	if r != nil && r.listScanBatchSize > 0 && r.listScanBatchSize < count {
+		count = r.listScanBatchSize
+	}
+	if remaining > 0 && remaining < count {
+		return remaining
+	}
+	return count
 }
 
 func (r *RedisMCPUpstreamRegistry) Get(ctx context.Context, tenantID, name string) (*UpstreamServer, bool, error) {
@@ -194,11 +235,10 @@ func (r *RedisMCPUpstreamRegistry) setEnabled(ctx context.Context, tenantID, nam
 }
 
 func (r *RedisMCPUpstreamRegistry) listScope(ctx context.Context, scope string, out map[string]UpstreamServer) error {
-	names, err := r.client.SMembers(ctx, mcpUpstreamTenantIndexKey(scope)).Result()
+	names, err := r.scanScopeNames(ctx, scope)
 	if err != nil {
 		return err
 	}
-	sort.Strings(names)
 	for _, name := range names {
 		record, ok, err := r.load(ctx, scope, name)
 		if err != nil {
@@ -209,6 +249,44 @@ func (r *RedisMCPUpstreamRegistry) listScope(ctx context.Context, scope string, 
 		}
 	}
 	return nil
+}
+
+// scanScopeNames uses Redis SSCAN rather than SMEMBERS so a list request
+// reads at most a bounded candidate set from each tenant/global scope. The
+// public registry interface has no cursor yet, so callers keep the existing
+// []UpstreamServer response while the store caps internal memory work.
+func (r *RedisMCPUpstreamRegistry) scanScopeNames(ctx context.Context, scope string) ([]string, error) {
+	limit := r.listScanLimit()
+	key := mcpUpstreamTenantIndexKey(scope)
+	names := make([]string, 0, int(limit))
+	seen := make(map[string]struct{}, int(limit))
+	var cursor uint64
+	for int64(len(names)) < limit {
+		count := r.listScanCount(limit - int64(len(names)))
+		if r.listScanHook != nil {
+			r.listScanHook(scope, count)
+		}
+		batch, next, err := r.client.SScan(ctx, key, cursor, "*", count).Result()
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range batch {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+			if int64(len(names)) >= limit {
+				break
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (r *RedisMCPUpstreamRegistry) load(ctx context.Context, tenantID, name string) (*UpstreamServer, bool, error) {
