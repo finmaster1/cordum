@@ -320,8 +320,9 @@ Flags common to `preview` and `attach`:
 - `--gateway-name` (default `cordum-gateway`) — entry name in the
   client config.
 - `--gateway-transport` (default `http`) — `http` | `sse` | `stdio`.
-- `--gateway-endpoint` (default `https://localhost:8081/api/v1/mcp/gateway`)
-  — URL for HTTP/SSE; ignored for stdio.
+- `--gateway-endpoint` (default
+  `https://localhost:8081/api/v1/mcp/gateway/upstream`) — canonical
+  MCP Gateway upstream URL for HTTP/SSE; ignored for stdio.
 - `--gateway-secret-ref` — optional `secret://` reference written into
   the entry's env block as `CORDUM_AUTH_SECRET_REF` (see EDGE-101 for
   the upstream registry's secret-ref contract).
@@ -1077,6 +1078,11 @@ MCP servers while reusing the existing Edge primitives (EdgeSession,
 AgentExecution, AgentActionEvent) — no parallel store, no parallel event
 bus. This P1 ships disabled-by-default; EDGE-101 will populate the
 upstream registry consumed when enabled.
+
+The canonical client attach / upstream-forwarding endpoint is
+`POST /api/v1/mcp/gateway/upstream` (for local defaults:
+`https://localhost:8081/api/v1/mcp/gateway/upstream`). The shorter
+`/api/v1/mcp/gateway` base path is not an attach endpoint or alias.
 
 ### Routes
 

@@ -7,6 +7,8 @@ import (
 	"os"
 )
 
+const defaultMCPGatewayEndpoint = "https://localhost:8081/api/v1/mcp/gateway/upstream"
+
 // runMCPAttachCmd dispatches the `cordumctl mcp <preview|attach|rollback>`
 // subcommands. Returns the process exit code so the caller (main.go)
 // can propagate non-zero. Stdout writes go to the supplied writer so
@@ -30,7 +32,7 @@ func runMCPAttachCmd(args []string, stdout, stderr io.Writer) int {
 	apply := fs.Bool("apply", false, "for `attach` only: write changes (without this flag, attach refuses to write)")
 	gatewayName := fs.String("gateway-name", "cordum-gateway", "MCP server entry name to add/update")
 	gatewayTransport := fs.String("gateway-transport", "http", "transport: http | sse | stdio")
-	gatewayEndpoint := fs.String("gateway-endpoint", "https://localhost:8081/api/v1/mcp/gateway", "HTTP/SSE endpoint URL")
+	gatewayEndpoint := fs.String("gateway-endpoint", defaultMCPGatewayEndpoint, "HTTP/SSE endpoint URL")
 	gatewaySecretRef := fs.String("gateway-secret-ref", "", "optional secret:// reference for the gateway auth token")
 	if err := fs.Parse(rest); err != nil {
 		return 2

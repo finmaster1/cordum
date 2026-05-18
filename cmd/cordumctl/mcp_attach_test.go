@@ -11,6 +11,11 @@ import (
 
 func waitMs(ms int) { time.Sleep(time.Duration(ms) * time.Millisecond) }
 
+const (
+	canonicalMCPGatewayEndpoint  = "https://localhost:8081/api/v1/mcp/gateway/upstream"
+	legacyBareMCPGatewayEndpoint = "https://localhost:8081/api/v1/mcp/gateway"
+)
+
 // gatewayRef is the canonical cordum-gateway UpstreamServerRef used
 // across the attach test matrix. Mirrors the EDGE-101 UpstreamServer
 // minimum-for-attach shape (Name + Transport + Endpoint; Command empty
@@ -19,7 +24,7 @@ func gatewayRef() UpstreamServerRef {
 	return UpstreamServerRef{
 		Name:      "cordum-gateway",
 		Transport: "http",
-		Endpoint:  "https://localhost:8081/api/v1/mcp/gateway",
+		Endpoint:  canonicalMCPGatewayEndpoint,
 	}
 }
 
@@ -438,6 +443,37 @@ func TestAttachDispatchRefusesWriteWithoutApplyFlag(t *testing.T) {
 			if string(before) != string(after) {
 				t.Fatalf("attach without --apply modified file (forbidden per task rail #1):\n%s",
 					stderr.String())
+			}
+		})
+	}
+}
+
+func TestAttachDispatchDefaultEndpointMatchesGatewayRoute(t *testing.T) {
+	for _, client := range allClients() {
+		t.Run(client, func(t *testing.T) {
+			adapter := adapterFor(t, client)
+
+			var stdout, stderr strings.Builder
+			code := runMCPAttachCmd([]string{
+				"attach",
+				"--config-path", adapter.ConfigPath(),
+				"--client", client,
+				"--apply",
+			}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("exit=%d want 0\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+			}
+
+			data, err := os.ReadFile(adapter.ConfigPath())
+			if err != nil {
+				t.Fatalf("read rendered config: %v", err)
+			}
+			rendered := string(data)
+			if !strings.Contains(rendered, canonicalMCPGatewayEndpoint) {
+				t.Fatalf("default attach endpoint missing canonical gateway route %q:\n%s", canonicalMCPGatewayEndpoint, rendered)
+			}
+			if strings.Contains(rendered, legacyBareMCPGatewayEndpoint+`"`) {
+				t.Fatalf("default attach endpoint rendered unregistered bare route %q:\n%s", legacyBareMCPGatewayEndpoint, rendered)
 			}
 		})
 	}
