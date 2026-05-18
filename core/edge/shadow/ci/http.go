@@ -60,14 +60,6 @@ func (h *httpReader) withBasicAuth(user, password string) *httpReader {
 	return h
 }
 
-func (h *httpReader) withHeader(key, value string) *httpReader {
-	if key == "" {
-		return h
-	}
-	h.headers[key] = value
-	return h
-}
-
 // resolve builds the absolute URL for a relative API path. The caller
 // is responsible for any per-segment URL encoding (e.g. GitLab API
 // project identifiers must be `%2F`-encoded); resolve preserves the

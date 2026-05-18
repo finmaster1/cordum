@@ -38,12 +38,3 @@ func (s *spyObserver) EmitAudit(event audit.SIEMEvent) {
 func (s *spyObserver) OIDCVerifyOutcome(provider ci.Provider, result string) {
 	s.oidcOutcomes = append(s.oidcOutcomes, oidcOutcomeCall{Provider: provider, Result: result})
 }
-
-func (s *spyObserver) findEmitFor(provider ci.Provider, signal string) bool {
-	for _, e := range s.emits {
-		if e.Provider == provider && e.Signal == signal {
-			return true
-		}
-	}
-	return false
-}

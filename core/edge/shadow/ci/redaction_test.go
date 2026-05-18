@@ -39,9 +39,9 @@ func TestRedactCIPath_EmitsProviderSchemeAndRepo(t *testing.T) {
 
 func TestSanitizeEvidenceText_RedactsSecretLikeTokens(t *testing.T) {
 	for _, in := range []string{
-		"export ANTHROPIC_API_KEY=sk-ant-fakefakefakefake123456789012",
+		"export ANTHROPIC_API_KEY=cordum_fake_sk-ant-fakefakefakefake123456789012",
 		"Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
-		"ghp_AAAAAAAAAAAAAAAAAAAA",
+		"ghp_testAAAAAAAAAAAAAAAA",
 	} {
 		got := ci.SanitizeEvidenceText(in, 256)
 		if strings.Contains(got, "sk-ant-") && strings.Contains(got, "fakefake") {

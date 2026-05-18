@@ -29,9 +29,9 @@ type GitLabConfig struct {
 }
 
 type gitlabScanner struct {
-	cfg     GitLabConfig
-	http    *httpReader
-	httpMu  sync.Mutex
+	cfg    GitLabConfig
+	http   *httpReader
+	httpMu sync.Mutex
 }
 
 // NewGitLabScanner returns a GitLab CI scanner.
@@ -134,9 +134,7 @@ func (s *gitlabScanner) scanProject(ctx context.Context, d *Detector, path strin
 		for _, j := range jobs {
 			if j.Runner.ID != 0 {
 				runnerID = strconv.Itoa(j.Runner.ID)
-				for _, t := range j.Runner.TagList {
-					labels = append(labels, t)
-				}
+				labels = append(labels, j.Runner.TagList...)
 				labels = append(labels, j.Runner.Description)
 			}
 			if jobID == "" {
