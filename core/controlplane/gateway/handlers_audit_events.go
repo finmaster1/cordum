@@ -22,6 +22,23 @@ import (
 // rather than a soft suggestion.
 const MaxAuditEventsLimit = 200
 
+// auditEventsErrInvalidCursorCode is the stable machine-readable code
+// the dashboard / SIEM clients pin against when a malformed ?cursor=
+// value comes back as a 400. Lifted to a package constant so renames
+// surface as a compile break, not a wire-shape regression.
+const auditEventsErrInvalidCursorCode = "INVALID_CURSOR"
+
+// errInvalidAuditCursor is the sentinel parseAuditEventsQuery returns
+// when the cursor fails Redis stream-id shape validation. The handler
+// matches this with errors.Is to write the structured 400 envelope
+// (code=INVALID_CURSOR) instead of the generic writeErrorJSON shape.
+// The error message intentionally does NOT echo the caller-supplied
+// cursor value — a malformed string here is reflected user input and
+// has no place in our response body or audit logs.
+var errInvalidAuditCursor = errors.New(
+	"invalid cursor: must be redis stream id '<unsigned-ms>-<unsigned-seq>'",
+)
+
 // defaultAuditEventsLimit is the page size when the caller omits ?limit.
 // Mirrors the dashboard's default render budget so the first request
 // fills a screen without forcing a second round-trip.
@@ -114,6 +131,14 @@ func (s *server) handleListAuditEvents(w http.ResponseWriter, r *http.Request) {
 
 	limit, cursor, filters, parseErr := parseAuditEventsQuery(r)
 	if parseErr != nil {
+		if errors.Is(parseErr, errInvalidAuditCursor) {
+			// Structured envelope with stable INVALID_CURSOR code so the
+			// dashboard error-mapper distinguishes "your cursor is bad"
+			// from generic 400s (bad limit, malformed from/to, etc.).
+			writeJSONError(w, http.StatusBadRequest,
+				auditEventsErrInvalidCursorCode, parseErr.Error())
+			return
+		}
 		writeErrorJSON(w, http.StatusBadRequest, parseErr.Error())
 		return
 	}
@@ -180,12 +205,31 @@ func parseAuditEventsQuery(r *http.Request) (int, string, auditEventsFilters, er
 
 	cursor := strings.TrimSpace(q.Get("cursor"))
 	if cursor != "" {
-		// Cursors are Redis Stream IDs (`<ms>-<seq>`). Reject anything
-		// that doesn't match that shape so a malformed value surfaces
-		// as a 400 here instead of a 500 from XRevRangeN downstream.
+		// Cursors are Redis Stream IDs (`<unsigned-ms>-<unsigned-seq>`).
+		// We refuse anything else so a malformed value surfaces as 400
+		// here instead of a 500 from XRevRangeN downstream. A shape-only
+		// check (single dash, both halves non-empty) is not enough: a
+		// value like "abc-def" passes that filter and only fails at the
+		// Redis call, leaking the upstream error envelope through
+		// writeInternalError. Parse both halves as base-10 unsigned ints
+		// — matches the redis stream id grammar exactly — and return the
+		// typed sentinel so the handler can attach the stable
+		// INVALID_CURSOR error code.
+		dashes := strings.Count(cursor, "-")
+		if dashes != 1 {
+			return 0, "", auditEventsFilters{}, errInvalidAuditCursor
+		}
 		sep := strings.IndexByte(cursor, '-')
-		if sep <= 0 || sep == len(cursor)-1 {
-			return 0, "", auditEventsFilters{}, errors.New("invalid cursor: must be stream id '<ms>-<seq>'")
+		msPart := cursor[:sep]
+		seqPart := cursor[sep+1:]
+		if msPart == "" || seqPart == "" {
+			return 0, "", auditEventsFilters{}, errInvalidAuditCursor
+		}
+		if _, err := strconv.ParseUint(msPart, 10, 64); err != nil {
+			return 0, "", auditEventsFilters{}, errInvalidAuditCursor
+		}
+		if _, err := strconv.ParseUint(seqPart, 10, 64); err != nil {
+			return 0, "", auditEventsFilters{}, errInvalidAuditCursor
 		}
 	}
 

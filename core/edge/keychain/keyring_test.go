@@ -59,6 +59,40 @@ func TestKeyringDelete(t *testing.T) {
 	}
 }
 
+// TestMockKeyringDeleteEmptyName is the PR #276 Sub-H #33 regression.
+// `MockKeyring.Delete("")` must mirror `Get`/`Set` and refuse the empty
+// key with `ErrKeyringNotFound`, NOT silently no-op. Without this rail
+// a future refactor could let a caller bug (an unset secret-name var)
+// silently delete the entry the caller actually wanted to keep — or
+// worse, prune *every* zero-key sentinel a future implementation may
+// add. The test also pins the no-mutation invariant: a seeded key must
+// still be reachable after a rejected empty-key Delete.
+func TestMockKeyringDeleteEmptyName(t *testing.T) {
+	t.Parallel()
+	kr := NewMockKeyring()
+	ctx := context.Background()
+
+	const seededKey, seededVal = "cordum_seeded_secret", "stay_put"
+	if err := kr.Set(ctx, seededKey, seededVal); err != nil {
+		t.Fatalf("seed Set: %v", err)
+	}
+
+	if err := kr.Delete(ctx, ""); !errors.Is(err, ErrKeyringNotFound) {
+		t.Fatalf("Delete empty: err=%v, want ErrKeyringNotFound", err)
+	}
+
+	// No-mutation invariant: the seeded key must survive an empty-key
+	// Delete attempt. If Delete("") accidentally wildcards through the
+	// store, this assertion catches it before the next CI run.
+	got, err := kr.Get(ctx, seededKey)
+	if err != nil {
+		t.Fatalf("Get post-empty-delete: err=%v, want nil (seeded key must survive)", err)
+	}
+	if got != seededVal {
+		t.Fatalf("Get post-empty-delete: value=%q, want %q (seeded value mutated)", got, seededVal)
+	}
+}
+
 func TestKeyringStrictModeFailsClosedOnUnavailable(t *testing.T) {
 	t.Parallel()
 	kr := NewMockKeyring()

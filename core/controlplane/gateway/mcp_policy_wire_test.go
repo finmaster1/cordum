@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"testing"
 
@@ -10,6 +11,55 @@ import (
 	"github.com/cordum/cordum/core/mcp"
 	"github.com/cordum/cordum/core/policy/actiongates"
 )
+
+// TestLegacyMCPApprovalArgsHash_NormalizesPlaceholders is the PR #276
+// Sub-H #30 regression. The helper that bridges upstream-controlled
+// ctxData.ActionHash into the legacy MCPApprovalStore ArgsHash column
+// must (a) always return a 64-character value so the SIEM correlation
+// shape is stable and (b) never return the short "00000000" 8-char
+// placeholder that predated the canonical-args binding. Real non-empty
+// hex digests must pass through unchanged so retry idempotency keys
+// stay byte-identical across the normalization pass.
+func TestLegacyMCPApprovalArgsHash_NormalizesPlaceholders(t *testing.T) {
+	t.Parallel()
+	zero64 := legacyMCPApprovalArgsHashZero
+	if len(zero64) != 64 {
+		t.Fatalf("legacyMCPApprovalArgsHashZero len=%d, want 64 (sha256 hex shape)", len(zero64))
+	}
+	if _, err := hex.DecodeString(zero64); err != nil {
+		t.Fatalf("legacyMCPApprovalArgsHashZero hex-decode failed: %v", err)
+	}
+
+	realHash := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty_normalized_to_64_zeros", "", zero64},
+		{"whitespace_normalized_to_64_zeros", "   ", zero64},
+		{"short_placeholder_normalized_to_64_zeros", "00000000", zero64},
+		{"short_placeholder_padded_whitespace", "  00000000  ", zero64},
+		{"real_64_hex_passes_through", realHash, realHash},
+		{"real_64_hex_trimmed_passes_through", "  " + realHash + " ", realHash},
+		// A non-canonical but non-placeholder value MUST be preserved
+		// — the legacy SIEM table accepts arbitrary strings and a
+		// stricter shape check would drop legitimately-correlated rows.
+		{"non_hex_marker_preserved", "legacy-debug-token", "legacy-debug-token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := legacyMCPApprovalArgsHash(tc.in)
+			if got != tc.want {
+				t.Fatalf("legacyMCPApprovalArgsHash(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got == "00000000" {
+				t.Errorf("helper returned the 8-char short placeholder; want 64-char zero hex instead")
+			}
+		})
+	}
+}
 
 // fakeInvariantLookup returns a deny rule keyed by tool name. The
 // tests use this to simulate the SecOps invariant SECURITY FLOOR

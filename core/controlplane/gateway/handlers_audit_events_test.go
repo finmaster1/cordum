@@ -509,6 +509,87 @@ func TestHandleAuditEvents_HeavyFilterPagesForward(t *testing.T) {
 	}
 }
 
+// TestHandleAuditEvents_InvalidCursor_Returns400InvalidCursorCode pins the
+// PR #276 Sub-H #29 finding: a malformed cursor must surface as a 400
+// with a structured `code: "INVALID_CURSOR"` envelope, NOT as a 500 from
+// the downstream XRevRangeN call and NOT as a plain-text 400 without the
+// stable error code. Asserts the wire shape BEFORE decoding so a
+// regression that downgrades the response to 500/200 is caught even if
+// the JSON happens to decode into a partially-populated body.
+//
+// Sub-cases cover the three malformed shapes the parser must reject:
+//   - "not-a-stream-id"        — letters in both halves
+//   - "abc-def"                — letters around a single dash
+//   - "12345"                  — no separator at all
+//   - "-456"                   — empty ms half
+//   - "456-"                   — empty seq half
+//
+// Each must produce 400 + code=INVALID_CURSOR. The raw cursor value MUST
+// NOT echo into the response body (no log/leak surface for caller bugs).
+func TestHandleAuditEvents_InvalidCursor_Returns400InvalidCursorCode(t *testing.T) {
+	cases := []struct {
+		name   string
+		cursor string
+	}{
+		{"letters_in_both_halves", "not-a-stream-id"},
+		{"letters_around_dash", "abc-def"},
+		{"no_separator", "12345"},
+		{"empty_ms_half", "-456"},
+		{"empty_seq_half", "456-"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s, _, _ := newTestGateway(t)
+			s.auditChainer = audit.NewChainer(s.redisClient(), "")
+
+			req := adminCtx(httptest.NewRequest(http.MethodGet,
+				"/api/v1/audit/events?tenant=default&limit=10&cursor="+tc.cursor, nil))
+			rec := httptest.NewRecorder()
+			s.handleListAuditEvents(rec, req)
+
+			// HTTP status asserted BEFORE decoding the body so a future
+			// regression that downgrades to 500/200 surfaces here, not
+			// silently behind an empty-decode path.
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (invalid cursor); body=%s",
+					rec.Code, rec.Body.String())
+			}
+
+			var body struct {
+				Code   string `json:"code"`
+				Error  string `json:"error"`
+				Status int    `json:"status"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode 400 body: %v (body=%s)", err, rec.Body.String())
+			}
+			if body.Code != "INVALID_CURSOR" {
+				t.Errorf("code = %q, want %q (stable INVALID_CURSOR contract)",
+					body.Code, "INVALID_CURSOR")
+			}
+			if body.Status != http.StatusBadRequest {
+				t.Errorf("status field = %d, want %d", body.Status, http.StatusBadRequest)
+			}
+			if body.Error == "" {
+				t.Errorf("error field empty; want human-readable hint")
+			}
+			// The raw cursor value MUST NOT echo into the response body —
+			// a caller-supplied string in an error reply is a classic
+			// log-injection / reflected-XSS shape we refuse to ship.
+			if strings.Contains(rec.Body.String(), tc.cursor) {
+				t.Errorf("response body echoes raw cursor %q; want sanitized hint", tc.cursor)
+			}
+			// Defense-in-depth: response must not leak the generic 500
+			// "internal error" string from writeInternalError.
+			lower := strings.ToLower(rec.Body.String())
+			if strings.Contains(lower, "internal error") {
+				t.Errorf("body leaks generic 500 internal-error: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 // itoa is a small i→string helper to keep test bodies readable without
 // pulling strconv into every line.
 func itoa(n int) string { return fmt.Sprintf("%d", n) }

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/cordum/cordum/core/edge"
@@ -10,6 +11,41 @@ import (
 	"github.com/cordum/cordum/core/mcp"
 	"github.com/cordum/cordum/core/policy/actiongates"
 )
+
+// legacyMCPApprovalArgsHashZero is the 64-character zero-hex placeholder
+// used when a legacy ArgsHash is missing or carries the short 8-character
+// "00000000" sentinel that predates the canonical-args binding. A SHA-256
+// hex digest is always 64 chars; the legacy SIEM correlation tables key
+// off this column, so persisting a short value here would either truncate
+// downstream rows (BigQuery STRING with NOT NULL + length constraint) or
+// silently collide every "no-hash" approval into a single row.
+const legacyMCPApprovalArgsHashZero = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// legacyMCPApprovalArgsHash normalizes the ArgsHash the legacy MCP
+// approval store sees on the ClaimPreApproved + EnqueueMCPApproval path.
+// EDGE-103 mint now derives a real SHA-256 via BuildMCPApprovalBinding,
+// but the legacy fallback still accepts an upstream-supplied
+// ctxData.ActionHash. Three normalizations:
+//
+//  1. Trim whitespace — guards against caller bugs that pass " <hex> ".
+//  2. Empty string → 64-char zero hex. Empty would otherwise produce a
+//     Redis key with a trailing colon and fan out across consumers.
+//  3. Short "00000000" placeholder (the 8-char value some legacy emit
+//     sites wrote before the canonical hash work) → 64-char zero hex.
+//
+// A real non-empty, non-placeholder value is preserved BYTE-FOR-BYTE so
+// retry idempotency keys stay stable across this normalization pass.
+// The function intentionally does NOT validate hex shape: the legacy
+// SIEM table accepts arbitrary strings and a stricter check would
+// reject perfectly-correlated rows that happened to write non-hex
+// debug markers.
+func legacyMCPApprovalArgsHash(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || trimmed == "00000000" {
+		return legacyMCPApprovalArgsHashZero
+	}
+	return trimmed
+}
 
 // policyDispatcherAdapter wraps the production action-gate pipeline so
 // the core/mcp policy layer can dispatch against it through the narrow
@@ -114,7 +150,14 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 	// or absent transport metadata. The legacy retry-with-same-args
 	// protocol still works via ClaimPreApproved for pre-EDGE-103 SIEM
 	// consumers that don't speak `_approval_ref`.
-	if rec, err := g.store.ClaimPreApproved(ctx, ctxData.Tenant, ctxData.AgentID, ctxData.Tool, ctxData.ActionHash); err != nil {
+	//
+	// ctxData.ActionHash is upstream-controlled — the canonical legacy
+	// emit sites supplied a SHA-256 hex digest, but a few older code
+	// paths wrote the short "00000000" placeholder before the canonical
+	// binding existed. Normalize via legacyMCPApprovalArgsHash so the
+	// SIEM correlation column always carries a stable 64-char shape.
+	argsHash := legacyMCPApprovalArgsHash(ctxData.ActionHash)
+	if rec, err := g.store.ClaimPreApproved(ctx, ctxData.Tenant, ctxData.AgentID, ctxData.Tool, argsHash); err != nil {
 		return "", fmt.Errorf("mcp gate: pre-approval claim: %w", err)
 	} else if rec != nil {
 		return rec.ID, nil
@@ -123,7 +166,7 @@ func (g *gatewayApprovalGate) ConsumeActionGateDecision(ctx context.Context, _ m
 		Tenant:   ctxData.Tenant,
 		AgentID:  ctxData.AgentID,
 		ToolName: ctxData.Tool,
-		ArgsHash: ctxData.ActionHash,
+		ArgsHash: argsHash,
 	}
 	rec, err := g.store.EnqueueMCPApproval(ctx, req)
 	if err != nil {

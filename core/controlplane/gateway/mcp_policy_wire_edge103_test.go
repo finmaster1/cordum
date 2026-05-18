@@ -153,7 +153,7 @@ func TestMintEdgeApproval_FailsClosedOnEdgeStoreError(t *testing.T) {
 			AgentID:    "agent_alpha",
 			Server:     "cordum.builtin",
 			Tool:       "fs.write",
-			ActionHash: "deadbeef",
+			ActionHash: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 			Args:       json.RawMessage(`{"path":"/x"}`),
 		})
 	if err == nil {
