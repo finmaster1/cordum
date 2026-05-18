@@ -10,9 +10,11 @@ Use managed Claude Code settings for enterprise enforcement where users must not
 
 - `allowManagedHooksOnly: true` so only managed hooks, SDK hooks, and managed force-enabled plugin hooks are loaded.
 - `disableBypassPermissionsMode: "disable"` to prevent bypass mode.
-- `allowManagedMcpServersOnly: true` and an `allowedMcpServers` entry for `cordum-edge`.
-- `allowedHttpHookUrls: []` so production enforcement does not depend on HTTP hooks.
-- command hooks that call `cordum-hook`; the hook talks only to local `cordum-agentd`.
+- `allowManagedMcpServersOnly: true` with `allowedMcpServers` set exactly to `[{ "serverName": "cordum-edge" }]` so users cannot add a parallel MCP server.
+- `allowedHttpHookUrls: []` because HTTP hooks are spike-only and production enforcement must use the local command-hook boundary.
+- command hooks that call a canonical Cordum hook binary (`/opt/cordum/bin/cordum-hook`, `/usr/local/bin/cordum-hook`, `/Applications/Cordum Edge/cordum-hook`, or `C:\Program Files\Cordum\cordum-hook.exe`); the hook talks only to local `cordum-agentd`.
+
+There is no settings-file flag that weakens those boundaries. Any future power-user exception must be delivered as a separately verified, signed trusted-config input; managed settings bytes alone are not trusted to enable HTTP hooks, alternate MCP servers, or arbitrary hook commands.
 
 ## Synthetic `managed-settings.json` excerpt
 

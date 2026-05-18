@@ -266,24 +266,29 @@ Every supported channel ends with the same verifier:
 cordumctl edge managed-settings verify --path <path>
 ```
 
-The verifier enforces the **14 invariants** baked into the template:
+The verifier enforces the **17 invariants** baked into the template:
 
 | # | Invariant | Severity |
 | --- | --- | --- |
 | 1 | `allowManagedHooksOnly == true` | critical |
 | 2 | `allowManagedMcpServersOnly == true` | critical |
 | 3 | `disableBypassPermissionsMode == "disable"` | critical |
-| 4 | `hooks.PreToolUse` present with non-empty command | critical |
-| 5 | `hooks.PostToolUse` present with non-empty command | critical |
-| 6 | `hooks.PostToolUseFailure` present with non-empty command | critical |
-| 7 | `hooks.UserPromptSubmit` present with non-empty command | critical |
-| 8 | `hooks.ConfigChange` present with non-empty command | critical |
-| 9 | `hooks.FileChanged` present with non-empty command | critical |
-| 10 | `env.CORDUM_AGENTD_FAIL_CLOSED == "true"` | critical |
-| 11 | `env.CORDUM_EDGE_MANAGED_POLICY_MODE == "enterprise-strict"` | critical |
-| 12 | `env.CORDUM_EDGE_MANAGED_HOOKS_ONLY == "true"` | critical |
-| 13 | `env.CORDUM_AGENTD_URL` non-empty + no query string | critical |
-| 14 | No nonce/key markers in env or serialised form: `CORDUM_AGENTD_HOOK_NONCE`, `ANTHROPIC_API_KEY`, `sk-…` provider keys, `ghp_…` GitHub tokens, `AKIA…` AWS access keys, or `Authorization` headers carrying bearer tokens. | high |
+| 4 | `allowedHttpHookUrls == []`; HTTP hooks are spike-only and must not be part of production enforcement | critical |
+| 5 | `allowedMcpServers == [{ "serverName": "cordum-edge" }]` with no extra/missing/case-variant entries | critical |
+| 6 | `hooks.PreToolUse` present with a canonical `cordum-hook claude pre-tool-use` command | critical |
+| 7 | `hooks.PostToolUse` present with a canonical `cordum-hook claude post-tool-use` command | critical |
+| 8 | `hooks.PostToolUseFailure` present with a canonical `cordum-hook claude post-tool-use-failure` command | critical |
+| 9 | `hooks.UserPromptSubmit` present with a canonical `cordum-hook claude user-prompt-submit` command | critical |
+| 10 | `hooks.ConfigChange` present with a canonical `cordum-hook claude config-change` command | critical |
+| 11 | `hooks.FileChanged` present with a canonical `cordum-hook claude file-changed` command | critical |
+| 12 | `env.CORDUM_AGENTD_FAIL_CLOSED == "true"` | critical |
+| 13 | `env.CORDUM_EDGE_MANAGED_POLICY_MODE == "enterprise-strict"` | critical |
+| 14 | `env.CORDUM_EDGE_MANAGED_HOOKS_ONLY == "true"` | critical |
+| 15 | `env.CORDUM_AGENTD_URL` non-empty + no query string | critical |
+| 16 | The hook command boundary is local `cordum-hook` -> local `cordum-agentd`; arbitrary shell/python/curl commands are rejected | critical |
+| 17 | No nonce/key markers in env or serialised form: `CORDUM_AGENTD_HOOK_NONCE`, `ANTHROPIC_API_KEY`, `sk-…` provider keys, `ghp_…` GitHub tokens, `AKIA…` AWS access keys, or `Authorization` headers carrying bearer tokens. | high |
+
+Canonical hook paths are `/opt/cordum/bin/cordum-hook`, `/usr/local/bin/cordum-hook`, `/Applications/Cordum Edge/cordum-hook`, and `C:\Program Files\Cordum\cordum-hook.exe`. The verifier has no settings-file override for HTTP hook URLs, alternate MCP servers, or arbitrary hook commands. A future power-user exception must be a separately verified, signed trusted-config input; managed settings bytes alone are not trusted to weaken the production boundary.
 
 The same checks run inside `cordumctl edge doctor` when you pass
 `--managed-settings-path` (or set `CORDUM_EDGE_MANAGED_SETTINGS_PATH`).

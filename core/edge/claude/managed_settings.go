@@ -25,7 +25,9 @@ type managedSettingsDocument struct {
 }
 
 type managedMCPAllow struct {
-	ServerName string `json:"serverName"`
+	ServerName string   `json:"serverName"`
+	Command    string   `json:"command,omitempty"`
+	Args       []string `json:"args,omitempty"`
 }
 
 type managedMCPDocument struct {

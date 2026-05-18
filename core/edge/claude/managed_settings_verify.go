@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -122,6 +123,22 @@ var requiredManagedHookEvents = []string{
 	"FileChanged",
 }
 
+var requiredManagedHookSubcommands = map[string]string{
+	"PreToolUse":         "pre-tool-use",
+	"PostToolUse":        "post-tool-use",
+	"PostToolUseFailure": "post-tool-use-failure",
+	"UserPromptSubmit":   "user-prompt-submit",
+	"ConfigChange":       "config-change",
+	"FileChanged":        "file-changed",
+}
+
+var canonicalManagedHookCommands = []string{
+	"/opt/cordum/bin/cordum-hook",
+	"/usr/local/bin/cordum-hook",
+	"/Applications/Cordum Edge/cordum-hook",
+	`C:\Program Files\Cordum\cordum-hook.exe`,
+}
+
 // reservedManagedEnvKeys lists env vars that MUST NOT appear in managed
 // settings. The bundle generator never emits them; their presence indicates
 // an operator hand-edited a secret into the file.
@@ -158,12 +175,59 @@ func collectManagedSettingsDrifts(doc managedSettingsDocument, raw []byte) []Man
 			Severity: managedSettingsDriftCritical,
 		})
 	}
+	// Production-boundary checks intentionally have no settings-file flag
+	// bypass. A future exception must be a separately verified, signed
+	// trusted-config input; config bytes alone are not trusted to weaken
+	// HTTP hook, MCP allowlist, or hook-command boundaries.
+	drifts = append(drifts, allowedHTTPHookURLDrifts(doc.AllowedHTTPHookURLs)...)
+	drifts = append(drifts, allowedMCPServerDrifts(doc.AllowedMcpServers)...)
 	drifts = append(drifts, requiredHookEventDrifts(doc.Hooks)...)
 	drifts = append(drifts, requiredEnvDrifts(doc.Env)...)
 	drifts = append(drifts, reservedEnvDrifts(doc.Env)...)
 	drifts = append(drifts, agentdURLDrifts(doc.Env)...)
 	drifts = append(drifts, serializedMarkerDrifts(raw)...)
 	return drifts
+}
+
+func allowedHTTPHookURLDrifts(urls []string) []ManagedSettingsDrift {
+	if len(urls) == 0 {
+		return nil
+	}
+	return []ManagedSettingsDrift{{
+		Field:    "allowedHttpHookUrls",
+		Got:      fmt.Sprintf("%d configured", len(urls)),
+		Want:     "empty list; HTTP hooks are not a production boundary",
+		Severity: managedSettingsDriftCritical,
+	}}
+}
+
+func allowedMCPServerDrifts(servers []managedMCPAllow) []ManagedSettingsDrift {
+	if len(servers) != 1 {
+		return []ManagedSettingsDrift{{
+			Field:    "allowedMcpServers",
+			Got:      fmt.Sprintf("%d configured", len(servers)),
+			Want:     "exactly cordum-edge",
+			Severity: managedSettingsDriftCritical,
+		}}
+	}
+	server := servers[0]
+	if strings.TrimSpace(server.ServerName) != "cordum-edge" {
+		return []ManagedSettingsDrift{{
+			Field:    "allowedMcpServers[0].serverName",
+			Got:      redactDiagnostic(server.ServerName),
+			Want:     "cordum-edge",
+			Severity: managedSettingsDriftCritical,
+		}}
+	}
+	if strings.TrimSpace(server.Command) != "" || len(server.Args) > 0 {
+		return []ManagedSettingsDrift{{
+			Field:    "allowedMcpServers[0]",
+			Got:      "runtime command fields present",
+			Want:     "serverName only",
+			Severity: managedSettingsDriftCritical,
+		}}
+	}
+	return nil
 }
 
 func requiredHookEventDrifts(hooks map[string][]claudeHookSet) []ManagedSettingsDrift {
@@ -179,11 +243,11 @@ func requiredHookEventDrifts(hooks map[string][]claudeHookSet) []ManagedSettings
 			})
 			continue
 		}
-		if !hasNonEmptyCommand(sets) {
+		if !hasCanonicalManagedHookCommand(event, sets) {
 			drifts = append(drifts, ManagedSettingsDrift{
-				Field:    "hooks." + event + "[*].command",
-				Got:      "empty",
-				Want:     "non-empty command",
+				Field:    "hooks." + event + "[0].command",
+				Got:      "missing or non-canonical command",
+				Want:     "canonical cordum-hook command",
 				Severity: managedSettingsDriftCritical,
 			})
 		}
@@ -191,15 +255,49 @@ func requiredHookEventDrifts(hooks map[string][]claudeHookSet) []ManagedSettings
 	return drifts
 }
 
-func hasNonEmptyCommand(sets []claudeHookSet) bool {
+func hasCanonicalManagedHookCommand(event string, sets []claudeHookSet) bool {
+	subcommand := requiredManagedHookSubcommands[event]
 	for _, set := range sets {
 		for _, hook := range set.Hooks {
-			if strings.TrimSpace(hook.Command) != "" {
+			if isCanonicalManagedHookCommand(hook.Command, subcommand) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func isCanonicalManagedHookCommand(command, subcommand string) bool {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" || subcommand == "" {
+		return false
+	}
+	for _, hookPath := range canonicalManagedHookCommands {
+		if trimmed == commandHook(hookPath, subcommand, 0).Command && canonicalManagedHookPathAllowed(hookPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalManagedHookPathAllowed(path string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return true
+	}
+	if sameManagedHookPath(resolved, path) {
+		return true
+	}
+	for _, allowed := range canonicalManagedHookCommands {
+		if sameManagedHookPath(resolved, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameManagedHookPath(a, b string) bool {
+	return filepath.Clean(strings.TrimSpace(a)) == filepath.Clean(strings.TrimSpace(b))
 }
 
 func requiredEnvDrifts(env map[string]string) []ManagedSettingsDrift {
