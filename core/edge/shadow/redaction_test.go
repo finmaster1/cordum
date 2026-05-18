@@ -58,6 +58,29 @@ func TestStripSecretMarkers_ExistingPatterns(t *testing.T) {
 	}
 }
 
+func TestStripSecretMarkers_PEMPrivateKeyFamilies(t *testing.T) {
+	cases := []struct {
+		name        string
+		labelPrefix string
+	}{
+		{name: "rsa", labelPrefix: "RSA "},
+		{name: "pkcs8_bare", labelPrefix: ""},
+		{name: "ec", labelPrefix: "EC "},
+		{name: "openssh", labelPrefix: "OPENSSH "},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripSecretMarkers("config=" + syntheticShadowPrivateKeyBlock(tc.labelPrefix))
+
+			assertNotContains(t, got, "BEGIN "+tc.labelPrefix+"PRIVATE"+" KEY")
+			if !strings.Contains(got, "<REDACTED>") {
+				t.Fatalf("stripSecretMarkers result %q did not include <REDACTED>", compactTestString(got))
+			}
+		})
+	}
+}
+
 func TestStripSecretMarkers_HomoglyphHyphens(t *testing.T) {
 	hyphens := []struct {
 		name string
@@ -210,4 +233,12 @@ func encodeROT13ForTest(s string) string {
 		}
 	}
 	return b.String()
+}
+
+const syntheticShadowPrivateKeyBody = "SAMPLE_BASE64_SYNTHETIC"
+
+func syntheticShadowPrivateKeyBlock(labelPrefix string) string {
+	return "-----BEGIN " + labelPrefix + "PRIVATE KEY-----\n" +
+		syntheticShadowPrivateKeyBody +
+		"\n-----END " + labelPrefix + "PRIVATE KEY-----"
 }

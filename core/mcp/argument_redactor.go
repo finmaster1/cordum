@@ -95,7 +95,7 @@ func DefaultRedactionRules() []RedactionRule {
 		// [opusr], so it needs its own pattern.
 		{Regex: `ghe_[A-Za-z0-9_]{16,}`, Replacement: "[REDACTED:github_token]", Description: "github_token"},
 		{Regex: `eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+`, Replacement: "[REDACTED:jwt]", Description: "jwt"},
-		{Regex: `-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----`, Replacement: "[REDACTED:pem_private_key]", Description: "pem_private_key"},
+		{Regex: `-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----`, Replacement: "[REDACTED:pem_private_key]", Description: "pem_private_key"},
 	}
 }
 

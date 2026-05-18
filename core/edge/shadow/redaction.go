@@ -30,7 +30,7 @@ const (
 // produced.
 var secretMarkerPatterns = []*regexp.Regexp{
 	// PGP / OpenSSH key blocks (whole header line).
-	regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+PRIVATE KEY[-A-Z]*-----`),
+	regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY[-A-Z]*-----`),
 	regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+CERTIFICATE-----`),
 	// Anthropic, OpenAI, GitHub, etc. token shapes — alnum bodies of >=16
 	// chars after a recognised prefix.

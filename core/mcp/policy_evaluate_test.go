@@ -432,6 +432,50 @@ func TestEvaluateToolCall_DefenseInDepthRefusesPartialRedaction(t *testing.T) {
 	}
 }
 
+func TestEvaluateToolCall_DefenseInDepthRefusesPEMPrivateKeyFamilies(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		labelPrefix string
+	}{
+		{name: "rsa", labelPrefix: "RSA "},
+		{name: "pkcs8_bare", labelPrefix: ""},
+		{name: "ec", labelPrefix: "EC "},
+		{name: "openssh", labelPrefix: "OPENSSH "},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pipeline := &fakePolicyDispatcher{}
+			emitter := &fakeEventEmitter{}
+			deps := newToolCallDepsFixture(pipeline, emitter, &fakeArtifactStore{})
+			deps.Redactor = stubRedactor{}
+			_, err := EvaluateToolCall(newAuthedToolCallCtx(), deps, ToolCallParams{
+				Name: "bash.exec",
+				Arguments: json.RawMessage(`{"cmd":` +
+					mustMarshalStringForTest(syntheticPrivateKeyPEMForRedactionTest(tc.labelPrefix)) + `}`),
+			}, "local-shell")
+			if err == nil {
+				t.Fatal("expected redaction_failed error from PEM completeness check, got nil")
+			}
+			if !strings.Contains(err.Error(), "redaction_failed") {
+				t.Fatalf("expected redaction_failed sentinel, got %q", err.Error())
+			}
+			if len(emitter.events) != 0 {
+				t.Fatalf("must emit zero events when PEM completeness check fails; got %d", len(emitter.events))
+			}
+		})
+	}
+}
+
+func mustMarshalStringForTest(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 // TestBuildActionDescriptor_NormalizesTargetPathFromArgs asserts that a
 // Windows backslash path supplied in arg["path"] surfaces on
 // descriptor.TargetPath as a normalized forward-slash form. Without this,

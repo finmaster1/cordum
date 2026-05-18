@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+const syntheticPEMBodyForRedactionTest = "SAMPLE_BASE64_SYNTHETIC"
+
+func syntheticPrivateKeyPEMForRedactionTest(labelPrefix string) string {
+	return "-----BEGIN " + labelPrefix + "PRIVATE KEY-----\n" +
+		syntheticPEMBodyForRedactionTest +
+		"\n-----END " + labelPrefix + "PRIVATE KEY-----"
+}
+
 func TestDefaultRedactor_FieldNames(t *testing.T) {
 	t.Parallel()
 	r := DefaultRedactor()
@@ -55,6 +63,39 @@ func TestDefaultRedactor_RegexHeuristics(t *testing.T) {
 			}
 			if !strings.Contains(string(out), "[REDACTED:") {
 				t.Errorf("no redaction marker: %s", out)
+			}
+		})
+	}
+}
+
+func TestDefaultRedactor_PEMPrivateKeyFamilies(t *testing.T) {
+	t.Parallel()
+	r := DefaultRedactor()
+
+	cases := []struct {
+		name        string
+		labelPrefix string
+	}{
+		{name: "rsa", labelPrefix: "RSA "},
+		{name: "pkcs8_bare", labelPrefix: ""},
+		{name: "ec", labelPrefix: "EC "},
+		{name: "openssh", labelPrefix: "OPENSSH "},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pemBlock := syntheticPrivateKeyPEMForRedactionTest(tc.labelPrefix)
+			input, err := json.Marshal(map[string]string{"note": "inspect\n" + pemBlock})
+			if err != nil {
+				t.Fatalf("marshal input: %v", err)
+			}
+
+			out := string(r.Redact(input))
+			if strings.Contains(out, syntheticPEMBodyForRedactionTest) || strings.Contains(out, "PRIVATE KEY") {
+				t.Fatalf("PEM private key material leaked for %s: %s", tc.name, out)
+			}
+			if !strings.Contains(out, "[REDACTED:pem_private_key]") {
+				t.Fatalf("PEM redaction marker missing for %s: %s", tc.name, out)
 			}
 		})
 	}

@@ -63,7 +63,7 @@ var redactionCompletenessPatterns = []*regexp.Regexp{
 	// Enterprise (ghe_) — same shape, distinct prefix letter.
 	regexp.MustCompile(`ghe_[A-Za-z0-9_]{16,}`),
 	regexp.MustCompile(`eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+`),
-	regexp.MustCompile(`-----BEGIN [A-Z ]+PRIVATE KEY-----`),
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
 }
 
 // highSeverityFindingMarkers is the set of [REDACTED:...] family tags
