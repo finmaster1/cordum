@@ -53,6 +53,18 @@ var (
 		"\u2014", "-",
 		"\uff0d", "-",
 	)
+	sensitiveMetadataKeyReplacer = strings.NewReplacer("-", "_", ".", "_", " ", "_")
+	sensitiveMetadataKeyMarkers  = []string{
+		"authorization",
+		"bearer",
+		"token",
+		"secret",
+		"api_key",
+		"apikey",
+		"private_key",
+		"credential",
+		"password",
+	}
 )
 
 // RedactPath returns a path safe to record in an audit finding. It strips
@@ -251,6 +263,40 @@ func stripSecretMarkers(s string) string {
 // recognised credential shape replaced by "<REDACTED>".
 func StripSecretMarkers(s string) string {
 	return stripSecretMarkers(s)
+}
+
+// sanitizeFindingMetadata is the store-boundary guard for free-form finding
+// metadata. Sensitive key names are rejected entirely; safe keys remain
+// available while values pass through the shared secret-shape redactor.
+func sanitizeFindingMetadata(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for key, value := range m {
+		if isSensitiveMetadataKey(key) {
+			continue
+		}
+		out[key] = StripSecretMarkers(value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isSensitiveMetadataKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	normalized := strings.ToLower(sensitiveMetadataKeyReplacer.Replace(key))
+	for _, marker := range sensitiveMetadataKeyMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeHomoglyphHyphens(s string) string {

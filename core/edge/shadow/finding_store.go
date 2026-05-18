@@ -487,7 +487,8 @@ func normalizeAndValidateCreate(req CreateFindingRequest, now time.Time, idGen f
 		return nil, fmt.Errorf("%w: detected_at is required", ErrValidation)
 	}
 
-	if err := validateFindingMetadata(req.Metadata); err != nil {
+	metadata := sanitizeFindingMetadata(req.Metadata)
+	if err := validateFindingMetadata(metadata); err != nil {
 		return nil, err
 	}
 
@@ -521,7 +522,7 @@ func normalizeAndValidateCreate(req CreateFindingRequest, now time.Time, idGen f
 		DetectedAt:       req.DetectedAt.UTC(),
 		CreatedAt:        now,
 		UpdatedAt:        now,
-		Metadata:         copyMetadata(req.Metadata),
+		Metadata:         copyMetadata(metadata),
 
 		SourceType:          ext.sourceType,
 		SourceID:            ext.sourceID,
