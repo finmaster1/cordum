@@ -77,13 +77,13 @@ func TestValidateGovernanceWrite(t *testing.T) {
 			ProvenanceRef:      "prov-1",
 			ProvenanceVerified: true,
 		}, nil},
-		{"valid with no tenant claim and no tenant-prefixed ids", &pb.UpdateMemoryRequest{
+		{"shared write with no tenant claim and no tenant-prefixed ids fails closed", &pb.UpdateMemoryRequest{
 			MemoryId:           "mem-1",
 			WriteKind:          pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_TRUST_STATE,
 			WriterAgentId:      "writer-1",
 			ProvenanceRef:      "prov-1",
 			ProvenanceVerified: true,
-		}, nil},
+		}, ErrSharedWriteTenantMismatch},
 	}
 
 	for _, tc := range tests {
@@ -123,6 +123,117 @@ func TestGovernanceWrite_TenantPrefixWithoutTenantID_FailsClosed(t *testing.T) {
 				TargetAgentId:      "t-victim/agent-1",
 				ProvenanceRef:      "prov-1",
 				ProvenanceVerified: true,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateGovernanceWrite(tc.req)
+			if !errors.Is(err, ErrSharedWriteTenantMismatch) {
+				t.Fatalf("got %v, want %v", err, ErrSharedWriteTenantMismatch)
+			}
+		})
+	}
+}
+
+func TestCheckTenantConsistency_FailsClosedOnEmptyTenantSharedPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		req     *pb.UpdateMemoryRequest
+		wantErr error
+	}{
+		{
+			name: "empty tenant shared policy unprefixed memory",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:  "mem-x",
+				WriteKind: pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_POLICY_STATE,
+			},
+			wantErr: ErrSharedWriteTenantMismatch,
+		},
+		{
+			name: "empty tenant shared trust unprefixed memory",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:  "mem-x",
+				WriteKind: pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_TRUST_STATE,
+			},
+			wantErr: ErrSharedWriteTenantMismatch,
+		},
+		{
+			name: "whitespace tenant shared directive unprefixed memory",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:  "mem-x",
+				TenantId:  " \t ",
+				WriteKind: pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_DIRECTIVE,
+			},
+			wantErr: ErrSharedWriteTenantMismatch,
+		},
+		{
+			name: "empty tenant policy state mutation unprefixed memory",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:            "mem-x",
+				WriteKind:           pb.MemoryWriteKind_MEMORY_WRITE_KIND_RAW,
+				PolicyStateMutation: true,
+			},
+			wantErr: ErrSharedWriteTenantMismatch,
+		},
+		{
+			name: "empty tenant private raw bootstrap write",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:  "mem-x",
+				WriteKind: pb.MemoryWriteKind_MEMORY_WRITE_KIND_RAW,
+			},
+		},
+		{
+			name: "tenant-prefixed memory with matching tenant",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:  "tenant-a/mem-x",
+				TenantId:  "tenant-a",
+				WriteKind: pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_POLICY_STATE,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkTenantConsistency(tc.req)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("got %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateGovernanceWrite_EmptyTenantVerifiedProvenanceStillFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		req  *pb.UpdateMemoryRequest
+	}{
+		{
+			name: "shared policy state",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:           "mem-x",
+				WriteKind:          pb.MemoryWriteKind_MEMORY_WRITE_KIND_SHARED_POLICY_STATE,
+				WriterAgentId:      "writer-1",
+				ProvenanceRef:      "prov-1",
+				ProvenanceVerified: true,
+			},
+		},
+		{
+			name: "policy state mutation flag",
+			req: &pb.UpdateMemoryRequest{
+				MemoryId:            "mem-x",
+				WriteKind:           pb.MemoryWriteKind_MEMORY_WRITE_KIND_RAW,
+				PolicyStateMutation: true,
+				WriterAgentId:       "writer-1",
+				ProvenanceRef:       "prov-1",
+				ProvenanceVerified:  true,
 			},
 		},
 	}

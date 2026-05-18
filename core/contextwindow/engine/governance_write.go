@@ -90,9 +90,10 @@ func isSharedWriteKind(k pb.MemoryWriteKind) bool {
 // the tenant prefix encoded in MemoryId / TargetAgentId, when those
 // carry one. Memory IDs in Cordum are namespaced as
 // "<tenant>/<memory-id>" by gateway convention; target_agent_id may
-// follow the same shape. An empty TenantId on the request is treated
-// as "no claim made" and skipped — the gateway is responsible for
-// populating TenantId on the wire when shared writes are intended.
+// follow the same shape. An empty TenantId is allowed only for
+// private/non-mutating bootstrap-compatible writes; shared
+// policy/trust/directive writes and PolicyStateMutation requests
+// require an explicit tenant claim.
 func checkTenantConsistency(req *pb.UpdateMemoryRequest) error {
 	tenant := strings.TrimSpace(req.GetTenantId())
 	memPrefix, memOK := tenantPrefix(req.GetMemoryId())
@@ -103,6 +104,9 @@ func checkTenantConsistency(req *pb.UpdateMemoryRequest) error {
 		// shared-mutating write that bypasses gateway tenant injection
 		// could target memories owned by another tenant.
 		if memOK || targetOK {
+			return ErrSharedWriteTenantMismatch
+		}
+		if isSharedWriteKind(req.GetWriteKind()) || req.GetPolicyStateMutation() {
 			return ErrSharedWriteTenantMismatch
 		}
 		return nil
