@@ -62,7 +62,7 @@ func TestPolicyEvaluate_RetryIdempotent(t *testing.T) {
 	}
 	deps := newToolCallDepsFixture(pipeline, emitter, &fakeArtifactStore{})
 	deps.Upstream = upstream
-	deps.DedupeState = &sync.Map{}
+	deps.DedupeState = NewInProcessDedupeStore()
 	// Deliberately do NOT set deps.EventIDFactory — use the production
 	// defaultEventIDFactory (random per call). The fix is what makes
 	// dedupe still hit despite the random factory.
@@ -111,7 +111,7 @@ func TestPolicyEvaluate_ConcurrentRace(t *testing.T) {
 		ArtifactStore: &fakeArtifactStore{},
 		Upstream:      upstream,
 		Clock:         func() time.Time { return time.Date(2026, 5, 15, 17, 0, 0, 0, time.UTC) },
-		DedupeState:   &sync.Map{},
+		DedupeState:   NewInProcessDedupeStore(),
 	}
 
 	ctx := newAuthedToolCallCtx()

@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+#### core/mcp — Cross-process MCP retry-dedupe via Redis SETNX (2026-05-18, task-4e5d34d2)
+
+- `core/mcp/dedupe_store.go` (new) introduces the `DedupeStore` interface (`LoadOrStore`/`Store`/`Delete`) plus `NewInProcessDedupeStore()` (sync.Map-backed default) and public constants `MCPDedupeKeyPrefix = "mcp:dedupe:"` + `MCPDedupeTTL = 10m`. `core/mcp/dedupe_redis.go` (new) adds `RedisDedupeStore` (SET NX EX MCPDedupeTTL winner-selection, GET decode on NX-miss, in-process fail-soft on any Redis error per taskRail #3) and `SelectDedupeStore(hint, client)` honoring `CORDUM_MCP_DEDUPE_BACKEND={redis,memory}` (defaults to Redis when client wired, in-process otherwise; unknown values fall back to in-process without panic). `ToolCallDeps.DedupeState` type changed from `*sync.Map` to `DedupeStore`; `dedupeBegin`/`dedupeFinish` now handle both backends with a 50ms poll + MCPDedupeTTL deadline-breaker on the Redis loser path. `core/controlplane/gateway/mcp_policy_wire.go` passes `s.jobStore.Client()` into `BuildMCPPolicyDeps` so multi-instance HA gateway deployments collapse identical retries across instances; today's single-instance gateway keeps in-process semantics. Test coverage: `core/mcp/dedupe_redis_test.go` (6 tests including TestRedisDedupeStore_CrossProcessCollapses), `core/mcp/policy_evaluate_dedupe_inprocess_test.go` (4 tests including error-delete + ctx-cancel waiter contracts), `core/controlplane/gateway/mcp_policy_wire_dedupe_backend_test.go` (5 backend-selection tests).
+
 ### Fixed
 
 #### PR #276 code-cleanup bundle — multi-signal dedup cap + sanitizeUpstreamError signature (2026-05-17, task-513e3c1b)

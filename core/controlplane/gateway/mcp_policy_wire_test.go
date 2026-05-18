@@ -263,7 +263,7 @@ func (fakeMCPArtifactStore) Put(_ context.Context, _ mcp.ArtifactPutRequest) (*e
 // ALLOW.
 func TestBuildMCPPolicyDeps_FailsClosedOnNilPipeline(t *testing.T) {
 	t.Parallel()
-	deps := BuildMCPPolicyDeps(nil, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, fakeMCPArtifactStore{})
+	deps := BuildMCPPolicyDeps(nil, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, fakeMCPArtifactStore{}, nil)
 	assertZeroToolCallDeps(t, deps, "nil pipeline")
 }
 
@@ -273,7 +273,7 @@ func TestBuildMCPPolicyDeps_FailsClosedOnNilPipeline(t *testing.T) {
 // the boot log claimed the gate was active.
 func TestBuildMCPPolicyDeps_FailsClosedOnNilEmitter(t *testing.T) {
 	t.Parallel()
-	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, &gatewayApprovalGate{}, nil, fakeMCPArtifactStore{})
+	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, &gatewayApprovalGate{}, nil, fakeMCPArtifactStore{}, nil)
 	assertZeroToolCallDeps(t, deps, "nil emitter")
 }
 
@@ -283,7 +283,7 @@ func TestBuildMCPPolicyDeps_FailsClosedOnNilEmitter(t *testing.T) {
 // time with -32603 on every tools/call instead of one boot-time signal.
 func TestBuildMCPPolicyDeps_FailsClosedOnNilArtifactStore(t *testing.T) {
 	t.Parallel()
-	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, nil)
+	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, nil, nil)
 	assertZeroToolCallDeps(t, deps, "nil artifact store")
 }
 
@@ -295,7 +295,7 @@ func TestBuildMCPPolicyDeps_FailsClosedOnNilArtifactStore(t *testing.T) {
 func TestBuildMCPPolicyDeps_WiresAllDepsWhenComplete(t *testing.T) {
 	t.Parallel()
 	pipeline := &actiongates.Pipeline{}
-	deps := BuildMCPPolicyDeps(pipeline, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, fakeMCPArtifactStore{})
+	deps := BuildMCPPolicyDeps(pipeline, &gatewayApprovalGate{}, fakeMCPEventEmitter{}, fakeMCPArtifactStore{}, nil)
 	if deps.Pipeline == nil {
 		t.Fatal("deps.Pipeline nil; want policyDispatcherAdapter wrapping the supplied pipeline")
 	}
@@ -324,7 +324,7 @@ func TestBuildMCPPolicyDeps_WiresAllDepsWhenComplete(t *testing.T) {
 // remain mandatory.
 func TestBuildMCPPolicyDeps_NilGateStillWires(t *testing.T) {
 	t.Parallel()
-	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, nil, fakeMCPEventEmitter{}, fakeMCPArtifactStore{})
+	deps := BuildMCPPolicyDeps(&actiongates.Pipeline{}, nil, fakeMCPEventEmitter{}, fakeMCPArtifactStore{}, nil)
 	if deps.Pipeline == nil {
 		t.Fatal("nil gate must not zero the deps; want pipeline wired")
 	}

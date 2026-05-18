@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cordum/cordum/core/edge"
@@ -271,11 +270,12 @@ type ToolCallDeps struct {
 	Clock           func() time.Time
 	EventIDFactory  func() string
 	// DedupeState scopes retry dedupe to a single caller (HTTP server,
-	// test fixture) instead of a global map. Production wires this to a
-	// per-server map keyed by (server, tool, EventID); tests inject a
-	// fresh map per fixture so -count=3 re-runs see a clean state. A
-	// nil map disables retry dedupe.
-	DedupeState *sync.Map
+	// test fixture) instead of a global map. Production wires this to
+	// either a NewInProcessDedupeStore (single-instance gateway) or a
+	// NewRedisDedupeStore (multi-instance HA behind a load balancer).
+	// Tests inject a fresh in-process store per fixture so -count=3
+	// re-runs see a clean state. A nil store disables retry dedupe.
+	DedupeState DedupeStore
 }
 
 // EvaluateToolCallResult bundles the artifacts a caller might want
@@ -765,7 +765,7 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 	// not stashed; dedupeBegin then short-circuits and EvaluateToolCall
 	// surfaces the real missing_mcp_metadata error below.
 	dedupeID := semanticDedupeKeyForCall(ctx, params, server)
-	myEntry, won, hit := dedupeBegin(ctx, deps, dedupeID)
+	winner, hit := dedupeBegin(ctx, deps, dedupeID)
 	if hit != nil {
 		return hit.result, hit.err
 	}
@@ -776,9 +776,9 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 		finalResult *ToolCallResult
 		finalErr    error
 	)
-	if won {
+	if winner != nil {
 		defer func() {
-			dedupeFinish(deps, dedupeID, myEntry, finalResult, finalErr)
+			dedupeFinish(deps, dedupeID, winner, finalResult, finalErr)
 		}()
 	}
 	evalResult, err := EvaluateToolCall(ctx, deps, params, server)
@@ -996,58 +996,232 @@ func semanticDedupeKeyForCall(ctx context.Context, params ToolCallParams, server
 	return computeSemanticDedupeKey(meta.Tenant, server, params.Name, actionHash, meta.SessionID, meta.ExecutionID, meta.Principal)
 }
 
-// dedupeBegin reserves the singleflight slot for the supplied semantic
-// dedupe key. Three returns:
+// dedupeOutcome bundles the cached result a loser observes when the
+// dedupe entry was already completed by another caller. Mirrors the
+// (result, err) pair dedupeFinish published for the winner.
+type dedupeOutcome struct {
+	result *ToolCallResult
+	err    error
+}
+
+// dedupeWinner carries per-backend state dedupeFinish needs to publish
+// the completed outcome. The caller treats this as opaque — the only
+// thing that matters at the call site is "did we win?" (winner != nil)
+// and "do we have a cached hit?" (handled by the outcome return).
 //
-//   - (entry, true, _)  caller is the winner; runs the body, then MUST
+// Exactly one of inProcessEntry / redisBacked is non-zero per backend
+// type. A winner from the in-process backend holds the *dedupeEntry
+// whose done channel must be closed when finishing; a Redis-backed
+// winner publishes a completed wire record (or deletes on error).
+type dedupeWinner struct {
+	inProcessEntry *dedupeEntry
+	redisBacked    bool
+}
+
+// dedupeBegin reserves the singleflight slot for the supplied semantic
+// dedupe key. Two returns:
+//
+//   - (winner, nil)   caller is the winner; runs the body, then MUST
 //     call dedupeFinish so waiters unblock and the cache fills (or
 //     clears, on error).
-//   - (_, false, hit)   caller observed an already-completed entry;
-//     short-circuits with hit.result / hit.err.
-//   - (_, false, nil)   dedupe is disabled (no state or empty key).
+//   - (nil, outcome)  caller observed an already-completed entry;
+//     short-circuits with outcome.result / outcome.err.
+//   - (nil, nil)      dedupe is disabled (no state or empty key).
 //
-// When LoadOrStore returns loaded=true but the existing entry is still
-// in flight (done not yet closed), the function blocks on done before
-// returning. Ctx cancellation surfaces as ctx.Err() so a SIGTERM-bound
-// caller doesn't get stuck waiting for a peer's upstream call.
-func dedupeBegin(ctx context.Context, deps ToolCallDeps, key string) (*dedupeEntry, bool, *dedupeEntry) {
+// In-process: a loser blocks on the winner's done channel until the
+// winner closes it. Ctx cancellation surfaces as ctx.Err() so a
+// SIGTERM-bound caller doesn't get stuck waiting for a peer.
+//
+// Redis-backed: a loser observing a pending wire record polls every
+// redisDedupePollInterval (default 50ms) until one of: the record
+// transitions to completed (short-circuit), the key is deleted by the
+// winner's error path (become the new winner), the TTL elapses
+// (become the new winner — deadlock-breaker), or ctx is cancelled.
+func dedupeBegin(ctx context.Context, deps ToolCallDeps, key string) (*dedupeWinner, *dedupeOutcome) {
 	if deps.DedupeState == nil || key == "" {
-		return nil, false, nil
+		return nil, nil
 	}
-	fresh := &dedupeEntry{done: make(chan struct{})}
+	_, isRedis := deps.DedupeState.(*RedisDedupeStore)
+	fresh := newPendingDedupeValue(isRedis)
 	existing, loaded := deps.DedupeState.LoadOrStore(key, fresh)
 	if !loaded {
-		return fresh, true, nil
+		return makeWinner(fresh, isRedis), nil
 	}
-	e, ok := existing.(*dedupeEntry)
-	if !ok {
-		// Defensive: malformed entry from a stale serialization path.
-		// Treat as if we won the slot; overwrite under our key.
+	switch e := existing.(type) {
+	case *dedupeEntry:
+		select {
+		case <-e.done:
+			return nil, &dedupeOutcome{result: e.result, err: e.err}
+		case <-ctx.Done():
+			return nil, &dedupeOutcome{err: ctx.Err()}
+		}
+	case *redisDedupeRecord:
+		if e.State == redisDedupeStateCompleted {
+			return nil, decodeRedisCompletedOutcome(e)
+		}
+		return waitForRedisDedupe(ctx, deps.DedupeState, key)
+	default:
+		// Defensive: a malformed wire value cannot be safely waited on.
+		// Overwrite under our key and proceed as the winner; the new
+		// caller's dedupeFinish will publish the canonical record.
 		deps.DedupeState.Store(key, fresh)
-		return fresh, true, nil
+		return makeWinner(fresh, isRedis), nil
 	}
-	select {
-	case <-e.done:
-		return nil, false, e
-	case <-ctx.Done():
-		// Don't synthesize a fake hit on cancel — surface ctx.Err()
-		// via a dedicated entry so the caller propagates it.
-		return nil, false, &dedupeEntry{err: ctx.Err()}
+}
+
+// newPendingDedupeValue returns the value the winner-selection LoadOrStore
+// passes to the backing store. The two backends accept distinct wire
+// types so the loser-side type switch in dedupeBegin can dispatch on
+// the returned value without a second type-probe round trip.
+func newPendingDedupeValue(isRedis bool) any {
+	if isRedis {
+		return &redisDedupeRecord{State: redisDedupeStatePending}
+	}
+	return &dedupeEntry{done: make(chan struct{})}
+}
+
+// makeWinner promotes the pending value the caller submitted into the
+// opaque dedupeWinner handle dedupeFinish consumes.
+func makeWinner(fresh any, isRedis bool) *dedupeWinner {
+	if isRedis {
+		return &dedupeWinner{redisBacked: true}
+	}
+	entry, _ := fresh.(*dedupeEntry)
+	return &dedupeWinner{inProcessEntry: entry}
+}
+
+// decodeRedisCompletedOutcome reconstructs the *ToolCallResult a loser
+// short-circuits with from the JSON wire record the winner published.
+// A decode error degrades to "no cached result, no error" so the caller
+// will re-emit upstream rather than reading garbage — better to lose
+// the dedupe optimization on one row than to corrupt a tool response.
+func decodeRedisCompletedOutcome(rec *redisDedupeRecord) *dedupeOutcome {
+	if rec == nil {
+		return &dedupeOutcome{}
+	}
+	out := &dedupeOutcome{}
+	if rec.ErrorMsg != "" {
+		out.err = errors.New(rec.ErrorMsg)
+	}
+	if len(rec.ResultJSON) == 0 {
+		return out
+	}
+	var result ToolCallResult
+	if err := json.Unmarshal(rec.ResultJSON, &result); err != nil {
+		return out
+	}
+	out.result = &result
+	return out
+}
+
+// waitForRedisDedupe is the Redis-backed loser polling loop. Per the
+// task plan's step 6 contract: poll every redisDedupePollInterval,
+// respect ctx.Done(), stop when the entry becomes completed/deleted,
+// and rely on MCPDedupeTTL as the deadlock breaker.
+//
+// Termination outcomes:
+//   - loser observes completed wire record  → short-circuit with cached
+//   - loser observes a deleted key (winner errored)  → become new winner
+//   - loser observes an expired key (Redis TTL)  → become new winner
+//   - ctx cancelled  → outcome carrying ctx.Err()
+//
+// The maximum total wait is MCPDedupeTTL: a degenerate Redis with TTL
+// not honored is still bounded because the polling loop checks the
+// elapsed clock against the TTL ceiling on every tick.
+func waitForRedisDedupe(ctx context.Context, store DedupeStore, key string) (*dedupeWinner, *dedupeOutcome) {
+	ticker := time.NewTicker(redisDedupePollInterval)
+	defer ticker.Stop()
+	deadline := time.NewTimer(MCPDedupeTTL)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, &dedupeOutcome{err: ctx.Err()}
+		case <-deadline.C:
+			// Deadline-breaker: TTL elapsed without resolution. Race-
+			// safe final check before stealing the slot — a winner
+			// that published a completed record in the last polling
+			// interval should still short-circuit the loser. Only
+			// force-take when the slot is still pending (the genuine
+			// crashed-winner case).
+			fresh := newPendingDedupeValue(true)
+			existing, loaded := store.LoadOrStore(key, fresh)
+			if !loaded {
+				return makeWinner(existing, true), nil
+			}
+			if rec, ok := existing.(*redisDedupeRecord); ok && rec.State == redisDedupeStateCompleted {
+				return nil, decodeRedisCompletedOutcome(rec)
+			}
+			store.Store(key, fresh)
+			return makeWinner(fresh, true), nil
+		case <-ticker.C:
+			again, stillLoaded := store.LoadOrStore(key, newPendingDedupeValue(true))
+			if !stillLoaded {
+				// Key was deleted or expired — our pending write won;
+				// proceed as the new winner.
+				return makeWinner(again, true), nil
+			}
+			rec, ok := again.(*redisDedupeRecord)
+			if !ok {
+				continue
+			}
+			if rec.State == redisDedupeStateCompleted {
+				return nil, decodeRedisCompletedOutcome(rec)
+			}
+			// Still pending — keep polling.
+		}
 	}
 }
 
 // dedupeFinish publishes the outcome for the singleflight winner. On
-// success (err == nil) the entry stays in the map so subsequent retries
-// short-circuit. On error the entry is removed so the next attempt
-// fires upstream fresh — transient failures must not become sticky.
-func dedupeFinish(deps ToolCallDeps, key string, entry *dedupeEntry, result *ToolCallResult, err error) {
-	if entry == nil || entry.done == nil {
+// success (err == nil) the entry stays in the store so subsequent
+// retries short-circuit. On error the entry is removed so the next
+// attempt fires upstream fresh — transient failures must not become
+// sticky.
+//
+// In-process: closes the winner's done channel after stashing result/
+// err so waiters unblock with the right outcome.
+//
+// Redis-backed: writes a completed wire record (re-applying
+// MCPDedupeTTL) on success, deletes the key on error. Oversized or
+// unserializable results are dropped from the cache (delete-on-error
+// fallback) so we never persist a multi-MB row.
+func dedupeFinish(deps ToolCallDeps, key string, winner *dedupeWinner, result *ToolCallResult, err error) {
+	if winner == nil {
 		return
 	}
-	entry.result = result
-	entry.err = err
-	close(entry.done)
-	if err != nil && deps.DedupeState != nil && key != "" {
-		deps.DedupeState.Delete(key)
+	if winner.inProcessEntry != nil {
+		entry := winner.inProcessEntry
+		if entry.done == nil {
+			return
+		}
+		entry.result = result
+		entry.err = err
+		close(entry.done)
+		if err != nil && deps.DedupeState != nil && key != "" {
+			deps.DedupeState.Delete(key)
+		}
+		return
+	}
+	if winner.redisBacked {
+		if deps.DedupeState == nil || key == "" {
+			return
+		}
+		if err != nil {
+			deps.DedupeState.Delete(key)
+			return
+		}
+		resultJSON, marshalErr := json.Marshal(result)
+		if marshalErr != nil || len(resultJSON) > maxRedisDedupeRecordBytes {
+			// Cannot persist a usable completed record cross-process;
+			// delete so subsequent retries fire fresh upstream rather
+			// than block on a pending record that will never resolve.
+			deps.DedupeState.Delete(key)
+			return
+		}
+		deps.DedupeState.Store(key, &redisDedupeRecord{
+			State:      redisDedupeStateCompleted,
+			ResultJSON: resultJSON,
+		})
 	}
 }

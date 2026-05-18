@@ -6,7 +6,6 @@ import (
 	"errors"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/cordum/cordum/core/edge"
@@ -149,7 +148,7 @@ func TestInvokeToolWithPolicy_DedupesRetryDoubleEmit(t *testing.T) {
 	deps.Upstream = upstream
 	// Force a stable EventID so the dedupe key is identical across calls.
 	deps.EventIDFactory = func() string { return "evt_stable" }
-	deps.DedupeState = &sync.Map{}
+	deps.DedupeState = NewInProcessDedupeStore()
 	ctx := newAuthedToolCallCtx()
 	params := ToolCallParams{
 		Name:      "fs.read_file",

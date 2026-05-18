@@ -11,6 +11,7 @@ import (
 	"github.com/cordum/cordum/core/edge"
 	"github.com/cordum/cordum/core/infra/artifacts"
 	"github.com/cordum/cordum/core/mcp"
+	"github.com/redis/go-redis/v9"
 )
 
 // mcpPolicyServerName is the logical MCP server identifier the gateway
@@ -134,7 +135,11 @@ func (s *server) attachMCPPolicyDeps(mcpServer *mcp.MCPServer, gate *gatewayAppr
 	}
 	emitter := edgeStoreEventEmitter{store: s.edgeStore}
 	artifactStore := productionArtifactStore{store: s.artifactStore}
-	policyDeps := BuildMCPPolicyDeps(s.actionGatePipeline, gate, emitter, artifactStore)
+	var redisClient redis.Cmdable
+	if s.jobStore != nil {
+		redisClient = s.jobStore.Client()
+	}
+	policyDeps := BuildMCPPolicyDeps(s.actionGatePipeline, gate, emitter, artifactStore, redisClient)
 	mcpServer = mcpServer.WithPolicyGate(mcpPolicyServerName, policyDeps)
 
 	mcpServer = mcpServer.WithApprovalHold(mcp.ApprovalHoldDeps{

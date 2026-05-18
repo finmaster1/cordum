@@ -3,13 +3,14 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
-	"sync"
 
 	"github.com/cordum/cordum/core/edge"
 	"github.com/cordum/cordum/core/infra/config"
 	"github.com/cordum/cordum/core/mcp"
 	"github.com/cordum/cordum/core/policy/actiongates"
+	"github.com/redis/go-redis/v9"
 )
 
 // legacyMCPApprovalArgsHashZero is the 64-character zero-hex placeholder
@@ -242,7 +243,13 @@ func (g *gatewayApprovalGate) mintEdgeApprovalForActionGate(ctx context.Context,
 // EvaluateToolCall path skips the REQUIRE_HUMAN handoff branch in
 // that case. Pipeline/emitter/store are mandatory because their nil
 // branches would produce a silently-degraded gate.
-func BuildMCPPolicyDeps(pipeline *actiongates.Pipeline, gate *gatewayApprovalGate, emitter mcp.EventEmitter, store mcp.ArtifactStore) mcp.ToolCallDeps {
+//
+// redisClient is the shared go-redis client owned by the gateway's
+// JobStore — passed in here rather than re-dialled so cross-process
+// dedupe reuses the existing connection pool (epic rail #3: no
+// parallel subsystems). A nil client forces the in-process backend
+// regardless of env-var override.
+func BuildMCPPolicyDeps(pipeline *actiongates.Pipeline, gate *gatewayApprovalGate, emitter mcp.EventEmitter, store mcp.ArtifactStore, redisClient redis.Cmdable) mcp.ToolCallDeps {
 	if pipeline == nil || emitter == nil || store == nil {
 		return mcp.ToolCallDeps{}
 	}
@@ -252,14 +259,12 @@ func BuildMCPPolicyDeps(pipeline *actiongates.Pipeline, gate *gatewayApprovalGat
 		ArtifactStore:   store,
 		ApprovalHandoff: gate,
 		Redactor:        mcp.DefaultRedactor(),
-		// In-process singleflight for retry dedupe. The semantic key
-		// (tenant, server, tool, action_hash, session, execution,
-		// principal) collapses idempotent retries of the same MCP tool
-		// call into a single pre/post pair so audit rows don't double
-		// when a client retries on transient transport failure. The
-		// sync.Map is scoped to this gateway instance — cross-process
-		// dedupe (multi-instance HA) is tracked as a follow-up Sub-B
-		// item; today's gateway is single-instance per deployment unit.
-		DedupeState: &sync.Map{},
+		// Backend selection per mcp.SelectDedupeStore matrix: unset
+		// env var defaults to Redis when the shared client is
+		// available (cross-process collapse across multi-instance HA),
+		// memory otherwise. Operators can pin a specific backend via
+		// CORDUM_MCP_DEDUPE_BACKEND={redis,memory}; unknown values
+		// degrade to memory without panicking the boot.
+		DedupeState: mcp.SelectDedupeStore(os.Getenv(mcp.DedupeBackendEnvVar), redisClient),
 	}
 }
