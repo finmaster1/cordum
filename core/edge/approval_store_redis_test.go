@@ -1829,6 +1829,79 @@ func TestGetApprovalsByActionHash_AppliesAuditLimit(t *testing.T) {
 	}
 }
 
+func TestApprovalActionHash_ZSetGrowthIsBounded(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 16, 9, 0, 0, 0, time.UTC)
+	now := base
+	store, client, _, cleanup := newRedisEdgeStore(t, WithClock(func() time.Time { return now }))
+	defer cleanup()
+
+	tenant := "tenant-action-hash-bound"
+	otherTenant := "tenant-action-hash-other"
+	sharedHash := "sha256:hot-action-bounded"
+	const overflow = 25
+	total := maxApprovalActionHashMembers + overflow
+	refs := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		refs = append(refs, enqueueRejectedApprovalForHash(t, ctx, store, &now, base, tenant, sharedHash, i))
+	}
+
+	key := edgeApprovalActionHashIndexKey(tenant, sharedHash)
+	memberCount, err := client.ZCard(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("ZCard action-hash index: %v", err)
+	}
+	if memberCount > int64(maxApprovalActionHashMembers) {
+		t.Fatalf("action-hash index has %d members, want <= %d", memberCount, maxApprovalActionHashMembers)
+	}
+	members, err := client.ZRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		t.Fatalf("ZRange action-hash index: %v", err)
+	}
+	if len(members) != maxApprovalActionHashMembers {
+		t.Fatalf("action-hash member len = %d, want %d", len(members), maxApprovalActionHashMembers)
+	}
+	if members[0] != refs[overflow] || members[len(members)-1] != refs[len(refs)-1] {
+		t.Fatalf("retained refs = first:%q last:%q, want first:%q last:%q", members[0], members[len(members)-1], refs[overflow], refs[len(refs)-1])
+	}
+	old, ok, err := store.GetApproval(ctx, tenant, refs[0])
+	if err != nil || !ok || old == nil || old.Status != ApprovalStatusRejected {
+		t.Fatalf("trimmed index member primary record = (%#v,%v,%v), want rejected approval retained", old, ok, err)
+	}
+	otherRef := enqueueRejectedApprovalForHash(t, ctx, store, &now, base, otherTenant, sharedHash, total+1)
+	otherMembers, err := client.ZRange(ctx, edgeApprovalActionHashIndexKey(otherTenant, sharedHash), 0, -1).Result()
+	if err != nil || !reflect.DeepEqual(otherMembers, []string{otherRef}) {
+		t.Fatalf("other-tenant action-hash members = %#v, %v; want only %q", otherMembers, err, otherRef)
+	}
+}
+
+func enqueueRejectedApprovalForHash(t *testing.T, ctx context.Context, store *RedisStore, now *time.Time, base time.Time, tenantID, actionHash string, index int) string {
+	t.Helper()
+	*now = base.Add(time.Duration(index) * time.Second)
+	suffix := fmt.Sprintf("%04d", index)
+	sessionID := "sess-bound-" + suffix
+	executionID := "exec-bound-" + suffix
+	eventID := "event-bound-" + suffix
+	createApprovalParents(t, ctx, store, tenantID, sessionID, executionID, eventID, *now)
+	req := validApprovalRequest(tenantID, sessionID, executionID, eventID, *now)
+	req.ActionHash = actionHash
+	approval, err := store.EnqueueApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("EnqueueApproval %d: %v", index, err)
+	}
+	if _, err := store.RejectApproval(ctx, ApprovalResolution{
+		TenantID:    tenantID,
+		ApprovalRef: approval.ApprovalRef,
+		ResolverID:  "reviewer-action-hash",
+		ResolvedBy:  "reviewer@example.invalid",
+		Reason:      "deny after indexing for retention test",
+		ResolvedAt:  now.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RejectApproval %d: %v", index, err)
+	}
+	return approval.ApprovalRef
+}
+
 // TestLookupByActionHash_FastPathSemanticsDocumented asserts the
 // fast-path semantics added by task-69d1f82b: LookupByActionHash now
 // scans at most maxApprovalsByActionHashLookup = 64 most-recent entries.

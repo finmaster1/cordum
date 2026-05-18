@@ -154,7 +154,9 @@ func (s *RedisStore) EnqueueApproval(ctx context.Context, req EdgeApprovalReques
 			// scanning per-principal lists. Skipped when ActionHash is
 			// empty (legacy callers that did not bind a hash).
 			if strings.TrimSpace(req.ActionHash) != "" {
-				pipe.ZAdd(ctx, edgeApprovalActionHashIndexKey(req.TenantID, req.ActionHash), redis.Z{Score: score, Member: ref})
+				actionHashKey := edgeApprovalActionHashIndexKey(req.TenantID, req.ActionHash)
+				pipe.ZAdd(ctx, actionHashKey, redis.Z{Score: score, Member: ref})
+				pipe.ZRemRangeByRank(ctx, actionHashKey, 0, -int64(maxApprovalActionHashMembers+1))
 			}
 			return nil
 		})
@@ -211,9 +213,15 @@ func (s *RedisStore) GetApproval(ctx context.Context, tenantID, approvalRef stri
 //     REQUIRE_HUMAN — fail-closed by design. An attacker burying an
 //     old APPROVED grant under >64 fresh PENDING records cannot
 //     silently land the call using the stale grant.
+//
+// maxApprovalActionHashMembers bounds the physical Redis ZSET hot key
+// itself. It intentionally stays above both read windows so recent audit/UI
+// and gate semantics are unchanged, while older refs remain available via
+// direct approval ref lookup and the independent audit/event pipeline.
 const (
 	maxApprovalsByActionHashAudit  = 256
 	maxApprovalsByActionHashLookup = 64
+	maxApprovalActionHashMembers   = 1000
 )
 
 // listApprovalsByActionHash returns up to `limit` approvals for
