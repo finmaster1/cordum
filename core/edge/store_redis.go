@@ -79,8 +79,9 @@ type RedisStore struct {
 	// approvalMaxTTL caps the per-approval ExpiresAt at hold-creation. A
 	// caller-supplied ExpiresAt longer than (createdAt + approvalMaxTTL) is
 	// clipped to that ceiling so a malicious or buggy caller cannot park
-	// an approval indefinitely. Zero (unset) preserves the legacy
-	// unclipped behaviour; EDGE-103 sets it via WithApprovalMaxTTL.
+	// an approval indefinitely. The constructor defaults this to
+	// DefaultApprovalMaxTTL; WithApprovalMaxTTL can only replace it with a
+	// positive override.
 	approvalMaxTTL time.Duration
 }
 
@@ -120,6 +121,7 @@ func NewRedisStoreFromClient(client redis.UniversalClient, opts ...StoreOption) 
 		idempotencyTTL:           defaultIdempotencyTTL,
 		maxIdempotencyReplayBody: defaultMaxIdempotencyReplayBody,
 		recorder:                 NewNoopRecorder(),
+		approvalMaxTTL:           DefaultApprovalMaxTTL,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -221,7 +223,9 @@ func WithRecorder(r Recorder) StoreOption {
 // A caller-supplied ExpiresAt longer than (createdAt + max) is clipped
 // to that ceiling so a malicious or buggy caller cannot park an
 // approval indefinitely. EDGE-103 wires this from cfg.Edge.ApprovalMaxTTL.
-// A non-positive value disables clipping (legacy behaviour).
+// A non-positive value is ignored so callers cannot disable the constructor's
+// default cap through this option; operator-facing config rejects such values
+// before store construction.
 func WithApprovalMaxTTL(max time.Duration) StoreOption {
 	return func(s *RedisStore) {
 		if max > 0 {

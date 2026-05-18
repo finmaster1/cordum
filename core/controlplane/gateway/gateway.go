@@ -109,6 +109,7 @@ const (
 	envGRPCServerEnforcementMinTime = "CORDUM_GRPC_SERVER_ENFORCEMENT_MIN_TIME"
 	envEdgeSessionRetentionTTL      = "CORDUM_EDGE_SESSION_RETENTION_TTL"
 	envEdgeSessionSweepInterval     = "CORDUM_EDGE_SESSION_SWEEP_INTERVAL"
+	envEdgeApprovalMaxTTL           = "CORDUM_EDGE_APPROVAL_MAX_TTL"
 )
 
 var (
@@ -337,6 +338,10 @@ func edgeSessionRetentionTTLFromEnv() (time.Duration, error) {
 
 func edgeSessionSweepIntervalFromEnv() (time.Duration, error) {
 	return positiveDurationFromEnv(envEdgeSessionSweepInterval, edgecore.DefaultSessionSweepInterval)
+}
+
+func edgeApprovalMaxTTLFromEnv() (time.Duration, error) {
+	return positiveDurationFromEnv(envEdgeApprovalMaxTTL, edgecore.DefaultApprovalMaxTTL)
 }
 
 func positiveDurationFromEnv(key string, fallback time.Duration) (time.Duration, error) {
@@ -656,7 +661,15 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 	if err != nil {
 		return err
 	}
-	edgeStore := edgecore.NewRedisStoreFromClient(jobStore.Client(), edgecore.WithRecorder(edgeRecorder))
+	edgeApprovalMaxTTL, err := edgeApprovalMaxTTLFromEnv()
+	if err != nil {
+		return err
+	}
+	edgeStore := edgecore.NewRedisStoreFromClient(
+		jobStore.Client(),
+		edgecore.WithRecorder(edgeRecorder),
+		edgecore.WithApprovalMaxTTL(edgeApprovalMaxTTL),
+	)
 	// EDGE-141 — Shadow finding store shares the existing Redis client; it
 	// does NOT own connection lifecycle. nil-safe: NewRedisStore returns
 	// nil when the client is nil so unit-test gateways without Redis

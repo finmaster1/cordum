@@ -70,10 +70,13 @@ func TestGatewayEdgeApprovalResolveEmitsAuditEvent(t *testing.T) {
 
 func TestGatewayEdgeApprovalRejectsSelfApproval(t *testing.T) {
 	s, handler := newEdgeRouteTestServer(t)
+	sink := &testAuditSender{}
+	s.auditExporter = sink
 
 	for _, action := range []string{"approve", "reject"} {
 		t.Run(action, func(t *testing.T) {
 			approval := seedGatewayEdgeApproval(t, s, edgeRouteTenant, "principal-edge-a", "self-"+action)
+			beforeAudits := sink.Len()
 			rr := edgeApprovalRoutePOSTAs(t, handler, edgeRouteTestAPIKey,
 				"/api/v1/edge/approvals/"+approval.ApprovalRef+"/"+action,
 				`{"reason":"resolve myself"}`)
@@ -85,6 +88,8 @@ func TestGatewayEdgeApprovalRejectsSelfApproval(t *testing.T) {
 			if body["code"] != "self_approval_denied" {
 				t.Fatalf("self %s code = %#v, want self_approval_denied body=%s", action, body["code"], rr.Body.String())
 			}
+			assertBodyOmits(t, rr.Body.String(), "principal-edge-a")
+			assertSelfApprovalAuditEvent(t, sink, beforeAudits, approval.ApprovalRef, "caller_is_requester")
 			stored, ok, err := s.edgeStore.GetApproval(context.Background(), edgeRouteTenant, approval.ApprovalRef)
 			if err != nil || !ok {
 				t.Fatalf("GetApproval after self-denied = (%#v,%v,%v)", stored, ok, err)
@@ -95,6 +100,36 @@ func TestGatewayEdgeApprovalRejectsSelfApproval(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertSelfApprovalAuditEvent(t *testing.T, sink *testAuditSender, start int, approvalRef, reasonCode string) audit.SIEMEvent {
+	t.Helper()
+	for i := start; i < sink.Len(); i++ {
+		ev := sink.Get(i)
+		if ev.EventType != audit.EventEdgeApprovalRejected || ev.Extra["conflict_kind"] != string(edgecore.ApprovalConflictKindSelfApproval) {
+			continue
+		}
+		if ev.Severity != audit.SeverityHigh || ev.Decision != "rejected" {
+			t.Fatalf("self-approval audit severity/decision = %q/%q, want high/rejected", ev.Severity, ev.Decision)
+		}
+		if ev.Extra["approval_ref"] != approvalRef || ev.Extra["reason_code"] != reasonCode {
+			t.Fatalf("self-approval audit extra = %#v, want ref=%q reason_code=%q", ev.Extra, approvalRef, reasonCode)
+		}
+		if strings.Contains(ev.Identity, "principal-edge-a") || strings.Contains(strings.Join(extraValues(ev.Extra), " "), "principal-edge-a") {
+			t.Fatalf("self-approval audit leaked raw caller principal: %#v", ev)
+		}
+		return ev
+	}
+	t.Fatalf("missing self-approval audit event after index %d for approval %q", start, approvalRef)
+	return audit.SIEMEvent{}
+}
+
+func extraValues(values map[string]string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, value)
+	}
+	return out
 }
 
 func TestGatewayEdgeApprovalStoresResolverOnApproval(t *testing.T) {

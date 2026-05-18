@@ -1669,17 +1669,14 @@ func TestApprovalConsumePolicySnapshotMismatch(t *testing.T) {
 	}
 }
 
-// TestApprovalConsumeRejectsSelfApprovalAtStore is a TDD RED test for the
-// store-level self-approval guard architect-cd323a16 mandated in EDGE-103
+// TestApprovalConsumeRejectsSelfApprovalAtStore pins the store-level
+// self-approval guard architect-cd323a16 mandated in EDGE-103
 // (comment-f1d377b1 section D — defense in depth at BOTH store and entry).
-// Today the MutationGate enforces requester != approver but the store does
-// not; if a refactor moves that check up out of MutationGate or bypasses it,
-// the store path silently allows self-consume. The intended fix is to
-// extend ApprovalClaimRequest with CallerAgentID and reject when the
-// caller matches approval.Requester or approval.ResolverID.
-//
-// Until that step-3 work lands this test FAILS — ClaimApproval will return
-// a non-nil approval with err=nil, instead of (nil,false,ErrApprovalConflict).
+// The gateway approve path enforces requester != approver; this store check
+// backs that up if a future refactor bypasses the entry-path guard. The store
+// must reject CallerAgentID == ResolverID. CallerAgentID == Requester is valid
+// for ordinary MCP retry semantics unless that same principal is also the
+// resolver/approver.
 func TestApprovalConsumeRejectsSelfApprovalAtStore(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 5, 15, 19, 5, 0, 0, time.UTC)
@@ -1706,11 +1703,9 @@ func TestApprovalConsumeRejectsSelfApprovalAtStore(t *testing.T) {
 		t.Fatalf("ApproveApproval: %v", err)
 	}
 
-	// Caller is the same principal as the requester+approver — store must
-	// recognize this as a self-approval attempt and refuse to consume.
-	// Architect amendment D: this is enforced via the new ApprovalClaimRequest
-	// CallerAgentID field + approvalClaimMatches check in step-3. The store
-	// owns the typed-error surface; the entry-path layer composes it.
+	// Caller is the same principal as the resolver/approver — store must
+	// recognize this as self-approval and refuse to consume. The store owns
+	// the typed-error surface; entry paths compose that into protocol/UI copy.
 	claimed, ok, err := store.ClaimApproval(ctx, ApprovalClaimRequest{
 		TenantID:       req.TenantID,
 		ApprovalRef:    approval.ApprovalRef,
@@ -1729,20 +1724,33 @@ func TestApprovalConsumeRejectsSelfApprovalAtStore(t *testing.T) {
 	}
 }
 
-// TestApprovalCreateClipsExpiresAtToConfiguredMaxTTL is a TDD RED test for
-// the ApprovalMaxTTL config field the architect's plan step-3 introduces.
-// When a caller supplies an ExpiresAt beyond the configured maximum, the
-// store MUST clip ExpiresAt to (createdAt + ApprovalMaxTTL) so a malicious
-// or buggy caller cannot park an approval indefinitely. The clip happens
-// AT CREATION; consume-time cannot extend.
-//
-// Step-3 wires `cfg.Edge.ApprovalMaxTTL` (default 30 min) + a store option
-// that propagates the cap. Until then this test FAILS — EnqueueApproval
-// stores the caller's 24-hour ExpiresAt unmodified.
+func TestApprovalCreateClipsExpiresAtToDefaultMaxTTL(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 15, 19, 5, 0, 0, time.UTC)
+	store, _, _, cleanup := newRedisEdgeStore(t, WithClock(func() time.Time { return base }))
+	defer cleanup()
+
+	createApprovalParents(t, ctx, store, "tenant-a", "sess-ttl-default", "exec-ttl-default", "event-ttl-default", base)
+	req := validApprovalRequest("tenant-a", "sess-ttl-default", "exec-ttl-default", "event-ttl-default", base)
+	req.ExpiresAt = base.Add(24 * time.Hour)
+	approval, err := store.EnqueueApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("EnqueueApproval: %v", err)
+	}
+	if approval.ExpiresAt == nil {
+		t.Fatalf("approval.ExpiresAt = nil; want clipped to default max %v after base", DefaultApprovalMaxTTL)
+	}
+	want := base.Add(DefaultApprovalMaxTTL)
+	if !approval.ExpiresAt.Equal(want) {
+		t.Fatalf("approval.ExpiresAt = %v; want %v (clipped to DefaultApprovalMaxTTL=%v)",
+			approval.ExpiresAt.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano), DefaultApprovalMaxTTL)
+	}
+}
+
 func TestApprovalCreateClipsExpiresAtToConfiguredMaxTTL(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 5, 15, 19, 10, 0, 0, time.UTC)
-	const maxTTL = 30 * time.Minute
+	const maxTTL = 10 * time.Minute
 	store, _, _, cleanup := newRedisEdgeStore(t,
 		WithClock(func() time.Time { return base }),
 		WithApprovalMaxTTL(maxTTL),

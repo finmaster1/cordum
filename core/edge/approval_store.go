@@ -10,7 +10,11 @@ import (
 )
 
 const (
-	ApprovalRefPrefix         = "edge_appr_"
+	ApprovalRefPrefix = "edge_appr_"
+	// DefaultApprovalMaxTTL is the production safety cap for an approval's
+	// hold-creation ExpiresAt. Operator overrides may shorten/lengthen this
+	// cap, but they must remain positive.
+	DefaultApprovalMaxTTL     = 30 * time.Minute
 	defaultApprovalTTL        = 5 * time.Minute
 	approvalRefRandomBytes    = 18
 	maxApprovalFieldBytes     = 2048

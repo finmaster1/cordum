@@ -943,9 +943,15 @@ func (s *server) consumeEdgeEvaluateApproval(ctx context.Context, store edgecore
 			InputHash:      strings.TrimSpace(event.InputHash),
 			PolicySnapshot: strings.TrimSpace(outcome.policySnapshot),
 			ConsumedAt:     time.Now().UTC(),
+			CallerAgentID:  strings.TrimSpace(event.PrincipalID),
 		})
 		if err != nil {
 			if errors.Is(err, edgecore.ErrApprovalConflict) {
+				var conflict *edgecore.ApprovalConflictError
+				if errors.As(err, &conflict) && conflict.Kind == edgecore.ApprovalConflictKindSelfApproval {
+					s.auditEdgeApprovalSelfApprovalDenied(tenantID, *approval, "caller_is_approver")
+					return edgeEvaluateRetryDeny(outcome, approvalRef, "approval self-approval denied; request a new approval"), nil
+				}
 				return edgeEvaluateRetryDeny(outcome, approvalRef, "approval action or policy snapshot mismatch; request a new approval"), nil
 			}
 			return outcome, err

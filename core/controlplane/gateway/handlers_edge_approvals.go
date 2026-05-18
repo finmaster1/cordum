@@ -140,6 +140,7 @@ func (s *server) handleResolveEdgeApproval(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if edgeApprovalRequesterMatchesResolver(existing, r) {
+		s.auditEdgeApprovalSelfApprovalDenied(tenantID, *existing, "caller_is_requester")
 		writeEdgeError(w, r, http.StatusForbidden, "self_approval_denied", "self-approval not permitted: the resolver cannot be the same principal as the approval requester", nil)
 		return
 	}
@@ -267,6 +268,21 @@ func (s *server) executeResolveEdgeApproval(r *http.Request, store edgecore.Stor
 		ContentType: "application/json",
 		Body:        body,
 	}, nil
+}
+
+func (s *server) auditEdgeApprovalSelfApprovalDenied(tenantID string, approval edgecore.EdgeApproval, reasonCode string) {
+	edgecore.SendSIEMEvent(s.auditExporter, edgecore.SIEMEventForApprovalResolved(
+		tenantID,
+		approval.ApprovalRef,
+		approval.RuleID,
+		"rejected",
+		"",
+		time.Now().UTC(),
+		map[string]string{
+			"conflict_kind": string(edgecore.ApprovalConflictKindSelfApproval),
+			"reason_code":   reasonCode,
+		},
+	))
 }
 
 func edgeApprovalListQueryFromRequest(r *http.Request, tenantID string) (edgecore.ListApprovalsQuery, error) {
