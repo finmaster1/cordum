@@ -50,6 +50,7 @@ const (
 	// read amplification vs. round-trips on dense filter combinations.
 	overScanFactor            = 3
 	createFindingMaxTxRetries = 5
+	transitionMaxTxRetries    = 5
 )
 
 // RedisStore is the production Store backed by the shared gateway Redis
@@ -633,7 +634,8 @@ func (s *RedisStore) listFindingsByMultiSignal(
 }
 
 // ResolveFinding applies the resolve lifecycle transition atomically:
-// the JSON write + status-index move happen inside a MULTI/EXEC block.
+// the watched JSON read, write, and status-index move happen inside the
+// Redis WATCH + MULTI/EXEC transition helper.
 func (s *RedisStore) ResolveFinding(ctx context.Context, tenantID, findingID string, req ResolveRequest) (*ShadowAgentFinding, error) {
 	return s.transitionFinding(ctx, tenantID, findingID, func(f *ShadowAgentFinding, now time.Time) error {
 		return applyResolve(f, req, now)
@@ -647,9 +649,8 @@ func (s *RedisStore) SuppressFinding(ctx context.Context, tenantID, findingID st
 	})
 }
 
-// transitionFinding centralises the optimistic-locking + index-move
-// dance shared by resolve/suppress. The mutate fn is the only
-// per-transition difference.
+// transitionFinding centralises the WATCH/CAS + index-move dance shared
+// by resolve/suppress. The mutate fn is the only per-transition difference.
 func (s *RedisStore) transitionFinding(
 	ctx context.Context,
 	tenantID, findingID string,
@@ -664,7 +665,35 @@ func (s *RedisStore) transitionFinding(
 		return nil, ErrNotFound
 	}
 	key := findingKey(findingID)
-	raw, err := s.client.Get(ctx, key).Bytes()
+	var updated *ShadowAgentFinding
+	for attempt := 0; attempt < transitionMaxTxRetries; attempt++ {
+		updated = nil
+		err := s.client.Watch(ctx, func(tx *redis.Tx) error {
+			next, err := s.transitionFindingWatched(ctx, tx, key, tenantID, findingID, mutate)
+			if err != nil {
+				return err
+			}
+			updated = next
+			return nil
+		}, key)
+		if err == nil {
+			return updated, nil
+		}
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("%w: concurrent transition retry exhausted for %s", ErrTerminalConflict, findingID)
+}
+
+func (s *RedisStore) transitionFindingWatched(
+	ctx context.Context,
+	tx *redis.Tx,
+	key, tenantID, findingID string,
+	mutate func(*ShadowAgentFinding, time.Time) error,
+) (*ShadowAgentFinding, error) {
+	raw, err := tx.Get(ctx, key).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil, ErrNotFound
@@ -687,30 +716,39 @@ func (s *RedisStore) transitionFinding(
 	if err != nil {
 		return nil, fmt.Errorf("shadow finding: marshal: %w", err)
 	}
-	score := float64(f.CreatedAt.UnixMilli())
-
-	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, key, payload, 0)
-	if prevStatus != f.Status {
-		pipe.ZRem(ctx, secondaryIndexKey(tenantID, redisIndexSegStatus, string(prevStatus)), findingID)
-		pipe.ZAdd(ctx, secondaryIndexKey(tenantID, redisIndexSegStatus, string(f.Status)),
-			redis.Z{Score: score, Member: findingID})
-	}
-	// Terminal retention: schedule TTL on the JSON key + every index entry.
-	// EDGE-143.5: TTL is per-finding via retentionFor(f.RetentionClass);
-	// legacy findings fall back to terminalRetention through retentionFor.
-	if isTerminal(f.Status) {
-		if ttl := s.retentionFor(f.RetentionClass); ttl > 0 {
-			pipe.Expire(ctx, key, ttl)
-			// Index entries already exist; setting the TTL on the ZSET would
-			// expire ALL members. Instead, the list path cleans expired
-			// terminals opportunistically (see purgeExpired).
-		}
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		return nil, fmt.Errorf("shadow finding: transition: %w", err)
+	if err := s.commitTransitionFinding(ctx, tx, key, findingID, tenantID, prevStatus, &f, payload); err != nil {
+		return nil, err
 	}
 	return &f, nil
+}
+
+func (s *RedisStore) commitTransitionFinding(
+	ctx context.Context,
+	tx *redis.Tx,
+	key, findingID, tenantID string,
+	prevStatus FindingStatus,
+	f *ShadowAgentFinding,
+	payload []byte,
+) error {
+	score := float64(f.CreatedAt.UnixMilli())
+	_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Set(ctx, key, payload, 0)
+		if prevStatus != f.Status {
+			pipe.ZRem(ctx, secondaryIndexKey(tenantID, redisIndexSegStatus, string(prevStatus)), findingID)
+			pipe.ZAdd(ctx, secondaryIndexKey(tenantID, redisIndexSegStatus, string(f.Status)),
+				redis.Z{Score: score, Member: findingID})
+		}
+		if isTerminal(f.Status) {
+			if ttl := s.retentionFor(f.RetentionClass); ttl > 0 {
+				pipe.Expire(ctx, key, ttl)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("shadow finding: transition: %w", err)
+	}
+	return nil
 }
 
 func isTerminal(s FindingStatus) bool {

@@ -41,6 +41,26 @@ func newTestStore(t *testing.T, opts ...StoreOption) (*RedisStore, *miniredis.Mi
 	return s, mr
 }
 
+func newConcurrentTransitionStore(t *testing.T) (*RedisStore, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), PoolSize: 4})
+	t.Cleanup(func() { _ = client.Close(); mr.Close() })
+	now := time.Date(2026, 5, 17, 13, 0, 0, 0, time.UTC)
+	idCounter := 0
+	s, err := NewRedisStore(client,
+		WithClock(func() time.Time { return now }),
+		WithIDGen(func() string {
+			idCounter++
+			return strings.Repeat("0", 28) + fmt.Sprintf("%04x", idCounter)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewRedisStore: %v", err)
+	}
+	return s, mr
+}
+
 func minimalCreateReq(tenant, owner, principal, product string, risk FindingRisk, evType, summary string) CreateFindingRequest {
 	return CreateFindingRequest{
 		TenantID:         tenant,
@@ -376,6 +396,59 @@ func assertZSetMemberCount(t *testing.T, ctx context.Context, client redis.Unive
 	}
 }
 
+func transitionBarrierClock(t *testing.T, parties int, at time.Time) func() time.Time {
+	t.Helper()
+	var mu sync.Mutex
+	arrived := 0
+	release := make(chan struct{})
+	return func() time.Time {
+		mu.Lock()
+		arrived++
+		if arrived == parties {
+			close(release)
+		}
+		mu.Unlock()
+		select {
+		case <-release:
+			return at
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for %d concurrent transitions; got %d", parties, arrived)
+			return at
+		}
+	}
+}
+
+type transitionTestOutcome struct {
+	status FindingStatus
+	err    error
+}
+
+func transitionOutcome(f *ShadowAgentFinding, err error) transitionTestOutcome {
+	if f == nil {
+		return transitionTestOutcome{err: err}
+	}
+	return transitionTestOutcome{status: f.Status, err: err}
+}
+
+func assertTerminalStatusIndexes(t *testing.T, ctx context.Context, s *RedisStore, tenantID, findingID string) {
+	t.Helper()
+	got, err := s.GetFinding(ctx, tenantID, findingID)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got == nil || !isTerminal(got.Status) {
+		t.Fatalf("final finding = %+v, want terminal status", got)
+	}
+	assertZSetMemberCount(t, ctx, s.client, secondaryIndexKey(tenantID, redisIndexSegStatus, string(FindingStatusDetected)), findingID, 0)
+	for _, status := range []FindingStatus{FindingStatusResolved, FindingStatusSuppressed} {
+		want := 0
+		if got.Status == status {
+			want = 1
+		}
+		assertZSetMemberCount(t, ctx, s.client, secondaryIndexKey(tenantID, redisIndexSegStatus, string(status)), findingID, want)
+	}
+}
+
 func TestGetFinding_TenantIsolation(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -661,6 +734,113 @@ func TestResolveFinding_TerminalAndIdempotent(t *testing.T) {
 	if _, err := s.SuppressFinding(ctx, "tenant-a", f.FindingID, SuppressRequest{SuppressedBy: "alice"}); !errors.Is(err, ErrTerminalConflict) {
 		t.Fatalf("suppress-after-resolve = %v, want ErrTerminalConflict", err)
 	}
+}
+
+func TestTransitionFinding_ConcurrentResolveVsSuppressIsAtomic(t *testing.T) {
+	s, _ := newConcurrentTransitionStore(t)
+	ctx := context.Background()
+	f, err := s.CreateFinding(ctx, minimalCreateReq("tenant-a", "o", "p", "claude-code", FindingRiskHigh, "config_file", "summary"))
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	s.now = transitionBarrierClock(t, 2, time.Date(2026, 5, 17, 14, 0, 0, 0, time.UTC))
+
+	start := make(chan struct{})
+	results := make(chan transitionTestOutcome, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		got, err := s.ResolveFinding(ctx, "tenant-a", f.FindingID, ResolveRequest{ResolvedBy: "alice", Reason: "fixed"})
+		results <- transitionOutcome(got, err)
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		got, err := s.SuppressFinding(ctx, "tenant-a", f.FindingID, SuppressRequest{SuppressedBy: "bob", Reason: "accepted"})
+		results <- transitionOutcome(got, err)
+	}()
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var successes, conflicts int
+	for res := range results {
+		switch {
+		case res.err == nil:
+			successes++
+			if !isTerminal(res.status) {
+				t.Fatalf("successful transition status = %q, want terminal", res.status)
+			}
+		case errors.Is(res.err, ErrTerminalConflict):
+			conflicts++
+		default:
+			t.Fatalf("transition error = %v, want nil or ErrTerminalConflict", res.err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent resolve/suppress outcomes: successes=%d conflicts=%d, want 1/1", successes, conflicts)
+	}
+	assertTerminalStatusIndexes(t, ctx, s, "tenant-a", f.FindingID)
+}
+
+func TestTransitionFinding_DuplicateResolveDoesNotCorruptIndexes(t *testing.T) {
+	s, _ := newConcurrentTransitionStore(t)
+	ctx := context.Background()
+	f, err := s.CreateFinding(ctx, minimalCreateReq("tenant-a", "o", "p", "claude-code", FindingRiskHigh, "config_file", "summary"))
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	s.now = transitionBarrierClock(t, 2, time.Date(2026, 5, 17, 14, 0, 0, 0, time.UTC))
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := s.ResolveFinding(ctx, "tenant-a", f.FindingID, ResolveRequest{ResolvedBy: "alice", Reason: "fixed"})
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("duplicate resolve error = %v, want nil idempotent success", err)
+		}
+	}
+	assertTerminalStatusIndexes(t, ctx, s, "tenant-a", f.FindingID)
+}
+
+func TestTransitionFinding_NotFoundAndWrongTenantAreReadOnly(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.ResolveFinding(ctx, "tenant-a", "missing-finding", ResolveRequest{ResolvedBy: "alice"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("resolve missing = %v, want ErrNotFound", err)
+	}
+	f, err := s.CreateFinding(ctx, minimalCreateReq("tenant-a", "o", "p", "claude-code", FindingRiskHigh, "config_file", "summary"))
+	if err != nil {
+		t.Fatalf("CreateFinding: %v", err)
+	}
+	if _, err := s.SuppressFinding(ctx, "tenant-b", f.FindingID, SuppressRequest{SuppressedBy: "bob"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant suppress = %v, want ErrNotFound", err)
+	}
+
+	got, err := s.GetFinding(ctx, "tenant-a", f.FindingID)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got.Status != FindingStatusDetected {
+		t.Fatalf("wrong-tenant transition changed status to %q, want %q", got.Status, FindingStatusDetected)
+	}
+	assertZSetMemberCount(t, ctx, s.client, secondaryIndexKey("tenant-a", redisIndexSegStatus, string(FindingStatusDetected)), f.FindingID, 1)
+	assertZSetMemberCount(t, ctx, s.client, secondaryIndexKey("tenant-a", redisIndexSegStatus, string(FindingStatusSuppressed)), f.FindingID, 0)
 }
 
 func TestSuppressFinding_TerminalAndIdempotent(t *testing.T) {
