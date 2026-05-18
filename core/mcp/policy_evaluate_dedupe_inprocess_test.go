@@ -24,6 +24,53 @@ func (e *erroringUpstreamCaller) Invoke(_ context.Context, _ ToolCallParams) (*T
 	return nil, e.err
 }
 
+type deleteGateDedupeStore struct {
+	inner              DedupeStore
+	deleteEntered      chan struct{}
+	releaseDelete      chan struct{}
+	loadedDuringDelete chan struct{}
+	deleteOnce         sync.Once
+	releaseOnce        sync.Once
+	loadedOnce         sync.Once
+}
+
+func newDeleteGateDedupeStore(inner DedupeStore) *deleteGateDedupeStore {
+	return &deleteGateDedupeStore{
+		inner:              inner,
+		deleteEntered:      make(chan struct{}),
+		releaseDelete:      make(chan struct{}),
+		loadedDuringDelete: make(chan struct{}),
+	}
+}
+
+func (s *deleteGateDedupeStore) LoadOrStore(key string, value any) (any, bool) {
+	actual, loaded := s.inner.LoadOrStore(key, value)
+	if loaded {
+		select {
+		case <-s.deleteEntered:
+			s.loadedOnce.Do(func() { close(s.loadedDuringDelete) })
+		default:
+		}
+	}
+	return actual, loaded
+}
+
+func (s *deleteGateDedupeStore) Store(key string, value any) {
+	s.inner.Store(key, value)
+}
+
+func (s *deleteGateDedupeStore) Delete(key string) {
+	s.deleteOnce.Do(func() {
+		close(s.deleteEntered)
+		<-s.releaseDelete
+	})
+	s.inner.Delete(key)
+}
+
+func (s *deleteGateDedupeStore) release() {
+	s.releaseOnce.Do(func() { close(s.releaseDelete) })
+}
+
 // TestInProcessDedupeStore_RetryCollapses asserts the in-process store
 // satisfies the same retry-idempotent contract the old `*sync.Map`
 // satisfied: 5 sequential retries of the same logical call collapse to
@@ -87,6 +134,75 @@ func TestInProcessDedupeStore_ErrorDeletesEntry(t *testing.T) {
 	if got := int(upstream.count.Load()); got != 3 {
 		t.Fatalf("upstream invoked %d times across 3 retries on error; want 3 (errors must NOT cache)", got)
 	}
+}
+
+func TestInProcessDedupe_ErrorPath_NewArrivalDoesNotInheritStaleError(t *testing.T) {
+	t.Parallel()
+	transientErr := errors.New("transient_upstream_timeout")
+	store := newDeleteGateDedupeStore(NewInProcessDedupeStore())
+	defer store.release()
+	deps := ToolCallDeps{DedupeState: store}
+	const key = "dedupe-error-race"
+
+	winner, outcome := dedupeBegin(context.Background(), deps, key)
+	if winner == nil || outcome != nil {
+		t.Fatalf("initial dedupeBegin = winner:%v outcome:%v; want first caller to win", winner, outcome)
+	}
+
+	finishDone := make(chan struct{})
+	go func() {
+		defer close(finishDone)
+		dedupeFinish(deps, key, winner, nil, transientErr)
+	}()
+
+	select {
+	case <-store.deleteEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dedupeFinish did not enter the error-path delete gate")
+	}
+
+	arrivalCtx, cancelArrival := context.WithCancel(context.Background())
+	defer cancelArrival()
+	arrivalDone := make(chan *dedupeOutcome, 1)
+	go func() {
+		freshWinner, arrivedOutcome := dedupeBegin(arrivalCtx, deps, key)
+		if freshWinner != nil {
+			dedupeFinish(deps, key, freshWinner, &ToolCallResult{}, nil)
+		}
+		arrivalDone <- arrivedOutcome
+	}()
+
+	select {
+	case <-store.loadedDuringDelete:
+	case <-time.After(2 * time.Second):
+		t.Fatal("new arrival did not observe the in-process entry while delete was gated")
+	}
+
+	select {
+	case arrivedOutcome := <-arrivalDone:
+		if arrivedOutcome != nil && errors.Is(arrivedOutcome.err, transientErr) {
+			t.Fatalf("new arrival inherited stale transient error during close-before-delete gap: %v", arrivedOutcome.err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		cancelArrival()
+		arrivedOutcome := <-arrivalDone
+		if arrivedOutcome == nil || !errors.Is(arrivedOutcome.err, context.Canceled) {
+			t.Fatalf("arrival while delete was gated returned %+v; want context cancellation without stale transient error", arrivedOutcome)
+		}
+	}
+
+	store.release()
+	select {
+	case <-finishDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dedupeFinish did not complete after releasing delete gate")
+	}
+
+	freshWinner, staleOutcome := dedupeBegin(context.Background(), deps, key)
+	if freshWinner == nil || staleOutcome != nil {
+		t.Fatalf("post-error retry = winner:%v outcome:%v; want a fresh winner after delete", freshWinner, staleOutcome)
+	}
+	dedupeFinish(deps, key, freshWinner, &ToolCallResult{}, nil)
 }
 
 // TestInProcessDedupeStore_ContextCancelReleasesWaiter asserts (d): a

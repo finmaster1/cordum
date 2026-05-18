@@ -1197,10 +1197,13 @@ func dedupeFinish(deps ToolCallDeps, key string, winner *dedupeWinner, result *T
 		}
 		entry.result = result
 		entry.err = err
-		close(entry.done)
 		if err != nil && deps.DedupeState != nil && key != "" {
+			// Delete before close prevents fresh arrivals from finding
+			// a completed error entry. Existing waiters already hold
+			// entry and still observe result/err via close's happens-before.
 			deps.DedupeState.Delete(key)
 		}
+		close(entry.done)
 		return
 	}
 	if winner.redisBacked {
