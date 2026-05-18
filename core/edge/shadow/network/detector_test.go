@@ -362,7 +362,7 @@ func TestNetworkDetector_LawfulMetadata_CatalogEnforced(t *testing.T) {
 		},
 	})
 
-	bannedURL := "https://api.anthropic.com/v1/messages?api_key=sk-ant-abcdef0123456789abcdef"
+	bannedURL := "https://api.anthropic.com/v1/messages?api_key=sk-test-abcdef0123456789abcdef"
 	bannedBearer := "Bearer abcdef0123456789secrettoken"
 	bannedIP := "203.0.113.42"
 

@@ -25,6 +25,7 @@ import type {
   BadRequestResponse,
   ConflictResponse,
   CreateBundleSnapshotBody,
+  EdgeConflictResponse,
   ForbiddenResponse,
   GetOutputPolicyStats200,
   GetOutputPolicyStatsParams,
@@ -89,6 +90,7 @@ export const getEvaluatePolicyMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | EdgeConflictResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -132,6 +134,7 @@ export type EvaluatePolicyMutationBody = PolicyCheckRequest;
 export type EvaluatePolicyMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
+  | EdgeConflictResponse
   | InternalServerErrorResponse;
 
 /**
@@ -141,6 +144,7 @@ export const useEvaluatePolicy = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | EdgeConflictResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -277,6 +281,7 @@ export const getExplainPolicyMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | EdgeConflictResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -320,6 +325,7 @@ export type ExplainPolicyMutationBody = PolicyCheckRequest;
 export type ExplainPolicyMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
+  | EdgeConflictResponse
   | InternalServerErrorResponse;
 
 /**
@@ -329,6 +335,7 @@ export const useExplainPolicy = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | EdgeConflictResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(

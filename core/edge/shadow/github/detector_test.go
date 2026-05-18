@@ -383,7 +383,7 @@ func TestGHDetector_Signals_CIEnvVarNames(t *testing.T) {
 		"name: ci",
 		"on: push",
 		"env:",
-		"  ANTHROPIC_API_KEY: sk-ant-leakedkey1234567890abcd",
+		"  ANTHROPIC_API_KEY: sk-test-leakedkey1234567890abcd",
 		"  REGULAR_VAR: regularvalue",
 		"jobs:",
 		"  build:",
@@ -400,7 +400,7 @@ func TestGHDetector_Signals_CIEnvVarNames(t *testing.T) {
 		t.Fatalf("expected env-var-name signal, got 0 findings")
 	}
 	for _, fnd := range findings {
-		if strings.Contains(fnd.EvidenceSummary, "sk-ant-leakedkey") {
+		if strings.Contains(fnd.EvidenceSummary, "sk-test-leakedkey") {
 			t.Fatalf("secret value leaked into EvidenceSummary: %q", fnd.EvidenceSummary)
 		}
 		if strings.Contains(fnd.EvidenceSummary, "regularvalue") {
