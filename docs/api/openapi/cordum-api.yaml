@@ -1500,9 +1500,13 @@ paths:
         (or set to a non-truthy value), the route returns 503 `service_unavailable`
         and persists nothing. When enabled, the endpoint accepts a bounded,
         redacted runtime event batch (process exec, file read/write, network
-        connect, DNS query) from a trusted source identity and persists mapped
-        `AgentActionEvent` records with `layer=runtime` and `decision=RECORDED`
-        through the existing Edge store. Raw argv, file contents, packet
+        connect, DNS query) from an authenticated runtime collector holding
+        `edge.runtime.ingest`; generic job writers are forbidden. The request
+        `source.source_id` must match the authenticated collector principal and
+        the referenced session/execution must be bound to that collector before
+        mapped `AgentActionEvent` records with `layer=runtime` and
+        `decision=RECORDED` are persisted through the existing Edge store. Raw
+        argv, file contents, packet
         payloads, DNS response bodies, request bodies, headers, secrets, and
         tokens are rejected at the strict-schema decode boundary. All-or-nothing
         batch acceptance — a single invalid envelope aborts the whole batch.
@@ -9530,13 +9534,13 @@ components:
     EdgeRuntimeIngestSource:
       type: object
       required: [source_id]
-      description: Trusted sidecar identity that produced the batch.
+      description: Authenticated trusted sidecar identity that produced the batch.
       properties:
         source_id:
           type: string
           minLength: 1
           maxLength: 256
-          description: Stable identifier for the runtime collector instance.
+          description: Stable identifier for the runtime collector instance; must match the authenticated collector principal.
     EdgeRuntimeProcessSummary:
       type: object
       description: Bounded redacted summary of a process exec event. Raw argv / env / cmdline are forbidden.

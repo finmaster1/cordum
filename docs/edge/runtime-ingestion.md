@@ -153,23 +153,26 @@ own `RetentionClass` controls.
 
 ## Tenant + source authentication
 
-The endpoint is gated by the existing Edge auth stack — exactly the same
-as the hook / MCP / evaluate endpoints:
+The endpoint is gated by the existing Edge auth stack, but uses a
+collector-only permission because runtime telemetry is trusted sidecar input:
 
 1. Gateway middleware: API key / OIDC / mTLS via the standard request
    pipeline.
-2. `requireEdgePermissionOrRole(PermJobsWrite, "admin", "user")` — RBAC
-   parity with the events endpoints; viewer cannot ingest.
+2. `PermRuntimeIngest` (`edge.runtime.ingest`) — normal admin/user/operator
+   job writers are not runtime collectors. When RBAC is disabled, the legacy
+   fallback accepts only the exact `runtime_collector` role.
 3. `edgeTenantFromRequest` — `X-Tenant-ID` header is mandatory; if the
    body carries a different tenant id we 403 `tenant_mismatch`.
-4. `source_id` validation — the adapter rejects any envelope whose
-   `source_id` is absent, whitespace-only, exceeds the redactor's
-   string cap, or matches a secret-shaped pattern. A future config seam
-   may add an allowlist; the skeleton enforces shape only.
+4. `source_id` validation — the request `source.source_id` must be present,
+   must match the authenticated collector principal, and must still pass the
+   adapter's shape/size/secret checks. Missing or mismatched source identity
+   fails closed before any append.
 5. Parent validation — `validateEdgeEventParents` confirms the
    `session_id` + `execution_id` exist for this tenant and that the
-   execution's `SessionID` matches the envelope. Cross-tenant /
-   cross-session events are rejected before any append.
+   execution's `SessionID` matches the envelope. Runtime ingest then verifies
+   the session's `PrincipalID` and execution's `WorkerID` are bound to the
+   authenticated collector. Cross-tenant, cross-session, or unbound events are
+   rejected before any append.
 
 No new auth provider, no new tenant header, no new API key path.
 

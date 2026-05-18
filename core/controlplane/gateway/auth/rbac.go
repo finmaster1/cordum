@@ -33,7 +33,7 @@ const (
 	// audience widening on submit is rejected 403 to prevent quiet
 	// impersonation through the delegation wire path. See #198
 	// Blocker 1 follow-up on split/delegation-security.
-	PermDelegationImpersonate  = "delegation.impersonate"
+	PermDelegationImpersonate = "delegation.impersonate"
 	// PermShadowExceptionHighRisk authorises an operator to create or
 	// revoke an exception scoped to risk=high findings (EDGE-143.6, Q8
 	// binding governor ruling on task-de50a293). Acts as the step-up
@@ -45,47 +45,48 @@ const (
 	// queries, so this gate is materially privilege-equivalent to
 	// modifying the audit posture for an entire scope of findings.
 	PermShadowExceptionHighRisk = "shadow.exception.high_risk"
-	PermWorkflowsRead          = "workflows.read"
-	PermWorkflowsWrite         = "workflows.write"
-	PermWorkersRead            = "workers.read"
-	PermWorkersWrite           = "workers.write"
-	PermConfigRead             = "config.read"
-	PermConfigWrite            = "config.write"
-	PermAuditRead              = "audit.read"
-	PermAuditExport            = "audit.export"
-	PermAuditVerify            = "audit.verify"
-	PermAPIKeysRead            = "apiKeys.read"
-	PermAPIKeysWrite           = "apiKeys.write"
-	PermDLQRead                = "dlq.read"
-	PermDLQWrite               = "dlq.write"
-	PermMemoryRead             = "memory.read"
-	PermLegalHoldRead          = "legalHold.read"
-	PermLegalHoldWrite         = "legalHold.write"
-	PermLicenseRead            = "license.read"
-	PermLocksRead              = "locks.read"
-	PermMCPRead                = "mcp.read"
-	PermMCPVerify              = "mcp.verify"
-	PermPacksInstall           = "packs.install"
-	PermPacksUninstall         = "packs.uninstall"
-	PermPacksRead              = "packs.read"
-	PermPacksVerify            = "packs.verify"
-	PermPolicyRead             = "policy.read"
-	PermPolicyWrite            = "policy.write"
-	PermPoolsWrite             = "pools.write"
-	PermTelemetryRead          = "telemetry.read"
-	PermTelemetryWrite         = "telemetry.write"
-	PermTelemetryExport        = "telemetry.export"
-	PermTopicsRead             = "topics.read"
-	PermTopicsWrite            = "topics.write"
-	PermWorkerCredentialsRead  = "workerCredentials.read"  // #nosec G101 -- permission identifier, not a credential.
-	PermWorkerCredentialsWrite = "workerCredentials.write" // #nosec G101 -- permission identifier, not a credential.
-	PermGovernanceRead         = "governance.read"
-	PermSchemasRead            = "schemas.read"
-	PermSchemasWrite           = "schemas.write"
-	PermUsersRead              = "users.read"
-	PermUsersWrite             = "users.write"
-	PermRolesRead              = "roles.read"
-	PermRolesWrite             = "roles.write"
+	PermWorkflowsRead           = "workflows.read"
+	PermWorkflowsWrite          = "workflows.write"
+	PermWorkersRead             = "workers.read"
+	PermWorkersWrite            = "workers.write"
+	PermConfigRead              = "config.read"
+	PermConfigWrite             = "config.write"
+	PermAuditRead               = "audit.read"
+	PermAuditExport             = "audit.export"
+	PermAuditVerify             = "audit.verify"
+	PermAPIKeysRead             = "apiKeys.read"
+	PermAPIKeysWrite            = "apiKeys.write"
+	PermDLQRead                 = "dlq.read"
+	PermDLQWrite                = "dlq.write"
+	PermMemoryRead              = "memory.read"
+	PermLegalHoldRead           = "legalHold.read"
+	PermLegalHoldWrite          = "legalHold.write"
+	PermLicenseRead             = "license.read"
+	PermLocksRead               = "locks.read"
+	PermMCPRead                 = "mcp.read"
+	PermMCPVerify               = "mcp.verify"
+	PermPacksInstall            = "packs.install"
+	PermPacksUninstall          = "packs.uninstall"
+	PermPacksRead               = "packs.read"
+	PermPacksVerify             = "packs.verify"
+	PermPolicyRead              = "policy.read"
+	PermPolicyWrite             = "policy.write"
+	PermPoolsWrite              = "pools.write"
+	PermRuntimeIngest           = "edge.runtime.ingest"
+	PermTelemetryRead           = "telemetry.read"
+	PermTelemetryWrite          = "telemetry.write"
+	PermTelemetryExport         = "telemetry.export"
+	PermTopicsRead              = "topics.read"
+	PermTopicsWrite             = "topics.write"
+	PermWorkerCredentialsRead   = "workerCredentials.read"  // #nosec G101 -- permission identifier, not a credential.
+	PermWorkerCredentialsWrite  = "workerCredentials.write" // #nosec G101 -- permission identifier, not a credential.
+	PermGovernanceRead          = "governance.read"
+	PermSchemasRead             = "schemas.read"
+	PermSchemasWrite            = "schemas.write"
+	PermUsersRead               = "users.read"
+	PermUsersWrite              = "users.write"
+	PermRolesRead               = "roles.read"
+	PermRolesWrite              = "roles.write"
 
 	// Eval dataset permissions gate the phase-2 governance-regression
 	// pipeline. They are namespaced under `evals.datasets.*` so the
@@ -118,6 +119,7 @@ var AllPermissions = []string{
 	PermPacksInstall, PermPacksUninstall, PermPacksRead, PermPacksVerify,
 	PermPolicyRead, PermPolicyWrite,
 	PermPoolsWrite,
+	PermRuntimeIngest,
 	PermTelemetryRead, PermTelemetryWrite, PermTelemetryExport,
 	PermTopicsRead, PermTopicsWrite,
 	PermWorkerCredentialsRead, PermWorkerCredentialsWrite,
@@ -145,7 +147,7 @@ type RoleDefinition struct {
 	UpdatedAt   string   `json:"updated_at,omitempty"`
 }
 
-// DefaultRoles returns the three built-in roles.
+// DefaultRoles returns the built-in interactive roles.
 func DefaultRoles() []*RoleDefinition {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return []*RoleDefinition{
@@ -206,7 +208,7 @@ func DefaultRoles() []*RoleDefinition {
 // Basic role fallback mapping (used when RBAC entitlement is disabled)
 // ---------------------------------------------------------------------------
 
-// basicRolePermissions maps the three built-in role names to their permissions.
+// basicRolePermissions maps built-in/fallback role names to their permissions.
 // Used as fallback when the RBAC entitlement is not active.
 var basicRolePermissions = map[string][]string{
 	"admin": {PermAdminAll},
@@ -236,6 +238,9 @@ var basicRolePermissions = map[string][]string{
 		PermPolicyRead,
 		PermGovernanceRead,
 		PermDelegationRead,
+	},
+	"runtime_collector": {
+		PermRuntimeIngest,
 	},
 }
 

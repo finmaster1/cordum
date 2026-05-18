@@ -1,13 +1,17 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/cordum/cordum/core/controlplane/gateway/auth"
 	edgecore "github.com/cordum/cordum/core/edge"
+	"github.com/cordum/cordum/core/licensing"
 )
 
 // enableRuntimeIngest flips the gateway feature flag on for the lifetime of
@@ -23,8 +27,12 @@ func disableRuntimeIngest(t *testing.T) {
 }
 
 func runtimeIngestBody(sessionID, executionID, tenantID, sourceEventID string) string {
+	return runtimeIngestBodyForSource("tetragon-test", sessionID, executionID, tenantID, sourceEventID)
+}
+
+func runtimeIngestBodyForSource(sourceID, sessionID, executionID, tenantID, sourceEventID string) string {
 	return `{
-		"source": {"source_id":"tetragon-test"},
+		"source": {"source_id":"` + sourceID + `"},
 		"batch_id":"batch-` + sourceEventID + `",
 		"events": [{
 			"tenant_id":"` + tenantID + `",
@@ -36,6 +44,196 @@ func runtimeIngestBody(sessionID, executionID, tenantID, sourceEventID string) s
 			"process": {"executable_basename":"curl","argument_count":1}
 		}]
 	}`
+}
+
+const testRuntimeCollectorRole = "runtime_collector"
+
+func setupRuntimeIngestRBAC(t *testing.T, s *server) {
+	t.Helper()
+	setTestEntitlements(t, s, licensing.PlanEnterprise, func(entitlements *licensing.Entitlements) {
+		entitlements.RBAC = true
+	})
+	if err := s.rbacStore.PutRole(context.Background(), &auth.RoleDefinition{
+		Name:        "user",
+		Description: "test same-tenant job writer without runtime ingest permission",
+		Permissions: []string{
+			auth.PermJobsWrite,
+		},
+	}); err != nil {
+		t.Fatalf("put user role: %v", err)
+	}
+	if err := s.rbacStore.PutRole(context.Background(), &auth.RoleDefinition{
+		Name:        testRuntimeCollectorRole,
+		Description: "test trusted runtime collector",
+		Permissions: []string{
+			auth.PermJobsWrite, // Keeps this role accepted by the vulnerable handler before the fix.
+			auth.PermRuntimeIngest,
+		},
+	}); err != nil {
+		t.Fatalf("put runtime collector role: %v", err)
+	}
+}
+
+func runtimeIngestAuthContext(role, principalID string) *auth.AuthContext {
+	return runtimeIngestAuthContextForTenant(edgeRouteTenant, role, principalID)
+}
+
+func runtimeIngestAuthContextForTenant(tenantID, role, principalID string) *auth.AuthContext {
+	return &auth.AuthContext{
+		Tenant:      tenantID,
+		PrincipalID: principalID,
+		Role:        role,
+		AuthSource:  auth.AuthSourceAPIKey,
+	}
+}
+
+func postRuntimeIngestWithAuth(t *testing.T, s *server, authCtx *auth.AuthContext, body string) *httptest.ResponseRecorder {
+	return postRuntimeIngestWithAuthForTenant(t, s, authCtx, edgeRouteTenant, body)
+}
+
+func postRuntimeIngestWithAuthForTenant(t *testing.T, s *server, authCtx *auth.AuthContext, headerTenant, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/edge/runtime/events", strings.NewReader(body))
+	req.Header.Set("X-Tenant-ID", headerTenant)
+	req.Header.Set("Content-Type", "application/json")
+	req = withAuth(req, authCtx)
+	rr := httptest.NewRecorder()
+	s.handleEdgeRuntimeIngest(rr, req)
+	return rr
+}
+
+func createRuntimeIngestBoundParents(t *testing.T, s *server, suffix, collectorID string) (edgecore.EdgeSession, edgecore.AgentExecution) {
+	return createRuntimeIngestBoundParentsForTenant(t, s, edgeRouteTenant, suffix, collectorID)
+}
+
+func createRuntimeIngestBoundParentsForTenant(t *testing.T, s *server, tenantID, suffix, collectorID string) (edgecore.EdgeSession, edgecore.AgentExecution) {
+	t.Helper()
+	now := time.Now().UTC()
+	session := edgecore.EdgeSession{
+		SessionID:      "sess-runtime-" + suffix,
+		TenantID:       tenantID,
+		PrincipalID:    collectorID,
+		PrincipalType:  edgecore.PrincipalTypeService,
+		AgentProduct:   "runtime-sidecar",
+		AgentVersion:   "test",
+		Mode:           edgecore.SessionModeLocalDev,
+		TraceID:        "trace-runtime-" + suffix,
+		PolicySnapshot: "snap-runtime",
+		PolicyMode:     edgecore.PolicyModeObserve,
+		Status:         edgecore.SessionStatusRunning,
+		RiskSummary: edgecore.RiskSummary{
+			MaxRisk: edgecore.RiskLevelLow,
+		},
+		StartedAt: now,
+	}
+	if err := s.edgeStore.CreateSession(context.Background(), session); err != nil {
+		t.Fatalf("create runtime session: %v", err)
+	}
+	execution := edgecore.AgentExecution{
+		ExecutionID:    "exec-runtime-" + suffix,
+		SessionID:      session.SessionID,
+		TenantID:       tenantID,
+		Adapter:        edgecore.AdapterRuntimeSidecar,
+		Mode:           edgecore.ExecutionModeLocalDev,
+		TraceID:        session.TraceID,
+		WorkerID:       collectorID,
+		PolicySnapshot: session.PolicySnapshot,
+		Status:         edgecore.ExecutionStatusRunning,
+		StartedAt:      now,
+	}
+	if err := s.edgeStore.CreateExecution(context.Background(), execution); err != nil {
+		t.Fatalf("create runtime execution: %v", err)
+	}
+	return session, execution
+}
+
+func TestRuntimeIngest_RejectsRegularUserWithJobsWritePerm(t *testing.T) {
+	enableRuntimeIngest(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "regular-user", "principal-edge-user")
+
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext("user", "principal-edge-user"),
+		runtimeIngestBodyForSource("principal-edge-user", session.SessionID, execution.ExecutionID, edgeRouteTenant, "forged-user"))
+
+	assertEdgeErrorShape(t, rr, http.StatusForbidden, edgeErrCodeAccessDenied)
+}
+
+func TestRuntimeIngest_RejectsAdminWithoutRuntimeCollectorPermission(t *testing.T) {
+	enableRuntimeIngest(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	if err := s.rbacStore.PutRole(context.Background(), &auth.RoleDefinition{
+		Name:        "admin",
+		Description: "test admin wildcard without runtime ingest permission",
+		Permissions: []string{
+			auth.PermAdminAll,
+			auth.PermJobsWrite,
+		},
+	}); err != nil {
+		t.Fatalf("put admin role: %v", err)
+	}
+	session, execution := createRuntimeIngestBoundParents(t, s, "admin-user", "principal-admin")
+
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext("admin", "principal-admin"),
+		runtimeIngestBodyForSource("principal-admin", session.SessionID, execution.ExecutionID, edgeRouteTenant, "forged-admin"))
+
+	assertEdgeErrorShape(t, rr, http.StatusForbidden, edgeErrCodeAccessDenied)
+}
+
+func TestRuntimeIngest_RejectsMismatchedSourceID(t *testing.T) {
+	enableRuntimeIngest(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "mismatched-source", "collector-a")
+
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"),
+		runtimeIngestBodyForSource("collector-b", session.SessionID, execution.ExecutionID, edgeRouteTenant, "source-mismatch"))
+
+	if rr.Code != http.StatusBadRequest && rr.Code != http.StatusForbidden {
+		t.Fatalf("mismatched source status = %d, want 400 or 403 body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRuntimeIngest_RejectsUnauthorizedSession(t *testing.T) {
+	enableRuntimeIngest(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	_, _ = createRuntimeIngestBoundParents(t, s, "authorized-session", "collector-a")
+	otherSession, otherExecution := createRuntimeIngestBoundParents(t, s, "unauthorized-session", "collector-b")
+
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"),
+		runtimeIngestBodyForSource("collector-a", otherSession.SessionID, otherExecution.ExecutionID, edgeRouteTenant, "unauthorized-session"))
+
+	assertEdgeErrorShape(t, rr, http.StatusForbidden, edgeErrCodeAccessDenied)
+}
+
+func TestRuntimeIngest_RejectsMissingCollectorIdentity(t *testing.T) {
+	enableRuntimeIngest(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "missing-identity", "collector-a")
+
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, ""),
+		runtimeIngestBodyForSource("collector-a", session.SessionID, execution.ExecutionID, edgeRouteTenant, "missing-collector-identity"))
+
+	if rr.Code != http.StatusUnauthorized && rr.Code != http.StatusForbidden {
+		t.Fatalf("missing collector identity status = %d, want 401 or 403 body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRuntimeIngest_AcceptsTrustedCollectorOnBoundSource(t *testing.T) {
+	enableRuntimeIngest(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "trusted-collector", "collector-a")
+
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"),
+		runtimeIngestBodyForSource("collector-a", session.SessionID, execution.ExecutionID, edgeRouteTenant, "trusted-collector"))
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("trusted collector status = %d, want 201 body=%s", rr.Code, rr.Body.String())
+	}
 }
 
 func TestRuntimeIngestDisabledReturns503(t *testing.T) {
@@ -52,15 +250,16 @@ func TestRuntimeIngestDisabledReturns503(t *testing.T) {
 
 func TestRuntimeIngestEnabledRequiresTenantHeader(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/edge/runtime/events",
 		strings.NewReader(runtimeIngestBody("ignored", "ignored", edgeRouteTenant, "no-tenant-header")))
-	addEdgeRouteAuth(req)
 	req.Header.Set("Content-Type", "application/json")
+	req = withAuth(req, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"))
 	// Deliberately omit X-Tenant-ID.
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	s.handleEdgeRuntimeIngest(rr, req)
 
 	assertEdgeErrorShape(t, rr, http.StatusBadRequest, edgeErrCodeTenantRequired)
 }
@@ -82,10 +281,12 @@ func TestRuntimeIngestEnabledRequiresAuth(t *testing.T) {
 
 func TestRuntimeIngestEnabledRejectsBodyTenantMismatch(t *testing.T) {
 	enableRuntimeIngest(t)
-	fix := newCrossTenantFixture(t)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "tenant-mismatch", "collector-a")
 	// header=A, body events stamp tenant=B → 403 tenant_mismatch.
-	body := runtimeIngestBody(fix.tenantA.session.SessionID, fix.tenantA.execution.ExecutionID, fix.tenantB.tenantID, "mismatch-1")
-	rr := fix.asAttacker(t, http.MethodPost, "/api/v1/edge/runtime/events", body)
+	body := runtimeIngestBodyForSource("collector-a", session.SessionID, execution.ExecutionID, edgeRouteOtherTenant, "mismatch-1")
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("body-tenant mismatch status = %d, want 403 body=%s", rr.Code, rr.Body.String())
@@ -97,30 +298,36 @@ func TestRuntimeIngestEnabledRejectsBodyTenantMismatch(t *testing.T) {
 
 func TestRuntimeIngestEnabledRejectsCrossTenantSession(t *testing.T) {
 	enableRuntimeIngest(t)
-	fix := newCrossTenantFixture(t)
-	body := runtimeIngestBody(fix.tenantB.session.SessionID, fix.tenantB.execution.ExecutionID, fix.tenantA.tenantID, "xtenant-sess")
-	rr := fix.asAttacker(t, http.MethodPost, "/api/v1/edge/runtime/events", body)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	tenantBSession, tenantBExecution := createRuntimeIngestBoundParentsForTenant(t, s, edgeRouteOtherTenant, "tenant-b", "collector-b")
+	body := runtimeIngestBodyForSource("collector-a", tenantBSession.SessionID, tenantBExecution.ExecutionID, edgeRouteTenant, "xtenant-sess")
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
 
 	assertCrossTenantBlocked(t, rr, "runtime ingest cross-tenant parents")
-	fix.assertNoTenantBLeak(t, rr, "runtime ingest cross-tenant parents")
+	if strings.Contains(rr.Body.String(), tenantBSession.SessionID) || strings.Contains(rr.Body.String(), tenantBExecution.ExecutionID) {
+		t.Fatalf("runtime ingest cross-tenant parents leaked tenant B IDs: %s", rr.Body.String())
+	}
 }
 
 func TestRuntimeIngestEnabledRejectsMissingParent(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
-	body := runtimeIngestBody("edge-session-does-not-exist", "edge-exec-does-not-exist", edgeRouteTenant, "missing-parent")
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	body := runtimeIngestBodyForSource("collector-a", "edge-session-does-not-exist", "edge-exec-does-not-exist", edgeRouteTenant, "missing-parent")
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
 	assertEdgeErrorShape(t, rr, http.StatusNotFound, edgeErrCodeNotFound)
 }
 
 func TestRuntimeIngestEnabledRejectsExecutionSessionMismatch(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	otherSession := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
-	body := runtimeIngestBody(otherSession.SessionID, execution.ExecutionID, edgeRouteTenant, "exec-mismatch")
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "exec-mismatch-a", "collector-a")
+	otherSession, _ := createRuntimeIngestBoundParents(t, s, "exec-mismatch-b", "collector-a")
+	body := runtimeIngestBodyForSource("collector-a", otherSession.SessionID, execution.ExecutionID, edgeRouteTenant, "exec-mismatch")
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
+	_ = session
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("execution mismatch status = %d, want 400 body=%s", rr.Code, rr.Body.String())
 	}
@@ -131,17 +338,18 @@ func TestRuntimeIngestEnabledRejectsExecutionSessionMismatch(t *testing.T) {
 
 func TestRuntimeIngestEnabledRejectsEmptyBatch(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
-	body := `{"source":{"source_id":"tetragon-test"},"events":[]}`
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	body := `{"source":{"source_id":"collector-a"},"events":[]}`
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
 	assertEdgeErrorShape(t, rr, http.StatusBadRequest, edgeErrCodeInvalidRequest)
 }
 
 func TestRuntimeIngestEnabledRejectsMissingSourceID(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "missing-source", "collector-a")
 	body := `{
 		"source":{"source_id":""},
 		"events":[{
@@ -153,17 +361,17 @@ func TestRuntimeIngestEnabledRejectsMissingSourceID(t *testing.T) {
 			"process":{"executable_basename":"curl","argument_count":1}
 		}]
 	}`
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
 	assertEdgeErrorShape(t, rr, http.StatusBadRequest, edgeErrCodeInvalidRequest)
 }
 
 func TestRuntimeIngestEnabledRejectsForbiddenRawKey(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "forbidden-raw-key", "collector-a")
 	body := `{
-		"source":{"source_id":"tetragon-test"},
+		"source":{"source_id":"collector-a"},
 		"events":[{
 			"tenant_id":"` + edgeRouteTenant + `",
 			"session_id":"` + session.SessionID + `",
@@ -173,7 +381,7 @@ func TestRuntimeIngestEnabledRejectsForbiddenRawKey(t *testing.T) {
 			"argv":["curl","https://evil.example.com"]
 		}]
 	}`
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), body)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("forbidden-key status = %d, want 400 body=%s", rr.Code, rr.Body.String())
 	}
@@ -185,12 +393,12 @@ func TestRuntimeIngestEnabledRejectsForbiddenRawKey(t *testing.T) {
 
 func TestRuntimeIngestEnabledRejectsOversizeBatch(t *testing.T) {
 	enableRuntimeIngest(t)
-	_, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "oversize", "collector-a")
 	// Build a batch with too many events to exceed MaxRuntimeBatchEvents.
 	var sb strings.Builder
-	sb.WriteString(`{"source":{"source_id":"tetragon-test"},"events":[`)
+	sb.WriteString(`{"source":{"source_id":"collector-a"},"events":[`)
 	for i := range 300 {
 		if i > 0 {
 			sb.WriteString(",")
@@ -206,7 +414,7 @@ func TestRuntimeIngestEnabledRejectsOversizeBatch(t *testing.T) {
 		}`)
 	}
 	sb.WriteString("]}")
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", sb.String())
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "collector-a"), sb.String())
 	if rr.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversize batch status = %d, want 413 body=%s", rr.Code, rr.Body.String())
 	}
@@ -214,11 +422,11 @@ func TestRuntimeIngestEnabledRejectsOversizeBatch(t *testing.T) {
 
 func TestRuntimeIngestEnabledAppendsEventsThroughStore(t *testing.T) {
 	enableRuntimeIngest(t)
-	s, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "append", "tetragon-test")
 
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events",
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "tetragon-test"),
 		runtimeIngestBody(session.SessionID, execution.ExecutionID, edgeRouteTenant, "rt-append-1"))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("ingest status = %d, want 201 body=%s", rr.Code, rr.Body.String())
@@ -284,9 +492,9 @@ type runtimeIngestResponseShape struct {
 //   - the response shape matches the documented contract.
 func TestRuntimeIngestEnabledStoresRedactedRuntimeEvent(t *testing.T) {
 	enableRuntimeIngest(t)
-	s, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "redacted", "tetragon-clusterA")
 
 	body := `{
 		"source":{"source_id":"tetragon-clusterA"},
@@ -301,7 +509,7 @@ func TestRuntimeIngestEnabledStoresRedactedRuntimeEvent(t *testing.T) {
 			"labels":{"node":"node-7"}
 		}]
 	}`
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "tetragon-clusterA"), body)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("ingest status = %d, want 201 body=%s", rr.Code, rr.Body.String())
 	}
@@ -427,9 +635,9 @@ func TestRuntimeIngestAllEventKinds_EndToEnd(t *testing.T) {
 	// table emits 5 events into the same execution, then each
 	// subtest filters by its own kind+marker. This catches partial-
 	// rejection / wrong-kind-persistence regressions.
-	s, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "all-kinds", "tetragon-all-kinds")
 
 	for i, tc := range cases {
 		t.Run(string(tc.kind), func(t *testing.T) {
@@ -448,7 +656,7 @@ func TestRuntimeIngestAllEventKinds_EndToEnd(t *testing.T) {
 					"labels":{"` + tc.labelKey + `":"` + tc.labelValue + `"}
 				}]
 			}`
-			rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+			rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "tetragon-all-kinds"), body)
 			if rr.Code != http.StatusCreated {
 				t.Fatalf("kind=%q POST status = %d, want 201 body=%s", tc.kind, rr.Code, rr.Body.String())
 			}
@@ -509,9 +717,9 @@ func TestRuntimeIngestAllEventKinds_EndToEnd(t *testing.T) {
 // idempotency story and create gaps in the evidence stream.
 func TestRuntimeIngestEnabledAllOrNothingOnOneBadEnvelope(t *testing.T) {
 	enableRuntimeIngest(t)
-	s, handler := newEdgeRouteTestServer(t)
-	session := createEdgeRouteSession(t, handler)
-	execution := createEdgeRouteExecution(t, handler, session.SessionID)
+	s, _ := newEdgeRouteTestServer(t)
+	setupRuntimeIngestRBAC(t, s)
+	session, execution := createRuntimeIngestBoundParents(t, s, "partial-batch", "tetragon-test")
 	body := `{
 		"source":{"source_id":"tetragon-test"},
 		"events":[
@@ -533,7 +741,7 @@ func TestRuntimeIngestEnabledAllOrNothingOnOneBadEnvelope(t *testing.T) {
 			}
 		]
 	}`
-	rr := edgeRoutePOST(t, handler, "/api/v1/edge/runtime/events", body)
+	rr := postRuntimeIngestWithAuth(t, s, runtimeIngestAuthContext(testRuntimeCollectorRole, "tetragon-test"), body)
 	if rr.Code == http.StatusCreated {
 		t.Fatalf("partial-batch must not return 201; got %d body=%s", rr.Code, rr.Body.String())
 	}
