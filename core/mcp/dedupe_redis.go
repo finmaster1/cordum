@@ -44,14 +44,20 @@ const redisDedupeCommandTimeout = 500 * time.Millisecond
 const redisDedupePollInterval = 50 * time.Millisecond
 
 // redisDedupeRecord is the JSON wire format persisted at every
-// `mcp:dedupe:<key>` Redis row. ResultJSON holds the pre-serialized
-// ToolCallResult body the InvokeToolWithPolicy path passes through —
-// the store does NOT recurse into the result struct so a future field
-// addition does not silently break the wire compatibility.
+// `mcp:dedupe:<key>` Redis row. Completed rows store only bounded
+// metadata about the ToolCallResult; Redis never stores raw content
+// text/data, structuredContent, MIME values, or other tool-result bodies.
 type redisDedupeRecord struct {
-	State      string          `json:"state"`
-	ResultJSON json.RawMessage `json:"result,omitempty"`
-	ErrorMsg   string          `json:"error,omitempty"`
+	State      string                     `json:"state"`
+	Result     *redisDedupeResultMetadata `json:"result,omitempty"`
+	ErrorClass string                     `json:"error_class,omitempty"`
+}
+
+type redisDedupeResultMetadata struct {
+	IsError              bool   `json:"is_error"`
+	ContentCount         int    `json:"content_count"`
+	HasStructuredContent bool   `json:"has_structured_content"`
+	ResultSHA256         string `json:"result_sha256"`
 }
 
 // RedisDedupeStore is the cross-process DedupeStore backed by Redis

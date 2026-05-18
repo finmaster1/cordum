@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"context"
+	"crypto/sha256"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,8 +50,12 @@ func TestRedisDedupeStore_CrossProcessCollapses(t *testing.T) {
 
 	// Winner completes the work and publishes the completed record.
 	completed := &redisDedupeRecord{
-		State:      redisDedupeStateCompleted,
-		ResultJSON: []byte(`{"content":[{"type":"text","text":"ok"}]}`),
+		State: redisDedupeStateCompleted,
+		Result: &redisDedupeResultMetadata{
+			IsError:      false,
+			ContentCount: 1,
+			ResultSHA256: strings.Repeat("a", sha256.Size*2),
+		},
 	}
 	storeA.Store("k.cross", completed)
 
@@ -67,8 +74,45 @@ func TestRedisDedupeStore_CrossProcessCollapses(t *testing.T) {
 	if gotB.State != redisDedupeStateCompleted {
 		t.Fatalf("second call observed state=%q; want %q", gotB.State, redisDedupeStateCompleted)
 	}
-	if string(gotB.ResultJSON) != `{"content":[{"type":"text","text":"ok"}]}` {
-		t.Fatalf("second call ResultJSON mismatch: got %s", string(gotB.ResultJSON))
+	if gotB.Result == nil || gotB.Result.ContentCount != 1 || gotB.Result.ResultSHA256 != strings.Repeat("a", sha256.Size*2) {
+		t.Fatalf("second call metadata mismatch: got %#v", gotB.Result)
+	}
+}
+
+func TestRedisDedupeStore_CompletedRecordDoesNotPersistRawResultFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	client, _ := newMiniRedisDedupeBackend(t)
+	storeA := NewRedisDedupeStore(client)
+	storeB := NewRedisDedupeStore(client)
+	canary := "redis-wire-canary-20260519"
+
+	storeA.Store("k.no-raw-result", &redisDedupeRecord{
+		State: redisDedupeStateCompleted,
+		Result: &redisDedupeResultMetadata{
+			IsError:              true,
+			ContentCount:         2,
+			HasStructuredContent: true,
+			ResultSHA256:         strings.Repeat("b", sha256.Size*2),
+		},
+	})
+
+	payload := singleRedisDedupePayload(t, ctx, client)
+	for i, forbidden := range []string{canary, "raw-data-" + canary, "\"content\":", "\"text\":", "\"data\":", "structuredContent", "payload"} {
+		if strings.Contains(payload, forbidden) {
+			t.Errorf("Redis completed dedupe record contains raw result field/fragment at index %d", i)
+		}
+	}
+	actual, loaded := storeB.LoadOrStore("k.no-raw-result", &redisDedupeRecord{State: redisDedupeStatePending})
+	if !loaded {
+		t.Fatalf("second Redis store LoadOrStore loaded=false; want completed metadata record")
+	}
+	rec, ok := actual.(*redisDedupeRecord)
+	if !ok || rec.State != redisDedupeStateCompleted || rec.Result == nil {
+		t.Fatalf("second Redis store actual = %#v; want completed redisDedupeRecord", actual)
+	}
+	if !rec.Result.IsError || rec.Result.ContentCount != 2 || !rec.Result.HasStructuredContent {
+		t.Fatalf("second Redis store metadata = %#v; want completed safe metadata", rec.Result)
 	}
 }
 
@@ -132,7 +176,13 @@ func TestRedisDedupeStore_StorePreservesTTL(t *testing.T) {
 	client, mr := newMiniRedisDedupeBackend(t)
 	store := NewRedisDedupeStore(client)
 	store.LoadOrStore("k.store-ttl", &redisDedupeRecord{State: redisDedupeStatePending})
-	store.Store("k.store-ttl", &redisDedupeRecord{State: redisDedupeStateCompleted, ResultJSON: []byte(`{"x":1}`)})
+	store.Store("k.store-ttl", &redisDedupeRecord{
+		State: redisDedupeStateCompleted,
+		Result: &redisDedupeResultMetadata{
+			ContentCount: 1,
+			ResultSHA256: strings.Repeat("c", sha256.Size*2),
+		},
+	})
 
 	gotTTL := mr.TTL(MCPDedupeKeyPrefix + "k.store-ttl")
 	if gotTTL <= 0 {

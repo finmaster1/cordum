@@ -1057,7 +1057,7 @@ func dedupeBegin(ctx context.Context, deps ToolCallDeps, key string) (*dedupeWin
 		}
 	case *redisDedupeRecord:
 		if e.State == redisDedupeStateCompleted {
-			return nil, decodeRedisCompletedOutcome(e)
+			return completedRedisDedupeOutcome(deps.DedupeState, key, e)
 		}
 		return waitForRedisDedupe(ctx, deps.DedupeState, key)
 	default:
@@ -1090,28 +1090,122 @@ func makeWinner(fresh any, isRedis bool) *dedupeWinner {
 	return &dedupeWinner{inProcessEntry: entry}
 }
 
-// decodeRedisCompletedOutcome reconstructs the *ToolCallResult a loser
-// short-circuits with from the JSON wire record the winner published.
-// A decode error degrades to "no cached result, no error" so the caller
-// will re-emit upstream rather than reading garbage — better to lose
-// the dedupe optimization on one row than to corrupt a tool response.
+// decodeRedisCompletedOutcome reconstructs the safe duplicate
+// *ToolCallResult a Redis loser short-circuits with from the bounded
+// metadata the winner published. A malformed metadata record returns nil
+// so the caller can promote itself to winner and re-run upstream rather
+// than treating an unreadable Redis row as a nil success.
 func decodeRedisCompletedOutcome(rec *redisDedupeRecord) *dedupeOutcome {
 	if rec == nil {
-		return &dedupeOutcome{}
+		return nil
 	}
 	out := &dedupeOutcome{}
-	if rec.ErrorMsg != "" {
-		out.err = errors.New(rec.ErrorMsg)
+	if rec.ErrorClass != "" {
+		out.err = errors.New(rec.ErrorClass)
 	}
-	if len(rec.ResultJSON) == 0 {
-		return out
+	if rec.Result == nil {
+		if out.err != nil {
+			return out
+		}
+		return nil
 	}
-	var result ToolCallResult
-	if err := json.Unmarshal(rec.ResultJSON, &result); err != nil {
-		return out
+	if strings.TrimSpace(rec.Result.ResultSHA256) == "" {
+		return nil
 	}
-	out.result = &result
+	if len(rec.Result.ResultSHA256) != sha256.Size*2 {
+		return nil
+	}
+	out.result = toolCallResultFromRedisDedupeMetadata(*rec.Result)
 	return out
+}
+
+func redisDedupeResultMetadataFor(result *ToolCallResult) (*redisDedupeResultMetadata, bool) {
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return nil, false
+	}
+	sum := sha256.Sum256(payload)
+	meta := &redisDedupeResultMetadata{
+		ResultSHA256: hex.EncodeToString(sum[:]),
+	}
+	if result != nil {
+		meta.IsError = result.IsError
+		meta.ContentCount = len(result.Content)
+		meta.HasStructuredContent = result.StructuredContent != nil
+	}
+	return meta, true
+}
+
+func toolCallResultFromRedisDedupeMetadata(meta redisDedupeResultMetadata) *ToolCallResult {
+	contentCount := meta.ContentCount
+	if contentCount < 0 {
+		contentCount = 0
+	}
+	hash := strings.TrimSpace(meta.ResultSHA256)
+	text := fmt.Sprintf(
+		"duplicate MCP tool result suppressed from Redis dedupe; result_sha256=%s content_count=%d has_structured_content=%t",
+		hash,
+		contentCount,
+		meta.HasStructuredContent,
+	)
+	return &ToolCallResult{
+		Content: []ContentItem{{
+			Type: "text",
+			Text: text,
+		}},
+		IsError: meta.IsError,
+	}
+}
+
+func completedRedisDedupeOutcome(store DedupeStore, key string, rec *redisDedupeRecord) (*dedupeWinner, *dedupeOutcome) {
+	if out := decodeRedisCompletedOutcome(rec); out != nil {
+		return nil, out
+	}
+	fresh := newPendingDedupeValue(true)
+	store.Store(key, fresh)
+	return makeWinner(fresh, true), nil
+}
+
+func redisDedupeRecordResultIsTooLarge(rec *redisDedupeRecord) bool {
+	if rec == nil || rec.Result == nil {
+		return false
+	}
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		return true
+	}
+	return len(payload) > maxRedisDedupeRecordBytes
+}
+
+func validateRedisDedupeRecordForStore(rec *redisDedupeRecord) bool {
+	if rec == nil {
+		return false
+	}
+	if rec.State != redisDedupeStateCompleted {
+		return true
+	}
+	if rec.Result == nil && rec.ErrorClass == "" {
+		return false
+	}
+	if rec.Result != nil && strings.TrimSpace(rec.Result.ResultSHA256) == "" {
+		return false
+	}
+	return !redisDedupeRecordResultIsTooLarge(rec)
+}
+
+func redisDedupeRecordForResult(result *ToolCallResult) (*redisDedupeRecord, bool) {
+	meta, ok := redisDedupeResultMetadataFor(result)
+	if !ok {
+		return nil, false
+	}
+	rec := &redisDedupeRecord{
+		State:  redisDedupeStateCompleted,
+		Result: meta,
+	}
+	if !validateRedisDedupeRecordForStore(rec) {
+		return nil, false
+	}
+	return rec, true
 }
 
 // waitForRedisDedupe is the Redis-backed loser polling loop. Per the
@@ -1150,7 +1244,7 @@ func waitForRedisDedupe(ctx context.Context, store DedupeStore, key string) (*de
 				return makeWinner(existing, true), nil
 			}
 			if rec, ok := existing.(*redisDedupeRecord); ok && rec.State == redisDedupeStateCompleted {
-				return nil, decodeRedisCompletedOutcome(rec)
+				return completedRedisDedupeOutcome(store, key, rec)
 			}
 			store.Store(key, fresh)
 			return makeWinner(fresh, true), nil
@@ -1166,7 +1260,7 @@ func waitForRedisDedupe(ctx context.Context, store DedupeStore, key string) (*de
 				continue
 			}
 			if rec.State == redisDedupeStateCompleted {
-				return nil, decodeRedisCompletedOutcome(rec)
+				return completedRedisDedupeOutcome(store, key, rec)
 			}
 			// Still pending — keep polling.
 		}
@@ -1182,10 +1276,10 @@ func waitForRedisDedupe(ctx context.Context, store DedupeStore, key string) (*de
 // In-process: closes the winner's done channel after stashing result/
 // err so waiters unblock with the right outcome.
 //
-// Redis-backed: writes a completed wire record (re-applying
-// MCPDedupeTTL) on success, deletes the key on error. Oversized or
-// unserializable results are dropped from the cache (delete-on-error
-// fallback) so we never persist a multi-MB row.
+// Redis-backed: writes a completed metadata-only wire record
+// (re-applying MCPDedupeTTL) on success, deletes the key on error.
+// Unserializable metadata is dropped from the cache (delete-on-error
+// fallback) so Redis never stores raw tool-result bodies.
 func dedupeFinish(deps ToolCallDeps, key string, winner *dedupeWinner, result *ToolCallResult, err error) {
 	if winner == nil {
 		return
@@ -1214,17 +1308,14 @@ func dedupeFinish(deps ToolCallDeps, key string, winner *dedupeWinner, result *T
 			deps.DedupeState.Delete(key)
 			return
 		}
-		resultJSON, marshalErr := json.Marshal(result)
-		if marshalErr != nil || len(resultJSON) > maxRedisDedupeRecordBytes {
+		rec, ok := redisDedupeRecordForResult(result)
+		if !ok {
 			// Cannot persist a usable completed record cross-process;
 			// delete so subsequent retries fire fresh upstream rather
 			// than block on a pending record that will never resolve.
 			deps.DedupeState.Delete(key)
 			return
 		}
-		deps.DedupeState.Store(key, &redisDedupeRecord{
-			State:      redisDedupeStateCompleted,
-			ResultJSON: resultJSON,
-		})
+		deps.DedupeState.Store(key, rec)
 	}
 }
