@@ -79,14 +79,32 @@ func validateMCPUpstreamTenant(r *http.Request, headerTenant, bodyTenant string)
 	return fmt.Errorf("edge tenant body/header mismatch")
 }
 
-func (s *server) mcpUpstreamPolicyInputs(r *http.Request, tenantID string) (string, []string) {
-	policyMode := strings.TrimSpace(r.URL.Query().Get("policy_mode"))
-	allowlist := splitCSVParams(r.URL.Query()["allowed_upstream"])
-	allowlist = append(allowlist, splitCSVParams(r.URL.Query()["allowed_upstreams"])...)
-	if len(allowlist) > 0 || policyMode != "" || s == nil || s.configSvc == nil {
-		return policyMode, allowlist
+// mcpUpstreamRejectsCallerPolicyParams returns a non-nil error if the caller
+// supplied any of the policy-related query params that previously could
+// downgrade strict validation or inject an allowlist. Policy now comes ONLY
+// from trusted tenant/server config; caller overrides are rejected with 400
+// invalid_request rather than silently ignored (avoids confused-deputy where
+// the caller believes they overrode strict mode).
+func mcpUpstreamRejectsCallerPolicyParams(r *http.Request) error {
+	q := r.URL.Query()
+	for _, name := range []string{"policy_mode", "allowed_upstream", "allowed_upstreams"} {
+		if _, present := q[name]; present {
+			return fmt.Errorf("%s must be configured in tenant settings, not query string", name)
+		}
 	}
-	return policyMode, s.mcpAllowedUpstreamsFromConfig(r, tenantID)
+	return nil
+}
+
+func (s *server) mcpUpstreamPolicyInputs(r *http.Request, tenantID string) (string, []string) {
+	// Policy mode is NOT caller-controllable; only the trusted-config allowlist
+	// is consulted. PolicyMode is left empty so the validator runs its
+	// unconditional internal-host rejection but does not enforce strict-only
+	// constraints (HTTPS-only, allowlist gate). Per-tenant strict mode opt-in
+	// is tracked as a follow-up task.
+	if s == nil || s.configSvc == nil {
+		return "", nil
+	}
+	return "", s.mcpAllowedUpstreamsFromConfig(r, tenantID)
 }
 
 func (s *server) mcpAllowedUpstreamsFromConfig(r *http.Request, tenantID string) []string {
@@ -95,18 +113,6 @@ func (s *server) mcpAllowedUpstreamsFromConfig(r *http.Request, tenantID string)
 		return nil
 	}
 	return extractStringSlice(effective, "safety", "mcp", "allowed_upstreams")
-}
-
-func splitCSVParams(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		for _, part := range strings.Split(value, ",") {
-			if trimmed := strings.TrimSpace(part); trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-	}
-	return out
 }
 
 func extractStringSlice(data map[string]any, keys ...string) []string {

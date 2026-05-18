@@ -71,6 +71,17 @@ func validateMCPUpstreamRisk(risk string) error {
 	}
 }
 
+// mcpCloudMetadataHosts is a deny-list of well-known cloud-provider
+// instance-metadata hostnames. Match is case-insensitive and trailing-dot
+// FQDN form is normalized away before lookup. These hosts have no
+// legitimate MCP upstream use case; allowing them would enable SSRF onto
+// the cloud provider's metadata endpoint.
+var mcpCloudMetadataHosts = map[string]struct{}{
+	"metadata.google.internal":   {},
+	"metadata.azure.com":         {},
+	"instance-data.ec2.internal": {},
+}
+
 func validateMCPUpstreamURL(ctx context.Context, raw, policyMode string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -78,11 +89,30 @@ func validateMCPUpstreamURL(ctx context.Context, raw, policyMode string) error {
 	}
 	strict := isMCPEnterpriseStrict(policyMode)
 	host := strings.TrimSpace(u.Hostname())
-	if strict {
-		unsafe, err := mcpHostResolvesUnsafe(ctx, host)
-		if err != nil || unsafe {
+	// Strip IPv6 zone identifier (e.g. fe80::1%eth0) before classification.
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	// Strip trailing dot FQDN form.
+	host = strings.TrimSuffix(host, ".")
+	// Cloud-metadata hostname check (pre-DNS): rejects in ALL modes.
+	if _, denied := mcpCloudMetadataHosts[strings.ToLower(host)]; denied {
+		return ErrUnsafeEndpoint
+	}
+	// Internal-host SSRF rejection (RFC1918, link-local incl 169.254.169.254,
+	// IPv6 ULA + link-local, multicast, unspecified, loopback) runs in
+	// EVERY mode — these are SSRF vectors with no legitimate MCP use case.
+	unsafe, err := mcpHostResolvesUnsafe(ctx, host)
+	if err != nil {
+		// Fail-closed in strict mode; in observe/enforce, refuse only on
+		// confirmed unsafe (DNS failure on a free-form hostname is not
+		// itself an SSRF signal — caller-supplied DNS errors shouldn't
+		// block legitimate public hosts at observe-time).
+		if strict {
 			return ErrUnsafeEndpoint
 		}
+	} else if unsafe {
+		return ErrUnsafeEndpoint
 	}
 	if strict && u.Scheme != "https" {
 		return ErrUnsafeEndpoint
@@ -115,8 +145,32 @@ func mcpHostResolvesUnsafe(ctx context.Context, host string) (bool, error) {
 	return false, nil
 }
 
+// mcpIPUnsafe rejects all internal/private/metadata-reachable address
+// classes that have no legitimate MCP upstream use case. Includes RFC1918
+// private (10/8, 172.16/12, 192.168/16), loopback (127/8, ::1), link-local
+// v4 (169.254/16, covers all cloud IMDS endpoints), link-local v6 (fe80::/10),
+// IPv6 ULA (fc00::/7), multicast (224.0.0.0/4, ff00::/8), and unspecified
+// (0.0.0.0, ::). Also handles IPv4-mapped IPv6 by unwrapping to v4.
 func mcpIPUnsafe(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsUnspecified()
+	if ip == nil {
+		return true
+	}
+	// Unwrap IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) so the check
+	// applies to the v4 class.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
+		return true
+	}
+	// IPv6 unique-local addresses (fc00::/7 = fc00::/8 + fd00::/8).
+	// stdlib IsPrivate() covers this since Go 1.17, but be defensive in case
+	// of future stdlib changes.
+	if len(ip) == net.IPv6len && (ip[0]&0xfe) == 0xfc {
+		return true
+	}
+	return false
 }
 
 func validateMCPUpstreamCommand(command []string) error {

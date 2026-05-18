@@ -171,6 +171,13 @@ func (s *server) decodeMCPUpstreamRequest(w http.ResponseWriter, r *http.Request
 		upstream.Name = pathName
 	}
 	upstream.TenantID = tenantID
+	// Reject caller-supplied policy_mode/allowed_upstream(s) query params
+	// (SSRF/policy-downgrade vector). Trusted tenant/server config is the
+	// ONLY policy source.
+	if err := mcpUpstreamRejectsCallerPolicyParams(r); err != nil {
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, err.Error(), nil)
+		return nil, false
+	}
 	policyMode, allowlist := s.mcpUpstreamPolicyInputs(r, tenantID)
 	if err := edgecore.ValidateMCPUpstream(r.Context(), &upstream, policyMode, allowlist); err != nil {
 		writeMCPUpstreamValidationError(w, r, err, tenantID, upstream.Name)

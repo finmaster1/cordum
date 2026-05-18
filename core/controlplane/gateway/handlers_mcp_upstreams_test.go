@@ -170,6 +170,138 @@ func TestHandlerCreateRedactedResponse(t *testing.T) {
 	}
 }
 
+// Policy must come from trusted tenant config only. Caller-supplied
+// `policy_mode` / `allowed_upstream(s)` query params MUST be rejected with
+// 400 invalid_request — not silently ignored — to prevent confused-deputy
+// where the caller believes they overrode strict mode.
+func TestHandlerCreateRejectsPolicyModeQueryParam(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"policy_mode_observe", "policy_mode=observe"},
+		{"policy_mode_enforce", "policy_mode=enforce"},
+		{"policy_mode_enterprise_strict", "policy_mode=enterprise-strict"},
+		{"allowed_upstream_singular", "allowed_upstream=evil-host"},
+		{"allowed_upstreams_plural", "allowed_upstreams=169.254.169.254"},
+		{"allowed_upstreams_csv", "allowed_upstreams=a,b,c"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := &fakeMCPUpstreamRegistry{}
+			handler := newMCPUpstreamHTTPHandler(t, registry)
+			body := []byte(`{
+				"name":"tenant-tools",
+				"transport":"http",
+				"endpoint":"https://mcp.example.com/tools",
+				"auth_secret_ref":"secret://vault/mcp/tenant-tools",
+				"risk":"medium",
+				"enabled":true
+			}`)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/edge/mcp/upstreams?"+tc.query, bytes.NewReader(body))
+			addMCPUpstreamAuth(req)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+			if registry.createCalls != 0 {
+				t.Fatalf("create called %d times despite reject, want 0", registry.createCalls)
+			}
+			if !strings.Contains(rec.Body.String(), "invalid_request") {
+				t.Fatalf("response did not include invalid_request code: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandlerUpdateRejectsPolicyQueryParams(t *testing.T) {
+	registry := &fakeMCPUpstreamRegistry{entries: []edgecore.UpstreamServer{{
+		Name:          "tenant-tools",
+		TenantID:      "tenant-a",
+		Transport:     "http",
+		Endpoint:      "https://mcp.example.com/tools",
+		AuthSecretRef: "secret://vault/mcp/tenant-tools",
+		Risk:          "medium",
+		Enabled:       true,
+	}}}
+	handler := newMCPUpstreamHTTPHandler(t, registry)
+	body := []byte(`{
+		"name":"tenant-tools",
+		"transport":"http",
+		"endpoint":"https://mcp.example.com/tools",
+		"auth_secret_ref":"secret://vault/mcp/tenant-tools",
+		"risk":"medium",
+		"enabled":true
+	}`)
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/edge/mcp/upstreams/tenant-tools?policy_mode=observe",
+		bytes.NewReader(body),
+	)
+	addMCPUpstreamAuth(req)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	if registry.updateCalls != 0 {
+		t.Fatalf("update called %d times despite reject, want 0", registry.updateCalls)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_request") {
+		t.Fatalf("response did not include invalid_request code: %s", rec.Body.String())
+	}
+}
+
+// Internal-host SSRF vectors must be rejected at the API edge regardless of
+// any caller-supplied query param. Covers the full attack surface from the
+// findings (AWS IMDS, RFC1918, IPv6 link-local + ULA, cloud-metadata DNS).
+func TestHandlerCreateRejectsInternalHostEndpoints(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint string
+	}{
+		{"aws_imds_v4", "http://169.254.169.254/latest/meta-data/"},
+		{"aws_imds_v6", "http://[fd00:ec2::254]/"},
+		{"gcp_metadata_dns", "http://metadata.google.internal/computeMetadata/v1/"},
+		{"rfc1918", "http://10.0.0.1/"},
+		{"loopback_v4", "http://127.0.0.1/"},
+		{"ipv6_link_local", "http://[fe80::1]/"},
+		{"ipv6_ula", "http://[fd00::1]/"},
+		{"ipv4_unspecified", "http://0.0.0.0/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := &fakeMCPUpstreamRegistry{}
+			handler := newMCPUpstreamHTTPHandler(t, registry)
+			body := fmt.Appendf(nil, `{
+				"name":"tenant-tools",
+				"transport":"http",
+				"endpoint":%q,
+				"auth_secret_ref":"secret://vault/mcp/tenant-tools",
+				"risk":"medium",
+				"enabled":true
+			}`, tc.endpoint)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/edge/mcp/upstreams", bytes.NewReader(body))
+			addMCPUpstreamAuth(req)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+			if registry.createCalls != 0 {
+				t.Fatalf("create called %d times despite reject, want 0", registry.createCalls)
+			}
+		})
+	}
+}
+
 func TestHandlerDisableIdempotent(t *testing.T) {
 	registry := &fakeMCPUpstreamRegistry{}
 	handler := newMCPUpstreamHTTPHandler(t, registry)
@@ -210,6 +342,7 @@ func addMCPUpstreamAuth(req *http.Request) {
 type fakeMCPUpstreamRegistry struct {
 	entries      []edgecore.UpstreamServer
 	createCalls  int
+	updateCalls  int
 	disableCalls map[string]int
 }
 
@@ -240,6 +373,7 @@ func (f *fakeMCPUpstreamRegistry) List(_ context.Context, tenantID string) ([]ed
 }
 
 func (f *fakeMCPUpstreamRegistry) Update(_ context.Context, upstream *edgecore.UpstreamServer) error {
+	f.updateCalls++
 	for i := range f.entries {
 		if f.entries[i].TenantID == upstream.TenantID && f.entries[i].Name == upstream.Name {
 			f.entries[i] = *upstream
