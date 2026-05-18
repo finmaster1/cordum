@@ -144,7 +144,10 @@ func TestProcessApprovalClaim_TypedConflictKind(t *testing.T) {
 			store := &fakeApprovalClaimStore{
 				err: &edge.ApprovalConflictError{Kind: tc.kind, Reason: "test-fixture"},
 			}
-			outcome, err := ProcessApprovalClaim(newApprovalHoldCtx(), ApprovalHoldDeps{Store: store}, ToolCallParams{
+			outcome, err := ProcessApprovalClaim(newApprovalHoldCtx(), ApprovalHoldDeps{
+				Store:          store,
+				PolicySnapshot: func(_ context.Context) string { return "policy-v7" },
+			}, ToolCallParams{
 				Name:      "fs.write",
 				Arguments: json.RawMessage(`{"path":"/x","_approval_ref":"edge_appr_xyz"}`),
 			})
@@ -171,7 +174,10 @@ func TestProcessApprovalClaim_TypedConflictKind(t *testing.T) {
 func TestProcessApprovalClaim_NotFoundMaps(t *testing.T) {
 	t.Parallel()
 	store := &fakeApprovalClaimStore{err: edge.ErrNotFound}
-	outcome, err := ProcessApprovalClaim(newApprovalHoldCtx(), ApprovalHoldDeps{Store: store}, ToolCallParams{
+	outcome, err := ProcessApprovalClaim(newApprovalHoldCtx(), ApprovalHoldDeps{
+		Store:          store,
+		PolicySnapshot: func(_ context.Context) string { return "policy-v7" },
+	}, ToolCallParams{
 		Name:      "fs.write",
 		Arguments: json.RawMessage(`{"path":"/x","_approval_ref":"edge_appr_unknown"}`),
 	})
@@ -277,6 +283,172 @@ func TestBuildMCPApprovalBinding_StripsApprovalRef(t *testing.T) {
 	if origIn != refIn {
 		t.Errorf("InputHash differs once `_approval_ref` is present; orig=%q with-ref=%q (would force args_mismatch on every legitimate retry)",
 			origIn, refIn)
+	}
+}
+
+// TestProcessApprovalClaim_BlankLinkage_FailsClosed is the consume-side
+// half of PR #276 Sub-E finding #26: ProcessApprovalClaim MUST refuse
+// the call when ANY of (Tenant, SessionID, ExecutionID, AgentID) is
+// blank, mirroring the EvaluateToolCall guard. The Edge approval store
+// keys consume on this tuple — a missing component would silently
+// consume against an under-attributed row.
+func TestProcessApprovalClaim_BlankLinkage_FailsClosed(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		meta CallMetadata
+	}{
+		{"blank_tenant", CallMetadata{Tenant: "", Principal: "p1", AgentID: "a1", SessionID: "s1", ExecutionID: "e1"}},
+		{"blank_session_id", CallMetadata{Tenant: "tnt_a", Principal: "p1", AgentID: "a1", SessionID: "", ExecutionID: "e1"}},
+		{"blank_execution_id", CallMetadata{Tenant: "tnt_a", Principal: "p1", AgentID: "a1", SessionID: "s1", ExecutionID: ""}},
+		{"blank_agent_id", CallMetadata{Tenant: "tnt_a", Principal: "p1", AgentID: "", SessionID: "s1", ExecutionID: "e1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeApprovalClaimStore{consumed: true}
+			ctx := WithCallMetadata(context.Background(), tc.meta)
+			_, err := ProcessApprovalClaim(ctx, ApprovalHoldDeps{
+				Store:          store,
+				PolicySnapshot: func(_ context.Context) string { return "policy-v7" },
+			}, ToolCallParams{
+				Name:      "fs.write",
+				Arguments: json.RawMessage(`{"path":"/x","_approval_ref":"edge_appr_xyz"}`),
+			})
+			if err == nil {
+				t.Fatal("expected fail-closed on blank linkage; got nil")
+			}
+			if !errors.Is(err, errMissingMCPMetadata) {
+				t.Fatalf("expected errMissingMCPMetadata, got %v", err)
+			}
+			if store.calls != 0 {
+				t.Fatalf("store.calls = %d; want 0 (must not consume against blank linkage)", store.calls)
+			}
+		})
+	}
+}
+
+// TestProcessApprovalClaim_NilSnapshot_FailsClosed is the PR #276 Sub-E
+// finding #16 defense-in-depth regression: when ProcessApprovalClaim is
+// called with a wired Store but a nil PolicySnapshot provider, it MUST
+// refuse to mint a claim against an empty snapshot (which would either
+// fail at the store layer per-request or — on a permissive fake — let
+// a hold register as "approved" against an empty policy).
+//
+// MCPServer.WithApprovalHold refuses to enable the path in this state,
+// so the runtime path is already safe. This locks the package-level
+// contract for direct callers.
+func TestProcessApprovalClaim_NilSnapshot_FailsClosed(t *testing.T) {
+	t.Parallel()
+	store := &fakeApprovalClaimStore{consumed: true}
+	deps := ApprovalHoldDeps{
+		Store: store,
+		// PolicySnapshot deliberately nil.
+	}
+	_, err := ProcessApprovalClaim(newApprovalHoldCtx(), deps, ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/x","_approval_ref":"edge_appr_xyz"}`),
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed on nil PolicySnapshot; got nil")
+	}
+	if !errors.Is(err, errMissingPolicySnapshot) {
+		t.Fatalf("expected errMissingPolicySnapshot, got %v", err)
+	}
+	if store.calls != 0 {
+		t.Fatalf("store.calls = %d; want 0 (must not consume against empty snapshot)", store.calls)
+	}
+}
+
+// TestApprovalHold_HashRoundtrip_Identical is the EDGE-103 reopen #2 (PR
+// #276 Sub-E finding #15) regression: the mint side (gateway's
+// mintEdgeApprovalForActionGate) and the consume side (ProcessApprovalClaim
+// via BuildMCPApprovalBinding) MUST derive byte-identical ActionHash AND
+// InputHash for the same (tenant, server, tool, args) tuple — even when
+// the consume-side args carry the server-reserved `_approval_ref` field
+// that the resume retry adds.
+//
+// Without this, edge.RedisStore.ClaimApproval returns
+// ApprovalConflictKindArgsMismatch on every legitimate retry. The test
+// pins both action-hash and input-hash equality across the retry boundary
+// so any future divergence (e.g. a forgotten stripApprovalRefArg call on
+// a new mint path) fails this test rather than failing in production.
+func TestApprovalHold_HashRoundtrip_Identical(t *testing.T) {
+	t.Parallel()
+	const tenant = "tnt_a"
+	const server = "cordum.builtin"
+	const policySnapshot = "policy-v7"
+
+	mintParams := ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/var/data/x.db","contents":"hi"}`),
+	}
+	// Resume retry: same logical args + the server-reserved `_approval_ref`.
+	resumeParams := ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/var/data/x.db","contents":"hi","_approval_ref":"edge_appr_xyz"}`),
+	}
+
+	mintAction, mintInput := BuildMCPApprovalBinding(tenant, server, mintParams, policySnapshot)
+	consumeAction, consumeInput := BuildMCPApprovalBinding(tenant, server, resumeParams, policySnapshot)
+
+	if mintAction == "" || mintInput == "" {
+		t.Fatalf("mint binding produced empty hashes: action=%q input=%q", mintAction, mintInput)
+	}
+	if mintAction != consumeAction {
+		t.Errorf("ActionHash drift across retry boundary: mint=%q consume=%q (would surface ArgsMismatch on legitimate retry)",
+			mintAction, consumeAction)
+	}
+	if mintInput != consumeInput {
+		t.Errorf("InputHash drift across retry boundary: mint=%q consume=%q (would surface ArgsMismatch on legitimate retry)",
+			mintInput, consumeInput)
+	}
+
+	// Sanity: an honest args mutation (different contents) must flip
+	// InputHash but keep ActionHash stable. The action hash binds
+	// tenant/server/tool/target_path; the input hash binds the canonical
+	// args bytes. Drift here would mean either too-narrow or too-broad
+	// binding scope.
+	mutated := ToolCallParams{
+		Name:      mintParams.Name,
+		Arguments: json.RawMessage(`{"path":"/var/data/x.db","contents":"different"}`),
+	}
+	mutatedAction, mutatedInput := BuildMCPApprovalBinding(tenant, server, mutated, policySnapshot)
+	if mutatedAction != mintAction {
+		t.Errorf("ActionHash flipped on args-only change; mint=%q mutated=%q", mintAction, mutatedAction)
+	}
+	if mutatedInput == mintInput {
+		t.Errorf("InputHash did NOT change on args mutation; both = %q (args-mismatch defense broken)", mintInput)
+	}
+}
+
+// TestApprovalHold_RequiresSnapshot is the PR #276 Sub-E finding #16
+// regression: WithApprovalHold MUST refuse to enable when
+// PolicySnapshot is nil. ProcessApprovalClaim builds an
+// ApprovalClaimRequest whose ClaimApproval validation rejects an empty
+// PolicySnapshot — so a partial wiring (store wired, snapshot missing)
+// would fail closed at every retry. The boot-time guard makes the
+// misconfiguration visible at deploy rather than per-request.
+func TestApprovalHold_RequiresSnapshot(t *testing.T) {
+	t.Parallel()
+	srv := NewServer(nil, &fakeToolService{}, nil, ServerConfig{})
+	srv = srv.WithApprovalHold(ApprovalHoldDeps{
+		Store: stubApprovalStore{},
+		// PolicySnapshot deliberately nil.
+		ServerName: "cordum.builtin",
+	})
+	if srv.HasApprovalHold() {
+		t.Fatalf("HasApprovalHold() = true with nil PolicySnapshot; want false (Sub-E #16 snapshot guard must fire)")
+	}
+	// Happy path: with snapshot wired, the gate stays on so legacy
+	// servers that DO wire a snapshot continue to work.
+	srv2 := NewServer(nil, &fakeToolService{}, nil, ServerConfig{})
+	srv2 = srv2.WithApprovalHold(ApprovalHoldDeps{
+		Store:          stubApprovalStore{},
+		PolicySnapshot: func(_ context.Context) string { return "policy-v7" },
+		ServerName:     "cordum.builtin",
+	})
+	if !srv2.HasApprovalHold() {
+		t.Fatalf("HasApprovalHold() = false after happy-path wiring; want true (snapshot guard regressed)")
 	}
 }
 

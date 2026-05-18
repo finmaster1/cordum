@@ -18,6 +18,18 @@ import (
 // upstream tool handler. Strip happens after the claim succeeds.
 const approvalRefArgKey = "_approval_ref"
 
+// errMissingPolicySnapshot is the explicit fail-closed sentinel for the
+// EDGE-103 approval-hold consume path (PR #276 Sub-E finding #16):
+// ProcessApprovalClaim REFUSES to issue a ClaimApproval when the caller
+// wired a Store but no PolicySnapshot provider. Otherwise the resulting
+// ApprovalClaimRequest carries an empty PolicySnapshot, and the
+// edge.RedisStore validation would either fail at the store layer (per-
+// request churn) or — worse — let a hold register as "approved" against
+// an empty snapshot. The boot-time guard at MCPServer.WithApprovalHold
+// is the primary defense; this sentinel is the in-package contract that
+// catches direct misuse of ProcessApprovalClaim.
+var errMissingPolicySnapshot = errors.New("missing_policy_snapshot: ApprovalHoldDeps.PolicySnapshot is required")
+
 // BuildMCPApprovalBinding centralises the hash tuple that binds an MCP
 // approval lifecycle. Both the gateway handoff (mint side) and
 // ProcessApprovalClaim (consume side) MUST derive the action+input
@@ -159,7 +171,17 @@ func ProcessApprovalClaim(ctx context.Context, deps ApprovalHoldDeps, params Too
 	}
 
 	meta, ok := CallMetadataFromContext(ctx)
-	if !ok || strings.TrimSpace(meta.Tenant) == "" {
+	// Sub-E #26: fail closed when ANY linkage field is blank. The Edge
+	// approval store keys consume on (TenantID, SessionID, ExecutionID,
+	// AgentID); a single missing component breaks the audit join and
+	// would silently mint or consume against an under-attributed
+	// approval row. The EvaluateToolCall path has the symmetric check
+	// for the gate-mint side.
+	if !ok ||
+		strings.TrimSpace(meta.Tenant) == "" ||
+		strings.TrimSpace(meta.SessionID) == "" ||
+		strings.TrimSpace(meta.ExecutionID) == "" ||
+		strings.TrimSpace(meta.AgentID) == "" {
 		return ApprovalClaimOutcome{}, errMissingMCPMetadata
 	}
 
@@ -171,10 +193,17 @@ func ProcessApprovalClaim(ctx context.Context, deps ApprovalHoldDeps, params Too
 		return ApprovalClaimOutcome{}, fmt.Errorf("re-marshal stripped args: %w", err)
 	}
 
-	policySnapshot := ""
-	if deps.PolicySnapshot != nil {
-		policySnapshot = deps.PolicySnapshot(ctx)
+	// Sub-E #16 defense-in-depth: even though MCPServer.WithApprovalHold
+	// refuses to enable the path with a nil PolicySnapshot, direct callers
+	// of ProcessApprovalClaim must also fail closed rather than minting a
+	// claim with an empty PolicySnapshot. An empty snapshot would either
+	// be rejected by the store (per-request churn) or — worse on a fake
+	// store — allow the hold to register as "approved" against an empty
+	// policy.
+	if deps.PolicySnapshot == nil {
+		return ApprovalClaimOutcome{}, errMissingPolicySnapshot
 	}
+	policySnapshot := deps.PolicySnapshot(ctx)
 
 	// EDGE-103 reopen #1: derive the action+input hashes through the
 	// same BuildMCPApprovalBinding helper the mint side calls. Without

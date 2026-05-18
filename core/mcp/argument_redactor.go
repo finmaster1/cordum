@@ -84,6 +84,16 @@ func DefaultRedactionRules() []RedactionRule {
 		// GitHub token families: classic PAT (ghp_), OAuth (gho_),
 		// user-server (ghu_), server-server (ghs_), refresh (ghr_).
 		{Regex: `gh[opusr]_[A-Za-z0-9]{16,}`, Replacement: "[REDACTED:github_token]", Description: "github_token"},
+		// GitHub fine-grained PAT (github_pat_<prefix>_<suffix>) carries
+		// underscores in the body and slips past the classic [A-Za-z0-9]
+		// character class. The longer prefix is matched before the
+		// gh[opusr]_ rule above so a github_pat_ token never falls
+		// through to a more permissive pattern.
+		{Regex: `github_pat_[A-Za-z0-9_]{16,}`, Replacement: "[REDACTED:github_token]", Description: "github_token"},
+		// GitHub Enterprise (ghe_) token family — same shape as the
+		// other gh* tokens but the `e` discriminator isn't in
+		// [opusr], so it needs its own pattern.
+		{Regex: `ghe_[A-Za-z0-9_]{16,}`, Replacement: "[REDACTED:github_token]", Description: "github_token"},
 		{Regex: `eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+`, Replacement: "[REDACTED:jwt]", Description: "jwt"},
 		{Regex: `-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----`, Replacement: "[REDACTED:pem_private_key]", Description: "pem_private_key"},
 	}

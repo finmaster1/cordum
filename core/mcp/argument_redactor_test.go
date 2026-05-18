@@ -145,6 +145,44 @@ func TestDefaultRedactor_ExtendedTokenFamilies(t *testing.T) {
 	}
 }
 
+// TestDefaultRedactor_GitHubTokenFamilies is the PR #276 Sub-E finding
+// #25 regression: the default redactor MUST scrub every GitHub token
+// family — classic PAT, OAuth, user-server, server-server, refresh,
+// fine-grained PAT, AND Enterprise — when a token shape lands in a free-
+// form string field. Pre-Sub-E coverage only handled the gh[opusr]_
+// shape (ghp/gho/ghu/ghs/ghr); github_pat_ and ghe_ slipped past every
+// regex and would survive into the redacted args of a failed event.
+func TestDefaultRedactor_GitHubTokenFamilies(t *testing.T) {
+	t.Parallel()
+	r := DefaultRedactor()
+	cases := []struct {
+		name      string
+		input     string
+		sensitive string
+	}{
+		// Fixtures assembled from fragments so GitHub secret-scanning push
+		// protection does not flag the source as a leaked credential.
+		{"classic_pat", `{"note":"` + "ghp_" + "0123456789abcdef0123456789abcdef0123" + `"}`, "ghp_" + "0123456789abcdef"},
+		{"oauth", `{"note":"` + "gho_" + "0123456789abcdef0123456789abcdef0123" + `"}`, "gho_" + "0123456789abcdef"},
+		{"user_server", `{"note":"` + "ghu_" + "0123456789abcdef0123456789abcdef0123" + `"}`, "ghu_" + "0123456789abcdef"},
+		{"server_server", `{"note":"` + "ghs_" + "0123456789abcdef0123456789abcdef0123" + `"}`, "ghs_" + "0123456789abcdef"},
+		{"refresh", `{"note":"` + "ghr_" + "0123456789abcdef0123456789abcdef0123" + `"}`, "ghr_" + "0123456789abcdef"},
+		{"fine_grained_pat", `{"note":"` + "github_pat_" + "11A0123456789_0123456789abcdef0123456789abcdef0123456789abcdef0123" + `"}`, "github_pat_" + "11A"},
+		{"enterprise", `{"note":"` + "ghe_" + "0123456789abcdef0123456789abcdef0123" + `"}`, "ghe_" + "0123456789abcdef"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := r.Redact(json.RawMessage(tc.input))
+			if strings.Contains(string(out), tc.sensitive) {
+				t.Errorf("redactor leaked %s token family: %s", tc.name, out)
+			}
+			if !strings.Contains(string(out), "[REDACTED:github_token]") {
+				t.Errorf("expected [REDACTED:github_token] marker for %s, got: %s", tc.name, out)
+			}
+		})
+	}
+}
+
 func BenchmarkRedactLarge(b *testing.B) {
 	r := DefaultRedactor()
 	// 10 KB payload with mixed secret/non-secret fields.

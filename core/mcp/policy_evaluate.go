@@ -35,6 +35,11 @@ var upstreamErrorRedactPatterns = []struct {
 	// API key tokens by common prefix (Anthropic sk-, GitHub ghp_, AWS AKIA).
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_\-]{4,}\b`), "[REDACTED:api_key]"},
 	{regexp.MustCompile(`\bgh[opusr]_[A-Za-z0-9]{8,}\b`), "[REDACTED:github_token]"},
+	// GitHub fine-grained PAT (github_pat_…) carries underscores in
+	// the body, so the classic gh[opusr]_ rule above does not cover it.
+	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{8,}\b`), "[REDACTED:github_token]"},
+	// GitHub Enterprise (ghe_…) — same shape, different prefix letter.
+	{regexp.MustCompile(`\bghe_[A-Za-z0-9_]{8,}\b`), "[REDACTED:github_token]"},
 	{regexp.MustCompile(`\bAKIA[0-9A-Z]{12,}\b`), "[REDACTED:aws_key]"},
 }
 
@@ -53,6 +58,11 @@ var redactionCompletenessPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`sk_live_[a-zA-Z0-9]{24,}`),
 	regexp.MustCompile(`sk-[A-Za-z0-9_\-]{16,}`),
 	regexp.MustCompile(`gh[opusr]_[A-Za-z0-9]{16,}`),
+	// Fine-grained PAT body carries underscores; classic class above
+	// would let github_pat_ tokens through the completeness backstop.
+	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{16,}`),
+	// Enterprise (ghe_) — same shape, distinct prefix letter.
+	regexp.MustCompile(`ghe_[A-Za-z0-9_]{16,}`),
 	regexp.MustCompile(`eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]+PRIVATE KEY-----`),
 }
@@ -791,7 +801,14 @@ func InvokeToolWithPolicy(ctx context.Context, deps ToolCallDeps, params ToolCal
 			return nil, errors.New("deps.ApprovalHandoff is required for REQUIRE_HUMAN decisions")
 		}
 		callMeta, _ := CallMetadataFromContext(ctx)
-		actionHash := canonicalActionHashFromEvent(evalResult.PreEvent, params, server)
+		// Sub-E #15: route the mint-side ActionHash through the SAME
+		// BuildMCPApprovalBinding helper the consume side
+		// (ProcessApprovalClaim) uses. The gateway adapter
+		// (mintEdgeApprovalForActionGate) ALSO calls this helper, so all
+		// three approval-lifecycle hash sites resolve to a single
+		// definition. Drift here previously surfaced as
+		// ApprovalConflictKindArgsMismatch on retries with `_approval_ref`.
+		actionHash, _ := BuildMCPApprovalBinding(callMeta.Tenant, server, params, "")
 		ref, herr := deps.ApprovalHandoff.ConsumeActionGateDecision(ctx, dec, ToolCallApprovalContext{
 			Tenant:     evalResult.PreEvent.TenantID,
 			AgentID:    callMeta.AgentID,
@@ -885,21 +902,6 @@ func newPostEvent(pre *edge.AgentActionEvent, clock func() time.Time, kind edge.
 		evt.Constraints = dec.Constraints
 	}
 	return evt
-}
-
-// canonicalActionHashFromEvent computes a stable hash over the tool
-// invocation so the approval-store lifecycle binds to the same key
-// the gate used. The key is tenant+server+tool+normalized-target-path
-// (CanonicalActionHash). Same logical file produces one key regardless
-// of whether the caller spelled the path with backslashes or forward
-// slashes — Windows and POSIX callers cannot race to create two
-// pending approvals for the same action.
-func canonicalActionHashFromEvent(pre *edge.AgentActionEvent, params ToolCallParams, server string) string {
-	var targetPath string
-	if parsed, _ := parseArgsForDescriptor(params.Arguments); parsed != nil {
-		targetPath = extractTargetPathFromArgs(parsed)
-	}
-	return ActionTupleHash(pre.TenantID, server, params.Name, targetPath)
 }
 
 // sanitizeUpstreamError redacts URL hosts, query strings, and known

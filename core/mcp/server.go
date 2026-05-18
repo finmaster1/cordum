@@ -506,6 +506,9 @@ func (s *MCPServer) handleToolsCall(ctx context.Context, params json.RawMessage)
 			if errors.Is(err, errMissingMCPMetadata) {
 				return nil, s.rpcError(jsonRPCGatewayMisconfiguredCode, "approval gate misconfigured", "missing_mcp_metadata")
 			}
+			if errors.Is(err, errMissingPolicySnapshot) {
+				return nil, s.rpcError(jsonRPCGatewayMisconfiguredCode, "approval gate misconfigured", "missing_policy_snapshot")
+			}
 			return nil, s.rpcError(jsonRPCInvalidParamsCode, "invalid approval ref", err.Error())
 		}
 		if outcome.ConflictErr != nil {
