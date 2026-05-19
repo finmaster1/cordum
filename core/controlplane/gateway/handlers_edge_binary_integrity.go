@@ -125,21 +125,20 @@ type binaryVerifyListItem struct {
 // partial persist.
 func (s *server) handleIngestBinaryVerify(w http.ResponseWriter, r *http.Request) {
 	client := s.redisClient()
-	if !s.requireStoreAndPermissionOrRole(w, r, auth.PermAuditExport, []string{"admin"}, client) {
+	if client == nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeStoreUnavailable, "redis store unavailable", nil)
 		return
 	}
-	tenant, err := s.resolveTenant(r, "")
-	if err != nil {
-		writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
+	if !s.requireEdgePermissionOrRole(w, r, auth.PermAuditExport, "admin") {
 		return
 	}
-	if err := s.requireTenantAccess(r, tenant); err != nil {
-		writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
+	tenant, ok := s.edgeTenantFromRequest(w, r, "")
+	if !ok {
 		return
 	}
 	if s.auditChainer == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable,
-			"audit_chainer_not_installed; binary-verify events cannot be persisted")
+		writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeServiceUnavailable,
+			"binary-verify events cannot be persisted", nil)
 		return
 	}
 
@@ -148,26 +147,26 @@ func (s *server) handleIngestBinaryVerify(w http.ResponseWriter, r *http.Request
 	raw, readErr := io.ReadAll(body)
 	if readErr != nil {
 		if errors.Is(readErr, &http.MaxBytesError{}) || strings.Contains(readErr.Error(), "request body too large") {
-			writeErrorJSON(w, http.StatusRequestEntityTooLarge,
-				fmt.Sprintf("body exceeds %d bytes", MaxBinaryVerifyRequestBodyBytes))
+			writeEdgeError(w, r, http.StatusRequestEntityTooLarge, edgeErrCodeRequestTooLarge,
+				fmt.Sprintf("body exceeds %d bytes", MaxBinaryVerifyRequestBodyBytes), nil)
 			return
 		}
-		writeErrorJSON(w, http.StatusBadRequest, "could not read request body")
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "could not read request body", nil)
 		return
 	}
 
 	var req binaryVerifyIngestRequest
 	if jsonErr := json.Unmarshal(raw, &req); jsonErr != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "invalid JSON body: "+jsonErr.Error())
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidJSON, "invalid JSON body", nil)
 		return
 	}
 	if len(req.Events) == 0 {
-		writeErrorJSON(w, http.StatusBadRequest, "events array must contain at least one event")
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "events array must contain at least one event", nil)
 		return
 	}
 	if len(req.Events) > MaxBinaryVerifyEventsPerRequest {
-		writeErrorJSON(w, http.StatusBadRequest,
-			fmt.Sprintf("events array exceeds cap of %d", MaxBinaryVerifyEventsPerRequest))
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest,
+			fmt.Sprintf("events array exceeds cap of %d", MaxBinaryVerifyEventsPerRequest), nil)
 		return
 	}
 
@@ -220,27 +219,26 @@ func (s *server) handleIngestBinaryVerify(w http.ResponseWriter, r *http.Request
 // bounded page in the same envelope shape as /api/v1/audit/events.
 func (s *server) handleListBinaryVerify(w http.ResponseWriter, r *http.Request) {
 	client := s.redisClient()
-	if !s.requireStoreAndPermissionOrRole(w, r, auth.PermAuditRead, []string{"admin"}, client) {
+	if client == nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeStoreUnavailable, "redis store unavailable", nil)
 		return
 	}
-	tenant, err := s.resolveTenant(r, strings.TrimSpace(r.URL.Query().Get("tenant")))
-	if err != nil {
-		writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
+	if !s.requireEdgePermissionOrRole(w, r, auth.PermAuditRead, "admin") {
 		return
 	}
-	if err := s.requireTenantAccess(r, tenant); err != nil {
-		writeErrorJSON(w, http.StatusForbidden, "tenant access denied")
+	tenant, ok := s.edgeTenantFromRequest(w, r, strings.TrimSpace(r.URL.Query().Get("tenant")))
+	if !ok {
 		return
 	}
 	if s.auditChainer == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable,
-			"audit_chainer_not_installed; binary-verify events cannot be served")
+		writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeServiceUnavailable,
+			"binary-verify events cannot be served", nil)
 		return
 	}
 
 	limit, cursor, filters, parseErr := parseBinaryVerifyListQuery(r)
 	if parseErr != nil {
-		writeErrorJSON(w, http.StatusBadRequest, parseErr.Error())
+		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, parseErr.Error(), nil)
 		return
 	}
 
@@ -249,7 +247,7 @@ func (s *server) handleListBinaryVerify(w http.ResponseWriter, r *http.Request) 
 		r.Context(), client, streamKey, cursor, limit, filters,
 	)
 	if fetchErr != nil {
-		writeInternalError(w, r, "binary-verify list: read stream", fetchErr)
+		writeEdgeInternalError(w, r, "binary-verify list: read stream", fetchErr)
 		return
 	}
 

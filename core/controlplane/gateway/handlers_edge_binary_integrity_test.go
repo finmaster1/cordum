@@ -62,6 +62,88 @@ func postBinaryIntegrityEvents(t *testing.T, s *server, tenant string, body any)
 	return rec
 }
 
+func postBinaryIntegrityRaw(t *testing.T, s *server, tenant, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := adminCtx(httptest.NewRequest(http.MethodPost,
+		"/api/v1/edge/binary-integrity/events", strings.NewReader(body)))
+	req.Header.Set("X-Tenant-ID", tenant)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleIngestBinaryVerify(rec, req)
+	return rec
+}
+
+func listBinaryIntegrityEvents(t *testing.T, s *server, tenant, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := adminCtx(httptest.NewRequest(http.MethodGet,
+		"/api/v1/edge/binary-integrity/events?tenant="+tenant+query, nil))
+	req.Header.Set("X-Tenant-ID", tenant)
+	rec := httptest.NewRecorder()
+	s.handleListBinaryVerify(rec, req)
+	return rec
+}
+
+func TestHandleBinaryIntegrityIngest_TenantDeniedReturnsEdgeError(t *testing.T) {
+	s := newBinaryIntegrityGateway(t)
+	s.auth = &tenantStrictAuth{tenant: "tenant-a", role: "admin"}
+	authCtx := &auth.AuthContext{Tenant: "tenant-a", Role: "admin", PrincipalID: "admin-a"}
+	raw, err := json.Marshal(binaryVerifyIngestRequest{Events: []model.BinaryVerifyEvent{validBinaryVerifyOK()}})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/edge/binary-integrity/events", bytes.NewReader(raw))
+	req = req.WithContext(context.WithValue(req.Context(), auth.ContextKey{}, authCtx))
+	req.Header.Set("X-Tenant-ID", "tenant-b")
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	s.handleIngestBinaryVerify(rec, req)
+
+	assertEdgeErrorShape(t, rec, http.StatusForbidden, edgeErrCodeTenantAccessDenied)
+}
+
+func TestHandleBinaryIntegrityIngest_BodyTooLargeReturnsEdgeError(t *testing.T) {
+	s := newBinaryIntegrityGateway(t)
+	body := strings.Repeat("x", int(MaxBinaryVerifyRequestBodyBytes)+1)
+
+	rec := postBinaryIntegrityRaw(t, s, "tenant-a", body)
+
+	assertEdgeErrorShape(t, rec, http.StatusRequestEntityTooLarge, edgeErrCodeRequestTooLarge)
+}
+
+func TestHandleBinaryIntegrityIngest_InvalidJSONReturnsEdgeError(t *testing.T) {
+	s := newBinaryIntegrityGateway(t)
+
+	rec := postBinaryIntegrityRaw(t, s, "tenant-a", `{"events":[`)
+
+	assertEdgeErrorShape(t, rec, http.StatusBadRequest, edgeErrCodeInvalidJSON)
+}
+
+func TestHandleBinaryIntegrityIngest_NoEventsReturnsEdgeError(t *testing.T) {
+	s := newBinaryIntegrityGateway(t)
+
+	rec := postBinaryIntegrityEvents(t, s, "tenant-a", binaryVerifyIngestRequest{})
+
+	assertEdgeErrorShape(t, rec, http.StatusBadRequest, edgeErrCodeInvalidRequest)
+}
+
+func TestHandleBinaryIntegrityList_InvalidQueryReturnsEdgeError(t *testing.T) {
+	s := newBinaryIntegrityGateway(t)
+
+	rec := listBinaryIntegrityEvents(t, s, "tenant-a", "&event=maybe")
+
+	assertEdgeErrorShape(t, rec, http.StatusBadRequest, edgeErrCodeInvalidRequest)
+}
+
+func TestHandleBinaryIntegrityList_StoreErrorReturnsEdgeError(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+	s.auditChainer = nil
+
+	rec := listBinaryIntegrityEvents(t, s, "tenant-a", "")
+
+	assertEdgeErrorShape(t, rec, http.StatusServiceUnavailable, edgeErrCodeServiceUnavailable)
+}
+
 func TestHandleIngestBinaryVerify_HappyPathPersists(t *testing.T) {
 	s := newBinaryIntegrityGateway(t)
 	tenant := "tenant-a"
