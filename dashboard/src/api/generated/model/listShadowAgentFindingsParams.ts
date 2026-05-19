@@ -11,6 +11,9 @@ import type { ListShadowAgentFindingsSourceType } from "./listShadowAgentFinding
 import type { ListShadowAgentFindingsCiProvider } from "./listShadowAgentFindingsCiProvider";
 
 export type ListShadowAgentFindingsParams = {
+  /**
+   * Filter by triage status. Managed-skip rows are not filterable with `status=managed_skip`; request `include_managed_skip=true` to include findings whose response status is `managed_skip`.
+   */
   status?: ListShadowAgentFindingsStatus;
   risk?: ListShadowAgentFindingsRisk;
   /**
@@ -76,7 +79,7 @@ export type ListShadowAgentFindingsParams = {
    */
   exception_id?: string;
   /**
-   * EDGE-143.5 — include findings carrying `false_positive_reason` (§10.3 managed_skip). Defaults to false; default behavior excludes them from operator dashboards.
+   * EDGE-143.5 — include findings carrying `false_positive_reason` (§10.3 managed_skip). Defaults to false; default behavior excludes them from operator dashboards. When true, responses may contain `status=managed_skip`.
    */
   include_managed_skip?: boolean;
 };

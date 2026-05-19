@@ -7,11 +7,11 @@
  */
 
 /**
- * Trusted sidecar identity that produced the batch.
+ * Authenticated trusted sidecar identity that produced the batch.
  */
 export interface EdgeRuntimeIngestSource {
   /**
-   * Stable identifier for the runtime collector instance.
+   * Stable identifier for the runtime collector instance; must match the authenticated collector principal.
    * @minLength 1
    * @maxLength 256
    */

@@ -14,4 +14,5 @@ export const ShadowAgentFindingStatus = {
   detected: "detected",
   resolved: "resolved",
   suppressed: "suppressed",
+  managed_skip: "managed_skip",
 } as const;
