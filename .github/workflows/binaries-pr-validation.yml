@@ -127,14 +127,19 @@ jobs:
           }
           Write-Host "Downloaded installer size: $sizeBytes bytes"
           Write-Host "Running silent install: $exe /S"
+          $installTimeoutSeconds = 240
+          $installTimer = [System.Diagnostics.Stopwatch]::StartNew()
           $proc = Start-Process -FilePath $exe -ArgumentList '/S' -PassThru
-          if (-not $proc.WaitForExit(120000)) {
+          if (-not $proc.WaitForExit($installTimeoutSeconds * 1000)) {
+            $installTimer.Stop()
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            throw "Gpg4Win installer timed out after 120 seconds"
+            throw "Gpg4Win installer timed out after $installTimeoutSeconds seconds"
           }
+          $installTimer.Stop()
           if ($proc.ExitCode -ne 0) {
             throw "Gpg4Win installer exited with code $($proc.ExitCode)"
           }
+          Write-Host "Gpg4Win installer completed in $([math]::Round($installTimer.Elapsed.TotalSeconds, 1)) seconds"
           $gpgExe = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe'
           $deadline = (Get-Date).AddSeconds(60)
           while (-not (Test-Path -LiteralPath $gpgExe) -and (Get-Date) -lt $deadline) {
