@@ -510,5 +510,14 @@ func DecodeBatch(r io.Reader) (RuntimeBatch, error) {
 	if err := dec.Decode(&batch); err != nil {
 		return RuntimeBatch{}, fmt.Errorf("%w: %v", ErrInvalidEnvelope, err)
 	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return RuntimeBatch{}, fmt.Errorf(
+				"%w: trailing data after JSON value: %v", ErrInvalidEnvelope, err,
+			)
+		}
+		return RuntimeBatch{}, fmt.Errorf("%w: trailing data after JSON value", ErrInvalidEnvelope)
+	}
 	return batch, nil
 }

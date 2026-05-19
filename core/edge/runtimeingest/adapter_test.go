@@ -541,6 +541,34 @@ func TestDecodeBatchRejectsForbiddenTopLevelKey(t *testing.T) {
 	}
 }
 
+func TestDecodeBatch_RejectsTrailingTokens(t *testing.T) {
+	validBatch := `{"source":{"source_id":"x"},"events":[]}`
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "valid", input: validBatch, wantErr: false},
+		{name: "trailing_object", input: validBatch + `{"foo":"bar"}`, wantErr: true},
+		{name: "trailing_value", input: validBatch + `42`, wantErr: true},
+		{name: "trailing_array", input: validBatch + `[1,2,3]`, wantErr: true},
+		{name: "trailing_garbage", input: validBatch + `notjson`, wantErr: true},
+		{name: "trailing_whitespace_only", input: validBatch + "  \n  \t  ", wantErr: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeBatch(strings.NewReader(tc.input))
+			if tc.wantErr && err == nil {
+				t.Fatalf("DecodeBatch(%q) error = nil, want error", tc.input)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("DecodeBatch(%q) error = %v, want nil", tc.input, err)
+			}
+		})
+	}
+}
+
 func TestDecodeBatchRejectsForbiddenKeysVariants(t *testing.T) {
 	for _, forbidden := range []string{"args", "cmdline", "command_line", "env", "environment", "file_content", "file_contents", "packet", "payload", "body", "request_body", "response_body", "headers", "header", "cookie", "cookies", "secret", "secrets", "token", "tokens", "password", "passwords", "api_key", "apikey", "private_key", "dns_response", "response"} {
 		t.Run(forbidden, func(t *testing.T) {
