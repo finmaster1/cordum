@@ -33,6 +33,7 @@ jobs:
     # release-time companion to install.{sh,ps1}'s version-floor check.
     name: tag monotonicity gate
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,6 +74,7 @@ jobs:
     name: build ${{ matrix.binary }} ${{ matrix.target.goos }}/${{ matrix.target.goarch }}
     needs: [version-monotonicity]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +119,7 @@ jobs:
     needs: [build]
     if: github.repository == 'cordum-io/cordum'
     runs-on: macos-latest
+    timeout-minutes: 30
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -178,6 +181,7 @@ jobs:
     needs: [build]
     if: github.repository == 'cordum-io/cordum'
     runs-on: windows-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - name: Guard on secrets
@@ -232,6 +236,7 @@ jobs:
     needs: [build, sign-darwin, sign-windows]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -334,6 +339,7 @@ jobs:
     name: gh release create
     needs: [sign-manifest]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: ${{ !contains(github.ref, '-rc') }}
     steps:
       - uses: actions/checkout@v4
