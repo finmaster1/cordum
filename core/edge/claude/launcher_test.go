@@ -111,6 +111,26 @@ func TestKillAgentdOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestPrepareLaunchTempRootCleanupRemovesNestedSettingsPath(t *testing.T) {
+	root, cleanup, err := prepareLaunchTempRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("prepareLaunchTempRoot returned error: %v", err)
+	}
+	settingsPath := filepath.Join(root, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write settings fixture: %v", err)
+	}
+
+	cleanup()
+
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Fatalf("temporary settings path should be cleaned, stat err=%v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("temporary root should be cleaned, stat err=%v", err)
+	}
+}
+
 func TestLaunchEdgeClaudeAgentdEarlyExitDoesNotHang(t *testing.T) {
 	helperPath := os.Args[0]
 	cwd := t.TempDir()

@@ -55,7 +55,26 @@ func prepareLaunchTempRoot(parent string) (string, func(), error) {
 		return "", nil, fmt.Errorf("create launcher temp dir: %w", err)
 	}
 	_ = os.Chmod(root, 0o700)
-	return root, func() { _ = os.RemoveAll(root) }, nil
+	return root, func() { removeAllWithRetry(root, 2*time.Second, 20*time.Millisecond) }, nil
+}
+
+func removeAllWithRetry(root string, maxWait, interval time.Duration) {
+	if strings.TrimSpace(root) == "" {
+		return
+	}
+	if interval <= 0 {
+		interval = 20 * time.Millisecond
+	}
+	deadline := time.Now().Add(maxWait)
+	for {
+		if err := os.RemoveAll(root); err == nil || os.IsNotExist(err) {
+			return
+		}
+		if maxWait <= 0 || !time.Now().Before(deadline) {
+			return
+		}
+		time.Sleep(interval)
+	}
 }
 
 func reserveLoopbackHookURL() (string, error) {
