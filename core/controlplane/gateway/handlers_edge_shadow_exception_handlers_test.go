@@ -145,6 +145,24 @@ func TestParseShadowExceptionListQuery_Limit(t *testing.T) {
 	}
 }
 
+func TestWriteShadowExceptionStoreError_LimitExceededUsesDedicatedCode(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/edge/shadow/exception", nil)
+	rec := httptest.NewRecorder()
+
+	writeShadowExceptionStoreError(rec, req, shadow.ErrExceptionLimitExceeded, "create shadow exception")
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429; body=%s", rec.Code, rec.Body.String())
+	}
+	var env edgeErrorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v; body=%s", err, rec.Body.String())
+	}
+	if env.Code != edgeErrCodeLimitExceeded {
+		t.Fatalf("error code = %q, want %q", env.Code, edgeErrCodeLimitExceeded)
+	}
+}
+
 func TestShadowException_Create_HighRisk_RequiresStepUp(t *testing.T) {
 	s := newShadowGateway(t)
 	rec := postShadowAs(t, s, "user", "tenant-a", "/api/v1/edge/shadow/exception", validExceptionCreateBody())

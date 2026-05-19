@@ -332,7 +332,7 @@ jobs:
             release/cordum-*
             release/SHA256SUMS
             release/SHA256SUMS.asc
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
   publish:

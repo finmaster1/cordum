@@ -322,7 +322,7 @@ func writeShadowExceptionStoreError(w http.ResponseWriter, r *http.Request, err 
 	case errors.Is(err, shadow.ErrInvalidCursor):
 		writeEdgeError(w, r, http.StatusBadRequest, edgeErrCodeInvalidRequest, "invalid cursor", nil)
 	case errors.Is(err, shadow.ErrExceptionLimitExceeded):
-		writeEdgeError(w, r, http.StatusTooManyRequests, edgeErrCodeConflict, "per-tenant exception cap reached", nil)
+		writeEdgeError(w, r, http.StatusTooManyRequests, edgeErrCodeLimitExceeded, "per-tenant exception cap reached", nil)
 	case errors.Is(err, shadow.ErrStoreUnavailable):
 		writeEdgeError(w, r, http.StatusServiceUnavailable, edgeErrCodeStoreUnavailable, "shadow finding store unavailable", nil)
 	default:

@@ -42,6 +42,7 @@ const (
 	edgeErrCodeStoreUnavailable         = "store_unavailable"
 	edgeErrCodeInternalError            = "internal_error"
 	edgeErrCodeConflict                 = "conflict"
+	edgeErrCodeLimitExceeded            = "limit_exceeded"
 	edgeErrCodeSessionTerminal          = "session_terminal"
 	edgeErrCodeExecutionTerminal        = "execution_terminal"
 	edgeErrCodeExecutionMismatch        = "execution_session_mismatch"

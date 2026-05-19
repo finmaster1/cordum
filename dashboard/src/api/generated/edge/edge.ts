@@ -5103,6 +5103,7 @@ export const getGetShadowExceptionQueryKey = (exceptionId?: string) => {
 export const getGetShadowExceptionQueryOptions = <
   TData = Awaited<ReturnType<typeof getShadowException>>,
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse
@@ -5145,6 +5146,7 @@ export type GetShadowExceptionQueryResult = NonNullable<
   Awaited<ReturnType<typeof getShadowException>>
 >;
 export type GetShadowExceptionQueryError =
+  | EdgeBadRequestResponse
   | EdgeUnauthorizedResponse
   | EdgeForbiddenResponse
   | EdgeNotFoundResponse
@@ -5154,6 +5156,7 @@ export type GetShadowExceptionQueryError =
 export function useGetShadowException<
   TData = Awaited<ReturnType<typeof getShadowException>>,
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse
@@ -5185,6 +5188,7 @@ export function useGetShadowException<
 export function useGetShadowException<
   TData = Awaited<ReturnType<typeof getShadowException>>,
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse
@@ -5214,6 +5218,7 @@ export function useGetShadowException<
 export function useGetShadowException<
   TData = Awaited<ReturnType<typeof getShadowException>>,
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse
@@ -5239,6 +5244,7 @@ export function useGetShadowException<
 export function useGetShadowException<
   TData = Awaited<ReturnType<typeof getShadowException>>,
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse
@@ -5295,6 +5301,7 @@ export const revokeShadowException = (
 
 export const getRevokeShadowExceptionMutationOptions = <
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse
@@ -5341,6 +5348,7 @@ export type RevokeShadowExceptionMutationResult = NonNullable<
 >;
 export type RevokeShadowExceptionMutationBody = RevokeShadowExceptionRequest;
 export type RevokeShadowExceptionMutationError =
+  | EdgeBadRequestResponse
   | EdgeUnauthorizedResponse
   | EdgeForbiddenResponse
   | EdgeNotFoundResponse
@@ -5353,6 +5361,7 @@ export type RevokeShadowExceptionMutationError =
  */
 export const useRevokeShadowException = <
   TError =
+    | EdgeBadRequestResponse
     | EdgeUnauthorizedResponse
     | EdgeForbiddenResponse
     | EdgeNotFoundResponse

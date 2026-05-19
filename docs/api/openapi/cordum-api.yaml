@@ -2182,7 +2182,7 @@ paths:
         '403':
           $ref: '#/components/responses/EdgeForbidden'
         '429':
-          description: Per-tenant exception cap reached (code=conflict).
+          description: Per-tenant exception cap reached (code=limit_exceeded).
           content:
             application/json:
               schema:
@@ -2215,6 +2215,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShadowException'
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
         '401':
           $ref: '#/components/responses/EdgeUnauthorized'
         '403':
@@ -2255,6 +2257,8 @@ paths:
       responses:
         '204':
           description: Exception revoked.
+        '400':
+          $ref: '#/components/responses/EdgeBadRequest'
         '401':
           $ref: '#/components/responses/EdgeUnauthorized'
         '403':
