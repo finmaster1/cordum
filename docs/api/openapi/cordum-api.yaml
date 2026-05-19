@@ -1503,10 +1503,7 @@ paths:
         and persists nothing. When enabled, the endpoint accepts a bounded,
         redacted runtime event batch (process exec, file read/write, network
         connect, DNS query) from an authenticated runtime collector holding
-        `edge.runtime.ingest`; generic job writers are forbidden. A bounded
-        `nonce` is required by default and is checked against a Redis replay
-        window scoped to `(tenant, collector)`; duplicate nonce submissions
-        return idempotent success without appending another copy. The request
+        `edge.runtime.ingest`; generic job writers are forbidden. The request
         `source.source_id` must match the authenticated collector principal and
         the referenced session/execution must be bound to that collector before
         mapped `AgentActionEvent` records with `layer=runtime` and
@@ -1527,12 +1524,6 @@ paths:
             schema:
               $ref: '#/components/schemas/EdgeRuntimeIngestRequest'
       responses:
-        '200':
-          description: Duplicate runtime ingest nonce suppressed as an idempotent replay
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EdgeRuntimeIngestResponse'
         '201':
           description: Runtime events appended
           content:
@@ -1550,7 +1541,7 @@ paths:
         '413':
           $ref: '#/components/responses/EdgePayloadTooLarge'
         '429':
-          description: Per-execution event cap exceeded or runtime replay window saturated (`REPLAY_WINDOW_FULL`)
+          description: Per-execution event cap exceeded
           content:
             application/json:
               schema:
@@ -9779,21 +9770,14 @@ components:
             $ref: '#/components/schemas/EdgeArtifactPointer'
     EdgeRuntimeIngestRequest:
       type: object
-      required: [source, nonce, events]
+      required: [source, events]
       additionalProperties: false
       properties:
         source:
           $ref: '#/components/schemas/EdgeRuntimeIngestSource'
-        nonce:
-          type: string
-          minLength: 16
-          maxLength: 64
-          pattern: '^[A-Za-z0-9-]{16,64}$'
-          description: Required by default replay-protection nonce (UUIDv7 or random 128-bit value). Set `CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED=false` only for transitional non-production clients that cannot yet send this field.
         batch_id:
           type: string
           maxLength: 256
-          description: Operator correlation identifier only; it is not used for replay protection.
         events:
           type: array
           minItems: 1
@@ -9824,10 +9808,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EdgeRuntimeIngestDropReport'
-        replayed:
-          type: boolean
-          default: false
-          description: True when a duplicate nonce was suppressed and no events were appended.
     BinaryVerifyEvent:
       type: object
       description: |
