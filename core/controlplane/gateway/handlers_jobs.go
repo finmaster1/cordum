@@ -40,6 +40,12 @@ import (
 
 const workerHeartbeatTTL = 30 * time.Second
 
+const (
+	errorCodeJobIdempotencyConflict = "IDEMPOTENCY_CONFLICT"
+	errorCodeJobBackpressure        = "BACKPRESSURE"
+	errorCodeMemoryPolicyViolation  = "MEMORY_POLICY_VIOLATION"
+)
+
 // statusPipelineSampleLimit bounds the status pipeline aggregation scan cost.
 const statusPipelineSampleLimit = int64(500)
 
@@ -1565,7 +1571,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := s.enforceJobBackpressure(r.Context(), orgID, teamID); err != nil {
 		var bp jobBackpressureError
 		if errors.As(err, &bp) {
-			writeErrorJSON(w, http.StatusTooManyRequests, bp.Error())
+			writeJSONError(w, http.StatusTooManyRequests, errorCodeJobBackpressure, bp.Error())
 			return
 		}
 		slog.Error("job backpressure check failed", "error", err)
@@ -1623,7 +1629,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := s.enforceMemoryID(r.Context(), orgID, teamID, "", "", explicitMemoryID); err != nil {
 			var perr memoryPolicyError
 			if errors.As(err, &perr) {
-				writeErrorJSON(w, perr.status, perr.msg)
+				writeJSONError(w, perr.status, errorCodeMemoryPolicyViolation, perr.msg)
 				return
 			}
 			writeErrorJSON(w, http.StatusInternalServerError, "memory policy check failed")
@@ -1787,7 +1793,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 					})
 					return
 				}
-				writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
+				writeJSONError(w, http.StatusConflict, errorCodeJobIdempotencyConflict, "idempotency key already used")
 				return
 			}
 		}
@@ -1846,7 +1852,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 					})
 					return
 				}
-				writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
+				writeJSONError(w, http.StatusConflict, errorCodeJobIdempotencyConflict, "idempotency key already used")
 				return
 			}
 		}
@@ -1990,7 +1996,7 @@ func (s *server) handleSubmitJobHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil && !errors.Is(err, redis.Nil) {
 				slog.Error("idempotency lookup failed", "error", err)
 			}
-			writeErrorJSON(w, http.StatusConflict, "idempotency key already used")
+			writeJSONError(w, http.StatusConflict, errorCodeJobIdempotencyConflict, "idempotency key already used")
 			return
 		}
 	}

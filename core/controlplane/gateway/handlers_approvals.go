@@ -25,6 +25,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+const errorCodeApprovalResultInvalidStatus = "RESULT_INVALID_STATUS"
+
 type approvalDecisionSummary struct {
 	Source           string   `json:"source,omitempty"`
 	Completeness     string   `json:"completeness,omitempty"`
@@ -334,7 +336,7 @@ func (s *server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 		lockKey := "cordum:wf:run:lock:" + runID
 		token, err := s.jobStore.TryAcquireLock(r.Context(), lockKey, 30*time.Second)
 		if err != nil || token == "" {
-			writeErrorJSON(w, http.StatusConflict, "workflow run is busy, retry")
+			writeJSONError(w, http.StatusConflict, errorCodeRunNotCancellable, "workflow run is busy, retry")
 			return
 		}
 		defer func() {
@@ -624,6 +626,26 @@ func approvalConflictPayload(status int, code model.ApprovalConflictCode, messag
 	return payload
 }
 
+func writeApprovalHandlerResult(w http.ResponseWriter, status int, body any, encodeLogMessage string) {
+	w.Header().Set("Content-Type", "application/json")
+	if status >= http.StatusBadRequest {
+		if msg, ok := body.(string); ok {
+			if status < http.StatusInternalServerError {
+				writeJSONError(w, status, errorCodeApprovalResultInvalidStatus, msg)
+				return
+			}
+			writeErrorJSON(w, status, msg)
+			return
+		}
+		w.WriteHeader(status)
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			slog.Warn(encodeLogMessage, "error", err)
+		}
+		return
+	}
+	writeJSON(w, body)
+}
+
 // withApprovalLock acquires a per-job distributed lock, executes fn, and
 // releases the lock on return. Returns store.ErrLockBusy-style error if
 // the lock cannot be acquired within a short deadline.
@@ -885,19 +907,7 @@ func (s *server) handleRepairApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if result.status >= 400 {
-		if msg, ok := result.body.(string); ok {
-			writeErrorJSON(w, result.status, msg)
-		} else {
-			w.WriteHeader(result.status)
-			if err := json.NewEncoder(w).Encode(result.body); err != nil {
-				slog.Warn("json encode approval repair error failed", "error", err)
-			}
-		}
-		return
-	}
-	writeJSON(w, result.body)
+	writeApprovalHandlerResult(w, result.status, result.body, "json encode approval repair error failed")
 }
 
 func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
@@ -1327,19 +1337,7 @@ func (s *server) handleApproveJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if result.status >= 400 {
-		if msg, ok := result.body.(string); ok {
-			writeErrorJSON(w, result.status, msg)
-		} else {
-			w.WriteHeader(result.status)
-			if err := json.NewEncoder(w).Encode(result.body); err != nil {
-				slog.Warn("json encode approval error failed", "error", err)
-			}
-		}
-		return
-	}
-	writeJSON(w, result.body)
+	writeApprovalHandlerResult(w, result.status, result.body, "json encode approval error failed")
 }
 
 func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
@@ -1544,19 +1542,7 @@ func (s *server) handleRejectJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if result.status >= 400 {
-		if msg, ok := result.body.(string); ok {
-			writeErrorJSON(w, result.status, msg)
-		} else {
-			w.WriteHeader(result.status)
-			if err := json.NewEncoder(w).Encode(result.body); err != nil {
-				slog.Warn("json encode approval error failed", "error", err)
-			}
-		}
-		return
-	}
-	writeJSON(w, result.body)
+	writeApprovalHandlerResult(w, result.status, result.body, "json encode approval error failed")
 }
 
 // handleApprovalContext returns enriched approval context for a single job,

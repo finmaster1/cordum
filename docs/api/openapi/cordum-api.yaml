@@ -2497,10 +2497,37 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            Job submit was rejected by a semantic work-orchestration policy.
+            Stable error `code`: `MEMORY_POLICY_VIOLATION`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Job submit idempotency key is already reserved without a replayable
+            job mapping. Stable error `code`: `IDEMPOTENCY_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '429':
-          $ref: '#/components/responses/RateLimited'
+          description: >
+            Job submit backpressure or generic rate limit. Backpressure returns
+            stable error `code`: `BACKPRESSURE`.
+          headers:
+            Retry-After:
+              description: Seconds until retry is permitted when present.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
     get:
@@ -2948,8 +2975,33 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            Workflow run start was rejected by a semantic work-orchestration
+            policy. Stable error `code`: `MEMORY_POLICY_VIOLATION`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Workflow run start idempotency key is already reserved without a
+            replayable run mapping. Stable error `code`:
+            `RUN_IDEMPOTENCY_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: >
+            Workflow run cannot be started because the active-run admission
+            limit is full. Stable error `code`: `RUN_NOT_RUNNABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
     get:
@@ -3199,11 +3251,25 @@ paths:
                   run_id:
                     type: string
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Workflow rerun request is not runnable, for example an invalid
+            resume step. Stable error `code`: `RUN_NOT_RUNNABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          description: >
+            Workflow rerun cannot be admitted because the active-run limit is
+            full. Stable error `code`: `RUN_NOT_RUNNABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/workflows/{id}/runs/{run_id}/cancel:
@@ -3228,7 +3294,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Workflow run is busy and cannot be cancelled right now. Stable
+            error `code`: `RUN_NOT_CANCELLABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/approvals:
@@ -3299,9 +3371,33 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >
+            Approval cannot be performed. Self-approval returns existing stable
+            `code`: `self_approval_denied`; other 4xx string-result failures
+            return `RESULT_INVALID_STATUS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Approval target job was not found. Stable error `code`:
+            `RESULT_INVALID_STATUS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Approval is not currently actionable or changed concurrently.
+            Stable conflict `code` values include
+            `approval_already_resolved`, `approval_retryable_lock`,
+            `approval_terminal_run`, `approval_stale_snapshot`,
+            `approval_stale_request`, and `approval_not_actionable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/approvals/{job_id}/reject:
@@ -3338,9 +3434,32 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >
+            Rejection cannot be performed. Self-rejection returns existing
+            stable `code`: `self_approval_denied`; other 4xx string-result
+            failures return `RESULT_INVALID_STATUS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Approval target job was not found. Stable error `code`:
+            `RESULT_INVALID_STATUS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Rejection is not currently actionable or changed concurrently.
+            Stable conflict `code` values include
+            `approval_already_resolved`, `approval_retryable_lock`,
+            `approval_terminal_run`, and `approval_not_actionable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/approvals/{job_id}/context:
@@ -6492,11 +6611,25 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >
+            Approval repair cannot be performed for this caller or tenant.
+            Stable 4xx string-result error `code`: `RESULT_INVALID_STATUS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Approval repair target job was not found. Stable error `code`:
+            `RESULT_INVALID_STATUS`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
-          description: Repair conflict
+          description: >
+            Approval repair conflict. Stable conflict `code` values include
+            `approval_retryable_lock`.
           content:
             application/json:
               schema:
