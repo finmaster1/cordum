@@ -17,6 +17,37 @@ import (
 	"github.com/cordum/cordum/core/edge/claude"
 )
 
+func TestSubtleMismatch(t *testing.T) {
+	t.Parallel()
+
+	generated, err := generateNonce()
+	if err != nil {
+		t.Fatalf("generateNonce: %v", err)
+	}
+	cases := []struct {
+		name      string
+		got, want string
+		wantMiss  bool
+	}{
+		{name: "exact match", got: "a", want: "a", wantMiss: false},
+		{name: "same length different content", got: "a", want: "b", wantMiss: true},
+		{name: "length mismatch", got: "a", want: "ab", wantMiss: true},
+		{name: "empty got", got: "", want: "a", wantMiss: true},
+		{name: "empty want", got: "a", want: "", wantMiss: true},
+		{name: "both empty", got: "", want: "", wantMiss: true},
+		{name: "generated nonce match", got: generated, want: generated, wantMiss: false},
+		{name: "generated nonce truncated", got: generated[:len(generated)-1], want: generated, wantMiss: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if gotMiss := subtleMismatch(tc.got, tc.want); gotMiss != tc.wantMiss {
+				t.Fatalf("subtleMismatch(%q, %q) = %t, want %t", tc.got, tc.want, gotMiss, tc.wantMiss)
+			}
+		})
+	}
+}
+
 func TestLocalServerRejectsRemoteAndBroadBindAddresses(t *testing.T) {
 	t.Parallel()
 

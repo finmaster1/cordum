@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +25,7 @@ import (
 const (
 	defaultMaxHookBodyBytes = 1 << 20
 	agentdNonceHeader       = "X-Cordum-Agentd-Nonce"
+	subtleMismatchPadLen    = 512
 )
 
 type LocalServerConfig struct {
@@ -504,14 +506,19 @@ func requestNonce(r *http.Request) string {
 }
 
 func subtleMismatch(got, want string) bool {
-	if len(got) != len(want) || got == "" || want == "" {
-		return true
-	}
-	var diff byte
-	for i := range got {
-		diff |= got[i] ^ want[i]
-	}
-	return diff != 0
+	// Include length and content in the same constant-time decision so a
+	// malformed nonce cannot distinguish "wrong length" from "wrong bytes".
+	var gotPadded, wantPadded [subtleMismatchPadLen]byte
+	copy(gotPadded[:], got)
+	copy(wantPadded[:], want)
+
+	match := subtle.ConstantTimeEq(int32(len(got)), int32(len(want)))
+	match &= subtle.ConstantTimeLessOrEq(1, len(got))
+	match &= subtle.ConstantTimeLessOrEq(1, len(want))
+	match &= subtle.ConstantTimeLessOrEq(len(got), subtleMismatchPadLen)
+	match &= subtle.ConstantTimeLessOrEq(len(want), subtleMismatchPadLen)
+	match &= subtle.ConstantTimeCompare(gotPadded[:], wantPadded[:])
+	return match != 1
 }
 
 func generateNonce() (string, error) {
