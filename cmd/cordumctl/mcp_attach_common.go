@@ -36,8 +36,8 @@ type UpstreamServerRef struct {
 // alongside a human-readable preview summary that the lifecycle prints
 // on preview. existing is nil when the config does not yet exist; the
 // adapter is responsible for producing a valid empty-config payload in
-// that case. err signals a parse failure (preview surfaces it, apply
-// aborts before writing).
+// that case. err signals a parse, validation, or merge failure
+// (preview surfaces it, apply aborts before writing).
 type AttachAdapter interface {
 	ClientName() string
 	ConfigPath() string
@@ -64,7 +64,7 @@ func DefaultConfigPath(client, homeDir string) string {
 // PreviewAttach reads the adapter's config file (if any), computes the
 // merged result, prints a human-readable diff via stdout, and returns
 // the exit code. NEVER writes. Exit 2 on parse failure so CI can
-// distinguish parse error from missing config (exit 0).
+// distinguish parse/validation error from missing config (exit 0).
 func PreviewAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Writer) int {
 	if adapter == nil {
 		_, _ = fmt.Fprintln(stdout, "preview: adapter is nil")
@@ -76,15 +76,15 @@ func PreviewAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.W
 		_, _ = fmt.Fprintf(stdout, "preview: read %s: %v\n", path, err)
 		return 2
 	}
+	_, preview, err := adapter.ReadAndMerge(existing, gateway)
+	if err != nil {
+		_, _ = fmt.Fprintf(stdout, "preview: validate/parse %s failed: %v (apply would abort before writing)\n",
+			path, err)
+		return 2
+	}
 	if missing {
 		_, _ = fmt.Fprintf(stdout, "preview: no existing config at %s; apply will create one with cordum-gateway\n", path)
 		return 0
-	}
-	_, preview, err := adapter.ReadAndMerge(existing, gateway)
-	if err != nil {
-		_, _ = fmt.Fprintf(stdout, "preview: parse %s failed: %v (apply would abort to preserve the broken file)\n",
-			path, err)
-		return 2
 	}
 	_, _ = fmt.Fprintf(stdout, "preview: %s (%s)\n", adapter.ClientName(), path)
 	_, _ = fmt.Fprintln(stdout, redactSecrets(preview))
@@ -95,7 +95,7 @@ func PreviewAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.W
 // ApplyAttach reads the adapter's config (or creates an empty starting
 // point), computes the merge, backs up the existing file via
 // `<path>.bak.<unix_ms>` if present, and atomically replaces the
-// target. Returns 0 on success, 2 on parse / IO failure.
+// target. Returns 0 on success, 2 on validation / IO failure.
 func ApplyAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Writer) int {
 	if adapter == nil {
 		_, _ = fmt.Fprintln(stdout, "apply: adapter is nil")
@@ -109,7 +109,7 @@ func ApplyAttach(adapter AttachAdapter, gateway UpstreamServerRef, stdout io.Wri
 	}
 	merged, _, err := adapter.ReadAndMerge(existing, gateway)
 	if err != nil {
-		_, _ = fmt.Fprintf(stdout, "apply: parse %s failed: %v (refusing to overwrite a config we cannot reason about)\n",
+		_, _ = fmt.Fprintf(stdout, "apply: validate/parse %s failed: %v (refusing to overwrite a config we cannot reason about)\n",
 			path, err)
 		return 2
 	}

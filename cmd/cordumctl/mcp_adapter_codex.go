@@ -11,8 +11,8 @@ import (
 // https://developers.openai.com/codex/config-reference. Codex stores
 // MCP servers as `[mcp_servers.<id>]` TOML sections with fields
 // command / args / cwd / env / enabled / required / startup_timeout_sec
-// / tool_timeout_sec. Stdio-only per current docs; HTTP gateways are
-// rendered as a stdio invocation of a future cordum-mcp proxy.
+// / tool_timeout_sec. Stdio-only per current docs; HTTP/SSE gateways
+// are rejected until a local proxy command is implemented.
 const (
 	codexSchemaURL  = "https://developers.openai.com/codex/config-reference"
 	codexSchemaDate = "2026-05-16"
@@ -157,15 +157,12 @@ func codexIDOf(name string) string {
 // rendering into that location; otherwise we append the new block at
 // the end of the file with a leading newline.
 func renderCodexMerged(existing []byte, gatewayID string, gateway UpstreamServerRef, replacing bool) ([]byte, error) {
-	block := renderCodexGatewayBlock(gatewayID, gateway)
+	block, err := renderCodexGatewayBlock(gatewayID, gateway)
+	if err != nil {
+		return nil, err
+	}
 	if !replacing {
-		var out bytes.Buffer
-		out.Write(bytes.TrimRight(existing, "\n"))
-		if out.Len() > 0 {
-			out.WriteString("\n\n")
-		}
-		out.Write(block)
-		return out.Bytes(), nil
+		return appendCodexGatewayBlock(existing, block), nil
 	}
 	sections, err := parseCodexMCPSections(existing)
 	if err != nil {
@@ -202,55 +199,67 @@ func renderCodexMerged(existing []byte, gatewayID string, gateway UpstreamServer
 	if !written {
 		// Defensive: replacing flag said yes but parser disagreed.
 		// Fall back to append so we never silently drop the new block.
-		out.Reset()
-		out.Write(bytes.TrimRight(existing, "\n"))
-		if out.Len() > 0 {
-			out.WriteString("\n\n")
-		}
-		out.Write(block)
+		return appendCodexGatewayBlock(existing, block), nil
 	}
 	return out.Bytes(), nil
+}
+
+func appendCodexGatewayBlock(existing, block []byte) []byte {
+	var out bytes.Buffer
+	out.Write(bytes.TrimRight(existing, "\n"))
+	if out.Len() > 0 {
+		out.WriteString("\n\n")
+	}
+	out.Write(block)
+	return out.Bytes()
 }
 
 // renderCodexGatewayBlock returns the canonical
 // `[mcp_servers.<gatewayID>]` block for the supplied gateway ref.
 // Codex's MCP transport is stdio-only per current docs, so HTTP/SSE
-// gateways are rendered as a stdio invocation of `cordumctl mcp proxy`
-// (a planned subcommand that ferries stdio frames to the HTTP
-// gateway). Operators see the planned command line in the block.
-func renderCodexGatewayBlock(gatewayID string, gateway UpstreamServerRef) []byte {
+// gateways fail fast rather than writing a non-existent proxy command
+// into a user config.
+func renderCodexGatewayBlock(gatewayID string, gateway UpstreamServerRef) ([]byte, error) {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "[mcp_servers.%s]\n", gatewayID)
 
-	transport := gateway.Transport
-	if transport == "" {
-		transport = "http"
-	}
+	transport := strings.ToLower(strings.TrimSpace(gateway.Transport))
 	switch transport {
-	case "stdio":
-		if len(gateway.Command) > 0 {
-			fmt.Fprintf(&buf, "command = %q\n", gateway.Command[0])
-			if len(gateway.Command) > 1 {
-				buf.WriteString("args = [")
-				for i, arg := range gateway.Command[1:] {
-					if i > 0 {
-						buf.WriteString(", ")
-					}
-					fmt.Fprintf(&buf, "%q", arg)
-				}
-				buf.WriteString("]\n")
-			}
+	case "":
+		if len(gateway.Command) == 0 {
+			return nil, fmt.Errorf("codex: empty transport requires explicit --gateway-transport stdio or a local --gateway-command")
 		}
+		writeCodexCommand(&buf, gateway.Command)
+	case "stdio":
+		if len(gateway.Command) == 0 {
+			return nil, fmt.Errorf("codex: stdio transport requires non-empty Command")
+		}
+		writeCodexCommand(&buf, gateway.Command)
+	case "http", "sse", "streamable-http":
+		return nil, fmt.Errorf("codex: transport %s unsupported: Codex config is stdio-only and cordumctl mcp proxy not implemented; use --gateway-transport stdio with a local --gateway-command, or use --client claude_code/cursor for HTTP", transport)
 	default:
-		// HTTP/SSE → render as a stdio invocation of the gateway proxy.
-		buf.WriteString(`command = "cordumctl"` + "\n")
-		fmt.Fprintf(&buf, "args = [%q, %q, %q, %q]\n", "mcp", "proxy", "--endpoint", gateway.Endpoint)
+		return nil, fmt.Errorf("codex: unknown transport %q", gateway.Transport)
 	}
 	if gateway.AuthSecretRef != "" {
 		fmt.Fprintf(&buf, "env = { CORDUM_AUTH_SECRET_REF = %q }\n", gateway.AuthSecretRef)
 	}
 	buf.WriteString("enabled = true\n")
-	return buf.Bytes()
+	return buf.Bytes(), nil
+}
+
+func writeCodexCommand(buf *bytes.Buffer, command []string) {
+	fmt.Fprintf(buf, "command = %q\n", command[0])
+	if len(command) <= 1 {
+		return
+	}
+	buf.WriteString("args = [")
+	for i, arg := range command[1:] {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		fmt.Fprintf(buf, "%q", arg)
+	}
+	buf.WriteString("]\n")
 }
 
 // codexMergePreview renders the operator-facing summary for a TOML-

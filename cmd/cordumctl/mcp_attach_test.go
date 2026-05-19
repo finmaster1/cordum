@@ -28,6 +28,27 @@ func gatewayRef() UpstreamServerRef {
 	}
 }
 
+func codexGatewayRef(transport string) UpstreamServerRef {
+	ref := gatewayRef()
+	ref.Transport = transport
+	return ref
+}
+
+func codexStdioGatewayRef() UpstreamServerRef {
+	return UpstreamServerRef{
+		Name:      "cordum-gateway",
+		Transport: "stdio",
+		Command:   []string{"cordum-mcp-local", "--stdio"},
+	}
+}
+
+func attachGatewayRefForClient(client string) UpstreamServerRef {
+	if client == "codex" {
+		return codexStdioGatewayRef()
+	}
+	return gatewayRef()
+}
+
 // adapterFor returns a fresh adapter for the named client pointing at a
 // freshly-isolated config path under t.TempDir(). Tests reuse this so
 // each scenario gets an unshared filesystem slot.
@@ -151,6 +172,186 @@ func writeFixture(t *testing.T, adapter AttachAdapter, payload []byte) {
 	}
 }
 
+func assertCodexUnsupported(t *testing.T, out string, transport string) {
+	t.Helper()
+	want := []string{
+		"codex: transport " + transport + " unsupported",
+		"stdio-only",
+		"cordumctl mcp proxy not implemented",
+	}
+	for _, fragment := range want {
+		if !strings.Contains(out, fragment) {
+			t.Fatalf("unsupported output missing %q:\n%s", fragment, out)
+		}
+	}
+	if strings.Contains(out, `args = ["mcp", "proxy"`) {
+		t.Fatalf("unsupported output must not render proxy args:\n%s", out)
+	}
+}
+
+func assertNoCodexProxyConfig(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	rendered := string(data)
+	if strings.Contains(rendered, `args = ["mcp", "proxy"`) ||
+		strings.Contains(rendered, `command = "cordumctl"`) {
+		t.Fatalf("config rendered unimplemented proxy command:\n%s", rendered)
+	}
+}
+
+func assertNoBackups(t *testing.T, path string) {
+	t.Helper()
+	backups, err := filepath.Glob(path + ".bak.*")
+	if err != nil {
+		t.Fatalf("glob backups: %v", err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("backup created on reject: %v", backups)
+	}
+}
+
+func assertCodexConfigUnchanged(t *testing.T, path string, before []byte) {
+	t.Helper()
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config after reject: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("config changed on reject\nafter:\n%s\nbefore:\n%s", after, before)
+	}
+}
+
+func assertCodexPreviewRejects(t *testing.T, transport string, existing bool) {
+	t.Helper()
+	adapter := adapterFor(t, "codex")
+	var before []byte
+	if existing {
+		before = fixtureExistingValid("codex")
+		writeFixture(t, adapter, before)
+	}
+
+	var buf strings.Builder
+	code := PreviewAttach(adapter, codexGatewayRef(transport), &buf)
+	if code != 2 {
+		t.Fatalf("exit=%d want 2\nout=%s", code, buf.String())
+	}
+	assertCodexUnsupported(t, buf.String(), transport)
+	if existing {
+		assertCodexConfigUnchanged(t, adapter.ConfigPath(), before)
+	} else if _, err := os.Stat(adapter.ConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("preview reject must not create config; stat err=%v", err)
+	}
+	assertNoBackups(t, adapter.ConfigPath())
+}
+
+func assertCodexApplyRejects(t *testing.T, transport string, existing bool) {
+	t.Helper()
+	adapter := adapterFor(t, "codex")
+	var before []byte
+	if existing {
+		before = fixtureExistingValid("codex")
+		writeFixture(t, adapter, before)
+	}
+
+	var buf strings.Builder
+	code := ApplyAttach(adapter, codexGatewayRef(transport), &buf)
+	if code != 2 {
+		t.Fatalf("exit=%d want 2\nout=%s", code, buf.String())
+	}
+	assertCodexUnsupported(t, buf.String(), transport)
+	if existing {
+		assertCodexConfigUnchanged(t, adapter.ConfigPath(), before)
+		assertNoCodexProxyConfig(t, adapter.ConfigPath())
+	} else if _, err := os.Stat(adapter.ConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("apply reject must not create config; stat err=%v", err)
+	}
+	assertNoBackups(t, adapter.ConfigPath())
+}
+
+func TestCodexAttachRejectsHTTPAndSSETransports(t *testing.T) {
+	for _, transport := range []string{"http", "sse"} {
+		t.Run(transport+"_preview_missing", func(t *testing.T) {
+			assertCodexPreviewRejects(t, transport, false)
+		})
+		t.Run(transport+"_preview_existing", func(t *testing.T) {
+			assertCodexPreviewRejects(t, transport, true)
+		})
+		t.Run(transport+"_apply_missing", func(t *testing.T) {
+			assertCodexApplyRejects(t, transport, false)
+		})
+		t.Run(transport+"_apply_existing", func(t *testing.T) {
+			assertCodexApplyRejects(t, transport, true)
+		})
+	}
+}
+
+func TestCodexAttachDispatchRejectsDefaultHTTPProxyCommand(t *testing.T) {
+	adapter := adapterFor(t, "codex")
+
+	var stdout, stderr strings.Builder
+	code := runMCPAttachCmd([]string{
+		"attach",
+		"--config-path", adapter.ConfigPath(),
+		"--client", "codex",
+		"--apply",
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit=%d want 2\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertCodexUnsupported(t, stdout.String()+stderr.String(), "http")
+	if _, err := os.Stat(adapter.ConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("dispatch reject must not create config; stat err=%v", err)
+	}
+	assertNoBackups(t, adapter.ConfigPath())
+}
+
+func TestCodexAttachStdioLocalSuccessDoesNotUseProxy(t *testing.T) {
+	adapter := adapterFor(t, "codex")
+	original := fixtureExistingValid("codex")
+	writeFixture(t, adapter, original)
+
+	var preview strings.Builder
+	if code := PreviewAttach(adapter, codexStdioGatewayRef(), &preview); code != 0 {
+		t.Fatalf("preview exit=%d want 0\nout=%s", code, preview.String())
+	}
+	if !strings.Contains(preview.String(), "cordum-gateway") ||
+		!strings.Contains(preview.String(), "other_server") {
+		t.Fatalf("preview missing expected merge summary:\n%s", preview.String())
+	}
+	assertCodexConfigUnchanged(t, adapter.ConfigPath(), original)
+
+	var apply strings.Builder
+	if code := ApplyAttach(adapter, codexStdioGatewayRef(), &apply); code != 0 {
+		t.Fatalf("apply exit=%d want 0\nout=%s", code, apply.String())
+	}
+	renderedBytes, err := os.ReadFile(adapter.ConfigPath())
+	if err != nil {
+		t.Fatalf("read rendered codex config: %v", err)
+	}
+	rendered := string(renderedBytes)
+	for _, fragment := range []string{
+		`[mcp_servers.other_server]`,
+		`[mcp_servers.cordum-gateway]`,
+		`command = "cordum-mcp-local"`,
+		`args = ["--stdio"]`,
+	} {
+		if !strings.Contains(rendered, fragment) {
+			t.Fatalf("rendered config missing %q:\n%s", fragment, rendered)
+		}
+	}
+	if strings.Contains(rendered, "mcp proxy") ||
+		strings.Contains(rendered, canonicalMCPGatewayEndpoint) ||
+		strings.Contains(rendered, `command = "cordumctl"`) {
+		t.Fatalf("stdio codex config must not use proxy/http command:\n%s", rendered)
+	}
+}
+
 // (A) Preview against a missing config reports the create path and
 // exits 0 without writing anything.
 func TestAttachPreviewMissingConfig(t *testing.T) {
@@ -158,7 +359,7 @@ func TestAttachPreviewMissingConfig(t *testing.T) {
 		t.Run(client, func(t *testing.T) {
 			adapter := adapterFor(t, client)
 			var buf strings.Builder
-			code := PreviewAttach(adapter, gatewayRef(), &buf)
+			code := PreviewAttach(adapter, attachGatewayRefForClient(client), &buf)
 			if code != 0 {
 				t.Fatalf("exit=%d want 0\nout=%s", code, buf.String())
 			}
@@ -183,7 +384,7 @@ func TestAttachPreviewExistingConfig(t *testing.T) {
 			before, _ := os.ReadFile(adapter.ConfigPath())
 
 			var buf strings.Builder
-			code := PreviewAttach(adapter, gatewayRef(), &buf)
+			code := PreviewAttach(adapter, attachGatewayRefForClient(client), &buf)
 			if code != 0 {
 				t.Fatalf("exit=%d want 0\nout=%s", code, buf.String())
 			}
@@ -213,7 +414,7 @@ func TestAttachPreviewMalformedConfig(t *testing.T) {
 			before, _ := os.ReadFile(adapter.ConfigPath())
 
 			var buf strings.Builder
-			code := PreviewAttach(adapter, gatewayRef(), &buf)
+			code := PreviewAttach(adapter, attachGatewayRefForClient(client), &buf)
 			if code != 2 {
 				t.Fatalf("exit=%d want 2 (parse error)\nout=%s", code, buf.String())
 			}
@@ -235,7 +436,7 @@ func TestAttachApplyCreatesNew(t *testing.T) {
 		t.Run(client, func(t *testing.T) {
 			adapter := adapterFor(t, client)
 			var buf strings.Builder
-			code := ApplyAttach(adapter, gatewayRef(), &buf)
+			code := ApplyAttach(adapter, attachGatewayRefForClient(client), &buf)
 			if code != 0 {
 				t.Fatalf("exit=%d want 0\nout=%s", code, buf.String())
 			}
@@ -270,7 +471,7 @@ func TestAttachApplyBacksUpExisting(t *testing.T) {
 			writeFixture(t, adapter, original)
 
 			var buf strings.Builder
-			code := ApplyAttach(adapter, gatewayRef(), &buf)
+			code := ApplyAttach(adapter, attachGatewayRefForClient(client), &buf)
 			if code != 0 {
 				t.Fatalf("exit=%d want 0\nout=%s", code, buf.String())
 			}
@@ -306,7 +507,7 @@ func TestAttachRollbackRestores(t *testing.T) {
 			writeFixture(t, adapter, original)
 
 			var buf strings.Builder
-			if code := ApplyAttach(adapter, gatewayRef(), &buf); code != 0 {
+			if code := ApplyAttach(adapter, attachGatewayRefForClient(client), &buf); code != 0 {
 				t.Fatalf("apply exit=%d", code)
 			}
 			buf.Reset()
@@ -348,7 +549,7 @@ func TestAttachNeverPrintsSecrets(t *testing.T) {
 			writeFixture(t, adapter, fixtureWithSecret(client))
 
 			var buf strings.Builder
-			code := PreviewAttach(adapter, gatewayRef(), &buf)
+			code := PreviewAttach(adapter, attachGatewayRefForClient(client), &buf)
 			if code != 0 {
 				t.Fatalf("exit=%d want 0\nout=%s", code, buf.String())
 			}
@@ -397,7 +598,7 @@ func TestAttachApplyIdempotent(t *testing.T) {
 			writeFixture(t, adapter, fixtureExistingValid(client))
 
 			var buf strings.Builder
-			if code := ApplyAttach(adapter, gatewayRef(), &buf); code != 0 {
+			if code := ApplyAttach(adapter, attachGatewayRefForClient(client), &buf); code != 0 {
 				t.Fatalf("apply#1 exit=%d", code)
 			}
 			firstMerged, _ := os.ReadFile(adapter.ConfigPath())
@@ -407,7 +608,7 @@ func TestAttachApplyIdempotent(t *testing.T) {
 			waitMs(2)
 
 			buf.Reset()
-			if code := ApplyAttach(adapter, gatewayRef(), &buf); code != 0 {
+			if code := ApplyAttach(adapter, attachGatewayRefForClient(client), &buf); code != 0 {
 				t.Fatalf("apply#2 exit=%d", code)
 			}
 			backups, _ := filepath.Glob(adapter.ConfigPath() + ".bak.*")
@@ -449,7 +650,7 @@ func TestAttachDispatchRefusesWriteWithoutApplyFlag(t *testing.T) {
 }
 
 func TestAttachDispatchDefaultEndpointMatchesGatewayRoute(t *testing.T) {
-	for _, client := range allClients() {
+	for _, client := range []string{"claude_code", "cursor"} {
 		t.Run(client, func(t *testing.T) {
 			adapter := adapterFor(t, client)
 
