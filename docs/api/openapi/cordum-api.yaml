@@ -10042,6 +10042,9 @@ components:
     CreateShadowAgentFindingRequest:
       type: object
       required: [owner_principal_id, agent_product, risk, evidence_type, detected_at]
+      anyOf:
+        - required: [evidence_summary]
+        - required: [evidence_artifact_ptr]
       properties:
         finding_id:
           type: string

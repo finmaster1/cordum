@@ -64,6 +64,32 @@ func TestOpenAPIShadowAgentFindingManagedSkipContract(t *testing.T) {
 	}
 }
 
+func TestOpenAPICreateShadowAgentFindingEvidenceContract(t *testing.T) {
+	schema := loadGatewayOpenAPISpec(t).Components.Schemas["CreateShadowAgentFindingRequest"]
+	tests := []struct {
+		name       string
+		fields     []string
+		wantAllows bool
+	}{
+		{name: "neither evidence field rejected"},
+		{name: "summary only accepted", fields: []string{"evidence_summary"}, wantAllows: true},
+		{name: "artifact pointer only accepted", fields: []string{"evidence_artifact_ptr"}, wantAllows: true},
+		{name: "both evidence fields accepted", fields: []string{"evidence_summary", "evidence_artifact_ptr"}, wantAllows: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := createShadowFindingRequestFields(tc.fields...)
+
+			got := openAPISchemaAllowsFields(schema, fields)
+
+			if got != tc.wantAllows {
+				t.Fatalf("schema allows fields = %v, want %v; anyOf=%v required=%v",
+					got, tc.wantAllows, schema.AnyOf, schema.Required)
+			}
+		})
+	}
+}
+
 // TestOpenAPIRedoclyLint runs redocly lint on the spec. Gated behind
 // OPENAPI_FULL=1 because it shells out to npx and pulls redocly on
 // first run — fine in CI, noisy for a plain `go test`.
@@ -97,7 +123,13 @@ type gatewayOpenAPIPathItem struct {
 }
 
 type gatewayOpenAPISchema struct {
+	Required   []string                          `yaml:"required"`
+	AnyOf      []gatewayOpenAPIRequiredBranch    `yaml:"anyOf"`
 	Properties map[string]gatewayOpenAPIProperty `yaml:"properties"`
+}
+
+type gatewayOpenAPIRequiredBranch struct {
+	Required []string `yaml:"required"`
 }
 
 type gatewayOpenAPIProperty struct {
@@ -153,4 +185,42 @@ func stringSliceContains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func createShadowFindingRequestFields(extra ...string) map[string]struct{} {
+	fields := map[string]struct{}{
+		"owner_principal_id": {},
+		"agent_product":      {},
+		"risk":               {},
+		"evidence_type":      {},
+		"detected_at":        {},
+	}
+	for _, name := range extra {
+		fields[name] = struct{}{}
+	}
+	return fields
+}
+
+func openAPISchemaAllowsFields(schema gatewayOpenAPISchema, fields map[string]struct{}) bool {
+	if !openAPIRequiredFieldsPresent(schema.Required, fields) {
+		return false
+	}
+	if len(schema.AnyOf) == 0 {
+		return true
+	}
+	for _, branch := range schema.AnyOf {
+		if openAPIRequiredFieldsPresent(branch.Required, fields) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAPIRequiredFieldsPresent(required []string, fields map[string]struct{}) bool {
+	for _, name := range required {
+		if _, ok := fields[name]; !ok {
+			return false
+		}
+	}
+	return true
 }

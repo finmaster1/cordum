@@ -166,6 +166,32 @@ func TestShadowAgents_CreateGetList_HappyPath(t *testing.T) {
 	}
 }
 
+func TestShadowAgents_CreateRejectsMissingEvidence(t *testing.T) {
+	s := newShadowGateway(t)
+	body := validShadowCreateBody("tenant-a")
+	body.EvidenceSummary = ""
+	body.EvidenceArtifact = nil
+
+	rec := postShadow(t, s, "tenant-a", "/api/v1/edge/shadow-agents", body)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create without evidence status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	var env edgeErrorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v; body=%s", err, rec.Body.String())
+	}
+	if env.Code != edgeErrCodeInvalidRequest {
+		t.Fatalf("error code = %q, want %q", env.Code, edgeErrCodeInvalidRequest)
+	}
+	if !strings.Contains(env.Message, "evidence_summary") || !strings.Contains(env.Message, "evidence_artifact_ptr") {
+		t.Fatalf("message = %q, want both evidence field names", env.Message)
+	}
+	if strings.Contains(rec.Body.String(), body.RedactedPath) {
+		t.Fatalf("error body leaked request path: %s", rec.Body.String())
+	}
+}
+
 func TestShadowAgents_TenantIsolation_GetReturns404(t *testing.T) {
 	s := newShadowGateway(t)
 	rec := postShadow(t, s, "tenant-a", "/api/v1/edge/shadow-agents", validShadowCreateBody("tenant-a"))

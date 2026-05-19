@@ -105,14 +105,62 @@ func TestCreateFinding_PersistsAllRequiredFields(t *testing.T) {
 	}
 }
 
-func TestCreateFinding_RejectsMissingEvidence(t *testing.T) {
-	s, _ := newTestStore(t)
-	ctx := context.Background()
-	req := minimalCreateReq("t1", "o1", "p1", "claude-code", FindingRiskLow, "config_file", "")
-	// no summary, no artifact pointer
-	_, err := s.CreateFinding(ctx, req)
-	if !errors.Is(err, ErrValidation) {
-		t.Fatalf("missing-evidence error = %v, want ErrValidation", err)
+func validEvidencePointer(tenant string) *EvidencePointer {
+	return &EvidencePointer{
+		TenantID:       tenant,
+		URI:            "s3://shadow-bucket/evidence.json",
+		SHA256:         "deadbeef",
+		RetentionClass: edgecore.RetentionClassStandard,
+		RedactionLevel: edgecore.RedactionLevelStandard,
+		CreatedAt:      time.Date(2026, 5, 17, 11, 0, 0, 0, time.UTC),
+	}
+}
+
+func TestCreateFinding_EvidenceRequirement(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*CreateFindingRequest)
+		wantErr bool
+	}{
+		{
+			name:    "rejects neither evidence field",
+			mutate:  func(req *CreateFindingRequest) {},
+			wantErr: true,
+		},
+		{
+			name: "accepts summary only",
+			mutate: func(req *CreateFindingRequest) {
+				req.EvidenceSummary = "summary only"
+			},
+		},
+		{
+			name: "accepts artifact pointer only",
+			mutate: func(req *CreateFindingRequest) {
+				req.EvidenceArtifact = validEvidencePointer(req.TenantID)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newTestStore(t)
+			req := minimalCreateReq("t1", "o1", "p1", "claude-code", FindingRiskLow, "config_file", "")
+			tc.mutate(&req)
+
+			got, err := s.CreateFinding(context.Background(), req)
+			if tc.wantErr {
+				if !errors.Is(err, ErrValidation) {
+					t.Fatalf("CreateFinding error = %v, want ErrValidation", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateFinding: %v", err)
+			}
+			if got.EvidenceSummary == "" && got.EvidenceArtifact == nil {
+				t.Fatalf("CreateFinding persisted no evidence: %+v", got)
+			}
+		})
 	}
 }
 
