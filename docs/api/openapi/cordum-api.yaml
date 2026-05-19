@@ -3752,7 +3752,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/OutputRule'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Output rule validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -3808,13 +3814,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicyGlobalDocument'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Global policy section or content validation failed. Stable error
+            `code`: `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: snapshot_version mismatch (optimistic concurrency)
+          description: >
+            snapshot_version mismatch (optimistic concurrency). Stable error
+            `code`: `POLICY_VERSION_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: >
+            Strict policy signing is required but signer output is unavailable.
+            Stable error `code`: `POLICY_SIGNING_REQUIRED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/policy/bundles:
@@ -3893,11 +3919,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicyBundleDetail'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy bundle validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          description: >
+            Strict policy signing is required but signer output is unavailable.
+            Stable error `code`: `POLICY_SIGNING_REQUIRED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
@@ -3908,6 +3948,14 @@ paths:
       responses:
         '204':
           description: Policy bundle deleted
+        '400':
+          description: >
+            Policy bundle id validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3949,7 +3997,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicyCheckResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy simulation request or candidate content validation failed.
+            Stable error `code`: `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4073,13 +4127,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicyShadow'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy shadow bundle/content validation failed. Stable error
+            `code`: `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Policy shadow write conflict. Stable error `code`:
+            `POLICY_SHADOW_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
         '503':
@@ -4106,7 +4172,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicyShadow'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy shadow bundle id validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4135,7 +4207,13 @@ paths:
         '204':
           description: Shadow policy removed
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy shadow bundle id validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4143,7 +4221,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Policy shadow delete conflict. Stable error `code`:
+            `POLICY_SHADOW_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
         '503':
@@ -4195,7 +4279,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ShadowResultsSummary'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy shadow summary query validation failed. Stable error
+            `code`: `POLICY_SHADOW_QUERY_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4271,7 +4361,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ShadowComparisonsResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy shadow comparison query validation failed. Stable error
+            `code`: `POLICY_SHADOW_QUERY_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4332,7 +4428,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ShadowTimeseriesResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy shadow timeseries query validation failed. Stable error
+            `code`: `POLICY_SHADOW_QUERY_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4361,7 +4463,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicySnapshot'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy publish validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4388,7 +4496,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicySnapshot'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy rollback validation failed. Stable error `code`:
+            `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4918,11 +5032,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/PackRecord'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Pack install validation failed. Stable error `code` values include
+            `PACK_INSTALL_INVALID`, `PACK_DEPENDENCY_MISSING`, and
+            `PACK_INVALID_SIGNATURE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >
+            Pack is already installed or locked. Stable error `code`:
+            `PACK_ALREADY_INSTALLED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '500':
@@ -4963,6 +5092,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            Pack uninstall lock conflict. Stable error `code`:
+            `PACK_ALREADY_INSTALLED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/packs/{id}/verify:
@@ -5038,11 +5175,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/PackRecord'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Marketplace pack install validation failed. Stable error `code`
+            values include `PACK_MARKETPLACE_INVALID`, `PACK_INSTALL_INVALID`,
+            and `PACK_INVALID_SIGNATURE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >
+            Marketplace pack was not found. Stable error `code`:
+            `PACK_DEPENDENCY_MISSING`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Marketplace pack is already installed or locked. Stable error
+            `code`: `PACK_ALREADY_INSTALLED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '502':
           $ref: '#/components/responses/BadGateway'
         '500':
@@ -6741,13 +6901,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/VelocityRule'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Velocity rule validation failed. Stable error `code`:
+            `VELOCITY_RULE_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/TierLimit'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Velocity rule already exists. Stable error `code`:
+            `VELOCITY_RULE_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/policy/velocity-rules/stats:
@@ -6818,13 +6990,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/VelocityRule'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Velocity rule validation failed. Stable error `code`:
+            `VELOCITY_RULE_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/TierLimit'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Velocity rule was not found. Stable error `code`:
+            `VELOCITY_RULE_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
@@ -6836,13 +7020,25 @@ paths:
         '204':
           description: Velocity rule deleted
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Velocity rule validation failed. Stable error `code`:
+            `VELOCITY_RULE_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/TierLimit'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Velocity rule was not found. Stable error `code`:
+            `VELOCITY_RULE_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/policy/analytics:
@@ -6960,7 +7156,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/PolicyReplayResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Policy replay request or candidate content validation failed.
+            Stable error `code`: `POLICY_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8294,15 +8496,33 @@ paths:
                 type: object
                 additionalProperties: true
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval extraction request validation failed. Stable error `code`:
+            `EVAL_EXTRACTION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            No matching incidents were found. Stable error `code`:
+            `EVAL_EXTRACTION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Eval dataset version already exists. Stable error `code`:
+            `EVAL_DATASET_VERSION_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/RateLimited'
         '503':
@@ -8417,15 +8637,33 @@ paths:
                 type: object
                 additionalProperties: true
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval dataset validation failed. Stable error `code`:
+            `EVAL_DATASET_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Eval dataset version already exists. Stable error `code`:
+            `EVAL_DATASET_VERSION_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '413':
-          $ref: '#/components/responses/PayloadTooLarge'
+          description: >
+            Eval dataset payload exceeded route limits. Stable error `code`:
+            `EVAL_DATASET_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/evals/datasets/by-name/{name}:
@@ -8557,7 +8795,13 @@ paths:
                 type: object
                 additionalProperties: true
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval dataset successor validation failed. Stable error `code`:
+            `EVAL_DATASET_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8565,9 +8809,21 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Eval dataset successor version already exists. Stable error
+            `code`: `EVAL_DATASET_VERSION_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '413':
-          $ref: '#/components/responses/PayloadTooLarge'
+          description: >
+            Eval dataset successor payload exceeded route limits. Stable error
+            `code`: `EVAL_DATASET_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
@@ -8585,7 +8841,13 @@ paths:
         '204':
           description: Dataset deleted
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval dataset delete validation failed. Stable error `code`:
+            `EVAL_DATASET_VALIDATION_FAILED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8628,7 +8890,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/EvalRunAcceptedResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval run request is not runnable. Stable error `code`:
+            `EVAL_RUN_NOT_RUNNABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8636,7 +8904,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >
+            Eval dataset run is already in progress. Stable error `code`:
+            `EVAL_RUN_CONFLICT`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/RateLimited'
         '503':
@@ -8695,7 +8969,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/EvalRunsResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval run list query validation failed. Stable error `code`:
+            `EVAL_RUN_NOT_RUNNABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8753,7 +9033,13 @@ paths:
         '204':
           description: Eval run deleted
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Eval run delete validation failed. Stable error `code`:
+            `EVAL_RUN_NOT_RUNNABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
