@@ -177,10 +177,10 @@ type Detector struct {
 	observer Observer
 	resolver TenantResolver
 
-	mu        sync.Mutex
-	clock     func() time.Time
-	state     *scanState
-	sourceID  string
+	mu       sync.Mutex
+	clock    func() time.Time
+	state    *scanState
+	sourceID string
 }
 
 // scanState carries cross-scan-cycle bookkeeping required by §14

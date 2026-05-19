@@ -164,9 +164,9 @@ func buildRouteCISDKThroughProxySteps(kind RemediationActionKind, f findingFeatu
 	}
 	if audience == RemediationAudienceEnterprise || audience == RemediationAudienceBoth {
 		steps = append(steps, RemediationStep{
-			ID:    "route_ci_sdk_through_proxy.enterprise.policy",
-			Title: "Roll the proxy-routing env block into your CI-template repo so new repos inherit it",
-			Kind:  kind,
+			ID:      "route_ci_sdk_through_proxy.enterprise.policy",
+			Title:   "Roll the proxy-routing env block into your CI-template repo so new repos inherit it",
+			Kind:    kind,
 			DocsURL: "docs/edge/managed-settings-deploy.md",
 			Conditions: []string{
 				"central CI templates avoid per-repo drift; align with your platform team's workflow strategy",

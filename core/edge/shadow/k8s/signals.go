@@ -615,9 +615,9 @@ func (d *Detector) emit(ctx context.Context, cand signalCandidate, nsByName map[
 		// §7.2: hostname = cluster-id, NOT the host that ran the
 		// detector. The store also TrimSpace'es; redactField provides
 		// boundary scrubbing of operator-supplied cluster names.
-		Hostname:    redactField(d.config.ClusterID),
+		Hostname:     redactField(d.config.ClusterID),
 		RedactedPath: d.buildRedactedPath(cand),
-		DetectedAt:  now,
+		DetectedAt:   now,
 
 		SourceType:      shadow.SourceTypeKubernetes,
 		SourceID:        redactField(d.sourceID),
