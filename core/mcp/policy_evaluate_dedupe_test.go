@@ -158,6 +158,34 @@ func TestPolicyEvaluate_ConcurrentRace(t *testing.T) {
 	}
 }
 
+func TestWaitForRedisDedupe_DeadlinesWithinTTL(t *testing.T) {
+	t.Parallel()
+	client, mr := newMiniRedisDedupeBackend(t)
+	store := NewRedisDedupeStore(client)
+	const key = "k.deadline-within-ttl"
+	if _, loaded := store.LoadOrStore(key, &redisDedupeRecord{State: redisDedupeStatePending}); loaded {
+		t.Fatal("seed LoadOrStore reported loaded=true; want fresh pending winner")
+	}
+	remainingTTL := 75 * time.Millisecond
+	mr.SetTTL(MCPDedupeKeyPrefix+key, remainingTTL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	winner, outcome := waitForRedisDedupe(ctx, store, key)
+	elapsed := time.Since(start)
+
+	if outcome != nil {
+		t.Fatalf("waitForRedisDedupe outcome err = %v; want TTL-bounded promotion", outcome.err)
+	}
+	if winner == nil || !winner.redisBacked {
+		t.Fatalf("waitForRedisDedupe winner = %#v; want Redis promotion winner", winner)
+	}
+	if elapsed > remainingTTL+150*time.Millisecond {
+		t.Fatalf("waitForRedisDedupe elapsed = %v; want bounded by remaining TTL %v", elapsed, remainingTTL)
+	}
+}
+
 // TestDedupeKey_SemanticDerivation is the direct unit test of the new
 // semantic-key helper. Locks the canonical-form delimiter sanity: two
 // tuples that share the same concatenated byte representation under a

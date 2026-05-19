@@ -1208,10 +1208,36 @@ func redisDedupeRecordForResult(result *ToolCallResult) (*redisDedupeRecord, boo
 	return rec, true
 }
 
-// waitForRedisDedupe is the Redis-backed loser polling loop. Per the
-// task plan's step 6 contract: poll every redisDedupePollInterval,
-// respect ctx.Done(), stop when the entry becomes completed/deleted,
-// and rely on MCPDedupeTTL as the deadlock breaker.
+// redisDedupeLoserDeadlineBudget keeps Redis losers aligned with the
+// actual cross-process pending marker. A positive PTTL caps the local
+// deadlock-breaker to the key's remaining Redis TTL; missing/expired
+// keys use a near-immediate budget so the final steal path runs without
+// waiting for another poll tick. Non-Redis stores, PTTL errors, and
+// no-TTL keys retain the historical MCPDedupeTTL fallback.
+func redisDedupeLoserDeadlineBudget(ctx context.Context, store DedupeStore, key string) time.Duration {
+	redisStore, ok := store.(*RedisDedupeStore)
+	if !ok || redisStore == nil || redisStore.client == nil {
+		return MCPDedupeTTL
+	}
+	pttlCtx, cancel := context.WithTimeout(ctx, redisDedupeCommandTimeout)
+	defer cancel()
+	remaining, err := redisStore.client.PTTL(pttlCtx, MCPDedupeKeyPrefix+key).Result()
+	if err != nil {
+		return MCPDedupeTTL
+	}
+	switch {
+	case remaining > 0:
+		return remaining
+	case remaining == time.Duration(-1):
+		return MCPDedupeTTL
+	default:
+		return time.Nanosecond
+	}
+}
+
+// waitForRedisDedupe is the Redis-backed loser polling loop. It polls
+// every redisDedupePollInterval, respects ctx.Done(), and stops when
+// the entry becomes completed/deleted/expired.
 //
 // Termination outcomes:
 //   - loser observes completed wire record  → short-circuit with cached
@@ -1219,14 +1245,22 @@ func redisDedupeRecordForResult(result *ToolCallResult) (*redisDedupeRecord, boo
 //   - loser observes an expired key (Redis TTL)  → become new winner
 //   - ctx cancelled  → outcome carrying ctx.Err()
 //
-// The maximum total wait is MCPDedupeTTL: a degenerate Redis with TTL
-// not honored is still bounded because the polling loop checks the
-// elapsed clock against the TTL ceiling on every tick.
+// Redis-backed waits are locally bounded by the key's remaining Redis
+// PTTL sampled on loser entry plus the caller context. Non-Redis,
+// PTTL-error, and no-TTL cases keep MCPDedupeTTL as the fallback
+// deadlock breaker so failures never become unbounded waits.
 func waitForRedisDedupe(ctx context.Context, store DedupeStore, key string) (*dedupeWinner, *dedupeOutcome) {
 	ticker := time.NewTicker(redisDedupePollInterval)
 	defer ticker.Stop()
-	deadline := time.NewTimer(MCPDedupeTTL)
-	defer deadline.Stop()
+	deadline := time.NewTimer(redisDedupeLoserDeadlineBudget(ctx, store, key))
+	defer func() {
+		if !deadline.Stop() {
+			select {
+			case <-deadline.C:
+			default:
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
