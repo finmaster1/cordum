@@ -109,11 +109,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $gpg4winVersion = '5.0.2'
           $url = "https://files.gpg4win.org/gpg4win-$gpg4winVersion.exe"
           $exe = Join-Path $env:RUNNER_TEMP "gpg4win-$gpg4winVersion.exe"
           Write-Host "Downloading Gpg4Win $gpg4winVersion from $url"
-          Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing -TimeoutSec 300
+          & curl.exe --fail --location --retry 3 --connect-timeout 30 --max-time 180 --output $exe $url
+          if ($LASTEXITCODE -ne 0) {
+            throw "Gpg4Win download failed with curl.exe exit code $LASTEXITCODE"
+          }
           if (-not (Test-Path -LiteralPath $exe)) {
             throw "Gpg4Win installer was not downloaded to $exe"
           }
@@ -123,11 +127,19 @@ jobs:
           }
           Write-Host "Downloaded installer size: $sizeBytes bytes"
           Write-Host "Running silent install: $exe /S"
-          $proc = Start-Process -FilePath $exe -ArgumentList '/S' -Wait -PassThru
+          $proc = Start-Process -FilePath $exe -ArgumentList '/S' -PassThru
+          if (-not $proc.WaitForExit(120000)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw "Gpg4Win installer timed out after 120 seconds"
+          }
           if ($proc.ExitCode -ne 0) {
             throw "Gpg4Win installer exited with code $($proc.ExitCode)"
           }
           $gpgExe = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe'
+          $deadline = (Get-Date).AddSeconds(60)
+          while (-not (Test-Path -LiteralPath $gpgExe) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+          }
           if (-not (Test-Path -LiteralPath $gpgExe)) {
             throw "Expected Gpg4Win gpg.exe not found at $gpgExe after install"
           }
