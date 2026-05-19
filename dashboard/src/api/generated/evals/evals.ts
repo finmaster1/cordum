@@ -23,7 +23,6 @@ import type {
 
 import type {
   BadRequestResponse,
-  ConflictResponse,
   CreateEvalDataset201,
   CreateEvalDatasetBody,
   CreateEvalDatasetFromIncidents200,
@@ -34,6 +33,7 @@ import type {
   CreateEvalDatasetSuccessorBody,
   DeleteEvalDatasetParams,
   DeleteEvalRunParams,
+  Error,
   EvalRunAcceptedResponse,
   EvalRunRequest,
   EvalRunResult,
@@ -46,7 +46,6 @@ import type {
   ListEvalDatasetsParams,
   ListEvalRunsParams,
   NotFoundResponse,
-  PayloadTooLargeResponse,
   RateLimitedResponse,
   ServiceUnavailableResponse,
   UnauthorizedResponse,
@@ -76,11 +75,9 @@ export const createEvalDatasetFromIncidents = (
 
 export const getCreateEvalDatasetFromIncidentsMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
-    | ConflictResponse
     | RateLimitedResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -133,11 +130,9 @@ export type CreateEvalDatasetFromIncidentsMutationResult = NonNullable<
 export type CreateEvalDatasetFromIncidentsMutationBody =
   CreateEvalDatasetFromIncidentsBody;
 export type CreateEvalDatasetFromIncidentsMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | NotFoundResponse
-  | ConflictResponse
   | RateLimitedResponse
   | ServiceUnavailableResponse;
 
@@ -146,11 +141,9 @@ export type CreateEvalDatasetFromIncidentsMutationError =
  */
 export const useCreateEvalDatasetFromIncidents = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
-    | ConflictResponse
     | RateLimitedResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -378,11 +371,9 @@ export const createEvalDataset = (
 
 export const getCreateEvalDatasetMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | ConflictResponse
-    | PayloadTooLargeResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(options?: {
@@ -424,11 +415,9 @@ export type CreateEvalDatasetMutationResult = NonNullable<
 >;
 export type CreateEvalDatasetMutationBody = CreateEvalDatasetBody;
 export type CreateEvalDatasetMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | ConflictResponse
-  | PayloadTooLargeResponse
   | ServiceUnavailableResponse;
 
 /**
@@ -436,11 +425,9 @@ export type CreateEvalDatasetMutationError =
  */
 export const useCreateEvalDataset = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | ConflictResponse
-    | PayloadTooLargeResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(
@@ -1018,12 +1005,10 @@ export const createEvalDatasetSuccessor = (
 
 export const getCreateEvalDatasetSuccessorMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
-    | ConflictResponse
-    | PayloadTooLargeResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(options?: {
@@ -1066,12 +1051,10 @@ export type CreateEvalDatasetSuccessorMutationResult = NonNullable<
 export type CreateEvalDatasetSuccessorMutationBody =
   CreateEvalDatasetSuccessorBody;
 export type CreateEvalDatasetSuccessorMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
-  | ConflictResponse
-  | PayloadTooLargeResponse
   | ServiceUnavailableResponse;
 
 /**
@@ -1079,12 +1062,10 @@ export type CreateEvalDatasetSuccessorMutationError =
  */
 export const useCreateEvalDatasetSuccessor = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
-    | ConflictResponse
-    | PayloadTooLargeResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(
@@ -1123,7 +1104,7 @@ export const deleteEvalDataset = (
 
 export const getDeleteEvalDatasetMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1168,7 +1149,7 @@ export type DeleteEvalDatasetMutationResult = NonNullable<
 >;
 
 export type DeleteEvalDatasetMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
@@ -1179,7 +1160,7 @@ export type DeleteEvalDatasetMutationError =
  */
 export const useDeleteEvalDataset = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1225,11 +1206,10 @@ export const runEvalDataset = (
 
 export const getRunEvalDatasetMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
-    | ConflictResponse
     | RateLimitedResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -1272,11 +1252,10 @@ export type RunEvalDatasetMutationResult = NonNullable<
 >;
 export type RunEvalDatasetMutationBody = EvalRunRequest;
 export type RunEvalDatasetMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
-  | ConflictResponse
   | RateLimitedResponse
   | ServiceUnavailableResponse;
 
@@ -1285,11 +1264,10 @@ export type RunEvalDatasetMutationError =
  */
 export const useRunEvalDataset = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
-    | ConflictResponse
     | RateLimitedResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -1342,7 +1320,7 @@ export const getListEvalRunsQueryKey = (
 export const getListEvalRunsQueryOptions = <
   TData = Awaited<ReturnType<typeof listEvalRuns>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1381,7 +1359,7 @@ export type ListEvalRunsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listEvalRuns>>
 >;
 export type ListEvalRunsQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
@@ -1390,7 +1368,7 @@ export type ListEvalRunsQueryError =
 export function useListEvalRuns<
   TData = Awaited<ReturnType<typeof listEvalRuns>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1418,7 +1396,7 @@ export function useListEvalRuns<
 export function useListEvalRuns<
   TData = Awaited<ReturnType<typeof listEvalRuns>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1444,7 +1422,7 @@ export function useListEvalRuns<
 export function useListEvalRuns<
   TData = Awaited<ReturnType<typeof listEvalRuns>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1466,7 +1444,7 @@ export function useListEvalRuns<
 export function useListEvalRuns<
   TData = Awaited<ReturnType<typeof listEvalRuns>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1663,7 +1641,7 @@ export const deleteEvalRun = (runId: string, params?: DeleteEvalRunParams) => {
 
 export const getDeleteEvalRunMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1708,7 +1686,7 @@ export type DeleteEvalRunMutationResult = NonNullable<
 >;
 
 export type DeleteEvalRunMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
@@ -1719,7 +1697,7 @@ export type DeleteEvalRunMutationError =
  */
 export const useDeleteEvalRun = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse

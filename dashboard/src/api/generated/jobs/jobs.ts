@@ -25,13 +25,13 @@ import type {
   BadRequestResponse,
   CancelJob200,
   ConflictResponse,
+  Error,
   InternalServerErrorResponse,
   JobDetail,
   ListJobs200,
   ListJobsParams,
   NotFoundResponse,
   PayloadTooLargeResponse,
-  RateLimitedResponse,
   RemediateJobBody,
   SafetyDecision,
   SubmitJobRequest,
@@ -61,8 +61,8 @@ export const getSubmitJobMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | Error
     | PayloadTooLargeResponse
-    | RateLimitedResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -106,8 +106,8 @@ export type SubmitJobMutationBody = SubmitJobRequest;
 export type SubmitJobMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
+  | Error
   | PayloadTooLargeResponse
-  | RateLimitedResponse
   | InternalServerErrorResponse;
 
 /**
@@ -117,8 +117,8 @@ export const useSubmitJob = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | Error
     | PayloadTooLargeResponse
-    | RateLimitedResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(

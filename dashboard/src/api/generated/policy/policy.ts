@@ -23,9 +23,9 @@ import type {
 
 import type {
   BadRequestResponse,
-  ConflictResponse,
   CreateBundleSnapshotBody,
   EdgeConflictResponse,
+  Error,
   ForbiddenResponse,
   GetOutputPolicyStats200,
   GetOutputPolicyStatsParams,
@@ -807,10 +807,7 @@ export const upsertOutputRule = (id: string, outputRule: OutputRule) => {
 };
 
 export const getUpsertOutputRuleMutationOptions = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | InternalServerErrorResponse,
+  TError = Error | UnauthorizedResponse | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -851,7 +848,7 @@ export type UpsertOutputRuleMutationResult = NonNullable<
 >;
 export type UpsertOutputRuleMutationBody = OutputRule;
 export type UpsertOutputRuleMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | InternalServerErrorResponse;
 
@@ -859,10 +856,7 @@ export type UpsertOutputRuleMutationError =
  * @summary Create or update an output policy rule
  */
 export const useUpsertOutputRule = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | InternalServerErrorResponse,
+  TError = Error | UnauthorizedResponse | InternalServerErrorResponse,
   TContext = unknown,
 >(
   options?: {
@@ -1050,10 +1044,9 @@ export const updatePolicyGlobal = (
 
 export const getUpdatePolicyGlobalMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | void
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -1095,10 +1088,9 @@ export type UpdatePolicyGlobalMutationResult = NonNullable<
 >;
 export type UpdatePolicyGlobalMutationBody = UpdatePolicyGlobalRequest;
 export type UpdatePolicyGlobalMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | void
   | InternalServerErrorResponse;
 
 /**
@@ -1106,10 +1098,9 @@ export type UpdatePolicyGlobalMutationError =
  */
 export const useUpdatePolicyGlobal = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | void
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -1463,7 +1454,7 @@ export const updatePolicyBundle = (
 
 export const getUpdatePolicyBundleMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -1507,7 +1498,7 @@ export type UpdatePolicyBundleMutationResult = NonNullable<
 >;
 export type UpdatePolicyBundleMutationBody = UpdatePolicyBundleRequest;
 export type UpdatePolicyBundleMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | NotFoundResponse
   | InternalServerErrorResponse;
@@ -1517,7 +1508,7 @@ export type UpdatePolicyBundleMutationError =
  */
 export const useUpdatePolicyBundle = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -1554,6 +1545,7 @@ export const deletePolicyBundle = (id: string) => {
 
 export const getDeletePolicyBundleMutationOptions = <
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1598,6 +1590,7 @@ export type DeletePolicyBundleMutationResult = NonNullable<
 >;
 
 export type DeletePolicyBundleMutationError =
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
@@ -1608,6 +1601,7 @@ export type DeletePolicyBundleMutationError =
  */
 export const useDeletePolicyBundle = <
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -1652,7 +1646,7 @@ export const simulatePolicyBundle = (
 
 export const getSimulatePolicyBundleMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -1696,7 +1690,7 @@ export type SimulatePolicyBundleMutationResult = NonNullable<
 >;
 export type SimulatePolicyBundleMutationBody = SimulatePolicyBundleBody;
 export type SimulatePolicyBundleMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | NotFoundResponse
   | InternalServerErrorResponse;
@@ -1706,7 +1700,7 @@ export type SimulatePolicyBundleMutationError =
  */
 export const useSimulatePolicyBundle = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -2154,10 +2148,9 @@ export const activatePolicyShadow = (
 
 export const getActivatePolicyShadowMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | ConflictResponse
     | InternalServerErrorResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -2200,10 +2193,9 @@ export type ActivatePolicyShadowMutationResult = NonNullable<
 >;
 export type ActivatePolicyShadowMutationBody = PolicyShadowUpsertRequest;
 export type ActivatePolicyShadowMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | ConflictResponse
   | InternalServerErrorResponse
   | ServiceUnavailableResponse;
 
@@ -2212,10 +2204,9 @@ export type ActivatePolicyShadowMutationError =
  */
 export const useActivatePolicyShadow = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | ConflictResponse
     | InternalServerErrorResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -2261,7 +2252,7 @@ export const getGetPolicyShadowQueryKey = (id?: string) => {
 export const getGetPolicyShadowQueryOptions = <
   TData = Awaited<ReturnType<typeof getPolicyShadow>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -2303,7 +2294,7 @@ export type GetPolicyShadowQueryResult = NonNullable<
   Awaited<ReturnType<typeof getPolicyShadow>>
 >;
 export type GetPolicyShadowQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
@@ -2313,7 +2304,7 @@ export type GetPolicyShadowQueryError =
 export function useGetPolicyShadow<
   TData = Awaited<ReturnType<typeof getPolicyShadow>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -2345,7 +2336,7 @@ export function useGetPolicyShadow<
 export function useGetPolicyShadow<
   TData = Awaited<ReturnType<typeof getPolicyShadow>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -2375,7 +2366,7 @@ export function useGetPolicyShadow<
 export function useGetPolicyShadow<
   TData = Awaited<ReturnType<typeof getPolicyShadow>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -2401,7 +2392,7 @@ export function useGetPolicyShadow<
 export function useGetPolicyShadow<
   TData = Awaited<ReturnType<typeof getPolicyShadow>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
@@ -2448,11 +2439,10 @@ export const deletePolicyShadow = (id: string) => {
 
 export const getDeletePolicyShadowMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
-    | ConflictResponse
     | InternalServerErrorResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -2495,11 +2485,10 @@ export type DeletePolicyShadowMutationResult = NonNullable<
 >;
 
 export type DeletePolicyShadowMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
-  | ConflictResponse
   | InternalServerErrorResponse
   | ServiceUnavailableResponse;
 
@@ -2508,11 +2497,10 @@ export type DeletePolicyShadowMutationError =
  */
 export const useDeletePolicyShadow = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
-    | ConflictResponse
     | InternalServerErrorResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
@@ -2570,7 +2558,7 @@ export const getGetPolicyShadowResultsSummaryQueryKey = (
 export const getGetPolicyShadowResultsSummaryQueryOptions = <
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsSummary>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2613,7 +2601,7 @@ export type GetPolicyShadowResultsSummaryQueryResult = NonNullable<
   Awaited<ReturnType<typeof getPolicyShadowResultsSummary>>
 >;
 export type GetPolicyShadowResultsSummaryQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -2621,7 +2609,7 @@ export type GetPolicyShadowResultsSummaryQueryError =
 export function useGetPolicyShadowResultsSummary<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsSummary>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2652,7 +2640,7 @@ export function useGetPolicyShadowResultsSummary<
 export function useGetPolicyShadowResultsSummary<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsSummary>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2681,7 +2669,7 @@ export function useGetPolicyShadowResultsSummary<
 export function useGetPolicyShadowResultsSummary<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsSummary>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2706,7 +2694,7 @@ export function useGetPolicyShadowResultsSummary<
 export function useGetPolicyShadowResultsSummary<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsSummary>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2775,7 +2763,7 @@ export const getGetPolicyShadowResultsComparisonsQueryKey = (
 export const getGetPolicyShadowResultsComparisonsQueryOptions = <
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsComparisons>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2818,7 +2806,7 @@ export type GetPolicyShadowResultsComparisonsQueryResult = NonNullable<
   Awaited<ReturnType<typeof getPolicyShadowResultsComparisons>>
 >;
 export type GetPolicyShadowResultsComparisonsQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -2826,7 +2814,7 @@ export type GetPolicyShadowResultsComparisonsQueryError =
 export function useGetPolicyShadowResultsComparisons<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsComparisons>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2857,7 +2845,7 @@ export function useGetPolicyShadowResultsComparisons<
 export function useGetPolicyShadowResultsComparisons<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsComparisons>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2886,7 +2874,7 @@ export function useGetPolicyShadowResultsComparisons<
 export function useGetPolicyShadowResultsComparisons<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsComparisons>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2911,7 +2899,7 @@ export function useGetPolicyShadowResultsComparisons<
 export function useGetPolicyShadowResultsComparisons<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsComparisons>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -2979,7 +2967,7 @@ export const getGetPolicyShadowResultsTimeseriesQueryKey = (
 export const getGetPolicyShadowResultsTimeseriesQueryOptions = <
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsTimeseries>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -3022,7 +3010,7 @@ export type GetPolicyShadowResultsTimeseriesQueryResult = NonNullable<
   Awaited<ReturnType<typeof getPolicyShadowResultsTimeseries>>
 >;
 export type GetPolicyShadowResultsTimeseriesQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -3030,7 +3018,7 @@ export type GetPolicyShadowResultsTimeseriesQueryError =
 export function useGetPolicyShadowResultsTimeseries<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsTimeseries>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -3061,7 +3049,7 @@ export function useGetPolicyShadowResultsTimeseries<
 export function useGetPolicyShadowResultsTimeseries<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsTimeseries>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -3090,7 +3078,7 @@ export function useGetPolicyShadowResultsTimeseries<
 export function useGetPolicyShadowResultsTimeseries<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsTimeseries>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -3115,7 +3103,7 @@ export function useGetPolicyShadowResultsTimeseries<
 export function useGetPolicyShadowResultsTimeseries<
   TData = Awaited<ReturnType<typeof getPolicyShadowResultsTimeseries>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -3166,10 +3154,7 @@ export const publishPolicy = (
 };
 
 export const getPublishPolicyMutationOptions = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | InternalServerErrorResponse,
+  TError = Error | UnauthorizedResponse | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -3210,7 +3195,7 @@ export type PublishPolicyMutationResult = NonNullable<
 >;
 export type PublishPolicyMutationBody = PublishPolicyRequest;
 export type PublishPolicyMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | InternalServerErrorResponse;
 
@@ -3218,10 +3203,7 @@ export type PublishPolicyMutationError =
  * @summary Publish policy bundles to production
  */
 export const usePublishPolicy = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | InternalServerErrorResponse,
+  TError = Error | UnauthorizedResponse | InternalServerErrorResponse,
   TContext = unknown,
 >(
   options?: {
@@ -3261,7 +3243,7 @@ export const rollbackPolicy = (
 
 export const getRollbackPolicyMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -3305,7 +3287,7 @@ export type RollbackPolicyMutationResult = NonNullable<
 >;
 export type RollbackPolicyMutationBody = RollbackPolicyRequest;
 export type RollbackPolicyMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | NotFoundResponse
   | InternalServerErrorResponse;
@@ -3315,7 +3297,7 @@ export type RollbackPolicyMutationError =
  */
 export const useRollbackPolicy = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -3831,10 +3813,9 @@ export const createVelocityRule = (
 
 export const getCreateVelocityRuleMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | TierLimitResponse
-    | ConflictResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -3876,10 +3857,9 @@ export type CreateVelocityRuleMutationResult = NonNullable<
 >;
 export type CreateVelocityRuleMutationBody = VelocityRule;
 export type CreateVelocityRuleMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | TierLimitResponse
-  | ConflictResponse
   | InternalServerErrorResponse;
 
 /**
@@ -3887,10 +3867,9 @@ export type CreateVelocityRuleMutationError =
  */
 export const useCreateVelocityRule = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | TierLimitResponse
-    | ConflictResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -4086,10 +4065,9 @@ export const updateVelocityRule = (id: string, velocityRule: VelocityRule) => {
 
 export const getUpdateVelocityRuleMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | TierLimitResponse
-    | NotFoundResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -4131,10 +4109,9 @@ export type UpdateVelocityRuleMutationResult = NonNullable<
 >;
 export type UpdateVelocityRuleMutationBody = VelocityRule;
 export type UpdateVelocityRuleMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | TierLimitResponse
-  | NotFoundResponse
   | InternalServerErrorResponse;
 
 /**
@@ -4142,10 +4119,9 @@ export type UpdateVelocityRuleMutationError =
  */
 export const useUpdateVelocityRule = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | TierLimitResponse
-    | NotFoundResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -4180,10 +4156,9 @@ export const deleteVelocityRule = (id: string) => {
 
 export const getDeleteVelocityRuleMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | TierLimitResponse
-    | NotFoundResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -4225,10 +4200,9 @@ export type DeleteVelocityRuleMutationResult = NonNullable<
 >;
 
 export type DeleteVelocityRuleMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | TierLimitResponse
-  | NotFoundResponse
   | InternalServerErrorResponse;
 
 /**
@@ -4236,10 +4210,9 @@ export type DeleteVelocityRuleMutationError =
  */
 export const useDeleteVelocityRule = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | TierLimitResponse
-    | NotFoundResponse
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -4379,7 +4352,7 @@ export const replayPolicyDecisions = (
 
 export const getReplayPolicyDecisionsMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | InternalServerErrorResponse
@@ -4424,7 +4397,7 @@ export type ReplayPolicyDecisionsMutationResult = NonNullable<
 >;
 export type ReplayPolicyDecisionsMutationBody = PolicyReplayRequest;
 export type ReplayPolicyDecisionsMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | InternalServerErrorResponse
@@ -4435,7 +4408,7 @@ export type ReplayPolicyDecisionsMutationError =
  */
 export const useReplayPolicyDecisions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | InternalServerErrorResponse

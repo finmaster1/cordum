@@ -27,6 +27,7 @@ import type {
   CreateAgent201,
   CreateAgentBody,
   DelegationListResponse,
+  Error,
   ForbiddenResponse,
   GetAgent200,
   GetAgentStats200,
@@ -37,7 +38,6 @@ import type {
   ListDelegationsForAgentParams,
   ListDelegationsParams,
   NotFoundResponse,
-  RateLimitedResponse,
   RevokeDelegationToken200,
   RevokeDelegationTokenBody,
   ServiceUnavailableResponse,
@@ -812,12 +812,10 @@ export const issueDelegationToken = (
 
 export const getIssueDelegationTokenMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ConflictResponse
-    | RateLimitedResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(options?: {
@@ -859,12 +857,10 @@ export type IssueDelegationTokenMutationResult = NonNullable<
 >;
 export type IssueDelegationTokenMutationBody = IssueDelegationTokenBody;
 export type IssueDelegationTokenMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | NotFoundResponse
   | ConflictResponse
-  | RateLimitedResponse
   | ServiceUnavailableResponse;
 
 /**
@@ -872,12 +868,10 @@ export type IssueDelegationTokenMutationError =
  */
 export const useIssueDelegationToken = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ConflictResponse
-    | RateLimitedResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(
@@ -917,10 +911,7 @@ export const verifyDelegationToken = (
 };
 
 export const getVerifyDelegationTokenMutationOptions = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | ServiceUnavailableResponse,
+  TError = Error | UnauthorizedResponse | ServiceUnavailableResponse,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -961,7 +952,7 @@ export type VerifyDelegationTokenMutationResult = NonNullable<
 >;
 export type VerifyDelegationTokenMutationBody = VerifyDelegationTokenBody;
 export type VerifyDelegationTokenMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ServiceUnavailableResponse;
 
@@ -969,10 +960,7 @@ export type VerifyDelegationTokenMutationError =
  * @summary Verify a delegation token for an expected audience
  */
 export const useVerifyDelegationToken = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | ServiceUnavailableResponse,
+  TError = Error | UnauthorizedResponse | ServiceUnavailableResponse,
   TContext = unknown,
 >(
   options?: {
@@ -1013,10 +1001,9 @@ export const revokeDelegationToken = (
 
 export const getRevokeDelegationTokenMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(options?: {
@@ -1058,10 +1045,9 @@ export type RevokeDelegationTokenMutationResult = NonNullable<
 >;
 export type RevokeDelegationTokenMutationBody = RevokeDelegationTokenBody;
 export type RevokeDelegationTokenMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | NotFoundResponse
   | ServiceUnavailableResponse;
 
 /**
@@ -1069,10 +1055,9 @@ export type RevokeDelegationTokenMutationError =
  */
 export const useRevokeDelegationToken = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
   TContext = unknown,
 >(
@@ -1124,7 +1109,7 @@ export const getListDelegationsForAgentQueryKey = (
 export const getListDelegationsForAgentQueryOptions = <
   TData = Awaited<ReturnType<typeof listDelegationsForAgent>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1166,7 +1151,7 @@ export type ListDelegationsForAgentQueryResult = NonNullable<
   Awaited<ReturnType<typeof listDelegationsForAgent>>
 >;
 export type ListDelegationsForAgentQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -1174,7 +1159,7 @@ export type ListDelegationsForAgentQueryError =
 export function useListDelegationsForAgent<
   TData = Awaited<ReturnType<typeof listDelegationsForAgent>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1205,7 +1190,7 @@ export function useListDelegationsForAgent<
 export function useListDelegationsForAgent<
   TData = Awaited<ReturnType<typeof listDelegationsForAgent>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1234,7 +1219,7 @@ export function useListDelegationsForAgent<
 export function useListDelegationsForAgent<
   TData = Awaited<ReturnType<typeof listDelegationsForAgent>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1259,7 +1244,7 @@ export function useListDelegationsForAgent<
 export function useListDelegationsForAgent<
   TData = Awaited<ReturnType<typeof listDelegationsForAgent>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1315,7 +1300,7 @@ export const getListDelegationsQueryKey = (params?: ListDelegationsParams) => {
 export const getListDelegationsQueryOptions = <
   TData = Awaited<ReturnType<typeof listDelegations>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1350,7 +1335,7 @@ export type ListDelegationsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listDelegations>>
 >;
 export type ListDelegationsQueryError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -1358,7 +1343,7 @@ export type ListDelegationsQueryError =
 export function useListDelegations<
   TData = Awaited<ReturnType<typeof listDelegations>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1388,7 +1373,7 @@ export function useListDelegations<
 export function useListDelegations<
   TData = Awaited<ReturnType<typeof listDelegations>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1416,7 +1401,7 @@ export function useListDelegations<
 export function useListDelegations<
   TData = Awaited<ReturnType<typeof listDelegations>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1440,7 +1425,7 @@ export function useListDelegations<
 export function useListDelegations<
   TData = Awaited<ReturnType<typeof listDelegations>>,
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,

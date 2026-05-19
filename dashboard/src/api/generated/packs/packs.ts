@@ -22,7 +22,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
-  BadRequestResponse,
+  Error,
   ForbiddenResponse,
   InstallPackBody,
   InternalServerErrorResponse,
@@ -352,7 +352,7 @@ export const installPack = (
 
 export const getInstallPackMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | PayloadTooLargeResponse
@@ -397,7 +397,7 @@ export type InstallPackMutationResult = NonNullable<
 >;
 export type InstallPackMutationBody = InstallPackBody;
 export type InstallPackMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | PayloadTooLargeResponse
@@ -408,7 +408,7 @@ export type InstallPackMutationError =
  */
 export const useInstallPack = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | PayloadTooLargeResponse
@@ -456,6 +456,7 @@ export const getUninstallPackMutationOptions = <
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -500,6 +501,7 @@ export type UninstallPackMutationError =
   | UnauthorizedResponse
   | ForbiddenResponse
   | NotFoundResponse
+  | Error
   | InternalServerErrorResponse;
 
 /**
@@ -510,6 +512,7 @@ export const useUninstallPack = <
     | UnauthorizedResponse
     | ForbiddenResponse
     | NotFoundResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(

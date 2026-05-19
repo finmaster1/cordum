@@ -26,6 +26,7 @@ import type {
   CreateWorkflow201,
   DryRunResult,
   DryRunWorkflowBody,
+  Error,
   InternalServerErrorResponse,
   NotFoundResponse,
   RunSummary,
@@ -511,6 +512,7 @@ export const getStartWorkflowRunMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | Error
     | NotFoundResponse
     | InternalServerErrorResponse,
   TContext = unknown,
@@ -555,6 +557,7 @@ export type StartWorkflowRunMutationBody = StartWorkflowRunBody;
 export type StartWorkflowRunMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
+  | Error
   | NotFoundResponse
   | InternalServerErrorResponse;
 
@@ -565,6 +568,7 @@ export const useStartWorkflowRun = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
+    | Error
     | NotFoundResponse
     | InternalServerErrorResponse,
   TContext = unknown,

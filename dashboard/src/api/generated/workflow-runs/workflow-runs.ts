@@ -24,7 +24,7 @@ import type {
 import type {
   BadRequestResponse,
   ChatMessage,
-  ConflictResponse,
+  Error,
   GetRunChat200,
   InternalServerErrorResponse,
   ListAllWorkflowRuns200,
@@ -855,7 +855,7 @@ export const rerunWorkflow = (
 
 export const getRerunWorkflowMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -899,7 +899,7 @@ export type RerunWorkflowMutationResult = NonNullable<
 >;
 export type RerunWorkflowMutationBody = RerunWorkflowBody;
 export type RerunWorkflowMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | NotFoundResponse
   | InternalServerErrorResponse;
@@ -909,7 +909,7 @@ export type RerunWorkflowMutationError =
  */
 export const useRerunWorkflow = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | NotFoundResponse
     | InternalServerErrorResponse,
@@ -953,7 +953,7 @@ export const getCancelWorkflowRunMutationOptions = <
   TError =
     | UnauthorizedResponse
     | NotFoundResponse
-    | ConflictResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -997,7 +997,7 @@ export type CancelWorkflowRunMutationResult = NonNullable<
 export type CancelWorkflowRunMutationError =
   | UnauthorizedResponse
   | NotFoundResponse
-  | ConflictResponse
+  | Error
   | InternalServerErrorResponse;
 
 /**
@@ -1007,7 +1007,7 @@ export const useCancelWorkflowRun = <
   TError =
     | UnauthorizedResponse
     | NotFoundResponse
-    | ConflictResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(

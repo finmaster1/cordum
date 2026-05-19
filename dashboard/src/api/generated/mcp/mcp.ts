@@ -26,6 +26,7 @@ import type {
   ApproveMcpApproval200,
   BadRequestResponse,
   ConflictResponse,
+  Error,
   ForbiddenResponse,
   GetAgentDeniedEvents200,
   GetAgentToolVisibility200,
@@ -71,10 +72,7 @@ export const getMcpSSEQueryKey = () => {
 
 export const getMcpSSEQueryOptions = <
   TData = Awaited<ReturnType<typeof mcpSSE>>,
-  TError =
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof mcpSSE>>, TError, TData>
@@ -96,17 +94,11 @@ export const getMcpSSEQueryOptions = <
 };
 
 export type McpSSEQueryResult = NonNullable<Awaited<ReturnType<typeof mcpSSE>>>;
-export type McpSSEQueryError =
-  | UnauthorizedResponse
-  | ForbiddenResponse
-  | ServiceUnavailableResponse;
+export type McpSSEQueryError = UnauthorizedResponse | ForbiddenResponse | Error;
 
 export function useMcpSSE<
   TData = Awaited<ReturnType<typeof mcpSSE>>,
-  TError =
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   options: {
     query: Partial<
@@ -127,10 +119,7 @@ export function useMcpSSE<
 };
 export function useMcpSSE<
   TData = Awaited<ReturnType<typeof mcpSSE>>,
-  TError =
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   options?: {
     query?: Partial<
@@ -149,10 +138,7 @@ export function useMcpSSE<
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
 export function useMcpSSE<
   TData = Awaited<ReturnType<typeof mcpSSE>>,
-  TError =
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   options?: {
     query?: Partial<
@@ -167,10 +153,7 @@ export function useMcpSSE<
 
 export function useMcpSSE<
   TData = Awaited<ReturnType<typeof mcpSSE>>,
-  TError =
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   options?: {
     query?: Partial<
@@ -212,7 +195,7 @@ export const getMcpMessageMutationOptions = <
     | BadRequestResponse
     | UnauthorizedResponse
     | ForbiddenResponse
-    | ServiceUnavailableResponse,
+    | Error,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -256,7 +239,7 @@ export type McpMessageMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
   | ForbiddenResponse
-  | ServiceUnavailableResponse;
+  | Error;
 
 /**
  * @summary Send a JSON-RPC 2.0 message to MCP server
@@ -266,7 +249,7 @@ export const useMcpMessage = <
     | BadRequestResponse
     | UnauthorizedResponse
     | ForbiddenResponse
-    | ServiceUnavailableResponse,
+    | Error,
   TContext = unknown,
 >(
   options?: {
@@ -1410,11 +1393,7 @@ export const verifyMcpSignature = (
 };
 
 export const getVerifyMcpSignatureMutationOptions = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = Error | UnauthorizedResponse | ForbiddenResponse,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1455,20 +1434,15 @@ export type VerifyMcpSignatureMutationResult = NonNullable<
 >;
 export type VerifyMcpSignatureMutationBody = VerifyMcpSignatureBody;
 export type VerifyMcpSignatureMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
-  | ForbiddenResponse
-  | ServiceUnavailableResponse;
+  | ForbiddenResponse;
 
 /**
  * @summary Verify an outbound MCP signature (admin-gated)
  */
 export const useVerifyMcpSignature = <
-  TError =
-    | BadRequestResponse
-    | UnauthorizedResponse
-    | ForbiddenResponse
-    | ServiceUnavailableResponse,
+  TError = Error | UnauthorizedResponse | ForbiddenResponse,
   TContext = unknown,
 >(
   options?: {
@@ -1513,6 +1487,7 @@ export const getListMcpOutboundQueryKey = (params?: ListMcpOutboundParams) => {
 export const getListMcpOutboundQueryOptions = <
   TData = Awaited<ReturnType<typeof listMcpOutbound>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1547,6 +1522,7 @@ export type ListMcpOutboundQueryResult = NonNullable<
   Awaited<ReturnType<typeof listMcpOutbound>>
 >;
 export type ListMcpOutboundQueryError =
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -1554,6 +1530,7 @@ export type ListMcpOutboundQueryError =
 export function useListMcpOutbound<
   TData = Awaited<ReturnType<typeof listMcpOutbound>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1583,6 +1560,7 @@ export function useListMcpOutbound<
 export function useListMcpOutbound<
   TData = Awaited<ReturnType<typeof listMcpOutbound>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1610,6 +1588,7 @@ export function useListMcpOutbound<
 export function useListMcpOutbound<
   TData = Awaited<ReturnType<typeof listMcpOutbound>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1633,6 +1612,7 @@ export function useListMcpOutbound<
 export function useListMcpOutbound<
   TData = Awaited<ReturnType<typeof listMcpOutbound>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1684,6 +1664,7 @@ export const getGetMcpUsageQueryKey = (params?: GetMcpUsageParams) => {
 export const getGetMcpUsageQueryOptions = <
   TData = Awaited<ReturnType<typeof getMcpUsage>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1714,6 +1695,7 @@ export type GetMcpUsageQueryResult = NonNullable<
   Awaited<ReturnType<typeof getMcpUsage>>
 >;
 export type GetMcpUsageQueryError =
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | ServiceUnavailableResponse;
@@ -1721,6 +1703,7 @@ export type GetMcpUsageQueryError =
 export function useGetMcpUsage<
   TData = Awaited<ReturnType<typeof getMcpUsage>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1746,6 +1729,7 @@ export function useGetMcpUsage<
 export function useGetMcpUsage<
   TData = Awaited<ReturnType<typeof getMcpUsage>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1769,6 +1753,7 @@ export function useGetMcpUsage<
 export function useGetMcpUsage<
   TData = Awaited<ReturnType<typeof getMcpUsage>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1788,6 +1773,7 @@ export function useGetMcpUsage<
 export function useGetMcpUsage<
   TData = Awaited<ReturnType<typeof getMcpUsage>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | ServiceUnavailableResponse,
@@ -1834,7 +1820,7 @@ export const getListMcpToolsQueryKey = (params?: ListMcpToolsParams) => {
 
 export const getListMcpToolsQueryOptions = <
   TData = Awaited<ReturnType<typeof listMcpTools>>,
-  TError = UnauthorizedResponse | ForbiddenResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   params?: ListMcpToolsParams,
   options?: {
@@ -1861,11 +1847,14 @@ export const getListMcpToolsQueryOptions = <
 export type ListMcpToolsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listMcpTools>>
 >;
-export type ListMcpToolsQueryError = UnauthorizedResponse | ForbiddenResponse;
+export type ListMcpToolsQueryError =
+  | UnauthorizedResponse
+  | ForbiddenResponse
+  | Error;
 
 export function useListMcpTools<
   TData = Awaited<ReturnType<typeof listMcpTools>>,
-  TError = UnauthorizedResponse | ForbiddenResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   params: undefined | ListMcpToolsParams,
   options: {
@@ -1887,7 +1876,7 @@ export function useListMcpTools<
 };
 export function useListMcpTools<
   TData = Awaited<ReturnType<typeof listMcpTools>>,
-  TError = UnauthorizedResponse | ForbiddenResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   params?: ListMcpToolsParams,
   options?: {
@@ -1907,7 +1896,7 @@ export function useListMcpTools<
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData> };
 export function useListMcpTools<
   TData = Awaited<ReturnType<typeof listMcpTools>>,
-  TError = UnauthorizedResponse | ForbiddenResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   params?: ListMcpToolsParams,
   options?: {
@@ -1923,7 +1912,7 @@ export function useListMcpTools<
 
 export function useListMcpTools<
   TData = Awaited<ReturnType<typeof listMcpTools>>,
-  TError = UnauthorizedResponse | ForbiddenResponse,
+  TError = UnauthorizedResponse | ForbiddenResponse | Error,
 >(
   params?: ListMcpToolsParams,
   options?: {
@@ -1964,9 +1953,9 @@ export const getGetAgentToolVisibilityQueryKey = (id?: string) => {
 export const getGetAgentToolVisibilityQueryOptions = <
   TData = Awaited<ReturnType<typeof getAgentToolVisibility>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
 >(
   id: string,
@@ -2005,17 +1994,17 @@ export type GetAgentToolVisibilityQueryResult = NonNullable<
   Awaited<ReturnType<typeof getAgentToolVisibility>>
 >;
 export type GetAgentToolVisibilityQueryError =
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
-  | NotFoundResponse
   | ServiceUnavailableResponse;
 
 export function useGetAgentToolVisibility<
   TData = Awaited<ReturnType<typeof getAgentToolVisibility>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
 >(
   id: string,
@@ -2043,9 +2032,9 @@ export function useGetAgentToolVisibility<
 export function useGetAgentToolVisibility<
   TData = Awaited<ReturnType<typeof getAgentToolVisibility>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
 >(
   id: string,
@@ -2071,9 +2060,9 @@ export function useGetAgentToolVisibility<
 export function useGetAgentToolVisibility<
   TData = Awaited<ReturnType<typeof getAgentToolVisibility>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
 >(
   id: string,
@@ -2095,9 +2084,9 @@ export function useGetAgentToolVisibility<
 export function useGetAgentToolVisibility<
   TData = Awaited<ReturnType<typeof getAgentToolVisibility>>,
   TError =
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
-    | NotFoundResponse
     | ServiceUnavailableResponse,
 >(
   id: string,

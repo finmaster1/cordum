@@ -24,6 +24,7 @@ import type {
 import type {
   ApprovalDecisionRequest,
   BadRequestResponse,
+  Error,
   ForbiddenResponse,
   GenericObject,
   GetApprovalContext200,
@@ -210,8 +211,7 @@ export const getApproveJobMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
-    | ForbiddenResponse
-    | NotFoundResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -255,8 +255,7 @@ export type ApproveJobMutationBody = ApprovalDecisionRequest;
 export type ApproveJobMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
-  | ForbiddenResponse
-  | NotFoundResponse
+  | Error
   | InternalServerErrorResponse;
 
 /**
@@ -266,8 +265,7 @@ export const useApproveJob = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
-    | ForbiddenResponse
-    | NotFoundResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -311,8 +309,7 @@ export const getRejectJobMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
-    | ForbiddenResponse
-    | NotFoundResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -356,8 +353,7 @@ export type RejectJobMutationBody = ApprovalDecisionRequest;
 export type RejectJobMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
-  | ForbiddenResponse
-  | NotFoundResponse
+  | Error
   | InternalServerErrorResponse;
 
 /**
@@ -367,8 +363,7 @@ export const useRejectJob = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
-    | ForbiddenResponse
-    | NotFoundResponse
+    | Error
     | InternalServerErrorResponse,
   TContext = unknown,
 >(
@@ -592,8 +587,7 @@ export const getRepairApprovalMutationOptions = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
-    | ForbiddenResponse
-    | NotFoundResponse
+    | Error
     | GenericObject
     | InternalServerErrorResponse,
   TContext = unknown,
@@ -638,8 +632,7 @@ export type RepairApprovalMutationBody = RepairApprovalBody;
 export type RepairApprovalMutationError =
   | BadRequestResponse
   | UnauthorizedResponse
-  | ForbiddenResponse
-  | NotFoundResponse
+  | Error
   | GenericObject
   | InternalServerErrorResponse;
 
@@ -650,8 +643,7 @@ export const useRepairApproval = <
   TError =
     | BadRequestResponse
     | UnauthorizedResponse
-    | ForbiddenResponse
-    | NotFoundResponse
+    | Error
     | GenericObject
     | InternalServerErrorResponse,
   TContext = unknown,

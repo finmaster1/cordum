@@ -23,7 +23,7 @@ import type {
 
 import type {
   BadGatewayResponse,
-  BadRequestResponse,
+  Error,
   ForbiddenResponse,
   InternalServerErrorResponse,
   MarketplaceCatalog,
@@ -217,7 +217,7 @@ export const installMarketplacePack = (
 
 export const getInstallMarketplacePackMutationOptions = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | InternalServerErrorResponse
@@ -262,7 +262,7 @@ export type InstallMarketplacePackMutationResult = NonNullable<
 >;
 export type InstallMarketplacePackMutationBody = MarketplaceInstallRequest;
 export type InstallMarketplacePackMutationError =
-  | BadRequestResponse
+  | Error
   | UnauthorizedResponse
   | ForbiddenResponse
   | InternalServerErrorResponse
@@ -273,7 +273,7 @@ export type InstallMarketplacePackMutationError =
  */
 export const useInstallMarketplacePack = <
   TError =
-    | BadRequestResponse
+    | Error
     | UnauthorizedResponse
     | ForbiddenResponse
     | InternalServerErrorResponse
