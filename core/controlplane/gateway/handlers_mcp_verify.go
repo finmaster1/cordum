@@ -89,11 +89,11 @@ func (s *server) handleMCPVerifySignature(w http.ResponseWriter, r *http.Request
 	}
 	var body mcpVerifySignatureRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "invalid json body: "+err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeMCPVerifyRequestInvalid, "invalid json body: "+err.Error())
 		return
 	}
 	if body.Method == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "method required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeMCPVerifyRequestInvalid, "method required")
 		return
 	}
 	verifier, err := s.mcpVerifier()

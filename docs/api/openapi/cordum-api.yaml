@@ -1503,7 +1503,10 @@ paths:
         and persists nothing. When enabled, the endpoint accepts a bounded,
         redacted runtime event batch (process exec, file read/write, network
         connect, DNS query) from an authenticated runtime collector holding
-        `edge.runtime.ingest`; generic job writers are forbidden. The request
+        `edge.runtime.ingest`; generic job writers are forbidden. A bounded
+        `nonce` is required by default and is checked against a Redis replay
+        window scoped to `(tenant, collector)`; duplicate nonce submissions
+        return idempotent success without appending another copy. The request
         `source.source_id` must match the authenticated collector principal and
         the referenced session/execution must be bound to that collector before
         mapped `AgentActionEvent` records with `layer=runtime` and
@@ -1524,6 +1527,12 @@ paths:
             schema:
               $ref: '#/components/schemas/EdgeRuntimeIngestRequest'
       responses:
+        '200':
+          description: Duplicate runtime ingest nonce suppressed as an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeRuntimeIngestResponse'
         '201':
           description: Runtime events appended
           content:
@@ -1541,7 +1550,7 @@ paths:
         '413':
           $ref: '#/components/responses/EdgePayloadTooLarge'
         '429':
-          description: Per-execution event cap exceeded
+          description: Per-execution event cap exceeded or runtime replay window saturated (`REPLAY_WINDOW_FULL`)
           content:
             application/json:
               schema:
@@ -5100,7 +5109,13 @@ paths:
               schema:
                 type: string
         '503':
-          $ref: '#/components/responses/ServiceUnavailable'
+          description: >
+            MCP HTTP transport is unavailable. Stable error `code`:
+            `MCP_HTTP_TRANSPORT_UNAVAILABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -5132,7 +5147,13 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '503':
-          $ref: '#/components/responses/ServiceUnavailable'
+          description: >
+            MCP HTTP transport is unavailable. Stable error `code`:
+            `MCP_HTTP_TRANSPORT_UNAVAILABLE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7126,17 +7147,41 @@ paths:
                     type: integer
                   jti: {type: string}
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid delegation issue request. Stable error `code` values:
+            `DELEGATION_REQUEST_INVALID`, `DELEGATION_SCOPE_EXCEEDED`,
+            `DELEGATION_CHAIN_TOO_DEEP`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Delegating or target agent identity was not found. Stable error
+            `code`: `DELEGATION_AGENT_NOT_FOUND`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           $ref: '#/components/responses/Conflict'
         '429':
-          $ref: '#/components/responses/RateLimited'
+          description: >
+            Delegation issue quota exceeded. Stable error `code`:
+            `DELEGATION_RATE_LIMITED`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until the rate limit resets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/agents/verify-delegation:
@@ -7184,7 +7229,14 @@ paths:
                       $ref: '#/components/schemas/DelegationChainLink'
                   error_code: {type: string}
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid delegation verify request. Stable error `code`:
+            `DELEGATION_REQUEST_INVALID`. Token verification denials continue
+            to return HTTP 200 with response `error_code`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '503':
@@ -7228,13 +7280,33 @@ paths:
                     type: integer
                     description: Number of downstream delegations revoked in addition to the root token.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid delegation revoke request. Stable error `code`:
+            `DELEGATION_REQUEST_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Delegation token was not found. Stable error `code`:
+            `DELEGATION_TOKEN_NOT_FOUND`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: >
+            Delegation revoke cascade exceeded the safe traversal depth. Stable
+            error `code`: `DELEGATION_CASCADE_TOO_DEEP`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/agents/{id}/delegations:
@@ -7298,7 +7370,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/DelegationListResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid delegation list filter or pagination parameter. Stable
+            error `code`: `DELEGATION_REQUEST_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7361,7 +7439,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/DelegationListResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid delegation list filter or pagination parameter. Stable
+            error `code`: `DELEGATION_REQUEST_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7774,13 +7858,25 @@ paths:
                 type: object
                 additionalProperties: true
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            Invalid MCP verify-signature request body. Stable error `code`:
+            `MCP_VERIFY_REQUEST_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '503':
-          $ref: '#/components/responses/ServiceUnavailable'
+          description: >
+            MCP verifier trust store is not configured. Existing stable error
+            `code`: `mcp_verifier_unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/mcp/outbound:
     get:
       operationId: listMcpOutbound
@@ -7828,6 +7924,15 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '400':
+          description: >
+            Invalid outbound MCP query parameter. Stable error `code` values:
+            `MCP_RANGE_INVALID`, `MCP_SIGNATURE_STATUS_INVALID`,
+            `MCP_LIMIT_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7875,6 +7980,14 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '400':
+          description: >
+            Invalid MCP usage time range. Stable error `code`:
+            `MCP_RANGE_INVALID`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7914,6 +8027,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >
+            Agent identity referenced by `agent_id` was not found. Stable error
+            `code`: `MCP_AGENT_IDENTITY_NOT_FOUND`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/agents/{id}/tools:
     get:
       operationId: getAgentToolVisibility
@@ -7943,12 +8064,26 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '400':
+          description: >
+            Missing path agent id. Stable error `code`:
+            `MCP_AGENT_ID_REQUIRED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >
+            Agent identity was not found. Stable error `code`:
+            `MCP_AGENT_IDENTITY_NOT_FOUND`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/agents/{id}/denied-events:
@@ -9644,14 +9779,21 @@ components:
             $ref: '#/components/schemas/EdgeArtifactPointer'
     EdgeRuntimeIngestRequest:
       type: object
-      required: [source, events]
+      required: [source, nonce, events]
       additionalProperties: false
       properties:
         source:
           $ref: '#/components/schemas/EdgeRuntimeIngestSource'
+        nonce:
+          type: string
+          minLength: 16
+          maxLength: 64
+          pattern: '^[A-Za-z0-9-]{16,64}$'
+          description: Required by default replay-protection nonce (UUIDv7 or random 128-bit value). Set `CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED=false` only for transitional non-production clients that cannot yet send this field.
         batch_id:
           type: string
           maxLength: 256
+          description: Operator correlation identifier only; it is not used for replay protection.
         events:
           type: array
           minItems: 1
@@ -9682,6 +9824,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EdgeRuntimeIngestDropReport'
+        replayed:
+          type: boolean
+          default: false
+          description: True when a duplicate nonce was suppressed and no events were appended.
     BinaryVerifyEvent:
       type: object
       description: |

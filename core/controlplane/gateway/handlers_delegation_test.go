@@ -178,9 +178,7 @@ func TestHandleDelegateAgentCrossTenantAndScopeErrors(t *testing.T) {
 	scopeReq.Header.Set("Content-Type", "application/json")
 	scopeRec := httptest.NewRecorder()
 	s.handleDelegateAgent(scopeRec, scopeReq)
-	if scopeRec.Code != http.StatusBadRequest || !strings.Contains(scopeRec.Body.String(), "scope_exceeded") {
-		t.Fatalf("scope status=%d body=%s", scopeRec.Code, scopeRec.Body.String())
-	}
+	assertOperatorErrorCode(t, scopeRec, http.StatusBadRequest, "DELEGATION_SCOPE_EXCEEDED")
 }
 
 func TestHandleDelegateAgentRejectsTooDeepChain(t *testing.T) {
@@ -237,9 +235,7 @@ func TestHandleDelegateAgentRejectsTooDeepChain(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.handleDelegateAgent(rec, req)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "chain_too_deep") {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	assertOperatorErrorCode(t, rec, http.StatusBadRequest, "DELEGATION_CHAIN_TOO_DEEP")
 }
 
 func TestHandleVerifyAndRevokeDelegationStructuredVerdicts(t *testing.T) {
@@ -431,9 +427,7 @@ func TestHandleRevokeDelegationReturnsNotFoundForUnknownJTI(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.handleRevokeDelegation(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown jti, got %d body=%s", rec.Code, rec.Body.String())
-	}
+	assertOperatorErrorCode(t, rec, http.StatusNotFound, "DELEGATION_TOKEN_NOT_FOUND")
 }
 
 // TestHandleDelegateAgentRejectsOverflowTTL guards the `ttl_seconds`

@@ -546,7 +546,7 @@ const mcpSSEReauthInterval = 5 * time.Minute
 func (s *server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 	transport := s.mcpHTTPTransport()
 	if transport == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "mcp http transport unavailable")
+		writeJSONError(w, http.StatusServiceUnavailable, errorCodeMCPHTTPTransportUnavailable, "mcp http transport unavailable")
 		return
 	}
 
@@ -591,7 +591,7 @@ func (s *server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleMCPMessage(w http.ResponseWriter, r *http.Request) {
 	transport := s.mcpHTTPTransport()
 	if transport == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "mcp http transport unavailable")
+		writeJSONError(w, http.StatusServiceUnavailable, errorCodeMCPHTTPTransportUnavailable, "mcp http transport unavailable")
 		return
 	}
 	transport.HandleMessage(w, r)

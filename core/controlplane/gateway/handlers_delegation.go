@@ -133,11 +133,11 @@ func (s *server) handleDelegateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	req.TargetAgentID = strings.TrimSpace(req.TargetAgentID)
 	if req.TargetAgentID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "target_agent_id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeDelegationRequestInvalid, "target_agent_id required")
 		return
 	}
 	if req.TTLSeconds < 0 {
-		writeErrorJSON(w, http.StatusBadRequest, "ttl_seconds must be non-negative")
+		writeJSONError(w, http.StatusBadRequest, errorCodeDelegationRequestInvalid, "ttl_seconds must be non-negative")
 		return
 	}
 	if req.TTLSeconds > maxDelegationTTLSeconds {
@@ -145,13 +145,13 @@ func (s *server) handleDelegateAgent(w http.ResponseWriter, r *http.Request) {
 		// time.Second` cannot overflow int64 nanoseconds and return a
 		// negative duration that would sneak past the service-layer
 		// maxTTL guard.
-		writeErrorJSON(w, http.StatusBadRequest, "ttl_seconds exceeds maximum (1 year)")
+		writeJSONError(w, http.StatusBadRequest, errorCodeDelegationRequestInvalid, "ttl_seconds exceeds maximum (1 year)")
 		return
 	}
 
 	tenant := tenantFromRequest(r)
 	if tenant == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "tenant required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeDelegationRequestInvalid, "tenant required")
 		return
 	}
 	if _, ok := s.loadDelegationAgent(w, r, delegatingAgentID, tenant); !ok {
@@ -170,7 +170,7 @@ func (s *server) handleDelegateAgent(w http.ResponseWriter, r *http.Request) {
 			s.emitDelegationAudit(r, "issue", tenant, delegatingAgentID, req.TargetAgentID, "", 0, "error", quotaErr)
 			return
 		}
-		writeErrorJSON(w, http.StatusTooManyRequests, "rate limited")
+		writeJSONError(w, http.StatusTooManyRequests, errorCodeDelegationRateLimited, "rate limited")
 		s.emitDelegationAudit(r, "issue", tenant, delegatingAgentID, req.TargetAgentID, "", 0, "rate_limited", errors.New("rate limited"))
 		return
 	}
@@ -197,7 +197,7 @@ func (s *server) handleDelegateAgent(w http.ResponseWriter, r *http.Request) {
 		if status >= 500 {
 			writeInternalError(w, r, "issue delegation token", err)
 		} else {
-			writeErrorJSON(w, status, delegationIssueMessage(err))
+			writeJSONError(w, status, delegationIssueErrorCode(err), delegationIssueMessage(err))
 		}
 		s.emitDelegationAudit(r, "issue", tenant, delegatingAgentID, req.TargetAgentID, claims.ID, claims.ChainDepth, "denied", err)
 		return
@@ -232,7 +232,7 @@ func (s *server) handleVerifyDelegation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.TrimSpace(req.Token) == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "token required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeDelegationRequestInvalid, "token required")
 		return
 	}
 
@@ -282,7 +282,7 @@ func (s *server) handleRevokeDelegation(w http.ResponseWriter, r *http.Request) 
 	}
 	req.JTI = strings.TrimSpace(req.JTI)
 	if req.JTI == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "jti required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeDelegationRequestInvalid, "jti required")
 		return
 	}
 	if s == nil || s.jobStore == nil {
@@ -302,7 +302,7 @@ func (s *server) handleRevokeDelegation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !ok || !strings.EqualFold(strings.TrimSpace(rootView.Tenant), tenant) {
-		writeErrorJSON(w, http.StatusNotFound, "delegation token not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeDelegationTokenNotFound, "delegation token not found")
 		s.emitDelegationAudit(r, "revoke", tenant, "", "", req.JTI, 0, "denied", delegation.ErrNotFound)
 		return
 	}
@@ -313,9 +313,9 @@ func (s *server) handleRevokeDelegation(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		switch {
 		case errors.Is(err, delegation.ErrNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "delegation token not found")
+			writeJSONError(w, http.StatusNotFound, errorCodeDelegationTokenNotFound, "delegation token not found")
 		case errors.Is(err, delegation.ErrCascadeTooDeep):
-			writeErrorJSON(w, http.StatusUnprocessableEntity, "delegation cascade too deep")
+			writeJSONError(w, http.StatusUnprocessableEntity, errorCodeDelegationCascadeTooDeep, "delegation cascade too deep")
 		default:
 			writeInternalError(w, r, "revoke delegation token", err)
 		}
@@ -416,7 +416,7 @@ func (s *server) loadDelegationAgent(w http.ResponseWriter, r *http.Request, age
 		return nil, false
 	}
 	if identity == nil {
-		writeErrorJSON(w, http.StatusNotFound, "agent identity not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeDelegationAgentNotFound, "agent identity not found")
 		return nil, false
 	}
 	// Tenant scoping: store.AgentIdentity does not currently carry a

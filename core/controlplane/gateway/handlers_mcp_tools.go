@@ -105,7 +105,7 @@ func (s *server) handleAgentToolVisibility(w http.ResponseWriter, r *http.Reques
 	}
 	agentID := strings.TrimSpace(r.PathValue("id"))
 	if agentID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "agent id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeMCPAgentIDRequired, "agent id required")
 		return
 	}
 	runtime := s.getMCPRuntime()
@@ -127,7 +127,7 @@ func (s *server) writeAgentToolVisibility(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if stored == nil {
-		writeErrorJSON(w, http.StatusNotFound, "agent identity not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeMCPAgentIdentityNotFound, "agent identity not found")
 		return
 	}
 	identity := mcpIdentityFromStore(stored)
@@ -159,7 +159,7 @@ func (s *server) handleAgentDeniedEvents(w http.ResponseWriter, r *http.Request)
 	}
 	agentID := strings.TrimSpace(r.PathValue("id"))
 	if agentID == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "agent id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeMCPAgentIDRequired, "agent id required")
 		return
 	}
 	events := []denyEventRecord{}

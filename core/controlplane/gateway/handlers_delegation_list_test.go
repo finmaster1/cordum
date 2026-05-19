@@ -111,6 +111,9 @@ func TestHandleListDelegationsFiltersAndPagination(t *testing.T) {
 	if len(page2.Items) != 1 || page2.Items[0].JTI == page.Items[0].JTI {
 		t.Fatalf("unexpected second page: %#v", page2)
 	}
+
+	rr = delegationList(t, s, "/api/v1/delegations?status=bogus", "delegation-reader")
+	assertOperatorErrorCode(t, rr, http.StatusBadRequest, "DELEGATION_REQUEST_INVALID")
 }
 
 func TestHandleListAgentDelegationsAndRBAC(t *testing.T) {
