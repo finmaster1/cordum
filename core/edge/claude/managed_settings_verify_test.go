@@ -296,6 +296,8 @@ func TestValidateLoopbackAgentdURL(t *testing.T) {
 		{name: "scheme_file", raw: "file:///v1/edge/hooks/claude", wantErr: errAgentdURLScheme},
 		{name: "remote_host_dns", raw: "http://example.com:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
 		{name: "remote_host_v4", raw: "http://10.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
+		{name: "non_canonical_loopback_v4_alias", raw: "http://127.0.0.5:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
+		{name: "non_canonical_loopback_v4_subnet", raw: "http://127.1.2.3:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
 		{name: "remote_host_unspecified", raw: "http://0.0.0.0:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
 		{name: "remote_host_link_local_v6", raw: "http://[fe80::1]:8765/v1/edge/hooks/claude", wantErr: errAgentdURLHost},
 		{name: "userinfo_password", raw: "http://user:pass@127.0.0.1:8765/v1/edge/hooks/claude", wantErr: errAgentdURLUserinfo},
