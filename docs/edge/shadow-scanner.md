@@ -423,6 +423,10 @@ detectors for the four additional CI providers covered by design doc
 `shadow.Store.CreateFinding` per run, no parallel store), OIDC verifier
 interface (generic over coreos/go-oidc), §6.3/§6.4 resolver vocabulary,
 and §14 false-positive controls — there is no parallel CI subsystem.
+This shipped-library status is separate from the `cordumctl edge doctor
+--shadow-ci` CLI integration: as of this build, `cordumctl` still reports the
+flag as unsupported/pending instead of invoking these detectors. See
+[`docs/cordumctl/edge-doctor.md`](../cordumctl/edge-doctor.md).
 
 Design references: [kubernetes-ci-shadow-detector-design.md §8.2–§8.5](kubernetes-ci-shadow-detector-design.md)
 for per-provider signals, §6.3/§6.4 for tenant/principal mapping, §14

@@ -17,10 +17,11 @@ Kernel / agentd / settings / dashboard / policy-mode / managed-settings).
 
 ## Shadow preview flags (EDGE-143.8)
 
-The `--shadow-cluster` and `--shadow-ci` flags let an operator **preview** what
-the EDGE-143 shadow-agent detectors would surface in their environment **before
-opting in via a managed-settings deployment**. The previews are strictly
-read-only:
+The `--shadow-cluster` flag lets an operator **preview** what the EDGE-143
+shadow-agent detectors would surface in their environment **before opting in via
+a managed-settings deployment**. The `--shadow-ci` flag is reserved for the same
+read-only preview shape, but its CLI integration is still pending in this build
+(see the CI section below). Wired previews are strictly read-only:
 
 - They build the relevant detector with an in-memory `dryRunStore` so
   `store.CreateFinding` records to a local slice instead of Redis.
@@ -31,8 +32,8 @@ read-only:
   `TestEdgeDoctor_ShadowCI_ReadOnly` so any future POST / PUT / PATCH / DELETE
   issued during a preview fails CI.
 
-Findings are printed to stdout, never persisted to the EDGE-141 store, never
-mutate the cluster or CI provider.
+For wired preview modes, findings are printed to stdout, never persisted to the
+EDGE-141 store, and never mutate the cluster or provider.
 
 ### `--shadow-cluster=<kubeconfig-path>`
 
@@ -59,35 +60,41 @@ constraining RBAC is best practice.
 
 ### `--shadow-ci=<provider>:<token-or-config-path>`
 
-Runs the EDGE-143.2 / EDGE-143.3 CI shadow detector for the named provider in
-dry-run mode.
+Reserved for running the CI shadow detectors from `cordumctl`, but the CLI
+integration is **not wired in this build**. The detector libraries have shipped
+separately — GitHub Actions under EDGE-143.2, and GitLab CI / Jenkins /
+Buildkite / CircleCI under EDGE-143.3 (`core/edge/shadow/ci/`) — so library
+availability does not imply `cordumctl edge doctor --shadow-ci` can invoke them
+yet.
 
 Supported providers (closed enum):
 
-| Provider | Status |
-|----------|--------|
-| `github` | EDGE-143.2 — detector module pending |
-| `gitlab` | EDGE-143.3 — detector module pending |
-| `jenkins` | EDGE-143.3 — detector module pending |
-| `buildkite` | EDGE-143.3 — detector module pending |
-| `circleci` | EDGE-143.3 — detector module pending |
+| Provider | Detector library status | `cordumctl --shadow-ci` status |
+|----------|-------------------------|-------------------------------|
+| `github` | EDGE-143.2 — shipped | CLI integration pending; exits unsupported |
+| `gitlab` | EDGE-143.3 — shipped | CLI integration pending; exits unsupported |
+| `jenkins` | EDGE-143.3 — shipped | CLI integration pending; exits unsupported |
+| `buildkite` | EDGE-143.3 — shipped | CLI integration pending; exits unsupported |
+| `circleci` | EDGE-143.3 — shipped | CLI integration pending; exits unsupported |
 
 ```bash
 cordumctl edge doctor --shadow-ci github:$GITHUB_TOKEN
 cordumctl edge doctor --shadow-ci gitlab:$GITLAB_TOKEN --json
 ```
 
-**Partial support today**: as of EDGE-143.8 landing, neither EDGE-143.2 nor
-EDGE-143.3 has shipped a detector module. Every supported provider therefore
-exits with a clear actionable message:
+**Current CLI behavior**: the flag validates the provider name but does not
+dispatch to the shipped libraries yet. Every supported provider exits non-zero
+with an unsupported message; any EDGE task-status hint in that message should be
+read as "CLI integration pending", not "detector library absent":
 
 ```text
 cordumctl edge doctor: provider github not supported in this build;
 EDGE-143.2/.3 detector(s) must DONE first
 ```
 
-Once those tasks land, the providers gated on them will exercise the same
-dry-run pipeline as `--shadow-cluster`.
+Once the CLI integration lands, providers will exercise the same read-only
+dry-run pipeline as `--shadow-cluster`. For the shipped library details, see
+[`docs/edge/shadow-scanner.md`](../edge/shadow-scanner.md).
 
 **Unknown providers** (anything outside the closed enum) print a clear
 "not recognized" error plus the full supported list, and exit non-zero:
@@ -141,8 +148,9 @@ not need a nil guard. `dry_run` is always `true` for these preview modes.
 
 ### Operator workflow
 
-1. Run `--shadow-cluster <path>` (and / or `--shadow-ci <provider>:<token>`) to
-   preview what the detectors would surface in your environment.
+1. Run `--shadow-cluster <path>` to preview what the Kubernetes detector would
+   surface in your environment. Treat `--shadow-ci <provider>:<token>` as
+   pending until the CLI integration described above lands.
 2. Review the findings; if the volume / shape is acceptable, opt in by deploying
    the EDGE-143 managed-settings rollout.
 3. Re-run `cordumctl edge doctor` (without `--shadow-*`) to verify the standard
