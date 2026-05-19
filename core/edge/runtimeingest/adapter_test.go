@@ -583,3 +583,83 @@ func TestDecodeBatchAcceptsCanonicalShape(t *testing.T) {
 		t.Fatalf("decoded batch = %#v", batch)
 	}
 }
+
+func TestDecodeBatchAcceptsDocumentedRuntimeIngestionShape(t *testing.T) {
+	body := []byte(`{
+		"source":{"source_id":"tetragon-cluster-a"},
+		"batch_id":"uuid-v4",
+		"events":[{
+			"tenant_id":"tenant-1234","session_id":"edge-session-abc",
+			"execution_id":"edge-exec-xyz",
+			"source_event_id":"stable-hash-or-source-uid",
+			"observed_at":"2026-05-17T13:42:11.123Z",
+			"kind":"runtime.process.exec",
+			"process":{"executable_basename":"curl","executable_sha256":"abcdef...","argument_count":3},
+			"file":{"operation":"read","path_redacted":"/tmp/[REDACTED]"},
+			"network":{"host_redacted":"[REDACTED].example","ip_prefix":"10.0.0.0/24","port":443,"protocol":"tcp"},
+			"dns":{"qname_redacted":"[REDACTED].svc.cluster.local","qtype":"A"},
+			"labels":{"node":"node-7","container_runtime":"containerd"},
+			"artifact_ptrs":[]
+		}]
+	}`)
+
+	batch, err := DecodeBatch(bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("DecodeBatch documented shape: %v", err)
+	}
+	if batch.Source.ID != "tetragon-cluster-a" {
+		t.Fatalf("source.source_id = %q", batch.Source.ID)
+	}
+	if got := batch.Events[0].Labels["container_runtime"]; got != "containerd" {
+		t.Fatalf("labels.container_runtime = %q", got)
+	}
+}
+
+func TestDecodeBatchRejectsStaleRuntimeIngestionDocShape(t *testing.T) {
+	cases := []struct {
+		name        string
+		body        []byte
+		wantMessage string
+	}{
+		{
+			name: "top_level_source_id",
+			body: []byte(`{
+				"source_id":"tetragon-cluster-a",
+				"events":[{
+					"tenant_id":"tenant-1234","session_id":"edge-session-abc",
+					"execution_id":"edge-exec-xyz","source_event_id":"se",
+					"observed_at":"2026-05-17T13:42:11.123Z",
+					"kind":"runtime.process.exec",
+					"process":{"executable_basename":"curl","argument_count":3}
+				}]
+			}`),
+			wantMessage: `unknown field "source_id"`,
+		},
+		{
+			name: "event_metadata",
+			body: []byte(`{
+				"source":{"source_id":"tetragon-cluster-a"},
+				"events":[{
+					"tenant_id":"tenant-1234","session_id":"edge-session-abc",
+					"execution_id":"edge-exec-xyz","source_event_id":"se",
+					"observed_at":"2026-05-17T13:42:11.123Z",
+					"kind":"runtime.process.exec",
+					"process":{"executable_basename":"curl","argument_count":3},
+					"metadata":{"container_runtime":"containerd"}
+				}]
+			}`),
+			wantMessage: `unknown field "metadata"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeBatch(bytes.NewReader(tc.body))
+			if !errors.Is(err, ErrInvalidEnvelope) {
+				t.Fatalf("err = %v, want ErrInvalidEnvelope", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Fatalf("err = %v, want message containing %q", err, tc.wantMessage)
+			}
+		})
+	}
+}

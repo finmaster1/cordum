@@ -62,9 +62,11 @@ kinds require a code change here plus the matching `EventKind` constant.
 
 ## Wire envelope
 
-```jsonc
+```json
 {
-  "source_id":     "tetragon-cluster-a",
+  "source": {
+    "source_id": "tetragon-cluster-a"
+  },
   "batch_id":      "uuid-v4",
   "events": [
     {
@@ -74,7 +76,6 @@ kinds require a code change here plus the matching `EventKind` constant.
       "source_event_id": "stable-hash-or-source-uid",
       "observed_at":   "2026-05-17T13:42:11.123Z",
       "kind":          "runtime.process.exec",
-      // Optional bounded, redacted summaries:
       "process": {
         "executable_basename": "curl",
         "executable_sha256":   "abcdef...",
@@ -87,8 +88,7 @@ kinds require a code change here plus the matching `EventKind` constant.
                    "protocol":      "tcp" },
       "dns":     { "qname_redacted": "[REDACTED].svc.cluster.local",
                    "qtype":          "A" },
-      "labels":      { "node": "node-7" },
-      "metadata":    { "container_runtime": "containerd" },
+      "labels":      { "node": "node-7", "container_runtime": "containerd" },
       "artifact_ptrs": []
     }
   ]
@@ -97,7 +97,9 @@ kinds require a code change here plus the matching `EventKind` constant.
 
 Field rules:
 
-- `tenant_id`, `session_id`, `execution_id`, `source_event_id`,
+- Top-level `source.source_id` and `events` are **required**. Missing or
+  empty source identity → 400 `invalid_request`.
+- Per-event `tenant_id`, `session_id`, `execution_id`, `source_event_id`,
   `observed_at`, and `kind` are **required**. Missing any → 400
   `invalid_request`.
 - `argument_count` is required for `runtime.process.exec`; raw `argv` is
@@ -195,7 +197,7 @@ no Redis writes, no SIEM forwarding, no side effects.
 
 ## Response shape
 
-```jsonc
+```json
 {
   "accepted_count": 12,
   "dropped_count":  3,
