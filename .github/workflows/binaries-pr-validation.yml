@@ -110,7 +110,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
-          $gpg4winVersion = '5.0.2'
+          # 5.0.2 silent install stalls on GitHub's windows-2025 runner; pin
+          # the latest 4.x Gpg4Win release that still installs unattended.
+          $gpg4winVersion = '4.4.1'
           $url = "https://files.gpg4win.org/gpg4win-$gpg4winVersion.exe"
           $exe = Join-Path $env:RUNNER_TEMP "gpg4win-$gpg4winVersion.exe"
           Write-Host "Downloading Gpg4Win $gpg4winVersion from $url"
