@@ -165,3 +165,41 @@ func TestAuditChainSenderTenantlessFallbackEmitsWarn(t *testing.T) {
 			downstream.Get(0).TenantID, model.DefaultTenant)
 	}
 }
+
+func TestAuditChainSender_DefaultTenantWarningRedactsIdentity(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	sender := newAuditChainSender(audit.NewChainer(client, ""), &testAuditSender{})
+	sender.Send(audit.SIEMEvent{
+		Timestamp: time.Now().UTC(),
+		EventType: audit.EventSystemAuth,
+		Severity:  audit.SeverityMedium,
+		Action:    "auth.failure",
+		Identity:  "apikey:alice@example.com",
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") {
+		t.Fatalf("expected WARN-level log line, got:\n%s", out)
+	}
+	if strings.Contains(out, "alice@example.com") {
+		t.Fatalf("tenantless warning leaked raw principal in logs:\n%s", out)
+	}
+	if !strings.Contains(out, "identity_hash=apikey:") {
+		t.Fatalf("tenantless warning missing role-prefixed identity_hash, got:\n%s", out)
+	}
+	if strings.Contains(out, "identity=apikey:") {
+		t.Fatalf("tenantless warning still logs raw identity field:\n%s", out)
+	}
+}

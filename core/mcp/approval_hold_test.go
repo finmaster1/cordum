@@ -286,6 +286,30 @@ func TestBuildMCPApprovalBinding_StripsApprovalRef(t *testing.T) {
 	}
 }
 
+// TestBuildMCPApprovalBinding_IgnoresPolicySnapshotParam pins the
+// maintenance contract behind the intentionally-unused fourth parameter:
+// policy snapshot drift is enforced by the approval store, not by the
+// action/input binding hash itself. If a future refactor adds the
+// snapshot to one side of the hash, this test catches the asymmetric
+// mint/consume drift before it ships.
+func TestBuildMCPApprovalBinding_IgnoresPolicySnapshotParam(t *testing.T) {
+	t.Parallel()
+	params := ToolCallParams{
+		Name:      "fs.write",
+		Arguments: json.RawMessage(`{"path":"/x","contents":"hi"}`),
+	}
+
+	actionA, inputA := BuildMCPApprovalBinding("tnt_a", "cordum.builtin", params, "policy-v1")
+	actionB, inputB := BuildMCPApprovalBinding("tnt_a", "cordum.builtin", params, "policy-v2")
+
+	if actionA != actionB {
+		t.Fatalf("ActionHash changed when only policySnapshot changed: %q vs %q", actionA, actionB)
+	}
+	if inputA != inputB {
+		t.Fatalf("InputHash changed when only policySnapshot changed: %q vs %q", inputA, inputB)
+	}
+}
+
 // TestProcessApprovalClaim_BlankLinkage_FailsClosed is the consume-side
 // half of PR #276 Sub-E finding #26: ProcessApprovalClaim MUST refuse
 // the call when ANY of (Tenant, SessionID, ExecutionID, AgentID) is

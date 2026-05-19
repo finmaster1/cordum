@@ -1188,8 +1188,8 @@ func (s *server) invokeMCPJSONHandler(
 	if len(payload) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if req.Header.Get("X-Tenant-ID") == "" {
-		req.Header.Set("X-Tenant-ID", s.mcpTenantFromContext(ctx))
+	if status, payload, raw, ok := s.stampMCPBridgeTenant(req, ctx); !ok {
+		return status, payload, raw, nil
 	}
 	for key, value := range headers {
 		key = strings.TrimSpace(key)
@@ -1244,8 +1244,8 @@ func (s *server) invokeMCPAnyHandler(
 	if len(payload) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if req.Header.Get("X-Tenant-ID") == "" {
-		req.Header.Set("X-Tenant-ID", s.mcpTenantFromContext(ctx))
+	if status, payload, raw, ok := s.stampMCPBridgeTenant(req, ctx); !ok {
+		return status, payload, raw, nil
 	}
 	for key, value := range headers {
 		key = strings.TrimSpace(key)
@@ -1270,16 +1270,43 @@ func (s *server) invokeMCPAnyHandler(
 	return rr.Code, decoded, raw, nil
 }
 
+func (s *server) stampMCPBridgeTenant(req *http.Request, ctx context.Context) (int, map[string]any, []byte, bool) {
+	if req.Header.Get("X-Tenant-ID") != "" {
+		return 0, nil, nil, true
+	}
+	tenant := s.mcpTenantFromContext(ctx)
+	if tenant == "" {
+		status, payload, raw := mcpMissingTenantBridgeResponse()
+		return status, payload, raw, false
+	}
+	req.Header.Set("X-Tenant-ID", tenant)
+	return 0, nil, nil, true
+}
+
+func mcpMissingTenantBridgeResponse() (int, map[string]any, []byte) {
+	payload := map[string]any{
+		"code":  "unauthorized",
+		"error": "mcp bridge requires tenant context",
+	}
+	raw, _ := json.Marshal(payload)
+	return http.StatusUnauthorized, payload, raw
+}
+
+// mcpTenantFromContext resolves only explicit auth/server tenant state.
+// It deliberately returns blank rather than model.DefaultTenant so bridge
+// invocations fail closed when middleware/auth context is missing.
 func (s *server) mcpTenantFromContext(ctx context.Context) string {
 	if auth := auth.FromContext(ctx); auth != nil {
 		if tenant := strings.TrimSpace(auth.Tenant); tenant != "" {
 			return tenant
 		}
 	}
-	if tenant := strings.TrimSpace(s.tenant); tenant != "" {
-		return tenant
+	if s != nil {
+		if tenant := strings.TrimSpace(s.tenant); tenant != "" {
+			return tenant
+		}
 	}
-	return "default"
+	return ""
 }
 
 func mcpBridgeString(v any) string {

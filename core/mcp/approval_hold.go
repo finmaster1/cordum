@@ -49,7 +49,12 @@ var errMissingPolicySnapshot = errors.New("missing_policy_snapshot: ApprovalHold
 // `_approval_ref` is stripped before canonicalisation so a resume retry
 // (which echoes the ref in args) lands on the same InputHash as the
 // original gated call.
-func BuildMCPApprovalBinding(tenant, server string, params ToolCallParams, _ string) (actionHash, inputHash string) {
+//
+// _policySnapshot is intentionally unused here: the approval store enforces
+// snapshot freshness during ClaimApproval, while this binding must stay scoped
+// to action/input hashes only. Naming the parameter prevents future mint vs
+// consume drift if one side tries to include the snapshot in the hash.
+func BuildMCPApprovalBinding(tenant, server string, params ToolCallParams, _policySnapshot string) (actionHash, inputHash string) {
 	stripped := stripApprovalRefArg(params.Arguments)
 	canonical, inputHash, _ := CanonicaliseArgs(stripped)
 	var targetPath string

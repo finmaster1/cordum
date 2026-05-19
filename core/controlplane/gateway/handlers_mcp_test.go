@@ -114,6 +114,40 @@ func TestMCPApprovalAuditHookDefaultsEmptyTenant(t *testing.T) {
 	}
 }
 
+func TestMcpTenantFromContext_FailsClosedOnMissingAuth(t *testing.T) {
+	t.Parallel()
+	s := &server{}
+	handlerCalled := false
+
+	status, _, raw, err := s.invokeMCPJSONHandler(
+		context.Background(),
+		http.MethodPost,
+		"/api/v1/policy/simulate",
+		nil,
+		nil,
+		map[string]any{"topic": "job.default"},
+		func(w http.ResponseWriter, r *http.Request) {
+			handlerCalled = true
+			if got := r.Header.Get("X-Tenant-ID"); got != "" {
+				t.Fatalf("handler saw fallback tenant header %q; want fail-closed before dispatch", got)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		},
+	)
+	if err != nil {
+		t.Fatalf("invokeMCPJSONHandler returned unexpected err: %v", err)
+	}
+	if handlerCalled {
+		t.Fatal("handler was called without auth/server tenant context; want fail-closed")
+	}
+	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s, want 401 or 403", status, string(raw))
+	}
+	if strings.Contains(string(raw), `"default"`) {
+		t.Fatalf("missing-tenant response should not stamp or mention default tenant: %s", raw)
+	}
+}
+
 func TestRegisterMCPRoutesEnforcesAuthAndHandlesPing(t *testing.T) {
 	t.Parallel()
 	s, _, _ := newTestGateway(t)

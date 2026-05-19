@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"strings"
 	"time"
@@ -60,7 +62,7 @@ func (s *auditChainSender) Send(event audit.SIEMEvent) {
 			slog.Warn("audit chain: tenantless event — PRODUCER BUG, falling back to default tenant",
 				"event_type", event.EventType,
 				"action", event.Action,
-				"identity", event.Identity,
+				"identity_hash", redactedAuditIdentity(event.Identity),
 			)
 			event.TenantID = model.DefaultTenant
 		}
@@ -94,4 +96,26 @@ func (s *auditChainSender) Close() error {
 		return nil
 	}
 	return s.downstream.Close()
+}
+
+func redactedAuditIdentity(identity string) string {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return ""
+	}
+	role, principal, ok := strings.Cut(identity, ":")
+	role = strings.TrimSpace(role)
+	principal = strings.TrimSpace(principal)
+	if !ok {
+		role = "unknown"
+		principal = identity
+	}
+	if role == "" {
+		role = "unknown"
+	}
+	if principal == "" {
+		principal = identity
+	}
+	sum := sha256.Sum256([]byte(principal))
+	return role + ":" + hex.EncodeToString(sum[:8])
 }

@@ -320,7 +320,15 @@ func exporterFromEnv() (Exporter, error) {
 			return nil, fmt.Errorf("audit config: CORDUM_AUDIT_EXPORT_WEBHOOK_URL required for webhook export")
 		}
 		var opts []WebhookOption
-		if secret := os.Getenv("CORDUM_AUDIT_EXPORT_WEBHOOK_SECRET"); secret != "" {
+		secret := strings.TrimSpace(os.Getenv("CORDUM_AUDIT_EXPORT_WEBHOOK_SECRET"))
+		if secret == "" {
+			slog.Warn("audit exporter webhook has no shared secret; payloads will be UNSIGNED",
+				"env_hint", "set CORDUM_AUDIT_EXPORT_WEBHOOK_SECRET to a 32+ char value",
+			)
+		} else {
+			if err := validateWebhookSecret(secret); err != nil {
+				return nil, err
+			}
 			opts = append(opts, WithWebhookSecret(secret))
 		}
 		exp = NewWebhookExporter(url, opts...)
