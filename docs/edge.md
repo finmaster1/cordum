@@ -131,4 +131,5 @@ Read it before touching any audit, evidence, approval, or cache code.
 - [Edge retention, caps, and cleanup](edge/retention.md)
 - [Edge observability](edge/observability.md) — metrics, audit fields, and dashboard hook status.
 - [Edge identity contract](edge/identity-contract.md) — IDs, hashes, approval lifecycle.
+- [Runtime ingest replay protection](edge/runtime-ingest-replay-protection.md) — nonce-window design required before production enablement.
 - Edge P0 threat model: internal Cordum engineering.
