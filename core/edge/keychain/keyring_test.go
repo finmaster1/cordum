@@ -196,6 +196,10 @@ func TestRedactBackendErrorSecretPatterns(t *testing.T) {
 
 	const syntheticPEMBody = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDSENTINELPEMxyzABCDEFG12345"
 	syntheticPEM := "-----BEGIN RSA PRIVATE KEY-----\n" + syntheticPEMBody + "\n-----END RSA PRIVATE KEY-----"
+	const syntheticCertBody = "MIIBSYNTHETICCERTBODYAAA="
+	syntheticBareCert := "-----BEGIN CERTIFICATE-----\n" + syntheticCertBody + "\n-----END CERTIFICATE-----"
+	syntheticTrustedCert := "-----BEGIN TRUSTED CERTIFICATE-----\n" + syntheticCertBody + "\n-----END TRUSTED CERTIFICATE-----"
+	syntheticX509Cert := "-----BEGIN X509 CERTIFICATE-----\n" + syntheticCertBody + "\n-----END X509 CERTIFICATE-----"
 	const (
 		syntheticBase64 = "U0VOVElORUxfQkFTRTY0X1RPS0VOX2FiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6"
 		syntheticHex    = "abcdef0123456789abcdef0123456789sentinelhexfullsuffix01"
@@ -209,11 +213,34 @@ func TestRedactBackendErrorSecretPatterns(t *testing.T) {
 	)
 
 	cases := []struct {
-		name   string
-		secret string
-		input  string
+		name      string
+		secret    string
+		input     string
+		want      string
+		forbidden []string
 	}{
 		{name: "pem_private_key", secret: syntheticPEMBody, input: "keyring decode failed: " + syntheticPEM},
+		{
+			name:      "pem_certificate",
+			secret:    syntheticCertBody,
+			input:     "failed to validate certificate: " + syntheticBareCert,
+			want:      "[REDACTED:cert]",
+			forbidden: []string{syntheticCertBody, "BEGIN CERTIFICATE", "END CERTIFICATE"},
+		},
+		{
+			name:      "pem_trusted_certificate",
+			secret:    syntheticCertBody,
+			input:     "failed to validate trusted certificate: " + syntheticTrustedCert,
+			want:      "[REDACTED:cert]",
+			forbidden: []string{syntheticCertBody, "BEGIN TRUSTED CERTIFICATE", "END TRUSTED CERTIFICATE"},
+		},
+		{
+			name:      "pem_x509_certificate",
+			secret:    syntheticCertBody,
+			input:     "failed to validate x509 certificate: " + syntheticX509Cert,
+			want:      "[REDACTED:cert]",
+			forbidden: []string{syntheticCertBody, "BEGIN X509 CERTIFICATE", "END X509 CERTIFICATE"},
+		},
 		{name: "long_base64_token", secret: syntheticBase64, input: "secret-service: invalid token " + syntheticBase64},
 		{name: "long_hex_run", secret: syntheticHex, input: "wincred returned digest " + syntheticHex},
 		{name: "jwt_three_segments", secret: syntheticJWT, input: "dbus returned token: " + syntheticJWT},
@@ -228,11 +255,20 @@ func TestRedactBackendErrorSecretPatterns(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			out := redactBackendError(tc.input)
-			if !strings.Contains(out, "[REDACTED") {
-				t.Fatalf("redactBackendError(%q): no [REDACTED marker present in %q", tc.name, out)
+			want := tc.want
+			if want == "" {
+				want = "[REDACTED"
+			}
+			if !strings.Contains(out, want) {
+				t.Fatalf("redactBackendError(%q): marker %q not present in %q", tc.name, want, out)
 			}
 			if strings.Contains(out, tc.secret) {
 				t.Fatalf("redactBackendError(%q): output %q still contains secret substring %q", tc.name, out, tc.secret)
+			}
+			for _, forbidden := range tc.forbidden {
+				if strings.Contains(out, forbidden) {
+					t.Fatalf("redactBackendError(%q): output %q still contains forbidden fragment %q", tc.name, out, forbidden)
+				}
 			}
 		})
 	}

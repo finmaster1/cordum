@@ -260,6 +260,7 @@ var backendErrorRedactPatterns = []backendRedactRule{
 	// PEM block — match BEGIN/END framing across newlines (which the
 	// caller pre-normalizes to spaces). Body is base64+whitespace.
 	{regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), "[REDACTED:pem]"},
+	{regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*CERTIFICATE-----.*?-----END [A-Z0-9 ]*CERTIFICATE-----`), "[REDACTED:cert]"},
 	// Authorization: Bearer <token> header.
 	{regexp.MustCompile(`(?i)authorization\s*:\s*bearer\s+[^\s,;}]+`), "[REDACTED:bearer]"},
 	// Standalone `Bearer <token>` without the Authorization prefix.
