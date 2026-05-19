@@ -297,25 +297,13 @@ func enableTestAuth(s *server) {
 func newTestGateway(t *testing.T) (*server, *stubBus, *stubSafetyClient) {
 	t.Helper()
 
-	// Constrain Redis pool size to prevent socket exhaustion under -count=3 on Windows.
-	// Use os.Setenv (not t.Setenv) because some callers use t.Parallel().
-	prev := os.Getenv("REDIS_POOL_SIZE")
-	if err := os.Setenv("REDIS_POOL_SIZE", "3"); err != nil {
-		t.Fatalf("setenv REDIS_POOL_SIZE: %v", err)
-	}
-	t.Cleanup(func() {
-		if prev == "" {
-			_ = os.Unsetenv("REDIS_POOL_SIZE") //nolint:errcheck // best-effort cleanup
-		} else {
-			_ = os.Setenv("REDIS_POOL_SIZE", prev) //nolint:errcheck // best-effort cleanup
-		}
-	})
-
 	// Allow loopback in tests (httptest.NewServer binds to 127.0.0.1).
 	prevSkip := skipPrivateIPCheck.Load()
 	skipPrivateIPCheck.Store(true)
 	t.Cleanup(func() { skipPrivateIPCheck.Store(prevSkip) })
 
+	// TestMain owns Redis pool sizing for this package. Avoid per-fixture
+	// environment mutation here because newTestGateway has t.Parallel callers.
 	srv, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("miniredis: %v", err)
@@ -418,6 +406,16 @@ func newTestGateway(t *testing.T) (*server, *stubBus, *stubSafetyClient) {
 	})
 
 	return s, bus, safetyClient
+}
+
+func TestNewTestGatewayRespectsProcessRedisPoolEnv(t *testing.T) {
+	t.Setenv("REDIS_POOL_SIZE", "1")
+
+	_, _, _ = newTestGateway(t)
+
+	if got := os.Getenv("REDIS_POOL_SIZE"); got != "1" {
+		t.Fatalf("REDIS_POOL_SIZE = %q, want process-level TestMain cap to remain 1", got)
+	}
 }
 
 func setTestEntitlements(t *testing.T, s *server, plan licensing.Plan, mutate func(*licensing.Entitlements)) {
