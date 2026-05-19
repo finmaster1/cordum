@@ -126,30 +126,69 @@ jobs:
             throw "Gpg4Win installer at $exe is only $sizeBytes bytes (< 20 MB); aborting"
           }
           Write-Host "Downloaded installer size: $sizeBytes bytes"
-          Write-Host "Running silent install: $exe /S"
+          $gpgExe = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe'
+          $controlFile = Join-Path $env:RUNNER_TEMP 'gpg4win.ini'
+          @'
+          [gpg4win]
+          inst_gpgol = false
+          inst_gpgex = false
+          inst_kleopatra = false
+          inst_gpa = false
+          inst_claws_mail = false
+          inst_compendium = false
+          inst_start_menu = false
+          inst_desktop = false
+          inst_quick_launch_bar = false
+          '@ | Set-Content -LiteralPath $controlFile -Encoding ASCII
+          $installArgs = @('/S', "/C=$controlFile")
+          Write-Host "Running silent GnuPG-only install: $exe $($installArgs -join ' ')"
           $installTimeoutSeconds = 240
           $installTimer = [System.Diagnostics.Stopwatch]::StartNew()
-          $proc = Start-Process -FilePath $exe -ArgumentList '/S' -PassThru
-          if (-not $proc.WaitForExit($installTimeoutSeconds * 1000)) {
-            $installTimer.Stop()
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            throw "Gpg4Win installer timed out after $installTimeoutSeconds seconds"
-          }
-          $installTimer.Stop()
-          if ($proc.ExitCode -ne 0) {
-            throw "Gpg4Win installer exited with code $($proc.ExitCode)"
-          }
-          Write-Host "Gpg4Win installer completed in $([math]::Round($installTimer.Elapsed.TotalSeconds, 1)) seconds"
-          $gpgExe = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe'
-          $deadline = (Get-Date).AddSeconds(60)
-          while (-not (Test-Path -LiteralPath $gpgExe) -and (Get-Date) -lt $deadline) {
+          $proc = Start-Process -FilePath $exe -ArgumentList $installArgs -PassThru
+          $deadline = (Get-Date).AddSeconds($installTimeoutSeconds)
+          $gpgReady = $false
+          $versionOutput = @()
+          while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
+            if (Test-Path -LiteralPath $gpgExe) {
+              $versionOutput = & $gpgExe --version 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                $gpgReady = $true
+                Write-Host "Gpg4Win gpg.exe became ready before installer process exited"
+                break
+              }
+            }
             Start-Sleep -Seconds 2
           }
-          if (-not (Test-Path -LiteralPath $gpgExe)) {
+          $installTimer.Stop()
+          if (-not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Get-Process |
+              Where-Object { $_.ProcessName -like 'gpg4win*' -or $_.ProcessName -like 'gnupg-w32*' } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+            if (-not $gpgReady) {
+              throw "Gpg4Win installer timed out after $installTimeoutSeconds seconds"
+            }
+            Write-Host "Stopped lingering installer process after gpg.exe became ready"
+          } elseif ($proc.ExitCode -ne 0) {
+            throw "Gpg4Win installer exited with code $($proc.ExitCode)"
+          }
+          Write-Host "Gpg4Win install readiness reached in $([math]::Round($installTimer.Elapsed.TotalSeconds, 1)) seconds"
+          $gpgDeadline = (Get-Date).AddSeconds(60)
+          while (-not $gpgReady -and (Get-Date) -lt $gpgDeadline) {
+            if (Test-Path -LiteralPath $gpgExe) {
+              $versionOutput = & $gpgExe --version 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                $gpgReady = $true
+                break
+              }
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $gpgReady) {
             throw "Expected Gpg4Win gpg.exe not found at $gpgExe after install"
           }
           $env:Path = "C:\Program Files (x86)\GnuPG\bin;$env:Path"
-          & $gpgExe --version
+          $versionOutput | ForEach-Object { Write-Host $_ }
       - name: install_test.ps1 — Gpg4Win/native gpg
         shell: pwsh
         run: |
