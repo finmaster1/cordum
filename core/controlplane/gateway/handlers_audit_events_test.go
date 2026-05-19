@@ -53,6 +53,55 @@ func decodeAuditEventsResponse(t *testing.T, rec *httptest.ResponseRecorder) aud
 	return out
 }
 
+func TestHandleAuditEvents_400ErrorEnvelopeIncludesCode(t *testing.T) {
+	cases := []struct {
+		name         string
+		query        string
+		expectedCode string
+	}{
+		{name: "invalid cursor", query: "cursor=invalid", expectedCode: "INVALID_CURSOR"},
+		{name: "invalid limit", query: "limit=abc", expectedCode: "INVALID_LIMIT"},
+		{name: "invalid from", query: "from=garbage", expectedCode: "INVALID_FROM"},
+		{name: "invalid to", query: "to=garbage", expectedCode: "INVALID_TO"},
+		{
+			name:         "inverted range",
+			query:        "from=2020-01-01T00:00:00Z&to=2019-01-01T00:00:00Z",
+			expectedCode: "INVALID_RANGE",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestGateway(t)
+			req := adminCtx(httptest.NewRequest(
+				http.MethodGet,
+				"/api/v1/audit/events?tenant=default&"+tc.query,
+				nil,
+			))
+			rec := httptest.NewRecorder()
+
+			s.handleListAuditEvents(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Error string `json:"error"`
+				Code  string `json:"code"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body.Code != tc.expectedCode {
+				t.Fatalf("code=%q, want %q; body=%+v", body.Code, tc.expectedCode, body)
+			}
+			if body.Error == "" {
+				t.Fatalf("error field is empty; body=%+v", body)
+			}
+		})
+	}
+}
+
 // TestHandleAuditEvents_RequiresAuditReadPerm pins the legacy-role wall:
 // when RBAC is not entitled, a viewer must be rejected by the legacyRoles
 // gate even though the basic-role mapping grants audit.read. Matches the

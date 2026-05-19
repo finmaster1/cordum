@@ -10762,6 +10762,9 @@ components:
         error:
           type: string
           description: Human-readable error message
+        code:
+          type: string
+          description: Optional machine-readable error code
         status:
           type: integer
           description: HTTP status code

@@ -22,21 +22,28 @@ import (
 // rather than a soft suggestion.
 const MaxAuditEventsLimit = 200
 
-// auditEventsErrInvalidCursorCode is the stable machine-readable code
-// the dashboard / SIEM clients pin against when a malformed ?cursor=
-// value comes back as a 400. Lifted to a package constant so renames
-// surface as a compile break, not a wire-shape regression.
-const auditEventsErrInvalidCursorCode = "INVALID_CURSOR"
+// AuditErrCodeInvalid* values are stable machine-readable 400 codes that
+// dashboard / SIEM clients can pin against without message-string matching.
+const (
+	AuditErrCodeInvalidCursor = "INVALID_CURSOR"
+	AuditErrCodeInvalidLimit  = "INVALID_LIMIT"
+	AuditErrCodeInvalidFrom   = "INVALID_FROM"
+	AuditErrCodeInvalidTo     = "INVALID_TO"
+	AuditErrCodeInvalidRange  = "INVALID_RANGE"
+	AuditErrCodeInvalidQuery  = "INVALID_QUERY"
+)
 
-// errInvalidAuditCursor is the sentinel parseAuditEventsQuery returns
-// when the cursor fails Redis stream-id shape validation. The handler
-// matches this with errors.Is to write the structured 400 envelope
-// (code=INVALID_CURSOR) instead of the generic writeErrorJSON shape.
-// The error message intentionally does NOT echo the caller-supplied
-// cursor value — a malformed string here is reflected user input and
-// has no place in our response body or audit logs.
-var errInvalidAuditCursor = errors.New(
-	"invalid cursor: must be redis stream id '<unsigned-ms>-<unsigned-seq>'",
+// These sentinel parse errors let the handler choose stable code fields while
+// preserving sanitized human-readable messages. The messages intentionally do
+// not echo caller-supplied query values.
+var (
+	errInvalidAuditCursor = errors.New(
+		"invalid cursor: must be redis stream id '<unsigned-ms>-<unsigned-seq>'",
+	)
+	errInvalidAuditLimit = errors.New("invalid limit: must be a positive integer")
+	errInvalidAuditFrom  = errors.New("invalid from: must be RFC3339 timestamp")
+	errInvalidAuditTo    = errors.New("invalid to: must be RFC3339 timestamp")
+	errInvalidAuditRange = errors.New("invalid range: to must not precede from")
 )
 
 // defaultAuditEventsLimit is the page size when the caller omits ?limit.
@@ -131,15 +138,8 @@ func (s *server) handleListAuditEvents(w http.ResponseWriter, r *http.Request) {
 
 	limit, cursor, filters, parseErr := parseAuditEventsQuery(r)
 	if parseErr != nil {
-		if errors.Is(parseErr, errInvalidAuditCursor) {
-			// Structured envelope with stable INVALID_CURSOR code so the
-			// dashboard error-mapper distinguishes "your cursor is bad"
-			// from generic 400s (bad limit, malformed from/to, etc.).
-			writeJSONError(w, http.StatusBadRequest,
-				auditEventsErrInvalidCursorCode, parseErr.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusBadRequest, parseErr.Error())
+		writeJSONError(w, http.StatusBadRequest,
+			auditEventsParseErrorCode(parseErr), parseErr.Error())
 		return
 	}
 
@@ -184,6 +184,23 @@ func (s *server) handleListAuditEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func auditEventsParseErrorCode(err error) string {
+	switch {
+	case errors.Is(err, errInvalidAuditCursor):
+		return AuditErrCodeInvalidCursor
+	case errors.Is(err, errInvalidAuditLimit):
+		return AuditErrCodeInvalidLimit
+	case errors.Is(err, errInvalidAuditFrom):
+		return AuditErrCodeInvalidFrom
+	case errors.Is(err, errInvalidAuditTo):
+		return AuditErrCodeInvalidTo
+	case errors.Is(err, errInvalidAuditRange):
+		return AuditErrCodeInvalidRange
+	default:
+		return AuditErrCodeInvalidQuery
+	}
+}
+
 // parseAuditEventsQuery parses the query string into a (limit, cursor,
 // filters) tuple. Invalid values produce a 400 error rather than silent
 // defaults — a malformed ?from= probably means a client bug worth
@@ -195,7 +212,7 @@ func parseAuditEventsQuery(r *http.Request) (int, string, auditEventsFilters, er
 	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
-			return 0, "", auditEventsFilters{}, errors.New("invalid limit: must be a positive integer")
+			return 0, "", auditEventsFilters{}, errInvalidAuditLimit
 		}
 		limit = parsed
 	}
@@ -241,7 +258,7 @@ func parseAuditEventsQuery(r *http.Request) (int, string, auditEventsFilters, er
 	if raw := strings.TrimSpace(q.Get("from")); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return 0, "", auditEventsFilters{}, errors.New("invalid from: must be RFC3339 timestamp")
+			return 0, "", auditEventsFilters{}, errInvalidAuditFrom
 		}
 		filters.from = t
 		filters.hasFrom = true
@@ -249,13 +266,13 @@ func parseAuditEventsQuery(r *http.Request) (int, string, auditEventsFilters, er
 	if raw := strings.TrimSpace(q.Get("to")); raw != "" {
 		t, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return 0, "", auditEventsFilters{}, errors.New("invalid to: must be RFC3339 timestamp")
+			return 0, "", auditEventsFilters{}, errInvalidAuditTo
 		}
 		filters.to = t
 		filters.hasTo = true
 	}
 	if filters.hasFrom && filters.hasTo && filters.to.Before(filters.from) {
-		return 0, "", auditEventsFilters{}, errors.New("invalid range: to must not precede from")
+		return 0, "", auditEventsFilters{}, errInvalidAuditRange
 	}
 	return limit, cursor, filters, nil
 }
