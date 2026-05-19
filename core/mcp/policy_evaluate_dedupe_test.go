@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -183,6 +185,113 @@ func TestWaitForRedisDedupe_DeadlinesWithinTTL(t *testing.T) {
 	}
 	if elapsed > remainingTTL+150*time.Millisecond {
 		t.Fatalf("waitForRedisDedupe elapsed = %v; want bounded by remaining TTL %v", elapsed, remainingTTL)
+	}
+}
+
+func TestWaitForRedisDedupe_CompletedRecordReturnsResult(t *testing.T) {
+	t.Parallel()
+	client, _ := newMiniRedisDedupeBackend(t)
+	store := NewRedisDedupeStore(client)
+	const key = "k.wait-completed"
+	hash := strings.Repeat("e", 64)
+	store.Store(key, &redisDedupeRecord{
+		State: redisDedupeStateCompleted,
+		Result: &redisDedupeResultMetadata{
+			ContentCount:         2,
+			HasStructuredContent: true,
+			ResultSHA256:         hash,
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	winner, outcome := waitForRedisDedupe(ctx, store, key)
+
+	if winner != nil {
+		t.Fatalf("waitForRedisDedupe winner = %#v; want nil for completed Redis record", winner)
+	}
+	if outcome == nil || outcome.err != nil || outcome.result == nil {
+		t.Fatalf("waitForRedisDedupe outcome = %#v; want successful cached result", outcome)
+	}
+	if got := len(outcome.result.Content); got != 1 {
+		t.Fatalf("cached result content length = %d; want metadata summary item", got)
+	}
+	text := outcome.result.Content[0].Text
+	for _, want := range []string{hash, "content_count=2", "has_structured_content=true"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("cached result text %q missing %q", text, want)
+		}
+	}
+}
+
+func TestWaitForRedisDedupe_DeletedKeyPromotesToWinner(t *testing.T) {
+	t.Parallel()
+	client, mr := newMiniRedisDedupeBackend(t)
+	store := NewRedisDedupeStore(client)
+	const key = "k.wait-deleted"
+	if _, loaded := store.LoadOrStore(key, &redisDedupeRecord{State: redisDedupeStatePending}); loaded {
+		t.Fatal("seed LoadOrStore loaded=true; want fresh pending")
+	}
+	store.Delete(key)
+	if mr.Exists(MCPDedupeKeyPrefix + key) {
+		t.Fatal("seed key still exists after Delete; test cannot exercise deleted-key promotion")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	winner, outcome := waitForRedisDedupe(ctx, store, key)
+
+	if outcome != nil {
+		t.Fatalf("waitForRedisDedupe outcome = %#v; want deleted-key winner promotion", outcome)
+	}
+	if winner == nil || !winner.redisBacked {
+		t.Fatalf("waitForRedisDedupe winner = %#v; want Redis-backed promotion", winner)
+	}
+}
+
+func TestWaitForRedisDedupe_TTLExpiryPromotesToWinner(t *testing.T) {
+	t.Parallel()
+	client, mr := newMiniRedisDedupeBackend(t)
+	store := NewRedisDedupeStore(client)
+	const key = "k.wait-ttl-expired"
+	if _, loaded := store.LoadOrStore(key, &redisDedupeRecord{State: redisDedupeStatePending}); loaded {
+		t.Fatal("seed LoadOrStore loaded=true; want fresh pending")
+	}
+	mr.FastForward(MCPDedupeTTL + time.Second)
+	if mr.Exists(MCPDedupeKeyPrefix + key) {
+		t.Fatal("seed key still exists after FastForward; test cannot exercise TTL expiry promotion")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	winner, outcome := waitForRedisDedupe(ctx, store, key)
+
+	if outcome != nil {
+		t.Fatalf("waitForRedisDedupe outcome = %#v; want TTL-expiry winner promotion", outcome)
+	}
+	if winner == nil || !winner.redisBacked {
+		t.Fatalf("waitForRedisDedupe winner = %#v; want Redis-backed promotion", winner)
+	}
+}
+
+func TestWaitForRedisDedupe_CtxCancelReturnsPromptly(t *testing.T) {
+	t.Parallel()
+	client, _ := newMiniRedisDedupeBackend(t)
+	store := NewRedisDedupeStore(client)
+	const key = "k.wait-cancel"
+	if _, loaded := store.LoadOrStore(key, &redisDedupeRecord{State: redisDedupeStatePending}); loaded {
+		t.Fatal("seed LoadOrStore loaded=true; want fresh pending")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	winner, outcome := waitForRedisDedupe(ctx, store, key)
+
+	if winner != nil {
+		t.Fatalf("waitForRedisDedupe winner = %#v; want nil on canceled context", winner)
+	}
+	if outcome == nil || !errors.Is(outcome.err, context.Canceled) {
+		t.Fatalf("waitForRedisDedupe outcome err = %v; want context.Canceled", outcome)
 	}
 }
 

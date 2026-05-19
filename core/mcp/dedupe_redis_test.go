@@ -249,3 +249,46 @@ func TestRedisDedupeStore_FailSoftOnClosedClient(t *testing.T) {
 		t.Fatal("fail-soft Redis operations blocked >3s on closed client; gate would be blocked in prod")
 	}
 }
+
+func TestRedisDedupeStore_FailSoftFallbackSharedAcrossCalls(t *testing.T) {
+	t.Parallel()
+	client, mr := newMiniRedisDedupeBackend(t)
+	store := NewRedisDedupeStore(client)
+	// Close both endpoints so every Redis command takes the fail-soft path.
+	_ = client.Close()
+	mr.Close()
+
+	pending := &redisDedupeRecord{State: redisDedupeStatePending}
+	actual, loaded := store.LoadOrStore("k.failsoft-shared", pending)
+	if loaded {
+		t.Fatalf("first fail-soft LoadOrStore loaded=true; want false from empty fallback")
+	}
+	if actual != pending {
+		t.Fatalf("first fail-soft LoadOrStore actual=%#v; want supplied pending record %#v", actual, pending)
+	}
+
+	loser := &redisDedupeRecord{State: redisDedupeStatePending}
+	actual, loaded = store.LoadOrStore("k.failsoft-shared", loser)
+	if !loaded {
+		t.Fatalf("second fail-soft LoadOrStore loaded=false; want shared fallback to collapse duplicate call")
+	}
+	if actual != pending {
+		t.Fatalf("second fail-soft LoadOrStore actual=%#v; want original fallback record %#v", actual, pending)
+	}
+
+	completed := &redisDedupeRecord{
+		State: redisDedupeStateCompleted,
+		Result: &redisDedupeResultMetadata{
+			ContentCount: 1,
+			ResultSHA256: strings.Repeat("d", sha256.Size*2),
+		},
+	}
+	store.Store("k.failsoft-shared", completed)
+	actual, loaded = store.LoadOrStore("k.failsoft-shared", loser)
+	if !loaded {
+		t.Fatalf("post-Store fail-soft LoadOrStore loaded=false; want completed fallback record")
+	}
+	if actual != completed {
+		t.Fatalf("post-Store fail-soft LoadOrStore actual=%#v; want completed record %#v", actual, completed)
+	}
+}
