@@ -62,12 +62,12 @@ func TestWireActionGatePipeline_NilReceiverNoOp(t *testing.T) {
 func TestEncodeActionDescriptorLabel_RoundTrip(t *testing.T) {
 	t.Parallel()
 	desc := &config.ActionDescriptor{
-		Kind:       config.ActionKindURL,
-		Verb:       config.ActionVerbRead,
-		TargetURL:  "https://example.com/docs",
-		Server:     "mcp-corp",
-		Tool:       "tools/read",
-		RiskTags:   []string{"data:pii"},
+		Kind:      config.ActionKindURL,
+		Verb:      config.ActionVerbRead,
+		TargetURL: "https://example.com/docs",
+		Server:    "mcp-corp",
+		Tool:      "tools/read",
+		RiskTags:  []string{"data:pii"},
 	}
 	encoded, err := encodeActionDescriptorLabel(desc)
 	if err != nil {
