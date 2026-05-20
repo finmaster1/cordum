@@ -110,9 +110,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
-          # 5.0.2 silent install stalls on GitHub's windows-2025 runner; pin
-          # the latest 4.x Gpg4Win release that still installs unattended.
+          # The full Gpg4Win NSIS installer stalls on GitHub's windows-2025
+          # runner. Keep using the pinned upstream Gpg4Win release, but install
+          # the bundled GnuPG payload directly so the native-gpg tier remains
+          # deterministic.
           $gpg4winVersion = '4.4.1'
+          $gpgPayloadName = 'gnupg-w32-2.4.8_20250514-bin.exe'
           $url = "https://files.gpg4win.org/gpg4win-$gpg4winVersion.exe"
           $exe = Join-Path $env:RUNNER_TEMP "gpg4win-$gpg4winVersion.exe"
           Write-Host "Downloading Gpg4Win $gpg4winVersion from $url"
@@ -128,68 +131,65 @@ jobs:
             throw "Gpg4Win installer at $exe is only $sizeBytes bytes (< 20 MB); aborting"
           }
           Write-Host "Downloaded installer size: $sizeBytes bytes"
-          $gpgExe = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe'
-          $controlFile = Join-Path $env:RUNNER_TEMP 'gpg4win.ini'
-          @'
-          [gpg4win]
-          inst_gpgol = false
-          inst_gpgex = false
-          inst_kleopatra = false
-          inst_gpa = false
-          inst_claws_mail = false
-          inst_compendium = false
-          inst_start_menu = false
-          inst_desktop = false
-          inst_quick_launch_bar = false
-          '@ | Set-Content -LiteralPath $controlFile -Encoding ASCII
-          $installArgs = @('/S', "/C=$controlFile")
-          Write-Host "Running silent GnuPG-only install: $exe $($installArgs -join ' ')"
-          $installTimeoutSeconds = 240
-          $installTimer = [System.Diagnostics.Stopwatch]::StartNew()
-          $proc = Start-Process -FilePath $exe -ArgumentList $installArgs -PassThru
-          $deadline = (Get-Date).AddSeconds($installTimeoutSeconds)
-          $gpgReady = $false
-          $versionOutput = @()
-          while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
-            if (Test-Path -LiteralPath $gpgExe) {
-              $versionOutput = & $gpgExe --version 2>&1
-              if ($LASTEXITCODE -eq 0) {
-                $gpgReady = $true
-                Write-Host "Gpg4Win gpg.exe became ready before installer process exited"
-                break
-              }
+
+          $sevenZip = @(
+            'C:\Program Files\7-Zip\7z.exe',
+            'C:\Program Files (x86)\7-Zip\7z.exe'
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $sevenZip) {
+            throw 'Expected 7-Zip on the Windows runner, but 7z.exe was not found'
+          }
+
+          $outerDir = Join-Path $env:RUNNER_TEMP 'gpg4win-payload'
+          $innerDir = Join-Path $env:RUNNER_TEMP 'gnupg-payload'
+          foreach ($dir in @($outerDir, $innerDir)) {
+            if (Test-Path -LiteralPath $dir) {
+              Remove-Item -LiteralPath $dir -Recurse -Force
             }
-            Start-Sleep -Seconds 2
+            New-Item -ItemType Directory -Path $dir | Out-Null
           }
-          $installTimer.Stop()
-          if (-not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Get-Process |
-              Where-Object { $_.ProcessName -like 'gpg4win*' -or $_.ProcessName -like 'gnupg-w32*' } |
-              Stop-Process -Force -ErrorAction SilentlyContinue
-            if (-not $gpgReady) {
-              throw "Gpg4Win installer timed out after $installTimeoutSeconds seconds"
+
+          $outerPayload = '$TEMP\' + $gpgPayloadName
+          Write-Host "Extracting bundled GnuPG payload from Gpg4Win: $outerPayload"
+          & $sevenZip x $exe "-o$outerDir" $outerPayload -y
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed to extract $outerPayload from Gpg4Win (exit $LASTEXITCODE)"
+          }
+
+          $payloadExe = Join-Path (Join-Path $outerDir '$TEMP') $gpgPayloadName
+          if (-not (Test-Path -LiteralPath $payloadExe)) {
+            throw "Expected bundled GnuPG payload not found at $payloadExe"
+          }
+
+          Write-Host "Extracting bundled GnuPG installer payload"
+          & $sevenZip x $payloadExe "-o$innerDir" -y
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed to extract bundled GnuPG payload (exit $LASTEXITCODE)"
+          }
+
+          $installDir = 'C:\Program Files (x86)\GnuPG'
+          New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+          foreach ($name in @('bin', 'share', 'lib', 'include')) {
+            $source = Join-Path $innerDir $name
+            if (Test-Path -LiteralPath $source) {
+              Copy-Item -LiteralPath $source -Destination $installDir -Recurse -Force
             }
-            Write-Host "Stopped lingering installer process after gpg.exe became ready"
-          } elseif ($proc.ExitCode -ne 0) {
-            throw "Gpg4Win installer exited with code $($proc.ExitCode)"
           }
-          Write-Host "Gpg4Win install readiness reached in $([math]::Round($installTimer.Elapsed.TotalSeconds, 1)) seconds"
-          $gpgDeadline = (Get-Date).AddSeconds(60)
-          while (-not $gpgReady -and (Get-Date) -lt $gpgDeadline) {
-            if (Test-Path -LiteralPath $gpgExe) {
-              $versionOutput = & $gpgExe --version 2>&1
-              if ($LASTEXITCODE -eq 0) {
-                $gpgReady = $true
-                break
-              }
-            }
-            Start-Sleep -Seconds 2
+
+          $gpgBinDir = Join-Path $installDir 'bin'
+          $gpgExe = Join-Path $gpgBinDir 'gpg.exe'
+          if (-not (Test-Path -LiteralPath $gpgExe)) {
+            throw "Expected Gpg4Win-bundled gpg.exe not found at $gpgExe"
           }
-          if (-not $gpgReady) {
-            throw "Expected Gpg4Win gpg.exe not found at $gpgExe after install"
+
+          $env:Path = "$gpgBinDir;$env:Path"
+          if ($env:GITHUB_PATH) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gpgBinDir
           }
-          $env:Path = "C:\Program Files (x86)\GnuPG\bin;$env:Path"
+          $versionOutput = & $gpgExe --version 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Gpg4Win-bundled gpg.exe --version failed with exit $LASTEXITCODE"
+          }
           $versionOutput | ForEach-Object { Write-Host $_ }
       - name: install_test.ps1 — Gpg4Win/native gpg
         shell: pwsh
