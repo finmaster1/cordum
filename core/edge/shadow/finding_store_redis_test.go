@@ -427,6 +427,7 @@ func TestListFindings_StaleCleanupSchedulingIsBounded(t *testing.T) {
 
 	started := make(chan []string, 32)
 	release := make(chan struct{})
+	var closeRelease sync.Once
 	var calls atomic.Int32
 	s.staleCleanupStartHook = func(_ context.Context, cleanupTenant string, ids []string) {
 		if cleanupTenant != tenant {
@@ -436,11 +437,12 @@ func TestListFindings_StaleCleanupSchedulingIsBounded(t *testing.T) {
 		started <- ids
 		<-release
 	}
-	defer func() {
-		if release != nil {
+	releaseCleanup := func() {
+		closeRelease.Do(func() {
 			close(release)
-		}
-	}()
+		})
+	}
+	defer releaseCleanup()
 
 	page, err := s.ListFindings(ctx, ListFindingsQuery{TenantID: tenant, Limit: staleCount})
 	if err != nil {
@@ -471,8 +473,7 @@ func TestListFindings_StaleCleanupSchedulingIsBounded(t *testing.T) {
 	}
 
 	waitForZSetCard(t, ctx, s.client, tenantIndexKey(tenant), staleCount)
-	close(release)
-	release = nil
+	releaseCleanup()
 	waitForZSetCard(t, ctx, s.client, tenantIndexKey(tenant), 0)
 }
 
