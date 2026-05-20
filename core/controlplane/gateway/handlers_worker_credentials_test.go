@@ -199,6 +199,7 @@ func TestCreateCredentialEmptyWorkerID(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+	requireStableErrorCode(t, rec, http.StatusBadRequest, "WORKER_CRED_BINDING_INVALID")
 }
 
 func TestCreateCredentialArrayTooLong(t *testing.T) {
@@ -245,6 +246,7 @@ func TestCreateCredentialPoolNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
+	requireStableErrorCode(t, rec, http.StatusNotFound, "POOL_NOT_FOUND")
 }
 
 func TestRevokeNonexistentCredential(t *testing.T) {
@@ -262,6 +264,7 @@ func TestRevokeNonexistentCredential(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
+	requireStableErrorCode(t, rec, http.StatusNotFound, "WORKER_CRED_NOT_FOUND")
 }
 
 func TestRotateCredentialClearsAgentLink(t *testing.T) {

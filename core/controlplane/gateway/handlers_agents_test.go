@@ -118,6 +118,7 @@ func TestCreateAgentValidation(t *testing.T) {
 			if rr.Code != tt.wantCode {
 				t.Fatalf("expected %d, got %d: %s", tt.wantCode, rr.Code, rr.Body.String())
 			}
+			requireStableErrorCode(t, rr, tt.wantCode, "AGENT_REQUEST_INVALID")
 		})
 	}
 }
@@ -242,6 +243,7 @@ func TestGetAgent(t *testing.T) {
 	if notFoundRR.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", notFoundRR.Code)
 	}
+	requireStableErrorCode(t, notFoundRR, http.StatusNotFound, "AGENT_NOT_FOUND")
 }
 
 func TestDeleteAgent(t *testing.T) {
@@ -314,6 +316,7 @@ func TestDeleteAgentNotFound(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
 	}
+	requireStableErrorCode(t, rr, http.StatusNotFound, "AGENT_NOT_FOUND")
 }
 
 func TestUpdateAgentNotFound(t *testing.T) {
@@ -333,6 +336,7 @@ func TestUpdateAgentNotFound(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
 	}
+	requireStableErrorCode(t, rr, http.StatusNotFound, "AGENT_NOT_FOUND")
 }
 
 func TestUpdateAgent(t *testing.T) {

@@ -101,6 +101,8 @@ paths:
   /api/v1/auth/oidc/group-role-mapping:
     put:
       operationId: updateOIDCGroupRoleMapping
+      x-cordum-error-codes:
+      - AUTH_OIDC_CALLBACK_FAILED
       summary: Update OIDC groups-to-roles mapping
       description: Admin-only endpoint for updating the active Okta/OIDC groups claim and Cordum role mapping. Values are validated, applied to the live provider, and persisted into system/default config.
       tags:
@@ -133,6 +135,9 @@ paths:
   /api/v1/auth/login:
     post:
       operationId: login
+      x-cordum-error-codes:
+      - AUTH_INVALID_CREDENTIALS
+      - AUTH_USER_DISABLED
       summary: Authenticate with username and password
       tags:
       - Auth
@@ -161,6 +166,8 @@ paths:
   /api/v1/auth/session:
     get:
       operationId: getSession
+      x-cordum-error-codes:
+      - AUTH_TOKEN_INVALID
       summary: Get current session
       description: Returns the authenticated user and token metadata.
       tags:
@@ -194,6 +201,11 @@ paths:
   /api/v1/auth/password:
     post:
       operationId: changeOwnPassword
+      x-cordum-error-codes:
+      - AUTH_REQUEST_INVALID
+      - AUTH_INVALID_CREDENTIALS
+      - AUTH_PASSWORD_INVALID
+      - AUTH_USER_NOT_FOUND
       summary: Change own password
       tags:
       - Auth
@@ -217,6 +229,9 @@ paths:
   /api/v1/users:
     post:
       operationId: createUser
+      x-cordum-error-codes:
+      - AUTH_REQUEST_INVALID
+      - AUTH_USER_CONFLICT
       summary: Create a user
       tags:
       - Users
@@ -247,6 +262,9 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     get:
       operationId: listUsers
+      x-cordum-error-codes:
+      - AUTH_TOKEN_INVALID
+      - AUTH_REQUEST_INVALID
       summary: List all users
       tags:
       - Users
@@ -278,6 +296,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     put:
       operationId: updateUser
+      x-cordum-error-codes:
+      - AUTH_REQUEST_INVALID
+      - AUTH_USER_NOT_FOUND
       summary: Update a user
       tags:
       - Users
@@ -306,6 +327,9 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteUser
+      x-cordum-error-codes:
+      - AUTH_REQUEST_INVALID
+      - AUTH_USER_NOT_FOUND
       summary: Delete a user
       tags:
       - Users
@@ -323,6 +347,10 @@ paths:
   /api/v1/users/{id}/password:
     post:
       operationId: resetUserPassword
+      x-cordum-error-codes:
+      - AUTH_REQUEST_INVALID
+      - AUTH_PASSWORD_INVALID
+      - AUTH_USER_NOT_FOUND
       summary: Reset a user's password (admin)
       tags:
       - Users
@@ -384,6 +412,8 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createAPIKey
+      x-cordum-error-codes:
+      - AUTH_KEY_INVALID
       summary: Create an API key
       description: 'The raw secret is returned **only once** in the response. Store it
 
@@ -418,6 +448,9 @@ paths:
   /api/v1/auth/keys/{id}:
     delete:
       operationId: deleteAPIKey
+      x-cordum-error-codes:
+      - AUTH_KEY_INVALID
+      - AUTH_KEY_NOT_FOUND
       summary: Revoke an API key
       tags:
       - APIKeys
@@ -4632,6 +4665,10 @@ paths:
   /api/v1/config:
     get:
       operationId: getConfig
+      x-cordum-error-codes:
+      - CONFIG_REQUEST_INVALID
+      - CONFIG_KEY_FORBIDDEN
+      - CONFIG_NOT_FOUND
       summary: Get configuration
       tags:
       - Config
@@ -4670,6 +4707,10 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     post:
       operationId: setConfig
+      x-cordum-error-codes:
+      - CONFIG_SCHEMA_VIOLATION
+      - CONFIG_KEY_FORBIDDEN
+      - CONFIG_VERSION_CONFLICT
       summary: Set configuration
       tags:
       - Config
@@ -4694,6 +4735,10 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     put:
       operationId: replaceConfig
+      x-cordum-error-codes:
+      - CONFIG_SCHEMA_VIOLATION
+      - CONFIG_KEY_FORBIDDEN
+      - CONFIG_VERSION_CONFLICT
       summary: Replace configuration
       tags:
       - Config
@@ -4759,6 +4804,8 @@ paths:
   /api/v1/schemas:
     post:
       operationId: createSchema
+      x-cordum-error-codes:
+      - CONFIG_SCHEMA_VIOLATION
       summary: Register a JSON schema
       tags:
       - Schemas
@@ -4814,6 +4861,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     get:
       operationId: getSchema
+      x-cordum-error-codes:
+      - CONFIG_SCHEMA_VIOLATION
+      - CONFIG_SCHEMA_NOT_FOUND
       summary: Get a schema by ID
       tags:
       - Schemas
@@ -4832,6 +4882,9 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteSchema
+      x-cordum-error-codes:
+      - CONFIG_SCHEMA_VIOLATION
+      - CONFIG_SCHEMA_NOT_FOUND
       summary: Delete a schema
       tags:
       - Schemas
@@ -5534,6 +5587,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     get:
       operationId: getRole
+      x-cordum-error-codes:
+      - RBAC_REQUEST_INVALID
+      - RBAC_ROLE_NOT_FOUND
       summary: Get a single RBAC role
       tags:
       - Auth
@@ -5556,6 +5612,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     put:
       operationId: putRole
+      x-cordum-error-codes:
+      - RBAC_REQUEST_INVALID
+      - RBAC_PERMISSION_INVALID
+      - RBAC_ROLE_IN_USE
       summary: Create or update an RBAC role
       tags:
       - Auth
@@ -5587,6 +5647,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
       operationId: deleteRole
+      x-cordum-error-codes:
+      - RBAC_REQUEST_INVALID
+      - RBAC_ROLE_NOT_FOUND
+      - RBAC_ROLE_IN_USE
       summary: Delete a custom RBAC role
       tags:
       - Auth
@@ -5620,6 +5684,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     get:
       operationId: getWorker
+      x-cordum-error-codes:
+      - WORKER_SESSION_INVALID
+      - WORKER_NOT_FOUND
       summary: Get a single worker runtime snapshot
       tags:
       - Workers
@@ -5645,6 +5712,9 @@ paths:
     - $ref: '#/components/parameters/LimitQ'
     get:
       operationId: getWorkerJobs
+      x-cordum-error-codes:
+      - WORKER_SESSION_INVALID
+      - WORKER_NOT_FOUND
       summary: List jobs associated with a worker
       tags:
       - Workers
@@ -5702,6 +5772,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     post:
       operationId: createWorkerCredential
+      x-cordum-error-codes:
+      - WORKER_CRED_BINDING_INVALID
+      - POOL_NOT_FOUND
+      - TOPIC_NOT_FOUND
       summary: Create or rotate a worker credential
       tags:
       - WorkerCredentials
@@ -5755,6 +5829,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     delete:
       operationId: deleteWorkerCredential
+      x-cordum-error-codes:
+      - WORKER_CRED_BINDING_INVALID
+      - WORKER_CRED_NOT_FOUND
       summary: Revoke a worker credential
       tags:
       - WorkerCredentials
@@ -5823,6 +5900,10 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       operationId: createPool
+      x-cordum-error-codes:
+      - POOL_INVALID_CONFIG
+      - POOL_NAME_CONFLICT
+      - POOL_VERSION_CONFLICT
       summary: Create a worker pool
       tags:
       - Pools
@@ -5856,6 +5937,10 @@ paths:
           $ref: '#/components/responses/Conflict'
     patch:
       operationId: updatePool
+      x-cordum-error-codes:
+      - POOL_INVALID_CONFIG
+      - POOL_NOT_FOUND
+      - POOL_VERSION_CONFLICT
       summary: Update a worker pool
       tags:
       - Pools
@@ -5893,6 +5978,10 @@ paths:
           $ref: '#/components/responses/Conflict'
     delete:
       operationId: deletePool
+      x-cordum-error-codes:
+      - POOL_INVALID_CONFIG
+      - POOL_NOT_FOUND
+      - POOL_VERSION_CONFLICT
       summary: Delete a worker pool
       tags:
       - Pools
@@ -5919,6 +6008,10 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     post:
       operationId: drainPool
+      x-cordum-error-codes:
+      - POOL_INVALID_CONFIG
+      - POOL_NOT_FOUND
+      - POOL_VERSION_CONFLICT
       summary: Mark a pool as draining
       tags:
       - Pools
@@ -5956,6 +6049,10 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     put:
       operationId: addTopicToPool
+      x-cordum-error-codes:
+      - POOL_INVALID_CONFIG
+      - POOL_NOT_FOUND
+      - POOL_VERSION_CONFLICT
       summary: Add a topic mapping to a pool
       tags:
       - Pools
@@ -5974,6 +6071,10 @@ paths:
           $ref: '#/components/responses/Conflict'
     delete:
       operationId: removeTopicFromPool
+      x-cordum-error-codes:
+      - POOL_INVALID_CONFIG
+      - TOPIC_NOT_FOUND
+      - POOL_VERSION_CONFLICT
       summary: Remove a topic mapping from a pool
       tags:
       - Pools
@@ -6022,6 +6123,9 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     post:
       operationId: createTopic
+      x-cordum-error-codes:
+      - TOPIC_SCHEMA_VIOLATION
+      - POOL_NOT_FOUND
       summary: Create or replace a topic registration
       tags:
       - Topics
@@ -6085,6 +6189,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     delete:
       operationId: deleteTopic
+      x-cordum-error-codes:
+      - TOPIC_SCHEMA_VIOLATION
+      - TOPIC_NOT_FOUND
       summary: Delete a topic registration
       tags:
       - Topics
@@ -7263,6 +7370,8 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     post:
       operationId: createAgent
+      x-cordum-error-codes:
+      - AGENT_REQUEST_INVALID
       summary: Create an agent identity
       tags:
       - Agents
@@ -7321,6 +7430,9 @@ paths:
     - $ref: '#/components/parameters/TenantID'
     get:
       operationId: getAgent
+      x-cordum-error-codes:
+      - AGENT_REQUEST_INVALID
+      - AGENT_NOT_FOUND
       summary: Get one agent identity
       tags:
       - Agents
@@ -7342,6 +7454,9 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     put:
       operationId: updateAgent
+      x-cordum-error-codes:
+      - AGENT_REQUEST_INVALID
+      - AGENT_NOT_FOUND
       summary: Update an agent identity
       tags:
       - Agents
@@ -7390,6 +7505,9 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
       operationId: deleteAgent
+      x-cordum-error-codes:
+      - AGENT_REQUEST_INVALID
+      - AGENT_NOT_FOUND
       summary: Delete an agent identity
       tags:
       - Agents
@@ -7407,6 +7525,9 @@ paths:
   /api/v1/agents/{id}/stats:
     get:
       operationId: getAgentStats
+      x-cordum-error-codes:
+      - AGENT_REQUEST_INVALID
+      - AGENT_NOT_FOUND
       summary: Get per-agent runtime statistics
       tags:
       - Agents

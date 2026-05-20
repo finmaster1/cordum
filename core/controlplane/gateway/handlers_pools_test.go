@@ -79,6 +79,7 @@ func TestHandleCreatePool(t *testing.T) {
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for duplicate, got %d: %s", w2.Code, w2.Body.String())
 	}
+	requireStableErrorCode(t, w2, http.StatusConflict, "POOL_NAME_CONFLICT")
 }
 
 func TestHandleUpdatePool(t *testing.T) {
@@ -106,6 +107,7 @@ func TestHandleUpdatePool(t *testing.T) {
 	if w2.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w2.Code, w2.Body.String())
 	}
+	requireStableErrorCode(t, w2, http.StatusNotFound, "POOL_NOT_FOUND")
 }
 
 func TestHandleDeletePool(t *testing.T) {
@@ -155,6 +157,7 @@ func TestHandleDrainPool(t *testing.T) {
 	if w2.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for already draining, got %d: %s", w2.Code, w2.Body.String())
 	}
+	requireStableErrorCode(t, w2, http.StatusBadRequest, "POOL_INVALID_CONFIG")
 }
 
 func TestHandleAddRemoveTopic(t *testing.T) {

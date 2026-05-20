@@ -139,7 +139,7 @@ func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if err := pools.ValidatePoolName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -155,7 +155,7 @@ func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 	}
 	if err := pools.ValidatePoolConfig(newPool); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -174,15 +174,15 @@ func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, configsvc.ErrRevisionConflict) {
-			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+			writeJSONError(w, http.StatusConflict, errorCodePoolVersionConflict, "config update conflict — retry")
 			return
 		}
 		if strings.Contains(err.Error(), "already exists") {
-			writeErrorJSON(w, http.StatusConflict, err.Error())
+			writeJSONError(w, http.StatusConflict, errorCodePoolNameConflict, err.Error())
 			return
 		}
 		slog.Error("create pool failed", "pool", name, "error", err)
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -214,7 +214,7 @@ func (s *server) handleUpdatePool(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if err := pools.ValidatePoolName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -253,15 +253,15 @@ func (s *server) handleUpdatePool(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, configsvc.ErrRevisionConflict) {
-			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+			writeJSONError(w, http.StatusConflict, errorCodePoolVersionConflict, "config update conflict — retry")
 			return
 		}
 		if errors.Is(err, ErrPoolNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, err.Error())
+			writeJSONError(w, http.StatusNotFound, errorCodePoolNotFound, err.Error())
 			return
 		}
 		slog.Error("update pool failed", "pool", name, "error", err)
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -285,7 +285,7 @@ func (s *server) handleDeletePool(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if err := pools.ValidatePoolName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -317,15 +317,15 @@ func (s *server) handleDeletePool(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, configsvc.ErrRevisionConflict) {
-			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+			writeJSONError(w, http.StatusConflict, errorCodePoolVersionConflict, "config update conflict — retry")
 			return
 		}
 		if errors.Is(err, ErrPoolNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, err.Error())
+			writeJSONError(w, http.StatusNotFound, errorCodePoolNotFound, err.Error())
 			return
 		}
 		if strings.Contains(err.Error(), "active topic mapping") {
-			writeErrorJSON(w, http.StatusBadRequest, err.Error())
+			writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 			return
 		}
 		slog.Error("delete pool failed", "pool", name, "error", err)
@@ -352,7 +352,7 @@ func (s *server) handleDrainPool(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if err := pools.ValidatePoolName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -390,15 +390,15 @@ func (s *server) handleDrainPool(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, configsvc.ErrRevisionConflict) {
-			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+			writeJSONError(w, http.StatusConflict, errorCodePoolVersionConflict, "config update conflict — retry")
 			return
 		}
 		if errors.Is(err, ErrPoolNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, err.Error())
+			writeJSONError(w, http.StatusNotFound, errorCodePoolNotFound, err.Error())
 			return
 		}
 		if strings.Contains(err.Error(), "cannot drain") {
-			writeErrorJSON(w, http.StatusBadRequest, err.Error())
+			writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 			return
 		}
 		slog.Error("drain pool failed", "pool", name, "error", err)
@@ -427,11 +427,11 @@ func (s *server) handleAddTopicToPool(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	topic := strings.TrimSpace(r.PathValue("topic"))
 	if err := pools.ValidatePoolName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 	if err := pools.ValidateTopicName(topic); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -453,11 +453,11 @@ func (s *server) handleAddTopicToPool(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, configsvc.ErrRevisionConflict) {
-			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+			writeJSONError(w, http.StatusConflict, errorCodePoolVersionConflict, "config update conflict — retry")
 			return
 		}
 		if errors.Is(err, ErrPoolNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, err.Error())
+			writeJSONError(w, http.StatusNotFound, errorCodePoolNotFound, err.Error())
 			return
 		}
 		slog.Error("add topic to pool failed", "pool", name, "topic", topic, "error", err)
@@ -482,7 +482,7 @@ func (s *server) handleRemoveTopicFromPool(w http.ResponseWriter, r *http.Reques
 	name := strings.TrimSpace(r.PathValue("name"))
 	topic := strings.TrimSpace(r.PathValue("topic"))
 	if err := pools.ValidatePoolName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodePoolInvalidConfig, err.Error())
 		return
 	}
 
@@ -509,11 +509,11 @@ func (s *server) handleRemoveTopicFromPool(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		if errors.Is(err, configsvc.ErrRevisionConflict) {
-			writeErrorJSON(w, http.StatusConflict, "config update conflict — retry")
+			writeJSONError(w, http.StatusConflict, errorCodePoolVersionConflict, "config update conflict — retry")
 			return
 		}
 		if errors.Is(err, ErrTopicNotFound) || errors.Is(err, ErrTopicPoolMappingNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, err.Error())
+			writeJSONError(w, http.StatusNotFound, errorCodeTopicNotFound, err.Error())
 			return
 		}
 		slog.Error("remove topic from pool failed", "pool", name, "topic", topic, "error", err)

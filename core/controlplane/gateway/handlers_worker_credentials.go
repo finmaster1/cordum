@@ -42,6 +42,16 @@ const (
 	maxCredentialArrayString = 128
 )
 
+func writeWorkerCredentialAccessError(w http.ResponseWriter, status int, err error) {
+	code := errorCodeWorkerCredBindingInvalid
+	if errors.Is(err, ErrPoolNotFound) {
+		code = errorCodePoolNotFound
+	} else if errors.Is(err, ErrTopicNotFound) {
+		code = errorCodeTopicNotFound
+	}
+	writeJSONError(w, status, code, err.Error())
+}
+
 func (s *server) handleListWorkerCredentials(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermissionOrRole(w, r, auth.PermWorkerCredentialsRead, "admin") {
 		return
@@ -83,15 +93,15 @@ func (s *server) handleCreateWorkerCredential(w http.ResponseWriter, r *http.Req
 	req.AllowedPools = trimStringSlice(req.AllowedPools)
 	req.AllowedTopics = trimStringSlice(req.AllowedTopics)
 	if err := validateWorkerID(req.WorkerID); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeWorkerCredBindingInvalid, err.Error())
 		return
 	}
 	if err := validateStringArray("allowed_pools", req.AllowedPools, maxCredentialArrayItems, maxCredentialArrayString); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeWorkerCredBindingInvalid, err.Error())
 		return
 	}
 	if err := validateStringArray("allowed_topics", req.AllowedTopics, maxCredentialArrayItems, maxCredentialArrayString); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeWorkerCredBindingInvalid, err.Error())
 		return
 	}
 	req.AgentID = strings.TrimSpace(req.AgentID)
@@ -102,7 +112,7 @@ func (s *server) handleCreateWorkerCredential(w http.ResponseWriter, r *http.Req
 			return
 		}
 		if agent == nil {
-			writeErrorJSON(w, http.StatusBadRequest, "agent_id references nonexistent agent identity")
+			writeJSONError(w, http.StatusBadRequest, errorCodeWorkerCredBindingInvalid, "agent_id references nonexistent agent identity")
 			return
 		}
 	}
@@ -111,7 +121,7 @@ func (s *server) handleCreateWorkerCredential(w http.ResponseWriter, r *http.Req
 		if errors.Is(err, ErrPoolNotFound) || errors.Is(err, ErrTopicNotFound) {
 			status = http.StatusNotFound
 		}
-		writeErrorJSON(w, status, err.Error())
+		writeWorkerCredentialAccessError(w, status, err)
 		return
 	}
 
@@ -148,7 +158,7 @@ func (s *server) handleCreateWorkerCredential(w http.ResponseWriter, r *http.Req
 		CreatedBy:     createdBy,
 	})
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeWorkerCredBindingInvalid, err.Error())
 		return
 	}
 
@@ -216,7 +226,7 @@ func (s *server) handleDeleteWorkerCredential(w http.ResponseWriter, r *http.Req
 
 	workerID := strings.TrimSpace(r.PathValue("worker_id"))
 	if err := validateWorkerID(workerID); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeWorkerCredBindingInvalid, err.Error())
 		return
 	}
 
@@ -226,13 +236,13 @@ func (s *server) handleDeleteWorkerCredential(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if existing == nil {
-		writeErrorJSON(w, http.StatusNotFound, "worker credential not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeWorkerCredNotFound, "worker credential not found")
 		return
 	}
 
 	if err := s.workerCredentialStore.Revoke(r.Context(), workerID); err != nil {
 		if errors.Is(err, workercredentials.ErrCredentialNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "worker credential not found")
+			writeJSONError(w, http.StatusNotFound, errorCodeWorkerCredNotFound, "worker credential not found")
 			return
 		}
 		writeInternalError(w, r, "revoke worker credential", err)

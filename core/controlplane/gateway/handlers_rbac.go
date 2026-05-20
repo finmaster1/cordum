@@ -49,14 +49,14 @@ func (s *server) handleGetRole(w http.ResponseWriter, r *http.Request) {
 
 	name := strings.ToLower(strings.TrimSpace(r.PathValue("name")))
 	if name == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "role name required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeRBACRequestInvalid, "role name required")
 		return
 	}
 
 	role, err := s.rbacStore.GetRole(r.Context(), name)
 	if err != nil {
 		if errors.Is(err, auth.ErrRoleNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "role not found")
+			writeJSONError(w, http.StatusNotFound, errorCodeRBACRoleNotFound, "role not found")
 			return
 		}
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to get role")
@@ -109,13 +109,13 @@ func (s *server) handlePutRole(w http.ResponseWriter, r *http.Request) {
 
 	name := strings.ToLower(strings.TrimSpace(r.PathValue("name")))
 	if name == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "role name required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeRBACRequestInvalid, "role name required")
 		return
 	}
 
 	var req roleRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "invalid request body")
+		writeJSONError(w, http.StatusBadRequest, errorCodeRBACRequestInvalid, "invalid request body")
 		return
 	}
 
@@ -124,7 +124,7 @@ func (s *server) handlePutRole(w http.ResponseWriter, r *http.Request) {
 	if existErr == nil && existing.BuiltIn {
 		// Built-in roles can have their description updated but not inheritance
 		if len(req.Inherits) > 0 && !slicesEqual(req.Inherits, existing.Inherits) {
-			writeErrorJSON(w, http.StatusBadRequest, "cannot change inheritance of built-in role")
+			writeJSONError(w, http.StatusBadRequest, errorCodeRBACRoleInUse, "cannot change inheritance of built-in role")
 			return
 		}
 	}
@@ -132,7 +132,7 @@ func (s *server) handlePutRole(w http.ResponseWriter, r *http.Request) {
 	// Validate inheritance — no cycles, no unknown parents
 	if len(req.Inherits) > 0 {
 		if err := s.rbacStore.ValidateInheritance(r.Context(), name, req.Inherits); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, err.Error())
+			writeJSONError(w, http.StatusBadRequest, errorCodeRBACPermissionInvalid, err.Error())
 			return
 		}
 	}
@@ -198,17 +198,17 @@ func (s *server) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 
 	name := strings.ToLower(strings.TrimSpace(r.PathValue("name")))
 	if name == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "role name required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeRBACRequestInvalid, "role name required")
 		return
 	}
 
 	if err := s.rbacStore.DeleteRole(r.Context(), name); err != nil {
 		if errors.Is(err, auth.ErrRoleNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "role not found")
+			writeJSONError(w, http.StatusNotFound, errorCodeRBACRoleNotFound, "role not found")
 			return
 		}
 		if errors.Is(err, auth.ErrBuiltInRole) {
-			writeErrorJSON(w, http.StatusBadRequest, "cannot delete built-in role")
+			writeJSONError(w, http.StatusBadRequest, errorCodeRBACRoleInUse, "cannot delete built-in role")
 			return
 		}
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to delete role")

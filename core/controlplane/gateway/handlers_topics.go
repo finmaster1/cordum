@@ -103,28 +103,28 @@ func (s *server) handleCreateTopic(w http.ResponseWriter, r *http.Request) {
 	req.Requires = trimStringSlice(req.Requires)
 	req.RiskTags = trimStringSlice(req.RiskTags)
 	if err := pools.ValidateTopicName(req.Name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 		return
 	}
 	if err := validateStringArray("requires", req.Requires, maxTopicArrayItems, maxTopicArrayString); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 		return
 	}
 	if err := validateStringArray("risk_tags", req.RiskTags, maxTopicArrayItems, maxTopicArrayString); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 		return
 	}
 	if req.Pool != "" {
 		if err := pools.ValidatePoolName(req.Pool); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, err.Error())
+			writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 			return
 		}
 		if err := s.ensurePoolExists(r.Context(), req.Pool); err != nil {
 			if errors.Is(err, ErrPoolNotFound) {
-				writeErrorJSON(w, http.StatusNotFound, err.Error())
+				writeJSONError(w, http.StatusNotFound, errorCodePoolNotFound, err.Error())
 				return
 			}
-			writeErrorJSON(w, http.StatusBadRequest, err.Error())
+			writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 			return
 		}
 	}
@@ -146,7 +146,7 @@ func (s *server) handleCreateTopic(w http.ResponseWriter, r *http.Request) {
 		Status:         req.Status,
 	}
 	if err := s.topicRegistry.Set(r.Context(), record); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 		return
 	}
 
@@ -179,7 +179,7 @@ func (s *server) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if err := pools.ValidateTopicName(name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeTopicSchemaViolation, err.Error())
 		return
 	}
 	existing, _, err := s.topicRegistry.Get(r.Context(), name)
@@ -188,7 +188,7 @@ func (s *server) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing == nil {
-		writeErrorJSON(w, http.StatusNotFound, "topic not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeTopicNotFound, "topic not found")
 		return
 	}
 	if err := s.topicRegistry.Delete(r.Context(), name); err != nil {

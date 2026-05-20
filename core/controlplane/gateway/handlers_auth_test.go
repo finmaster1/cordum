@@ -72,6 +72,10 @@ func TestHandleLogin_InvalidAPIKey(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
+	requireStableErrorCode(t, rec, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS")
+	if strings.Contains(rec.Body.String(), "user") || strings.Contains(rec.Body.String(), "email") {
+		t.Fatalf("auth failure body leaks identity hint: %s", rec.Body.String())
+	}
 }
 
 func TestHandleLogin_EmptyPassword(t *testing.T) {
@@ -90,6 +94,7 @@ func TestHandleLogin_EmptyPassword(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
+	requireStableErrorCode(t, rec, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS")
 }
 
 func TestHandleLogin_InvalidJSON(t *testing.T) {
@@ -486,6 +491,39 @@ func TestLoginHandler_DisabledUser403(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	requireStableErrorCode(t, rec, http.StatusForbidden, "AUTH_USER_DISABLED")
+	if strings.Contains(rec.Body.String(), "disabled-user") {
+		t.Fatalf("disabled-user response body leaked username: %s", rec.Body.String())
+	}
+}
+
+func TestHandleChangePasswordInvalidCurrentPasswordReturnsStableCode(t *testing.T) {
+	s, store := setupLoginIntegration(t)
+	ctx := context.Background()
+
+	user := &auth.User{Username: "change-user", Tenant: "default", Role: "user"}
+	if err := store.Create(ctx, user, "SecurePass1!xy"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/auth/change-password",
+		bytes.NewBufferString(`{"current_password":"wrong","new_password":"NewSecurePass1!xy"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(context.WithValue(req.Context(), auth.ContextKey{}, &auth.AuthContext{
+		Tenant:      "default",
+		PrincipalID: user.ID,
+		Role:        "user",
+	}))
+	rec := httptest.NewRecorder()
+	s.handleChangePassword(rec, req)
+
+	requireStableErrorCode(t, rec, http.StatusUnauthorized, "AUTH_INVALID_CREDENTIALS")
+	if strings.Contains(rec.Body.String(), "change-user") || strings.Contains(rec.Body.String(), user.ID) {
+		t.Fatalf("password-change failure body leaked user identity: %s", rec.Body.String())
 	}
 }
 

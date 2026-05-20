@@ -109,7 +109,7 @@ func (s *server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	created, err := s.agentIdentityStore.Create(r.Context(), identity)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, err.Error())
 		return
 	}
 
@@ -143,7 +143,7 @@ func (s *server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
 		parsed, err := strconv.Atoi(v)
 		if err != nil || parsed <= 0 {
-			writeErrorJSON(w, http.StatusBadRequest, "invalid limit")
+			writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, "invalid limit")
 			return
 		}
 		limit = parsed
@@ -255,7 +255,7 @@ func (s *server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "agent id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, "agent id required")
 		return
 	}
 
@@ -265,7 +265,7 @@ func (s *server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if identity == nil {
-		writeErrorJSON(w, http.StatusNotFound, "agent identity not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeAgentNotFound, "agent identity not found")
 		return
 	}
 
@@ -286,7 +286,7 @@ func (s *server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "agent id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, "agent id required")
 		return
 	}
 
@@ -312,10 +312,10 @@ func (s *server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	updated, err := s.agentIdentityStore.Update(r.Context(), id, updates)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorJSON(w, http.StatusNotFound, "agent identity not found")
+			writeJSONError(w, http.StatusNotFound, errorCodeAgentNotFound, "agent identity not found")
 			return
 		}
-		writeErrorJSON(w, http.StatusBadRequest, err.Error())
+		writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, err.Error())
 		return
 	}
 
@@ -344,7 +344,7 @@ func (s *server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "agent id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, "agent id required")
 		return
 	}
 
@@ -354,7 +354,7 @@ func (s *server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing == nil {
-		writeErrorJSON(w, http.StatusNotFound, "agent identity not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeAgentNotFound, "agent identity not found")
 		return
 	}
 
@@ -388,7 +388,7 @@ func (s *server) handleAgentStats(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "agent id required")
+		writeJSONError(w, http.StatusBadRequest, errorCodeAgentRequestInvalid, "agent id required")
 		return
 	}
 
@@ -398,7 +398,7 @@ func (s *server) handleAgentStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if identity == nil {
-		writeErrorJSON(w, http.StatusNotFound, "agent identity not found")
+		writeJSONError(w, http.StatusNotFound, errorCodeAgentNotFound, "agent identity not found")
 		return
 	}
 

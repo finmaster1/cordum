@@ -150,6 +150,7 @@ func TestCreateTopicInvalidName(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+	requireStableErrorCode(t, rec, http.StatusBadRequest, "TOPIC_SCHEMA_VIOLATION")
 }
 
 func TestCreateTopicPoolNotFound(t *testing.T) {
@@ -164,6 +165,7 @@ func TestCreateTopicPoolNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 	}
+	requireStableErrorCode(t, rec, http.StatusNotFound, "POOL_NOT_FOUND")
 }
 
 func TestCreateTopicArrayTooLong(t *testing.T) {
@@ -190,6 +192,18 @@ func TestCreateTopicArrayTooLong(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+	requireStableErrorCode(t, rec, http.StatusBadRequest, "TOPIC_SCHEMA_VIOLATION")
+}
+
+func TestDeleteTopicMissingReturnsStableCode(t *testing.T) {
+	s, _, _ := newTestGateway(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/topics/job.missing", nil)
+	req.SetPathValue("name", "job.missing")
+	rr := httptest.NewRecorder()
+	s.handleDeleteTopic(rr, req)
+
+	requireStableErrorCode(t, rr, http.StatusNotFound, "TOPIC_NOT_FOUND")
 }
 
 func TestCreateTopicServiceFailure(t *testing.T) {
