@@ -35,6 +35,7 @@ type runtimeIngestResponse struct {
 	AcceptedCount int                        `json:"accepted_count"`
 	DroppedCount  int                        `json:"dropped_count"`
 	Dropped       []runtimeingest.DropReport `json:"dropped,omitempty"`
+	Replayed      bool                       `json:"replayed,omitempty"`
 }
 
 // runtimeIngestEnabled returns true when the operator has explicitly
@@ -127,25 +128,122 @@ func (s *server) handleEdgeRuntimeIngest(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	proceed, reserved := s.checkRuntimeIngestReplay(w, r, tenantID, collectorID, batch.Nonce)
+	if !proceed {
+		return
+	}
 	if len(result.Events) > 0 {
 		if _, err := store.AppendEvents(r.Context(), result.Events); err != nil {
+			if reserved {
+				s.releaseRuntimeIngestReplayReservation(r.Context(), tenantID, collectorID, batch.Nonce)
+			}
 			writeEdgeEventStoreError(w, r, err, "append runtime events")
 			return
 		}
+	}
+	if reserved {
+		s.recordRuntimeReplayFirstSeen(tenantID, collectorID)
 	}
 	resp := runtimeIngestResponse{
 		AcceptedCount: len(result.Events),
 		DroppedCount:  len(result.Dropped),
 		Dropped:       result.Dropped,
 	}
+	writeRuntimeIngestResponse(w, http.StatusCreated, resp)
+}
+
+func (s *server) checkRuntimeIngestReplay(
+	w http.ResponseWriter,
+	r *http.Request,
+	tenantID string,
+	collectorID string,
+	nonce string,
+) (bool, bool) {
+	if strings.TrimSpace(nonce) == "" {
+		return true, false
+	}
+	window := s.runtimeIngestReplayWindow()
+	if window == nil {
+		writeEdgeInternalError(w, r, "runtime replay-window unavailable", errRuntimeReplayWindowUnavailable)
+		return false, false
+	}
+	accepted, err := window.Reserve(r.Context(), tenantID, collectorID, nonce)
+	if err != nil {
+		if errors.Is(err, runtimeingest.ErrReplayWindowFull) {
+			s.recordRuntimeReplayWindowFull(tenantID, collectorID)
+			writeEdgeError(w, r, http.StatusTooManyRequests, edgeErrCodeReplayWindowFull,
+				"replay window cardinality exceeded", nil)
+			return false, false
+		}
+		writeEdgeInternalError(w, r, "runtime replay-window check", err)
+		return false, false
+	}
+	if !accepted {
+		s.recordRuntimeReplayReplayed(tenantID, collectorID)
+		writeRuntimeIngestResponse(w, http.StatusOK, runtimeIngestResponse{Replayed: true})
+		return false, false
+	}
+	return true, true
+}
+
+func (s *server) runtimeIngestReplayWindow() *runtimeingest.ReplayWindow {
+	if s == nil {
+		return nil
+	}
+	if s.runtimeReplayWindow != nil {
+		return s.runtimeReplayWindow
+	}
+	if s.jobStore == nil || s.jobStore.Client() == nil {
+		return nil
+	}
+	return runtimeingest.NewReplayWindow(
+		s.jobStore.Client(),
+		runtimeingest.ReplayWindowTTL,
+		runtimeingest.MaxReplayWindowCardinality,
+	)
+}
+
+func (s *server) releaseRuntimeIngestReplayReservation(ctx context.Context, tenantID, collectorID, nonce string) {
+	window := s.runtimeIngestReplayWindow()
+	if window == nil {
+		return
+	}
+	if err := window.Release(ctx, tenantID, collectorID, nonce); err != nil {
+		slog.Warn("release runtime replay reservation failed",
+			"tenant_id", tenantID,
+			"collector_id", collectorID,
+			"error", err)
+	}
+}
+
+func (s *server) recordRuntimeReplayFirstSeen(tenantID, collectorID string) {
+	if s != nil && s.edgeRecorder != nil {
+		s.edgeRecorder.RecordRuntimeReplayFirstSeen(tenantID, collectorID)
+	}
+}
+
+func (s *server) recordRuntimeReplayReplayed(tenantID, collectorID string) {
+	if s != nil && s.edgeRecorder != nil {
+		s.edgeRecorder.RecordRuntimeReplayReplayed(tenantID, collectorID)
+	}
+}
+
+func (s *server) recordRuntimeReplayWindowFull(tenantID, collectorID string) {
+	if s != nil && s.edgeRecorder != nil {
+		s.edgeRecorder.RecordRuntimeReplayWindowFull(tenantID, collectorID)
+	}
+}
+
+func writeRuntimeIngestResponse(w http.ResponseWriter, status int, resp runtimeIngestResponse) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Warn("json encode runtime ingest response failed", "error", err)
 	}
 }
 
 var errRuntimeIngestCollectorParentDenied = errors.New("runtime collector is not authorized for session or execution")
+var errRuntimeReplayWindowUnavailable = errors.New("runtime replay window unavailable")
 
 func (s *server) requireRuntimeIngestCollector(w http.ResponseWriter, r *http.Request) (string, bool) {
 	authCtx := auth.FromRequest(r)

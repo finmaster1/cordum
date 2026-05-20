@@ -10,7 +10,17 @@ import type { EdgeRuntimeEventEnvelope } from "./edgeRuntimeEventEnvelope";
 
 export interface EdgeRuntimeIngestRequest {
   source: EdgeRuntimeIngestSource;
-  /** @maxLength 256 */
+  /**
+   * Required by default replay-protection nonce (UUIDv7 or random 128-bit value). Set `CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED=false` only for transitional non-production clients that cannot yet send this field.
+   * @minLength 16
+   * @maxLength 64
+   * @pattern ^[A-Za-z0-9-]{16,64}$
+   */
+  nonce: string;
+  /**
+   * Operator correlation identifier only; it is not used for replay protection.
+   * @maxLength 256
+   */
   batch_id?: string;
   /**
    * @minItems 1

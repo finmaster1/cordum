@@ -111,6 +111,14 @@ type Recorder interface {
 	// to {"reserve", "complete", "append", "other", "unknown"}.
 	RecordIdempotencyWindowExpired(phase string)
 
+	// Runtime ingest replay-window metrics. Implementations MUST NOT expose
+	// raw nonce values or raw collector identifiers as labels; tenant and
+	// collector are accepted only so implementations can emit bounded presence
+	// labels or correlated safe logs.
+	RecordRuntimeReplayFirstSeen(tenant, collector string)
+	RecordRuntimeReplayReplayed(tenant, collector string)
+	RecordRuntimeReplayWindowFull(tenant, collector string)
+
 	// Degraded / fail-closed outcomes.
 	RecordDegraded(tenant, mode, component, reasonCode string)
 	RecordFailClosed(tenant, mode, reasonCode string)
@@ -195,6 +203,9 @@ func (NoopRecorder) RecordApprovalEnqueueAborted(string)                        
 func (NoopRecorder) RecordAppendEventsAborted(string)                            {}
 func (NoopRecorder) RecordIdempotencyTTLExtended(string)                         {}
 func (NoopRecorder) RecordIdempotencyWindowExpired(string)                       {}
+func (NoopRecorder) RecordRuntimeReplayFirstSeen(string, string)                 {}
+func (NoopRecorder) RecordRuntimeReplayReplayed(string, string)                  {}
+func (NoopRecorder) RecordRuntimeReplayWindowFull(string, string)                {}
 func (NoopRecorder) RecordDegraded(string, string, string, string)               {}
 func (NoopRecorder) RecordFailClosed(string, string, string)                     {}
 func (NoopRecorder) RecordAgentdResponseWriteAborted(string)                     {}

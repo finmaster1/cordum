@@ -720,6 +720,9 @@ func (r *captureRecorder) RecordApprovalEnqueueAborted(string)                 {
 func (r *captureRecorder) RecordAppendEventsAborted(string)                    {}
 func (r *captureRecorder) RecordIdempotencyTTLExtended(string)                 {}
 func (r *captureRecorder) RecordIdempotencyWindowExpired(string)               {}
+func (r *captureRecorder) RecordRuntimeReplayFirstSeen(string, string)         {}
+func (r *captureRecorder) RecordRuntimeReplayReplayed(string, string)          {}
+func (r *captureRecorder) RecordRuntimeReplayWindowFull(string, string)        {}
 func (r *captureRecorder) RecordAgentdResponseWriteAborted(string)             {}
 func (r *captureRecorder) RecordEdgeExportRequestRejected(string)              {}
 func (r *captureRecorder) RecordRedactionFailed(string, string)                {}

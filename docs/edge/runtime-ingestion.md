@@ -67,6 +67,7 @@ kinds require a code change here plus the matching `EventKind` constant.
   "source": {
     "source_id": "tetragon-cluster-a"
   },
+  "nonce":         "018f9f65-1e73-7a33-9ed1-6cb3a5aa0001",
   "batch_id":      "uuid-v4",
   "events": [
     {
@@ -97,8 +98,13 @@ kinds require a code change here plus the matching `EventKind` constant.
 
 Field rules:
 
-- Top-level `source.source_id` and `events` are **required**. Missing or
-  empty source identity → 400 `invalid_request`.
+- Top-level `source.source_id`, `nonce`, and `events` are **required** by
+  default. Missing or empty source identity / nonce → 400 `invalid_request`.
+  `nonce` accepts `^[A-Za-z0-9-]{16,64}$` (UUIDv7 or random 128-bit values).
+  `CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED=false` is a transitional non-production
+  opt-out for clients that cannot yet send nonces.
+- `batch_id` is operator correlation only. Replay protection uses `nonce`, not
+  `batch_id`.
 - Per-event `tenant_id`, `session_id`, `execution_id`, `source_event_id`,
   `observed_at`, and `kind` are **required**. Missing any → 400
   `invalid_request`.
@@ -128,6 +134,8 @@ Constants on the adapter (`core/edge/runtimeingest`):
 | `MaxRuntimeRedactedStringBytes`        | 256        | Hard cap on per-field redacted string length.                       |
 | `DefaultRuntimeSampleRateNumerator`    | 1          | 100% accepted when sampling disabled.                               |
 | `DefaultRuntimeSampleRateDenominator`  | 1          |                                                                     |
+| `ReplayWindowTTL`                      | 1 hour     | Redis nonce-window lifetime per tenant/collector.                   |
+| `MaxReplayWindowCardinality`           | 10000      | Per tenant/collector nonce cap before 429 `REPLAY_WINDOW_FULL`.     |
 
 Sampling: when a source-config seam enables sampling (out of scope for
 this skeleton; designed-only), the adapter uses
@@ -175,6 +183,12 @@ collector-only permission because runtime telemetry is trusted sidecar input:
    the session's `PrincipalID` and execution's `WorkerID` are bound to the
    authenticated collector. Cross-tenant, cross-session, or unbound events are
    rejected before any append.
+6. Replay validation — the gateway reserves `sha256(nonce)` in Redis key
+   `edge:rt:nonce:<tenant_id>:<collector_id>` after auth/source/parent checks
+   and before append. First-seen nonces append normally. Duplicate nonces
+   return `200 OK` with `replayed: true` and append nothing. If append fails
+   after a reservation, the gateway releases the nonce so the collector can
+   retry safely.
 
 No new auth provider, no new tenant header, no new API key path.
 
@@ -201,6 +215,7 @@ no Redis writes, no SIEM forwarding, no side effects.
 {
   "accepted_count": 12,
   "dropped_count":  3,
+  "replayed":       false,
   "dropped":        [
     { "source_event_id": "abc...", "reason": "sampled_out" }
   ],
@@ -222,6 +237,8 @@ Error mapping (all via the existing edge envelope):
 | ----------------------------------------- | ---- | ----------------------- |
 | Endpoint disabled                          | 503  | `service_unavailable`   |
 | Missing / empty / oversize source_id       | 400  | `invalid_request`       |
+| Missing / malformed nonce                   | 400  | `invalid_request`       |
+| Duplicate nonce inside replay window        | 200  | success body `replayed: true` |
 | Tenant header missing                      | 400  | `tenant_required`       |
 | Tenant header / body mismatch              | 403  | `tenant_mismatch`       |
 | RBAC / license denial                       | 403  | `access_denied`         |
@@ -236,6 +253,7 @@ Error mapping (all via the existing edge envelope):
 | Execution-session mismatch                  | 400  | `execution_session_mismatch` |
 | Cross-tenant artifact pointer               | 400  | `artifact_pointer_invalid` |
 | Per-execution event cap exceeded            | 429  | `event_cap_exceeded`    |
+| Replay window cardinality exceeded          | 429  | `REPLAY_WINDOW_FULL`    |
 | Store unavailable                           | 503  | `store_unavailable`     |
 | Anything else                               | 500  | `internal_error`        |
 

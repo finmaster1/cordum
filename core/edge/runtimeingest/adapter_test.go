@@ -16,6 +16,7 @@ const (
 	testSessionID   = "edge-session-rt-1"
 	testExecutionID = "edge-exec-rt-1"
 	testSourceID    = "tetragon-test"
+	testNonce       = "018f9f65-1e73-7a33-9ed1-6cb3a5aa0001"
 )
 
 func testObservedAt() time.Time {
@@ -58,6 +59,7 @@ func testEnvelope(kind string, mutators ...func(*RuntimeEventEnvelope)) RuntimeE
 func testBatch(events ...RuntimeEventEnvelope) RuntimeBatch {
 	return RuntimeBatch{
 		Source:  SourceIdentity{ID: testSourceID},
+		Nonce:   testNonce,
 		BatchID: "batch-1",
 		Events:  events,
 	}
@@ -542,7 +544,7 @@ func TestDecodeBatchRejectsForbiddenTopLevelKey(t *testing.T) {
 }
 
 func TestDecodeBatch_RejectsTrailingTokens(t *testing.T) {
-	validBatch := `{"source":{"source_id":"x"},"events":[]}`
+	validBatch := `{"source":{"source_id":"x"},"nonce":"018f9f65-1e73-7a33-9ed1-6cb3a5aa0001","events":[]}`
 	cases := []struct {
 		name    string
 		input   string
@@ -569,6 +571,55 @@ func TestDecodeBatch_RejectsTrailingTokens(t *testing.T) {
 	}
 }
 
+func TestDecodeBatch_NonceRequired(t *testing.T) {
+	t.Setenv("CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED", "")
+	body := []byte(`{"source":{"source_id":"tetragon-test"},"events":[]}`)
+
+	_, err := DecodeBatch(bytes.NewReader(body))
+	if !errors.Is(err, ErrInvalidBatch) {
+		t.Fatalf("err = %v, want ErrInvalidBatch", err)
+	}
+	if !strings.Contains(err.Error(), "nonce required") {
+		t.Fatalf("err = %v, want nonce required message", err)
+	}
+}
+
+func TestDecodeBatch_NonceLengthBounded(t *testing.T) {
+	cases := []string{"short", strings.Repeat("a", 65)}
+	for _, nonce := range cases {
+		t.Run(nonce, func(t *testing.T) {
+			body := []byte(`{"source":{"source_id":"tetragon-test"},"nonce":"` + nonce + `","events":[]}`)
+			_, err := DecodeBatch(bytes.NewReader(body))
+			if !errors.Is(err, ErrInvalidBatch) {
+				t.Fatalf("err = %v, want ErrInvalidBatch", err)
+			}
+			if !strings.Contains(err.Error(), "nonce length") {
+				t.Fatalf("err = %v, want nonce length message", err)
+			}
+		})
+	}
+}
+
+func TestDecodeBatch_NonceCharsetValidated(t *testing.T) {
+	body := []byte(`{"source":{"source_id":"tetragon-test"},"nonce":"nonce-000000000001!","events":[]}`)
+	_, err := DecodeBatch(bytes.NewReader(body))
+	if !errors.Is(err, ErrInvalidBatch) {
+		t.Fatalf("err = %v, want ErrInvalidBatch", err)
+	}
+	if !strings.Contains(err.Error(), "invalid characters") {
+		t.Fatalf("err = %v, want invalid characters message", err)
+	}
+}
+
+func TestDecodeBatch_NonceOptionalWhenFlagDisabled(t *testing.T) {
+	t.Setenv("CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED", "false")
+	body := []byte(`{"source":{"source_id":"tetragon-test"},"events":[]}`)
+
+	if _, err := DecodeBatch(bytes.NewReader(body)); err != nil {
+		t.Fatalf("DecodeBatch with replay-required flag disabled: %v", err)
+	}
+}
+
 func TestDecodeBatchRejectsForbiddenKeysVariants(t *testing.T) {
 	for _, forbidden := range []string{"args", "cmdline", "command_line", "env", "environment", "file_content", "file_contents", "packet", "payload", "body", "request_body", "response_body", "headers", "header", "cookie", "cookies", "secret", "secrets", "token", "tokens", "password", "passwords", "api_key", "apikey", "private_key", "dns_response", "response"} {
 		t.Run(forbidden, func(t *testing.T) {
@@ -592,6 +643,7 @@ func TestDecodeBatchRejectsForbiddenKeysVariants(t *testing.T) {
 func TestDecodeBatchAcceptsCanonicalShape(t *testing.T) {
 	body := []byte(`{
 		"source":{"source_id":"tetragon-test"},
+		"nonce":"018f9f65-1e73-7a33-9ed1-6cb3a5aa0001",
 		"batch_id":"b1",
 		"events":[{
 			"tenant_id":"t","session_id":"s","execution_id":"e",
@@ -607,6 +659,9 @@ func TestDecodeBatchAcceptsCanonicalShape(t *testing.T) {
 	if batch.Source.ID != "tetragon-test" {
 		t.Fatalf("source_id = %q", batch.Source.ID)
 	}
+	if batch.Nonce != testNonce {
+		t.Fatalf("nonce = %q, want %q", batch.Nonce, testNonce)
+	}
 	if len(batch.Events) != 1 || batch.Events[0].Kind != KindProcessExec {
 		t.Fatalf("decoded batch = %#v", batch)
 	}
@@ -615,6 +670,7 @@ func TestDecodeBatchAcceptsCanonicalShape(t *testing.T) {
 func TestDecodeBatchAcceptsDocumentedRuntimeIngestionShape(t *testing.T) {
 	body := []byte(`{
 		"source":{"source_id":"tetragon-cluster-a"},
+		"nonce":"018f9f65-1e73-7a33-9ed1-6cb3a5aa0001",
 		"batch_id":"uuid-v4",
 		"events":[{
 			"tenant_id":"tenant-1234","session_id":"edge-session-abc",

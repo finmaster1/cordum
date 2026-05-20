@@ -43,6 +43,9 @@ type PrometheusRecorder struct {
 	appendEventsAborts        *prometheus.CounterVec
 	idempotencyTTLExtended    *prometheus.CounterVec
 	idempotencyWindowExpired  *prometheus.CounterVec
+	runtimeReplayFirstSeen    *prometheus.CounterVec
+	runtimeReplayReplayed     *prometheus.CounterVec
+	runtimeReplayWindowFull   *prometheus.CounterVec
 	degraded                  *prometheus.CounterVec
 	failClosed                *prometheus.CounterVec
 	agentdResponseWriteAborts *prometheus.CounterVec
@@ -179,6 +182,18 @@ func NewPrometheusRecorder(reg prometheus.Registerer) Recorder {
 			Namespace: ns, Name: "idempotency_window_expired_total",
 			Help: "Edge idempotency window-expired rejections (max in-flight cap or duplicate-after-TTL), labeled by bounded phase.",
 		}, []string{"phase"}),
+		runtimeReplayFirstSeen: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: ns, Name: "runtime_replay_first_seen_total",
+			Help: "Runtime ingest batches accepted as first-seen by the replay window, labeled only by identity presence.",
+		}, []string{"tenant_present", "collector_present"}),
+		runtimeReplayReplayed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: ns, Name: "runtime_replay_replayed_total",
+			Help: "Runtime ingest duplicate batches suppressed by the replay window, labeled only by identity presence.",
+		}, []string{"tenant_present", "collector_present"}),
+		runtimeReplayWindowFull: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: ns, Name: "runtime_replay_window_full_total",
+			Help: "Runtime ingest batches refused because the replay window reached its cardinality cap, labeled only by identity presence.",
+		}, []string{"tenant_present", "collector_present"}),
 		degraded: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: ns, Name: "degraded_total",
 			Help: "Edge degraded outcomes, labeled by mode, component, and reason_code.",
@@ -262,6 +277,7 @@ func NewPrometheusRecorder(reg prometheus.Registerer) Recorder {
 		r.approvalRequested, r.approvalResolved, r.approvalEnqueueAborts,
 		r.appendEventsAborts,
 		r.idempotencyTTLExtended, r.idempotencyWindowExpired,
+		r.runtimeReplayFirstSeen, r.runtimeReplayReplayed, r.runtimeReplayWindowFull,
 		r.degraded, r.failClosed, r.agentdResponseWriteAborts,
 		r.agentdShutdownForced,
 		r.edgeExportRejected,
@@ -342,6 +358,15 @@ func (r *PrometheusRecorder) RecordIdempotencyTTLExtended(state string) {
 func (r *PrometheusRecorder) RecordIdempotencyWindowExpired(phase string) {
 	r.idempotencyWindowExpired.WithLabelValues(boundedIdempotencyWindowExpiredPhase(phase)).Inc()
 }
+func (r *PrometheusRecorder) RecordRuntimeReplayFirstSeen(tenant, collector string) {
+	r.runtimeReplayFirstSeen.WithLabelValues(boundedIdentityPresent(tenant), boundedIdentityPresent(collector)).Inc()
+}
+func (r *PrometheusRecorder) RecordRuntimeReplayReplayed(tenant, collector string) {
+	r.runtimeReplayReplayed.WithLabelValues(boundedIdentityPresent(tenant), boundedIdentityPresent(collector)).Inc()
+}
+func (r *PrometheusRecorder) RecordRuntimeReplayWindowFull(tenant, collector string) {
+	r.runtimeReplayWindowFull.WithLabelValues(boundedIdentityPresent(tenant), boundedIdentityPresent(collector)).Inc()
+}
 func (r *PrometheusRecorder) RecordDegraded(_ /*tenant*/, mode, component, reasonCode string) {
 	r.degraded.WithLabelValues(boundedMode(mode), boundedComponent(component), boundedReasonCode(reasonCode)).Inc()
 }
@@ -408,6 +433,10 @@ func boundedMode(value string) string {
 }
 
 func boundedTenantPresent(value string) string {
+	return boundedIdentityPresent(value)
+}
+
+func boundedIdentityPresent(value string) string {
 	if lowerTrim(value) == "" {
 		return "false"
 	}

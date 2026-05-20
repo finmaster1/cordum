@@ -42,4 +42,5 @@ export const EdgeErrorCode = {
   idempotency_window_expired: "idempotency_window_expired",
   max_executions_exceeded: "max_executions_exceeded",
   event_cap_exceeded: "event_cap_exceeded",
+  REPLAY_WINDOW_FULL: "REPLAY_WINDOW_FULL",
 } as const;

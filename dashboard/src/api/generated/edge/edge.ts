@@ -3389,14 +3389,14 @@ export const useCreateEdgeEventsBatch = <
   return useMutation(mutationOptions, queryClient);
 };
 /**
- * Disabled by default. When `CORDUM_EDGE_RUNTIME_INGEST_ENABLED` is unset (or set to a non-truthy value), the route returns 503 `service_unavailable` and persists nothing. When enabled, the endpoint accepts a bounded, redacted runtime event batch (process exec, file read/write, network connect, DNS query) from an authenticated runtime collector holding `edge.runtime.ingest`; generic job writers are forbidden. The request `source.source_id` must match the authenticated collector principal and the referenced session/execution must be bound to that collector before mapped `AgentActionEvent` records with `layer=runtime` and `decision=RECORDED` are persisted through the existing Edge store. Raw argv, file contents, packet payloads, DNS response bodies, request bodies, headers, secrets, and tokens are rejected at the strict-schema decode boundary. All-or-nothing batch acceptance — a single invalid envelope aborts the whole batch. See `docs/edge/runtime-ingestion.md` for the full contract.
+ * Disabled by default. When `CORDUM_EDGE_RUNTIME_INGEST_ENABLED` is unset (or set to a non-truthy value), the route returns 503 `service_unavailable` and persists nothing. When enabled, the endpoint accepts a bounded, redacted runtime event batch (process exec, file read/write, network connect, DNS query) from an authenticated runtime collector holding `edge.runtime.ingest`; generic job writers are forbidden. A bounded `nonce` is required by default and is checked against a Redis replay window scoped to `(tenant, collector)`; duplicate nonce submissions return idempotent success without appending another copy. The request `source.source_id` must match the authenticated collector principal and the referenced session/execution must be bound to that collector before mapped `AgentActionEvent` records with `layer=runtime` and `decision=RECORDED` are persisted through the existing Edge store. Raw argv, file contents, packet payloads, DNS response bodies, request bodies, headers, secrets, and tokens are rejected at the strict-schema decode boundary. All-or-nothing batch acceptance — a single invalid envelope aborts the whole batch. See `docs/edge/runtime-ingestion.md` for the full contract.
  * @summary Ingest bounded runtime telemetry from a trusted sidecar
  */
 export const ingestEdgeRuntimeEvents = (
   edgeRuntimeIngestRequest: EdgeRuntimeIngestRequest,
   signal?: AbortSignal,
 ) => {
-  return apiClient<EdgeRuntimeIngestResponse>({
+  return apiClient<EdgeRuntimeIngestResponse | EdgeRuntimeIngestResponse>({
     url: `/api/v1/edge/runtime/events`,
     method: "POST",
     headers: { "Content-Type": "application/json" },

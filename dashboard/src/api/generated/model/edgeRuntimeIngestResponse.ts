@@ -13,4 +13,6 @@ export interface EdgeRuntimeIngestResponse {
   /** @minimum 0 */
   dropped_count: number;
   dropped?: EdgeRuntimeIngestDropReport[];
+  /** True when a duplicate nonce was suppressed and no events were appended. */
+  replayed?: boolean;
 }

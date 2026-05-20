@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -133,6 +134,7 @@ type RuntimeEventEnvelope struct {
 // ID for operator correlation, and N envelopes.
 type RuntimeBatch struct {
 	Source  SourceIdentity         `json:"source"`
+	Nonce   string                 `json:"nonce,omitempty"`
 	BatchID string                 `json:"batch_id,omitempty"`
 	Events  []RuntimeEventEnvelope `json:"events"`
 }
@@ -519,5 +521,37 @@ func DecodeBatch(r io.Reader) (RuntimeBatch, error) {
 		}
 		return RuntimeBatch{}, fmt.Errorf("%w: trailing data after JSON value", ErrInvalidEnvelope)
 	}
+	if err := validateRuntimeBatchNonce(batch.Nonce); err != nil {
+		return RuntimeBatch{}, err
+	}
 	return batch, nil
+}
+
+func validateRuntimeBatchNonce(nonce string) error {
+	nonce = strings.TrimSpace(nonce)
+	if nonce == "" {
+		if !runtimeReplayRequired() {
+			return nil
+		}
+		return fmt.Errorf("%w: nonce required", ErrInvalidBatch)
+	}
+	if len(nonce) < 16 || len(nonce) > 64 {
+		return fmt.Errorf("%w: nonce length must be 16-64 characters", ErrInvalidBatch)
+	}
+	for _, r := range nonce {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return fmt.Errorf("%w: nonce contains invalid characters", ErrInvalidBatch)
+	}
+	return nil
+}
+
+func runtimeReplayRequired() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CORDUM_EDGE_RUNTIME_REPLAY_REQUIRED"))) {
+	case "false", "0", "no":
+		return false
+	default:
+		return true
+	}
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/cordum/cordum/core/controlplane/topicregistry"
 	"github.com/cordum/cordum/core/controlplane/workercredentials"
 	edgecore "github.com/cordum/cordum/core/edge"
+	"github.com/cordum/cordum/core/edge/runtimeingest"
 	"github.com/cordum/cordum/core/edge/shadow"
 	"github.com/cordum/cordum/core/governance"
 	"github.com/cordum/cordum/core/infra/artifacts"
@@ -131,6 +132,7 @@ type server struct {
 	memStore            store.Store
 	jobStore            *store.RedisJobStore // Typed for ListRecentJobs
 	edgeStore           edgecore.Store
+	runtimeReplayWindow *runtimeingest.ReplayWindow
 	shadowFindingStore  shadow.Store
 	mcpUpstreamRegistry edgecore.MCPUpstreamRegistry
 	// mcpUpstreamRegistryMu guards lazy fallback initialization for
@@ -674,6 +676,11 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 		edgecore.WithRecorder(edgeRecorder),
 		edgecore.WithApprovalMaxTTL(edgeApprovalMaxTTL),
 	)
+	runtimeReplayWindow := runtimeingest.NewReplayWindow(
+		jobStore.Client(),
+		runtimeingest.ReplayWindowTTL,
+		runtimeingest.MaxReplayWindowCardinality,
+	)
 	// EDGE-141 — Shadow finding store shares the existing Redis client; it
 	// does NOT own connection lifecycle. nil-safe: NewRedisStore returns
 	// nil when the client is nil so unit-test gateways without Redis
@@ -689,6 +696,7 @@ func RunWithAuth(cfg *config.Config, provider auth.AuthProvider, entitlementReso
 		memStore:               memStore,
 		jobStore:               jobStore,
 		edgeStore:              edgeStore,
+		runtimeReplayWindow:    runtimeReplayWindow,
 		shadowFindingStore:     shadowFindingStore,
 		mcpUpstreamRegistry:    edgecore.NewRedisMCPUpstreamRegistryFromClient(jobStore.Client()),
 		decisionLogStore:       decisionLogStore,
