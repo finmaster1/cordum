@@ -19,18 +19,18 @@ package mcp
 // `spec` object. An earlier version of this tool wrapped everything
 // under `spec` and the gateway silently dropped it (QA reopen).
 type CreateWorkflowInput struct {
-	ID             string             `json:"id,omitempty"`
-	Name           string             `json:"name,omitempty"`
-	Description    string             `json:"description,omitempty"`
-	OrgID          string             `json:"org_id,omitempty"`
-	TeamID         string             `json:"team_id,omitempty"`
-	Version        string             `json:"version,omitempty"`
-	TimeoutSec     int64              `json:"timeout_sec,omitempty"`
-	Steps          map[string]any     `json:"steps"`
-	Config         map[string]any     `json:"config,omitempty"`
-	Parameters     []map[string]any   `json:"parameters,omitempty"`
-	InputSchema    map[string]any     `json:"input_schema,omitempty"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	ID             string           `json:"id,omitempty"`
+	Name           string           `json:"name,omitempty"`
+	Description    string           `json:"description,omitempty"`
+	OrgID          string           `json:"org_id,omitempty"`
+	TeamID         string           `json:"team_id,omitempty"`
+	Version        string           `json:"version,omitempty"`
+	TimeoutSec     int64            `json:"timeout_sec,omitempty"`
+	Steps          map[string]any   `json:"steps"`
+	Config         map[string]any   `json:"config,omitempty"`
+	Parameters     []map[string]any `json:"parameters,omitempty"`
+	InputSchema    map[string]any   `json:"input_schema,omitempty"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 }
 
 type CreateWorkflowOutput struct {
